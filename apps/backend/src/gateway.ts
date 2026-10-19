@@ -1,15 +1,75 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { GatewayClient } from '@logitland/relay';
+import {
+  GatewayService,
+  consoleLogger,
+  createRelay,
+  type GatewayClient,
+  type GatewayHost,
+  type GatewaySocket,
+  type Relay,
+  type RelayBindings,
+  type SocketEvents,
+} from '@logitland/relay';
 import type { Bindings } from './index';
 
-// Owned by B1 (intake and reading): the Discord Gateway client. One instance, named "discord".
-// Protocol logic lives in packages/relay/src/gateway so it can be tested in Node.
+// The Discord Gateway client. One instance, named "discord".
+// This class only owns the outbound WebSocket, the timers and the storage; what to do with them is
+// GatewayService (packages/relay/src/gateway), which runs the same way in Node tests.
+
+const log = consoleLogger({ service: 'relay', component: 'gateway' });
 
 export class DiscordGateway extends DurableObject<Bindings> {
-  async ensure(): Promise<void> {}
+  private service: GatewayService | undefined;
+
+  /** Connects if not connected. Cron calls this every minute; the alarm does the same between calls. */
+  async ensure(): Promise<void> {
+    await this.gateway().ensure();
+  }
 
   async status(): Promise<Record<string, unknown>> {
-    return { state: 'not built' };
+    return this.gateway().report();
+  }
+
+  // The alarm is the backstop: it brings an evicted Durable Object back, and it re-checks a live one.
+  override async alarm(): Promise<void> {
+    await this.gateway().tick();
+  }
+
+  protected buildRelay(): Relay {
+    return createRelay(this.env as unknown as RelayBindings, { log });
+  }
+
+  /** An outbound WebSocket is a fetch with `Upgrade: websocket` to the https form of the URL. Outbound sockets don't hibernate. */
+  protected async openSocket(url: string, events: SocketEvents): Promise<GatewaySocket> {
+    const response = await fetch(url.replace(/^ws/, 'http'), { headers: { Upgrade: 'websocket' } });
+    const ws = response.webSocket;
+    if (!ws) throw new Error(`Discord did not accept the WebSocket upgrade (HTTP ${response.status})`);
+    ws.accept();
+    ws.addEventListener('message', (event) => events.message(event.data as string | ArrayBuffer));
+    ws.addEventListener('close', (event) => events.close(event.code, event.reason));
+    ws.addEventListener('error', () => events.close(1006, 'connection error'));
+    return { send: (data) => ws.send(data), close: (code, reason) => ws.close(code, reason) };
+  }
+
+  protected gateway(): GatewayService {
+    this.service ??= new GatewayService(this.host());
+    return this.service;
+  }
+
+  private host(): GatewayHost {
+    return {
+      relay: this.buildRelay(),
+      token: this.env.DISCORD_BOT_TOKEN ?? '',
+      storage: this.ctx.storage,
+      connect: (url, events) => this.openSocket(url, events),
+      setTimer: (fn, ms) => {
+        const timer = setTimeout(fn, ms);
+        return () => clearTimeout(timer);
+      },
+      wakeAt: (epochMs) => this.ctx.storage.setAlarm(epochMs),
+      now: () => Date.now(),
+      random: () => Math.random(),
+    };
   }
 }
 

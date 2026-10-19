@@ -1,6 +1,8 @@
-// Relay health in fixtures mode: the prototype's three scenarios (normal, ingestion gap, moderation outage),
-// the path values, Discord senders and troubled receivers. The subscription field and the post bars are
-// drawn from fixed seeds exactly as the prototype's script draws them, so every reload looks the same.
+// Relay health in fixtures mode: the prototype's three scenarios (normal, ingestion gap, moderation outage)
+// as an AdminHealth, plus the parts the relay doesn't report (Discord senders, troubled receivers, post bars).
+// The subscription field and the post bars are drawn from fixed seeds exactly as the prototype's script draws
+// them, so every reload looks the same.
+import type { AdminHealth } from '@logitland/contracts';
 import { lcg } from '@logitland/flock';
 
 export type Scenario = 'normal' | 'gap' | 'mod';
@@ -14,22 +16,6 @@ export interface HealthNotice {
   detail: string;
   action: { label: string; href: string };
 }
-
-export const NOTICES: Partial<Record<Scenario, HealthNotice>> = {
-  gap: {
-    tone: 'wait',
-    title: 'Event intake missed 2 minutes of Discord',
-    detail:
-      'After a restart, the MCP feed skipped 03:12–03:14 UTC. The relay can’t tell how many events were in that window. 9 subscriptions were sent subscription.gap, and a history read is backfilling messages that still exist.',
-    action: { label: 'Affected subscriptions', href: '/admin/deliveries' },
-  },
-  mod: {
-    tone: 'fail',
-    title: 'Jev/Laya isn’t answering',
-    detail: '37 agent messages are waiting for a verdict. Nothing posts without one. The outage policy decides what agents are told: [policy to decide].',
-    action: { label: 'Open moderation', href: '/admin/moderation' },
-  },
-};
 
 /** "Live · updated 4 s ago", starting again after 15 s. */
 export const UPDATED = { ago: 4, reset: 15, format: 'Live · updated {t}' } as const;
@@ -56,33 +42,50 @@ export interface PathStep {
   noteMorphs?: boolean;
 }
 
-export function healthPath(s: Scenario): PathStep[] {
-  return [
-    { name: 'Relay API', knot: 'quiet', value: '312/min', tick: { from: 312, lo: 288, hi: 341, step: 7, format: '{n}/min', every: 3000 }, note: '4 keys refused in the last hour' },
-    {
-      name: 'Jev/Laya',
-      knot: s === 'mod' ? 'fail' : 'quiet',
-      value: s === 'mod' ? '37 waiting' : '3 waiting',
-      valueTone: s === 'mod' ? 'fail' : undefined,
-      note: s === 'mod' ? 'No verdict for 2 min 10 s' : 'Oldest 4 s · last verdict 1 s ago',
-      noteMorphs: true,
+/** What the relay reports in fixtures mode: the prototype's three scenarios (normal, ingestion gap, moderation outage). */
+export function healthFixture(s: Scenario, now = Date.now()): AdminHealth {
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  const field = subscriptionField(s).counts;
+  return {
+    generated_at: ago(0),
+    intake:
+      s === 'gap'
+        ? {
+            status: 'resuming',
+            last_event_at: ago(1_200),
+            last_heartbeat_at: ago(3_000),
+            last_error: 'The Gateway restarted and missed 03:12–03:14 UTC. The relay is backfilling from Discord’s history.',
+          }
+        : { status: 'connected', last_event_at: ago(1_200), last_heartbeat_at: ago(8_000), last_error: null },
+    moderation: {
+      held_for_review: s === 'mod' ? 3 : 2,
+      held_for_outage: s === 'mod' ? 37 : 0,
+      oldest_held_at: ago(s === 'mod' ? 130_000 : 4 * 60_000),
+      outages_last_hour: s === 'mod' ? 14 : 0,
+      open_reports: 4,
+      open_appeals: 2,
     },
-    { name: 'Discord', knot: 'quiet', value: '2 of 6 cooling', note: 'Normal bucket waits, no global 429s' },
-    {
-      name: 'Event intake',
-      knot: s === 'gap' ? 'wait' : 'quiet',
-      value: s === 'gap' ? '2 min gap' : '1.2 s behind',
-      valueTone: s === 'gap' ? 'wait' : undefined,
-      note: s === 'gap' ? 'Resumed at cursor 884,213' : 'MCP event-log bridge',
-      noteMorphs: true,
+    messages_last_hour: {
+      sent: s === 'mod' ? 12 : 288,
+      moderating: s === 'mod' ? 0 : 3,
+      held: s === 'mod' ? 40 : 5,
+      blocked: 2,
+      queued: 4,
+      sending: 1,
+      uncertain: 1,
+      failed: 0,
+      removed: 1,
     },
-    { name: 'Callbacks', knot: 'quiet', value: '12 due', tick: { from: 12, lo: 8, hi: 17, step: 2, format: '{n} due', every: 5000 }, note: '23 retrying · 5 failed, kept for replay' },
-  ];
+    deliveries: { due: 12, last_hour: { delivered: 1190, pending: 12, retrying: 23, failed: 5, dropped: 2 } },
+    subscriptions: { active: field.ok + field.retry! + field.fail!, paused: field.paused },
+    agents: { by_tier: { new: 61, claimed: 31, trusted: 5 }, by_status: { active: 97, off: 11, suspended: 6, banned: 2 }, signups_last_day: 23 },
+    switches: { signup_open: true, new_agent_posting: true, relay_read_only: false, public_mirror: true, deliveries_paused: false },
+  };
 }
 
 /* ---------- Every subscription, one dot each ---------- */
 
-export type FieldKind = 'ok' | 'retry' | 'fail' | 'paused';
+export type FieldKind = 'ok' | 'retry' | 'fail' | 'paused' | 'ended';
 export interface FieldDot {
   kind: FieldKind;
   /** CSS custom properties for `.field-dots > i`. */
@@ -90,14 +93,28 @@ export interface FieldDot {
 }
 export interface FieldCounts {
   ok: number;
-  retry: number;
   /** null when the source doesn't report it. */
+  retry: number | null;
   fail: number | null;
   paused: number;
+  ended?: number | null;
 }
 export interface SubscriptionField {
   dots: FieldDot[];
   counts: FieldCounts;
+  /** The legend, in order; only the states the source reports. */
+  legend: { kind: FieldKind; label: string; n: number }[];
+}
+
+function legendOf(counts: FieldCounts, labels: { ok: string }): SubscriptionField['legend'] {
+  const all: [FieldKind, string, number | null | undefined][] = [
+    ['ok', labels.ok, counts.ok],
+    ['retry', 'Retrying', counts.retry],
+    ['fail', 'Failing', counts.fail],
+    ['paused', 'Paused', counts.paused],
+    ['ended', 'Ended', counts.ended],
+  ];
+  return all.flatMap(([kind, label, n]) => (n === null || n === undefined ? [] : [{ kind, label, n }]));
 }
 
 function drawField(n: number, kindAt: (i: number, r: number) => FieldKind): FieldDot[] {
@@ -125,18 +142,19 @@ export function subscriptionField(scenario: Scenario): SubscriptionField {
     const kind: FieldKind = r < 0.84 ? 'ok' : r < 0.93 ? 'retry' : r < 0.96 ? 'fail' : 'paused';
     return scenario === 'gap' && i >= 60 && i < 69 ? 'retry' : kind;
   });
-  const counts: FieldCounts = { ok: 0, retry: 0, fail: 0, paused: 0 };
-  for (const d of dots) counts[d.kind] = (counts[d.kind] ?? 0) + 1;
-  return { dots, counts };
+  const counts = { ok: 0, retry: 0, fail: 0, paused: 0 };
+  for (const d of dots) counts[d.kind as keyof typeof counts] += 1;
+  return { dots, counts, legend: legendOf(counts, { ok: 'Healthy' }) };
 }
 
 /** The same drawing for counts that come from elsewhere: one dot each, scaled down past 140 so the field stays legible. */
 export function fieldFromCounts(counts: FieldCounts): SubscriptionField {
   const parts: [FieldKind, number][] = [
     ['ok', counts.ok],
-    ['retry', counts.retry],
+    ['retry', counts.retry ?? 0],
     ['fail', counts.fail ?? 0],
     ['paused', counts.paused],
+    ['ended', counts.ended ?? 0],
   ];
   const total = parts.reduce((s, [, n]) => s + n, 0);
   const scale = total > 140 ? 140 / total : 1;
@@ -144,7 +162,7 @@ export function fieldFromCounts(counts: FieldCounts): SubscriptionField {
   // Scatter the states through the field instead of drawing them in bands.
   const shuffle = lcg(12);
   const order = kinds.map((k) => ({ k, r: shuffle() })).sort((a, b) => a.r - b.r);
-  return { dots: drawField(order.length, (i) => order[i]!.k), counts };
+  return { dots: drawField(order.length, (i) => order[i]!.k), counts, legend: legendOf(counts, { ok: 'Active' }) };
 }
 
 /* ---------- Agent posts ---------- */

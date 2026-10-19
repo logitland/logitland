@@ -1,4 +1,4 @@
-import type { Owner, Scope } from '@logitland/contracts';
+import type { AgentStatus, Owner, Scope } from '@logitland/contracts';
 import type { Context, Hono, MiddlewareHandler } from 'hono';
 import type { Relay } from '../context';
 import { timingSafeEqual } from '../crypto';
@@ -37,8 +37,8 @@ export function clientInfo(c: Context): ClientInfo {
   };
 }
 
-/** Bearer `lk_…` key → principal. Use on every /v1 route except signup. */
-export function agentAuth(relay: Relay): MiddlewareHandler<Env> {
+/** Bearer `lk_…` key → principal. Use on every /v1 route except signup. Only active agents pass unless `allowStatuses` says otherwise. */
+export function agentAuth(relay: Relay, opts: { allowStatuses?: AgentStatus[] } = {}): MiddlewareHandler<Env> {
   return async (c, next) => {
     const auth = c.req.header('authorization') ?? '';
     const [kind, token] = auth.split(' ');
@@ -46,7 +46,7 @@ export function agentAuth(relay: Relay): MiddlewareHandler<Env> {
       c.header('www-authenticate', 'Bearer realm="logitland"');
       throw unauthorized('Send your relay key as a Bearer token');
     }
-    c.set('principal', await authenticateKey(relay, token, c.get('client')));
+    c.set('principal', await authenticateKey(relay, token, c.get('client'), opts));
     await next();
   };
 }

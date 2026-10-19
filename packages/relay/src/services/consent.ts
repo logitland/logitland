@@ -2,11 +2,36 @@ import type { ConsentMethod, ConsentStatus } from '@logitland/contracts';
 import { DiscordError } from '@logitland/discord';
 import { iso, type Relay } from '../context';
 import { audit } from './audit';
+import { auditIf } from './identity';
 import { scrubPerson } from './scrub';
 
-// People must agree to the public mirror before they chat in relayed channels (Discord Developer Terms,
-// section 5(b): share a user's data with third parties only when they expressly direct it). The consents row,
-// with its time and method, is the proof we keep. The Discord role is what lets them send messages.
+// People must agree to the public mirror before the relay stores or shares what they write (Discord Developer Terms,
+// section 5(b): share a user's data with third parties only when they expressly direct it). Intake keeps a person's
+// message only if they had agreed by the time they wrote it; the Discord role is what lets them chat at all. The consents
+// row says which notice they saw and when, and consent_history keeps every grant and revocation as proof.
+
+/** Bump when the notice changes in a way that matters, so the record says which text a person saw. */
+export const CONSENT_NOTICE_VERSION = '2026-10-19';
+
+/**
+ * What a person is told before they agree, on the welcome message and in the reply to /mirror agree. Discord allows 2000
+ * characters in a message, and this has to fit in one. `dashboardUrl` is the mirror site, not the relay's own address.
+ */
+export function consentNotice(dashboardUrl: string): string {
+  return [
+    '**The Logitland public mirror**',
+    'Logitland is a Discord server where AI agents and people talk. If you press the button below, Logitland copies what you write in its relayed channels from that moment on: your messages, polls, thread titles, your Discord display name and the time. Nothing you wrote before you agreed is copied.',
+    [
+      'Who gets it:',
+      '• A public web page and a public API that anyone can read without an account. Search engines may index them.',
+      '• Every AI agent connected to Logitland. Agents may keep copies, and so may the webhook servers they send events to.',
+      '• Automated moderation, which reads recent messages for context when an agent posts. It runs on Logitland’s moderation service and on Cloudflare Workers AI.',
+    ].join('\n'),
+    'If you don’t agree, you can still read the channels, but you don’t get the chat role. Anything you write anyway is not copied: Logitland keeps only that a message was sent, and when and where, not who wrote it or what it said.',
+    'To leave, run `/mirror leave`. That stops the copying, takes the chat role away and deletes what Logitland holds of yours. Copies agents already received can’t be recalled, and Discord keeps its own copy. Logitland keeps a record of when you agreed and left.',
+    `More: ${dashboardUrl}/privacy and ${dashboardUrl}/mirror`,
+  ].join('\n\n');
+}
 
 /** Who did it, for the audit trail: a person acting in Discord, or a signed-in person acting from the dashboard. */
 export interface ConsentActor {
@@ -20,9 +45,9 @@ interface ConsentRow {
   revoked_at: string | null;
 }
 
-/** Messages a person wrote that are still held, in mirrored channels only or anywhere. */
+/** Messages a person wrote that are still held, in mirrored channels only (public_mirror on and relayed, as services/mirror.ts has it) or anywhere. */
 export async function messageCount(relay: Relay, discordUserId: string, scope: 'mirrored' | 'all'): Promise<number> {
-  const join = scope === 'mirrored' ? 'JOIN channels ch ON ch.id = c.channel_id AND ch.public_mirror = 1' : '';
+  const join = scope === 'mirrored' ? "JOIN channels ch ON ch.id = c.channel_id AND ch.public_mirror = 1 AND ch.agent_access != 'off'" : '';
   const row = await relay.db
     .prepare(`SELECT COUNT(*) AS n FROM conversation c ${join} WHERE c.discord_user_id = ? AND c.deleted_at IS NULL`)
     .bind(discordUserId)
@@ -56,53 +81,102 @@ async function setRole(relay: Relay, guildId: string | null, discordUserId: stri
   }
 }
 
+const isAgreed = async (relay: Relay, discordUserId: string) =>
+  Boolean(await relay.db.prepare('SELECT 1 AS ok FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL').bind(discordUserId).first());
+
 /**
- * Records the agreement and gives the role. An agreement already in force keeps its original time and method.
- * The role is applied either way, so running it again repairs a person whose role call failed before.
+ * Makes the chat role match the agreement as it stands. Agreeing and leaving can overlap (both finish their Discord calls
+ * after the database has moved on), so this checks again after each call and repeats until the two agree. Returns false
+ * when Discord refused, or when the person kept flipping.
+ */
+export async function syncRole(relay: Relay, guildId: string | null, discordUserId: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const grant = await isAgreed(relay, discordUserId);
+    if (!(await setRole(relay, guildId, discordUserId, grant))) return false;
+    if ((await isAgreed(relay, discordUserId)) === grant) return true;
+  }
+  return false;
+}
+
+const NOT_AGREED = 'NOT EXISTS (SELECT 1 FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL)';
+const AGREED = 'EXISTS (SELECT 1 FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL)';
+
+/**
+ * Records the agreement: the consents row, a consent_history row and the audit entry, in one batch. An agreement already
+ * in force keeps its original time, method and notice and writes nothing; agreeing again after leaving starts over with a
+ * new time, so nothing written in between shows. The caller gives the role (syncRole) once this has returned.
  */
 export async function grantConsent(
   relay: Relay,
-  input: { discordUserId: string; guildId: string; method: ConsentMethod; actor: ConsentActor },
-): Promise<{ changed: boolean; roleGranted: boolean }> {
+  input: { discordUserId: string; guildId: string; method: ConsentMethod; actor: ConsentActor; interactionId?: string | null },
+): Promise<{ changed: boolean }> {
   const { discordUserId, guildId, method, actor } = input;
-  const r = await relay.db
-    .prepare(
-      `INSERT INTO consents (discord_user_id, guild_id, method, granted_at, revoked_at) VALUES (?, ?, ?, ?, NULL)
-       ON CONFLICT (discord_user_id) DO UPDATE SET guild_id = excluded.guild_id, method = excluded.method, granted_at = excluded.granted_at, revoked_at = NULL
-       WHERE consents.revoked_at IS NOT NULL`,
-    )
-    .bind(discordUserId, guildId, method, iso(relay.now()))
-    .run();
-  const changed = r.meta.changes > 0;
-  if (changed) {
-    await audit(relay, {
-      actor_type: actor.type,
-      actor_id: actor.id,
-      action: 'consent.granted',
-      target_type: 'person',
-      target_id: discordUserId,
-      reason: method,
-    });
-    relay.log.info('consent.granted', { method });
-  }
-  return { changed, roleGranted: await setRole(relay, guildId, discordUserId, true) };
+  const interactionId = input.interactionId ?? null;
+  const at = iso(relay.now());
+  // The audit and history rows go first, guarded by the state the upsert is about to change, so a repeat or a lost race writes neither.
+  const results = await relay.db.batch([
+    auditIf(
+      relay,
+      { actor_type: actor.type, actor_id: actor.id, action: 'consent.granted', target_type: 'person', target_id: discordUserId, reason: method },
+      NOT_AGREED,
+      discordUserId,
+    ),
+    relay.db
+      .prepare(
+        `INSERT INTO consent_history (discord_user_id, guild_id, action, method, notice_version, interaction_id, at) SELECT ?, ?, 'granted', ?, ?, ?, ? WHERE ${NOT_AGREED}`,
+      )
+      .bind(discordUserId, guildId, method, CONSENT_NOTICE_VERSION, interactionId, at, discordUserId),
+    relay.db
+      .prepare(
+        `INSERT INTO consents (discord_user_id, guild_id, method, notice_version, interaction_id, granted_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT (discord_user_id) DO UPDATE SET guild_id = excluded.guild_id, method = excluded.method, notice_version = excluded.notice_version,
+           interaction_id = excluded.interaction_id, granted_at = excluded.granted_at, revoked_at = NULL
+         WHERE consents.revoked_at IS NOT NULL`,
+      )
+      .bind(discordUserId, guildId, method, CONSENT_NOTICE_VERSION, interactionId, at),
+  ]);
+  const changed = results[2]!.meta.changes > 0;
+  if (changed) relay.log.info('consent.granted', { method });
+  return { changed };
 }
 
-/** Ends the agreement at once, so the public view hides the person's text from here on. Returns whether one was in force. */
-export async function revokeConsent(relay: Relay, discordUserId: string, actor: ConsentActor): Promise<boolean> {
-  const r = await relay.db
-    .prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ? AND revoked_at IS NULL')
-    .bind(iso(relay.now()), discordUserId)
-    .run();
-  if (r.meta.changes === 0) return false;
-  await audit(relay, { actor_type: actor.type, actor_id: actor.id, action: 'consent.revoked', target_type: 'person', target_id: discordUserId });
+/**
+ * Ends the agreement at once, so readers lose the person's text from here on. The consents row, a consent_history row
+ * (with how they left) and the audit entry go in one batch. Returns whether one was in force.
+ */
+export async function revokeConsent(relay: Relay, discordUserId: string, actor: ConsentActor, opts: { interactionId?: string | null } = {}): Promise<boolean> {
+  const at = iso(relay.now());
+  const results = await relay.db.batch([
+    auditIf(
+      relay,
+      { actor_type: actor.type, actor_id: actor.id, action: 'consent.revoked', target_type: 'person', target_id: discordUserId },
+      AGREED,
+      discordUserId,
+    ),
+    relay.db
+      .prepare(
+        `INSERT INTO consent_history (discord_user_id, guild_id, action, method, notice_version, interaction_id, at)
+         SELECT discord_user_id, guild_id, 'revoked', ?, notice_version, ?, ? FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL`,
+      )
+      .bind(actor.type === 'owner' ? 'dashboard' : 'command', opts.interactionId ?? null, at, discordUserId),
+    relay.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ? AND revoked_at IS NULL').bind(at, discordUserId),
+  ]);
+  if (results[2]!.meta.changes === 0) return false;
   relay.log.info('consent.revoked');
   return true;
 }
 
+/** Rounds of scrubbing (5000 messages each) before giving up; far more than anyone has written here. */
+const MAX_SCRUB_ROUNDS = 10;
+
 /** Deletes every mirrored message the person wrote, wherever the relay keeps a copy. Consent is untouched. */
 export async function removeMessages(relay: Relay, discordUserId: string, actor: ConsentActor): Promise<number> {
-  const { messages } = await scrubPerson(relay, discordUserId);
+  let messages = 0;
+  for (let round = 0; round < MAX_SCRUB_ROUNDS; round++) {
+    const r = await scrubPerson(relay, discordUserId);
+    messages += r.messages;
+    if (!r.more) break;
+  }
   if (messages > 0) {
     await audit(relay, {
       actor_type: actor.type,
@@ -117,11 +191,11 @@ export async function removeMessages(relay: Relay, discordUserId: string, actor:
   return messages;
 }
 
-/** The second half of leaving: take the role away first so nothing new arrives, then delete what is there. Revoke consent before calling. */
+/** The second half of leaving: take the role away first so nothing new arrives, then delete what is there. Revoke consent before calling: the role follows the agreement. */
 export async function removePerson(
   relay: Relay,
   input: { discordUserId: string; guildId: string | null; actor: ConsentActor },
 ): Promise<{ messages: number; roleRemoved: boolean }> {
-  const roleRemoved = await setRole(relay, input.guildId, input.discordUserId, false);
+  const roleRemoved = await syncRole(relay, input.guildId, input.discordUserId);
   return { messages: await removeMessages(relay, input.discordUserId, input.actor), roleRemoved };
 }

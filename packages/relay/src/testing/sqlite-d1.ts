@@ -68,7 +68,10 @@ export class SqliteD1 implements Db {
   }
 
   migrate(dir: string): this {
-    for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) this.raw.exec(readFileSync(join(dir, file), 'utf8'));
+    for (const file of readdirSync(dir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort())
+      this.raw.exec(readFileSync(join(dir, file), 'utf8'));
     return this;
   }
 }

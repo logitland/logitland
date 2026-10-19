@@ -19,7 +19,10 @@
     </nav>
     <button type="button" class="account" popovertarget="account-menu"><span class="avatar" aria-hidden="true">{initial}</span>@{data.viewer.username}</button>
     <div id="account-menu" class="pop" popover use:anchored>
-      <p class="pop__meta">Signed in with Discord as <strong class="t-ink">@{data.viewer.username}</strong>{#if data.viewer.demo} (example){/if}</p>
+      <p class="pop__meta">
+        Signed in with Discord as <strong class="t-ink">@{data.viewer.username}</strong>{#if data.viewer.demo}
+          (example){/if}
+      </p>
       <div class="pop__meta stack g-2">
         <span class="label" id="theme-label">Theme</span>
         <ThemeSwitch />

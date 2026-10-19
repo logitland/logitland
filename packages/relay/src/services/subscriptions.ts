@@ -13,7 +13,7 @@ import {
 } from '@logitland/contracts';
 import { generateSecret, signHeaders } from '@logitland/webhooks';
 import { iso, type Relay, type Stmt } from '../context';
-import { randomToken } from '../crypto';
+import { randomToken, sha256 } from '../crypto';
 import { RelayError, conflict, notFound } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit, auditStmt } from './audit';
@@ -25,6 +25,10 @@ import { enforce } from './limits';
 // Webhook subscriptions: an agent asks the relay to push channel events to an HTTPS endpoint. The
 // destination is untrusted input (see destinations.ts), so creating one costs a rate-limit token, a DNS
 // preflight and a signed challenge before any conversation data is sent.
+//
+// A subscription that gets message text (message.created or message.updated) always gets the removals too
+// (message.deleted and message.bulk_deleted), whether or not it asked: the people in those messages may take
+// their words back, and the receiver has to be told so it can delete what it stored.
 
 export interface SubscriptionRow {
   id: string;
@@ -41,6 +45,8 @@ export interface SubscriptionRow {
   paused_reason: string | null;
   paused_at: string | null;
   failure_streak: number;
+  idempotency_key: string | null;
+  payload_digest: string | null;
   created_at: string;
 }
 
@@ -57,11 +63,17 @@ const CREATES_PER_HOST_PER_HOUR = 10;
 const CHALLENGE_MAX_BYTES = 4096;
 const PREVIOUS_SECRET_HOURS = 24;
 
+/** The events a subscription hears: what it asked for, plus the removals if it gets message text. */
+export function withRemovals(events: EventType[]): EventType[] {
+  const getsText = events.some((e) => e === 'message.created' || e === 'message.updated');
+  return getsText ? [...new Set<EventType>([...events, 'message.deleted', 'message.bulk_deleted'])] : events;
+}
+
 export const toSubscription = (r: SubscriptionRow): Subscription => ({
   id: r.id as Subscription['id'],
   agent_id: r.agent_id as Subscription['agent_id'],
   url_host: r.url_host,
-  events: JSON.parse(r.events) as EventType[],
+  events: withRemovals(JSON.parse(r.events) as EventType[]),
   channel_ids: JSON.parse(r.channel_ids) as string[],
   description: r.description,
   status: r.status,
@@ -70,11 +82,19 @@ export const toSubscription = (r: SubscriptionRow): Subscription => ({
   created_at: r.created_at,
 });
 
-/** Drops a subscription's undelivered deliveries, for use inside a batch with the change that stops them. */
-export function dropPendingStmt(relay: Relay, subscriptionId: string, reason: string): Stmt {
+/**
+ * Drops a subscription's undelivered deliveries, for use inside a batch with the change that stops them (served by
+ * deliveries_open, so it never walks the subscription's history). With `onlyIfStatus` it drops them only if the
+ * subscription has that status at that point in the batch.
+ */
+export function dropPendingStmt(relay: Relay, subscriptionId: string, reason: string, onlyIfStatus?: SubscriptionStatus): Stmt {
   return relay.db
-    .prepare("UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL, last_error = ? WHERE subscription_id = ? AND status IN ('pending', 'retrying')")
-    .bind(reason, subscriptionId);
+    .prepare(
+      `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL, last_error = ? WHERE subscription_id = ? AND status IN ('pending', 'retrying')${
+        onlyIfStatus ? ' AND EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status = ?)' : ''
+      }`,
+    )
+    .bind(reason, subscriptionId, ...(onlyIfStatus ? [subscriptionId, onlyIfStatus] : []));
 }
 
 /** At most `max` bytes of the body, read as a stream so a hostile endpoint can't make us buffer more. Null when it is larger. */
@@ -104,7 +124,11 @@ async function challenge(relay: Relay, subscriptionId: string, url: URL, secret:
     const res = await relay.fetch(url, {
       method: 'POST',
       redirect: 'manual',
-      headers: { 'content-type': 'application/json', 'user-agent': 'Logitland-Relay/0.1', ...(await signHeaders(secret, `chl_${subscriptionId}`, body, relay.now())) },
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': 'Logitland-Relay/0.1',
+        ...(await signHeaders(secret, `chl_${subscriptionId}`, body, relay.now())),
+      },
       body,
       signal: AbortSignal.timeout(LIMITS.deliveryTimeoutMs),
     });
@@ -113,12 +137,17 @@ async function challenge(relay: Relay, subscriptionId: string, url: URL, secret:
       return `The destination answered the challenge with ${res.status}.${res.status >= 300 && res.status < 400 ? ' Redirects aren’t followed.' : ''}`;
     }
     const text = await readCapped(res, CHALLENGE_MAX_BYTES);
-    if (text === null) return `The challenge response was larger than ${CHALLENGE_MAX_BYTES} bytes. Answer with just {"challenge": "<the challenge you were sent>"}.`;
+    if (text === null)
+      return `The challenge response was larger than ${CHALLENGE_MAX_BYTES} bytes. Answer with just {"challenge": "<the challenge you were sent>"}.`;
     const answer = ChallengeResponse.safeParse(JSON.parse(text));
-    return answer.success && answer.data.challenge === token ? null : 'The challenge response didn’t echo the challenge. Answer with {"challenge": "<the challenge you were sent>"}.';
+    return answer.success && answer.data.challenge === token
+      ? null
+      : 'The challenge response didn’t echo the challenge. Answer with {"challenge": "<the challenge you were sent>"}.';
   } catch (err) {
     if (err instanceof SyntaxError) return 'The challenge response wasn’t JSON. Answer with {"challenge": "<the challenge you were sent>"}.';
-    return err instanceof Error && err.name === 'TimeoutError' ? `The destination didn’t answer the challenge within ${LIMITS.deliveryTimeoutMs / 1000} seconds.` : 'Couldn’t connect to the destination to send the challenge.';
+    return err instanceof Error && err.name === 'TimeoutError'
+      ? `The destination didn’t answer the challenge within ${LIMITS.deliveryTimeoutMs / 1000} seconds.`
+      : 'Couldn’t connect to the destination to send the challenge.';
   }
 }
 
@@ -143,19 +172,63 @@ async function readableChannel(relay: Relay, channelId: string): Promise<void> {
 
 const capMessage = (max: number) => `Your agent can have ${max} subscriptions (active or paused). Delete one before adding another.`;
 
-export async function createSubscription(relay: Relay, principal: AgentPrincipal, req: CreateSubscriptionRequest): Promise<Subscription & { secret: string }> {
+const idempotencyConflict = () =>
+  new RelayError(
+    409,
+    'idempotency_conflict',
+    'That Idempotency-Key was used for a different subscription. Use a new key to add another, or send exactly the same request again.',
+  );
+
+/** What a retry with the same Idempotency-Key gets: the subscription the first request made, with its current secret. */
+async function replay(relay: Relay, found: SubscriptionRow, digest: string): Promise<Subscription & { secret: string; replayed: true }> {
+  if (found.payload_digest !== digest) throw idempotencyConflict();
+  if (found.status === 'disabled' && found.paused_reason === REMOVED)
+    throw conflict('The subscription made with that Idempotency-Key was deleted. Use a new key to add another.');
+  return { ...toSubscription(found), secret: await relay.secrets.open(found.secret_ciphertext, secretAad(found.id)), replayed: true };
+}
+
+/**
+ * Adds a subscription. With an Idempotency-Key, a retry (after a timeout, say) returns the subscription the first
+ * request made instead of adding a second that would deliver everything twice: same secret, no second challenge,
+ * and it doesn't count against the rate limits. A key reused with a different request is a 409.
+ */
+export async function createSubscription(
+  relay: Relay,
+  principal: AgentPrincipal,
+  req: CreateSubscriptionRequest,
+  opts: { idempotencyKey?: string } = {},
+): Promise<Subscription & { secret: string; replayed?: true }> {
   const agent = principal.agent;
   const channelIds = [...new Set(req.channel_ids)];
-  const events = [...new Set(req.events)];
+  const events = withRemovals([...new Set(req.events)]);
+  const key = opts.idempotencyKey ?? null;
+  const digest = key ? await sha256(JSON.stringify([req.url, [...new Set(req.events)].sort(), [...channelIds].sort(), req.description ?? null])) : null;
+  const known = (): Promise<SubscriptionRow | null> =>
+    relay.db.prepare('SELECT * FROM subscriptions WHERE agent_id = ? AND idempotency_key = ?').bind(agent.id, key).first<SubscriptionRow>();
+  if (key) {
+    const found = await known();
+    if (found) return replay(relay, found, digest!);
+  }
   for (const channelId of channelIds) await readableChannel(relay, channelId);
 
   const max = SUBSCRIPTIONS_MAX[agent.tier];
-  const held = await relay.db.prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE agent_id = ? AND status IN ('active', 'paused')").bind(agent.id).first<{ n: number }>();
+  const held = await relay.db
+    .prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE agent_id = ? AND status IN ('active', 'paused')")
+    .bind(agent.id)
+    .first<{ n: number }>();
   if ((held?.n ?? 0) >= max) throw conflict(capMessage(max));
 
   const host = (await refusing(() => checkUrl(req.url, relay.config.blockedHosts))).hostname;
-  await enforce(relay, [{ key: `sub:create:${agent.id}:h`, limit: CREATES_PER_AGENT_PER_HOUR, windowSeconds: 3600 }], `Agents can add ${CREATES_PER_AGENT_PER_HOUR} subscriptions an hour. Try again later.`);
-  await enforce(relay, [{ key: `sub:host:${host}:h`, limit: CREATES_PER_HOST_PER_HOUR, windowSeconds: 3600 }], 'Too many subscriptions were added for that destination recently. Try again later.');
+  await enforce(
+    relay,
+    [{ key: `sub:create:${agent.id}:h`, limit: CREATES_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
+    `Agents can add ${CREATES_PER_AGENT_PER_HOUR} subscriptions an hour. Try again later.`,
+  );
+  await enforce(
+    relay,
+    [{ key: `sub:host:${host}:h`, limit: CREATES_PER_HOST_PER_HOUR, windowSeconds: 3600 }],
+    'Too many subscriptions were added for that destination recently. Try again later.',
+  );
 
   const url = await refusing(() => preflightDestination(req.url, relay.resolver, relay.config.blockedHosts));
   const now = relay.now();
@@ -165,20 +238,41 @@ export async function createSubscription(relay: Relay, principal: AgentPrincipal
   if (failure) throw new RelayError(422, 'destination_refused', failure);
 
   const [urlCiphertext, secretCiphertext] = await Promise.all([relay.secrets.seal(url.toString(), urlAad(id)), relay.secrets.seal(secret, secretAad(id))]);
-  // The cap is checked again inside the insert so concurrent creates can't overshoot it.
+  // The cap is checked again inside the insert so concurrent creates can't overshoot it. A concurrent create with the
+  // same Idempotency-Key that got there first makes this insert do nothing too; it is told apart from the cap below.
   const results = await relay.db.batch([
     relay.db
       .prepare(
-        `INSERT INTO subscriptions (id, agent_id, url_ciphertext, url_host, events, channel_ids, description, secret_ciphertext, status, created_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?
+        `INSERT OR IGNORE INTO subscriptions (id, agent_id, url_ciphertext, url_host, events, channel_ids, description, secret_ciphertext, status, idempotency_key, payload_digest, created_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?
          WHERE (SELECT COUNT(*) FROM subscriptions WHERE agent_id = ? AND status IN ('active', 'paused')) < ?`,
       )
-      .bind(id, agent.id, urlCiphertext, url.host, JSON.stringify(events), JSON.stringify(channelIds), req.description ?? null, secretCiphertext, iso(now), agent.id, max),
+      .bind(
+        id,
+        agent.id,
+        urlCiphertext,
+        url.host,
+        JSON.stringify(events),
+        JSON.stringify(channelIds),
+        req.description ?? null,
+        secretCiphertext,
+        key,
+        digest,
+        iso(now),
+        agent.id,
+        max,
+      ),
     ...channelIds.map((channelId) =>
-      relay.db.prepare('INSERT INTO subscription_channels (subscription_id, channel_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM subscriptions WHERE id = ?)').bind(id, channelId, id),
+      relay.db
+        .prepare('INSERT INTO subscription_channels (subscription_id, channel_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM subscriptions WHERE id = ?)')
+        .bind(id, channelId, id),
     ),
   ]);
-  if (results[0]!.meta.changes !== 1) throw conflict(capMessage(max));
+  if (results[0]!.meta.changes !== 1) {
+    const winner = key ? await known() : null;
+    if (winner) return replay(relay, winner, digest!);
+    throw conflict(capMessage(max));
+  }
   await audit(relay, {
     actor_type: 'agent',
     actor_id: agent.id,
@@ -192,13 +286,19 @@ export async function createSubscription(relay: Relay, principal: AgentPrincipal
 }
 
 export async function listSubscriptions(relay: Relay, agentId: string): Promise<Subscription[]> {
-  const { results } = await relay.db.prepare(`SELECT * FROM subscriptions s WHERE s.agent_id = ? AND ${visible('s')} ORDER BY s.created_at, s.id`).bind(agentId).all<SubscriptionRow>();
+  const { results } = await relay.db
+    .prepare(`SELECT * FROM subscriptions s WHERE s.agent_id = ? AND ${visible('s')} ORDER BY s.created_at, s.id`)
+    .bind(agentId)
+    .all<SubscriptionRow>();
   return results.map(toSubscription);
 }
 
 /** The agent's own subscription, or 404. Other agents' subscriptions look the same as missing ones. */
 export async function ownSubscription(relay: Relay, agentId: string, id: string): Promise<SubscriptionRow> {
-  const row = await relay.db.prepare(`SELECT * FROM subscriptions s WHERE s.id = ? AND s.agent_id = ? AND ${visible('s')}`).bind(id, agentId).first<SubscriptionRow>();
+  const row = await relay.db
+    .prepare(`SELECT * FROM subscriptions s WHERE s.id = ? AND s.agent_id = ? AND ${visible('s')}`)
+    .bind(id, agentId)
+    .first<SubscriptionRow>();
   if (!row) throw notFound('No such subscription');
   return row;
 }
@@ -206,7 +306,9 @@ export async function ownSubscription(relay: Relay, agentId: string, id: string)
 export async function deleteSubscription(relay: Relay, agentId: string, id: string): Promise<void> {
   await ownSubscription(relay, agentId, id);
   await relay.db.batch([
-    relay.db.prepare("UPDATE subscriptions SET status = 'disabled', paused_reason = ?, secret_previous_ciphertext = NULL, secret_previous_until = NULL WHERE id = ?").bind(REMOVED, id),
+    relay.db
+      .prepare("UPDATE subscriptions SET status = 'disabled', paused_reason = ?, secret_previous_ciphertext = NULL, secret_previous_until = NULL WHERE id = ?")
+      .bind(REMOVED, id),
     dropPendingStmt(relay, id, 'The subscription was removed'),
     relay.db.prepare('DELETE FROM subscription_channels WHERE subscription_id = ?').bind(id),
     auditStmt(relay, { actor_type: 'agent', actor_id: agentId, action: 'subscription.deleted', target_type: 'subscription', target_id: id }),
@@ -242,7 +344,14 @@ export async function resumeSubscription(relay: Relay, agentId: string, id: stri
     .bind(id)
     .run();
   if (resumed.meta.changes === 1) {
-    await audit(relay, { actor_type: 'agent', actor_id: agentId, action: 'subscription.resumed', target_type: 'subscription', target_id: id, diff: { status: { from: 'paused', to: 'active' } } });
+    await audit(relay, {
+      actor_type: 'agent',
+      actor_id: agentId,
+      action: 'subscription.resumed',
+      target_type: 'subscription',
+      target_id: id,
+      diff: { status: { from: 'paused', to: 'active' } },
+    });
     if (channels.length) {
       try {
         await recordGap(relay, {
@@ -283,7 +392,9 @@ export async function rotateSecret(relay: Relay, agentId: string, id: string): P
 /** Subscriptions of an owner's agents, newest first, with the agent's name. */
 export async function listOwnerSubscriptions(relay: Relay, ownerId: string): Promise<OwnerSubscription[]> {
   const { results } = await relay.db
-    .prepare(`SELECT s.*, a.name AS agent_name FROM subscriptions s JOIN agents a ON a.id = s.agent_id WHERE a.owner_id = ? AND ${visible('s')} ORDER BY s.id DESC`)
+    .prepare(
+      `SELECT s.*, a.name AS agent_name FROM subscriptions s JOIN agents a ON a.id = s.agent_id WHERE a.owner_id = ? AND ${visible('s')} ORDER BY s.id DESC`,
+    )
     .bind(ownerId)
     .all<SubscriptionRow & { agent_name: string }>();
   return results.map((r) => ({ ...toSubscription(r), agent_name: r.agent_name }));
@@ -307,7 +418,7 @@ export async function listAdminSubscriptions(
   const { results } = await relay.db
     .prepare(
       `SELECT s.*, a.name AS agent_name,
-         (SELECT MAX(d.delivered_at) FROM deliveries d WHERE d.subscription_id = s.id) AS last_delivered_at,
+         (SELECT d.delivered_at FROM deliveries d WHERE d.subscription_id = s.id AND d.status = 'delivered' ORDER BY d.id DESC LIMIT 1) AS last_delivered_at,
          (SELECT COUNT(*) FROM deliveries d WHERE d.subscription_id = s.id AND d.status IN ('pending', 'retrying')) AS pending_count
        FROM subscriptions s JOIN agents a ON a.id = s.agent_id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY s.id DESC LIMIT ?`,
@@ -315,7 +426,12 @@ export async function listAdminSubscriptions(
     .bind(...args, opts.limit)
     .all<SubscriptionRow & { agent_name: string; last_delivered_at: string | null; pending_count: number }>();
   return {
-    subscriptions: results.map((r) => ({ ...toSubscription(r), agent_name: r.agent_name, last_delivered_at: r.last_delivered_at, pending_count: r.pending_count })),
+    subscriptions: results.map((r) => ({
+      ...toSubscription(r),
+      agent_name: r.agent_name,
+      last_delivered_at: r.last_delivered_at,
+      pending_count: r.pending_count,
+    })),
     next_before: results.length === opts.limit ? results[results.length - 1]!.id : null,
   };
 }

@@ -21,7 +21,7 @@
       const r = paused[s.host]
         ? { ...s, stateLabel: 'Paused', tone: 'plain' as const, dot: 'dot--off' as const, detail: `Paused by @${pausedBy}`, tag: 'paused' as const }
         : { ...s, tag: s.state };
-      return { ...r, text: [r.host, `${r.agent} · @${r.owner}`, r.stateLabel, r.detail, r.rate].join(' ').toLowerCase() };
+      return { ...r, text: [r.host, r.agent, r.owner ?? '', r.stateLabel, r.detail, r.rate].join(' ').toLowerCase() };
     }),
   );
 
@@ -67,9 +67,10 @@
     el.classList.add('is-flash');
   }
 
-  // Replay the selected failed deliveries.
+  // Replay the selected deliveries. Each shows how its replay went.
+  const current = $derived(data.statuses.find((f) => f.value === data.status) ?? data.statuses[0]!);
   let picked = $state<string[]>(untrack(() => data.failed.filter((f) => f.selected).map((f) => f.id)));
-  let queued = $state<Record<string, boolean>>({});
+  let outcomes = $state<Record<string, string>>({});
   let replaying = $state(false);
   let status = $state('');
   let statusEl = $state<HTMLElement>();
@@ -82,11 +83,12 @@
     return async ({ result }) => {
       replaying = false;
       if (result.type !== 'success' && result.type !== 'failure') return applyAction(result);
-      const ids = (result.data?.replayed as string[] | undefined) ?? [];
+      const done = (result.data?.replayed as Record<string, string> | undefined) ?? {};
+      const ids = Object.keys(done);
       if (ids.length) {
-        for (const id of ids) queued[id] = true;
+        Object.assign(outcomes, done);
         picked = picked.filter((id) => !ids.includes(id));
-        const msg = `${ids.length} ${ids.length === 1 ? 'delivery' : 'deliveries'} queued again with the same webhook-id.`;
+        const msg = `${ids.length} ${ids.length === 1 ? 'delivery' : 'deliveries'} replayed with the same webhook-id.`;
         status = msg;
         reveal(statusEl);
         toast(msg);
@@ -103,11 +105,14 @@
 <header class="a-header">
   <div class="page-head__text head-text">
     <h1 class="h1">Delivery health</h1>
-    <p class="t-3">Events sent to agents’ receivers. Each is signed with Standard Webhooks and arrives at least once, in no guaranteed order; receivers drop repeats by webhook-id.</p>
+    <p class="t-3">
+      Events sent to agents’ receivers. Each is signed with Standard Webhooks and arrives at least once, in no guaranteed order; receivers drop repeats by
+      webhook-id.
+    </p>
   </div>
   <div class="a-tools" role="search">
-    <label class="sr-only" for="d-search">Search subscriptions by host, agent or owner</label>
-    <input class="input input--sm" id="d-search" type="search" placeholder="Host, agent or owner" autocomplete="off" bind:value={query} oninput={apply} />
+    <label class="sr-only" for="d-search">Search subscriptions by host or agent</label>
+    <input class="input input--sm" id="d-search" type="search" placeholder="Host or agent" autocomplete="off" bind:value={query} oninput={apply} />
   </div>
 </header>
 
@@ -153,7 +158,7 @@
           <li class="row sub" animate:flip={FLIP} in:rise out:fold>
             <div class="sub__id">
               <span class="mono t-ink wrap-any">{s.host}</span>
-              <span class="caption t-3">{s.agent} · @{s.owner}</span>
+              <span class="caption t-3">{s.agent}{s.owner ? ` · @${s.owner}` : ''}</span>
             </div>
             <div class="sub__state">
               <span class="tag tag--{s.tone}"><span class="dot {s.dot}" aria-hidden="true"></span><Morph text={s.stateLabel} /></span>
@@ -164,7 +169,12 @@
               >{#if s.action?.kind === 'pause'}<form method="POST" action="?/pause" use:enhance={pause(s.host)}>
                   <input type="hidden" name="host" value={s.host} />
                   <input type="hidden" name="paused" value={String(!paused[s.host])} />
-                  <button type="submit" class="btn btn--sm" class:is-busy={pausing[s.host]} aria-busy={pausing[s.host] || undefined} aria-label="{paused[s.host] ? 'Resume' : 'Pause'} {s.host}"
+                  <button
+                    type="submit"
+                    class="btn btn--sm"
+                    class:is-busy={pausing[s.host]}
+                    aria-busy={pausing[s.host] || undefined}
+                    aria-label="{paused[s.host] ? 'Resume' : 'Pause'} {s.host}"
                     ><span class="btn__spin" aria-hidden="true"></span><Morph text={paused[s.host] ? 'Resume' : 'Pause'} /></button
                   >
                 </form>{:else if s.action?.kind === 'review'}{@const target = s.action.target}<a
@@ -196,7 +206,10 @@
                 </div>
               {/each}
             </div>
-            <p class="caption t-3">The relay looks up each address itself before every send. Workers doesn’t document blocking private addresses, so the platform isn’t relied on for this.</p>
+            <p class="caption t-3">
+              The relay looks up each address itself before every send. Workers doesn’t document blocking private addresses, so the platform isn’t relied on for
+              this.
+            </p>
           </section>
         {/if}
         {#if data.gap}
@@ -214,34 +227,61 @@
     <form class="stack g-3" method="POST" action="?/replay" use:enhance={replay}>
       <div class="between" style="--gap: 12px 24px">
         <div class="stack g-1">
-          <h2 id="dl-h" class="micro">Failed, kept for replay</h2>
-          <span class="caption t-3">Kept for [retention period]. A replay rechecks channel access and the address first.</span>
+          <h2 id="dl-h" class="micro">{current.title}</h2>
+          <span class="caption t-3">{current.hint}</span>
         </div>
-        <button type="submit" class="btn btn--primary btn--sm" id="replay" disabled={picked.length === 0} class:is-busy={replaying} aria-busy={replaying || undefined}
-          ><span class="btn__spin" aria-hidden="true"></span><Morph text={replayLabel} /></button
-        >
+        {#if current.replayable}
+          <button
+            type="submit"
+            class="btn btn--primary btn--sm"
+            id="replay"
+            disabled={picked.length === 0}
+            class:is-busy={replaying}
+            aria-busy={replaying || undefined}><span class="btn__spin" aria-hidden="true"></span><Morph text={replayLabel} /></button
+          >
+        {/if}
       </div>
+      <nav class="chips" aria-label="Show deliveries by status">
+        {#each data.statuses as f (f.value)}
+          <a class="chip" class:is-selected={f.value === data.status} aria-current={f.value === data.status ? 'true' : undefined} href="?status={f.value}"
+            >{f.label}</a
+          >
+        {/each}
+      </nav>
       <ul class="card card--flush rows" id="failed-list" bind:this={failedList}>
         {#each data.failed as d (d.id)}
           <li>
-            <label class="pick">
-              <input type="checkbox" name="delivery" value={d.id} aria-label="Select {d.id}" bind:group={picked} onchange={() => (status = '')} />
-              <span class="pick__id"><span class="mono t-ink">{d.id}</span><span class="mono tiny t-3">{d.eventType}</span></span>
-              <span class="pick__host mono tiny">{d.host}</span>
-              <Morph class="pick__answer {queued[d.id] ? 't-2' : 't-fail'}" text={queued[d.id] ? 'Queued again' : d.answer} />
-              <span class="pick__when t-3">{d.when}</span>
-            </label>
+            {#if current.replayable}
+              <label class="pick">
+                <input type="checkbox" name="delivery" value={d.id} aria-label="Select {d.id}" bind:group={picked} onchange={() => (status = '')} />
+                <span class="pick__id"><span class="mono t-ink">{d.id}</span><span class="mono tiny t-3">{d.eventType}</span></span>
+                <span class="pick__host mono tiny">{d.host}</span>
+                <Morph class="pick__answer {outcomes[d.id] ? 't-2' : 't-fail'}" text={outcomes[d.id] ?? d.answer} />
+                <span class="pick__when t-3">{d.when}</span>
+              </label>
+            {:else}
+              <div class="pick pick--plain">
+                <span class="pick__id"><span class="mono t-ink">{d.id}</span><span class="mono tiny t-3">{d.eventType}</span></span>
+                <span class="pick__host mono tiny">{d.host}</span>
+                <span class="pick__answer t-wait">{d.answer}</span>
+                <span class="pick__when t-3">{d.when}</span>
+              </div>
+            {/if}
           </li>
         {:else}
-          <li class="row t-3">No failed deliveries are waiting for replay.</li>
+          <li class="row t-3">Nothing here: no {current.label.toLowerCase()} deliveries.</li>
         {/each}
       </ul>
-      <p class="caption t-3 replay-status" id="replay-status" bind:this={statusEl}>{status}</p>
+      {#if data.older}<a class="link self-start" href="?status={data.status}&before={data.older}">Older deliveries</a>{/if}
+      <p class="caption t-3 replay-status" id="replay-status" role="status" bind:this={statusEl}>{status}</p>
     </form>
   </section>
 </main>
 
 <style>
+  a.chip {
+    text-decoration: none;
+  }
   .head-text {
     flex: 1 1 480px;
     max-width: 800px;
@@ -331,6 +371,12 @@
     gap: var(--s-2) var(--s-5);
     padding: var(--s-3) var(--s-5);
     cursor: pointer;
+  }
+  .pick--plain {
+    cursor: default;
+  }
+  .pick > .pick__answer {
+    flex: 1 1 160px;
   }
   .pick:has(input:checked) {
     background: var(--raised);

@@ -1,6 +1,4 @@
 {
   "extends": "@logitland/config/tsconfig/library.json",
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

@@ -1,29 +1,20 @@
 // What a signed-in person can see and do about their own words on the mirror. These two calls go to the
-// dashboard API (the InternalApi entrypoint) through the BACKEND service binding, as the signed-in
-// person: the relay checks that the owner header belongs to the Discord user in the path.
+// dashboard API (the InternalApi entrypoint) through the BACKEND service binding, as the signed-in person:
+// the relay checks that x-logitland-person (the Discord user the dashboard verified at sign-in) is the one in the path
+// (401 when the header is missing, 403 when it belongs to someone else). No owner account is needed: a person who signs
+// in only to remove their messages is known by their Discord ID alone.
 //
-// Wire shapes expected until the relay's /internal/people routes are built:
-// GET /internal/people/:discordUserId -> { consented, granted_at, revoked_at, message_count }
-// POST /internal/people/:discordUserId/removal { mode } -> { removed }
+// GET /internal/people/:discordUserId -> ConsentStatus
+// POST /internal/people/:discordUserId/removal { mode } -> PersonRemoval
 
 import { env } from 'cloudflare:workers';
-import { z } from 'zod';
+import { ConsentStatus, PersonRemoval, type PersonRemovalMode } from '@logitland/contracts';
 import { FIXTURE_PERSON } from '#lib/fixtures/mirror.js';
 import { RelayRequestError, dataSource, p, simulate } from '#lib/server/relay.js';
 
 export interface Person {
-  owner_id: string;
   discord_user_id: string;
 }
-
-export interface PersonStatus {
-  consented: boolean;
-  grantedAt: string | null;
-  leftAt: string | null;
-  messages: number;
-}
-
-export type RemovalMode = 'remove_messages' | 'leave';
 
 export class PeopleError extends Error {
   constructor(
@@ -34,14 +25,6 @@ export class PeopleError extends Error {
   }
 }
 
-const Status = z.object({
-  consented: z.boolean(),
-  granted_at: z.string().nullable().optional(),
-  revoked_at: z.string().nullable().optional(),
-  message_count: z.number().int().min(0),
-});
-const Removal = z.object({ removed: z.number().int().min(0).optional() });
-
 function describe(status: number): string {
   if (status === 401 || status === 403) return 'Your Discord sign-in doesn’t match this account. Sign out and sign in again.';
   if (status === 429) return 'Too many tries. Wait a minute, then try again.';
@@ -50,7 +33,7 @@ function describe(status: number): string {
 
 async function call(person: Person, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
   if (!env.INTERNAL_TOKEN) throw new PeopleError(500, 'The dashboard isn’t set up to reach the relay yet.');
-  const headers: Record<string, string> = { 'x-logitland-internal': env.INTERNAL_TOKEN, 'x-logitland-owner': person.owner_id };
+  const headers: Record<string, string> = { 'x-logitland-internal': env.INTERNAL_TOKEN, 'x-logitland-person': person.discord_user_id };
   if (body !== undefined) headers['content-type'] = 'application/json';
   let res: Response;
   try {
@@ -58,8 +41,7 @@ async function call(person: Person, method: 'GET' | 'POST', path: string, body?:
   } catch {
     throw new PeopleError(502, describe(502));
   }
-  const data = res.status === 204 ? null : await res.json().catch(() => null);
-  return { status: res.status, data };
+  return { status: res.status, data: res.status === 204 ? null : await res.json().catch(() => null) };
 }
 
 function path(person: Person, suffix = ''): string {
@@ -71,26 +53,39 @@ function path(person: Person, suffix = ''): string {
   }
 }
 
-export async function personStatus(person: Person): Promise<PersonStatus> {
-  if (dataSource() === 'fixtures') {
-    await simulate(120);
-    const granted = new Date(Date.now() - FIXTURE_PERSON.grantedDaysAgo * 86_400_000).toISOString();
-    return { consented: FIXTURE_PERSON.consented, grantedAt: granted, leftAt: null, messages: FIXTURE_PERSON.messages };
-  }
-  const { status, data } = await call(person, 'GET', path(person));
-  // The relay has no record of this person: they never agreed and nothing of theirs is shown.
-  if (status === 404) return { consented: false, grantedAt: null, leftAt: null, messages: 0 };
-  const parsed = status < 400 ? Status.safeParse(data) : null;
-  if (!parsed?.success) throw new PeopleError(status >= 400 ? status : 502, describe(status >= 400 ? status : 502));
-  return { consented: parsed.data.consented, grantedAt: parsed.data.granted_at ?? null, leftAt: parsed.data.revoked_at ?? null, messages: parsed.data.message_count };
+/** In fixtures mode, ?preview= shows the other places a person can be: left, hidden (never agreed, messages remain), error, role-failed. */
+function fixtureStatus(preview: string | null): ConsentStatus {
+  const granted = new Date(Date.now() - FIXTURE_PERSON.grantedDaysAgo * 86_400_000).toISOString();
+  const left = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  if (preview === 'left') return { agreed: false, method: 'command', granted_at: granted, revoked_at: left, mirrored_messages: 0 };
+  if (preview === 'hidden') return { agreed: false, method: null, granted_at: null, revoked_at: null, mirrored_messages: 3 };
+  return { agreed: FIXTURE_PERSON.agreed, method: 'command', granted_at: granted, revoked_at: null, mirrored_messages: FIXTURE_PERSON.messages };
 }
 
-export async function removePerson(person: Person, mode: RemovalMode, known: number): Promise<{ removed: number }> {
+export async function personStatus(person: Person, preview: string | null = null): Promise<ConsentStatus> {
+  if (dataSource() === 'fixtures') {
+    await simulate(120);
+    if (preview === 'error') throw new PeopleError(502, describe(502));
+    return fixtureStatus(preview);
+  }
+  const { status, data } = await call(person, 'GET', path(person));
+  const parsed = status < 400 ? ConsentStatus.safeParse(data) : null;
+  if (!parsed?.success) throw new PeopleError(status >= 400 ? status : 502, describe(status >= 400 ? status : 502));
+  return parsed.data;
+}
+
+export async function removePerson(person: Person, mode: PersonRemovalMode, preview: string | null = null): Promise<PersonRemoval> {
   if (dataSource() === 'fixtures') {
     await simulate(900);
-    return { removed: known };
+    if (preview === 'error') throw new PeopleError(502, describe(502));
+    const before = fixtureStatus(preview);
+    const consent: ConsentStatus =
+      mode === 'leave' ? { ...before, agreed: false, revoked_at: new Date().toISOString(), mirrored_messages: 0 } : { ...before, mirrored_messages: 0 };
+    return { mode, removed_messages: before.mirrored_messages, role_removed: mode === 'leave' ? preview !== 'role-failed' : null, consent };
   }
   const { status, data } = await call(person, 'POST', path(person, '/removal'), { mode });
   if (status >= 400) throw new PeopleError(status, describe(status));
-  return { removed: Removal.safeParse(data).data?.removed ?? known };
+  const parsed = PersonRemoval.safeParse(data);
+  if (!parsed.success) throw new PeopleError(502, describe(502));
+  return parsed.data;
 }

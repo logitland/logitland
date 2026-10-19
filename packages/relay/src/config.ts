@@ -26,6 +26,8 @@ export interface RelayBindings {
   MODERATION_OUTAGE?: string;
   /** "development" switches to the stub moderator and relaxed checks. Only accepted on a local PUBLIC_URL. */
   RELAY_MODE?: string;
+  /** Development only: point Discord REST (and so the Gateway URL) at a local fake, e.g. http://127.0.0.1:8790/api/v10. */
+  DISCORD_API_BASE?: string;
 }
 
 export class ConfigError extends Error {
@@ -37,6 +39,8 @@ export class ConfigError extends Error {
 
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])$|\.(localhost|test)$/;
 const PLACEHOLDER_HOST = /(^|\.)(invalid|example)$|replace/i;
+/** Values from the example env files and docs. A random token is never refused for what it happens to contain. */
+const PLACEHOLDER_TOKENS = ['dev-internal-token', 'test-internal-token', 'changeme', 'change-me', 'replace-me'];
 
 const list = (v?: string) =>
   (v ?? '')
@@ -62,6 +66,7 @@ export function checkConfig(env: RelayBindings): string[] {
   if (!env.RELAY_SECRET_KEY) problems.push('RELAY_SECRET_KEY is missing');
 
   const dev = env.RELAY_MODE === 'development';
+  if (env.DISCORD_API_BASE && !dev) problems.push('DISCORD_API_BASE is only allowed in development');
   if (dev) {
     if (publicHost && !LOCAL_HOST.test(publicHost)) problems.push('RELAY_MODE=development is only allowed on a local PUBLIC_URL');
     return problems;
@@ -77,12 +82,17 @@ export function checkConfig(env: RelayBindings): string[] {
     if (LOCAL_HOST.test(h)) problems.push(`${name} points at a local host`);
     if (PLACEHOLDER_HOST.test(h)) problems.push(`${name} is still a placeholder`);
   }
-  if (!env.INTERNAL_TOKEN || env.INTERNAL_TOKEN.length < 32 || /dev|test|change/i.test(env.INTERNAL_TOKEN)) problems.push('INTERNAL_TOKEN must be at least 32 random characters');
+  if (!env.INTERNAL_TOKEN || env.INTERNAL_TOKEN.length < 32) problems.push('INTERNAL_TOKEN must be at least 32 random characters');
+  else if (PLACEHOLDER_TOKENS.some((p) => env.INTERNAL_TOKEN.toLowerCase().startsWith(p)))
+    problems.push('INTERNAL_TOKEN is still an example value; generate a new one');
   if (!env.IP_HASH_KEY || env.IP_HASH_KEY.length < 32) problems.push('IP_HASH_KEY must be at least 32 random characters');
   if (!env.DISCORD_BOT_TOKEN) problems.push('DISCORD_BOT_TOKEN is missing');
-  for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID', 'DISCORD_CONSENT_ROLE_ID'] as const) if (!env[name]) problems.push(`${name} is missing`);
+  for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID', 'DISCORD_CONSENT_ROLE_ID'] as const)
+    if (!env[name]) problems.push(`${name} is missing`);
   if (!(env.JEV_LAYA_URL && env.JEV_LAYA_TOKEN) && !env.AI) problems.push('No classifier: set JEV_LAYA_URL and JEV_LAYA_TOKEN, or bind AI');
   if (!list(env.ADMIN_DISCORD_IDS).length) problems.push('ADMIN_DISCORD_IDS is empty');
+  // Without the queue the cron scan would attempt every delivery itself, inside its own query budget.
+  if (!env.DELIVERIES) problems.push('The DELIVERIES queue binding is missing');
   if (env.MODERATION_OUTAGE && !['hold', 'refuse'].includes(env.MODERATION_OUTAGE)) problems.push('MODERATION_OUTAGE must be hold or refuse');
   return problems;
 }

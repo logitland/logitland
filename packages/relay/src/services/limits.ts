@@ -25,7 +25,9 @@ export async function hit(relay: Relay, l: Limit, cost = 1): Promise<LimitResult
   const now = relay.now();
   const start = windowStart(now, l.windowSeconds);
   const row = await relay.db
-    .prepare('INSERT INTO rate_counters (key, window_start, count) VALUES (?, ?, ?) ON CONFLICT (key, window_start) DO UPDATE SET count = count + excluded.count RETURNING count')
+    .prepare(
+      'INSERT INTO rate_counters (key, window_start, count) VALUES (?, ?, ?) ON CONFLICT (key, window_start) DO UPDATE SET count = count + excluded.count RETURNING count',
+    )
     .bind(l.key, start, cost)
     .first<{ count: number }>();
   const count = row?.count ?? cost;
@@ -35,21 +37,33 @@ export async function hit(relay: Relay, l: Limit, cost = 1): Promise<LimitResult
 
 /** The current count without adding to it. */
 export async function peek(relay: Relay, l: Limit): Promise<number> {
-  const row = await relay.db.prepare('SELECT count FROM rate_counters WHERE key = ? AND window_start = ?').bind(l.key, windowStart(relay.now(), l.windowSeconds)).first<{ count: number }>();
+  const row = await relay.db
+    .prepare('SELECT count FROM rate_counters WHERE key = ? AND window_start = ?')
+    .bind(l.key, windowStart(relay.now(), l.windowSeconds))
+    .first<{ count: number }>();
   return row?.count ?? 0;
 }
 
-/** Counts against every limit in order and throws 429 at the first one exceeded. */
-export async function enforce(relay: Relay, limits: Limit[], message: string): Promise<void> {
+/** Counts `cost` (one by default) against every limit in order and throws 429 at the first one exceeded. */
+export async function enforce(relay: Relay, limits: Limit[], message: string, cost = 1): Promise<void> {
   for (const l of limits) {
-    const r = await hit(relay, l);
+    const r = await hit(relay, l, cost);
     if (!r.ok) throw rateLimited(message, r.retryAfterSeconds);
   }
 }
 
-/** Cron: drop windows older than two days. */
-export async function sweepCountersJob(relay: Relay): Promise<number> {
+const SWEEP_BATCH = 1000;
+
+/** Cron: drop windows older than two days, a bounded batch at a time until it runs out of time. */
+export async function sweepCountersJob(relay: Relay, ctx: { deadline?: number } = {}): Promise<number> {
   const cutoff = Math.floor(relay.now().getTime() / 1000) - 2 * 86_400;
-  const r = await relay.db.prepare('DELETE FROM rate_counters WHERE window_start < ?').bind(cutoff).run();
-  return r.meta.changes;
+  let total = 0;
+  for (;;) {
+    const r = await relay.db
+      .prepare('DELETE FROM rate_counters WHERE rowid IN (SELECT rowid FROM rate_counters WHERE window_start < ? LIMIT ?)')
+      .bind(cutoff, SWEEP_BATCH)
+      .run();
+    total += r.meta.changes;
+    if (r.meta.changes < SWEEP_BATCH || (ctx.deadline !== undefined && Date.now() >= ctx.deadline)) return total;
+  }
 }

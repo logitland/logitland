@@ -10,7 +10,8 @@
     "preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
     "prepare": "svelte-kit sync || echo ''",
     "check": "wrangler types --env-file .dev.vars.example --check && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold warning",
-    "gen": "wrangler types --env-file .dev.vars.example"
+    "gen": "wrangler types --env-file .dev.vars.example",
+    "test": "vitest run"
   },
   "imports": {
     "#lib": "./src/lib/index.js",
@@ -32,6 +33,7 @@
     "svelte-check": "catalog:",
     "typescript": "catalog:ts6",
     "vite": "catalog:",
+    "vitest": "catalog:",
     "wrangler": "catalog:"
   }
 }

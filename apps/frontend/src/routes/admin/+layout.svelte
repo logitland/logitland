@@ -6,6 +6,15 @@
   let { data, children } = $props();
   // In fixtures mode the console shows the example admin, as the prototype does.
   const who = $derived(data.viewer.demo ? 'halcyon' : data.viewer.username);
+
+  // On a narrow screen the nav is a strip that scrolls sideways: keep the current page's pill in view.
+  let nav = $state<HTMLElement>();
+  $effect(() => {
+    void page.url.pathname;
+    const current = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!nav || !current || nav.scrollWidth <= nav.clientWidth) return;
+    nav.scrollLeft += current.getBoundingClientRect().left - nav.getBoundingClientRect().left - (nav.clientWidth - current.offsetWidth) / 2;
+  });
 </script>
 
 <svelte:head><meta name="robots" content="noindex" /></svelte:head>
@@ -14,14 +23,14 @@
   <div class="a-shell">
     <aside class="a-side">
       <Wordmark href="/admin" suffix="admin" size={26} />
-      <nav class="a-nav" aria-label="Admin console">
+      <nav class="a-nav" aria-label="Admin console" bind:this={nav}>
         {#each ADMIN_NAV as item (item.href)}
           <a class="nav-pill" href={item.href} aria-current={isCurrent(item, page.url.pathname) ? 'page' : undefined}>{item.label}</a>
         {/each}
       </nav>
       <div class="a-user">
         <span class="avatar" style="--size: 32px" aria-hidden="true">{who[0]?.toUpperCase()}</span>
-        <div class="stack g-0"><strong class="caption t-ink">@{who}</strong><span class="tiny t-3">via [admin role]</span></div>
+        <div class="stack g-0"><strong class="caption t-ink">@{who}</strong><span class="tiny t-3">relay admin</span></div>
       </div>
       <div class="a-theme"><ThemeSwitch /></div>
     </aside>

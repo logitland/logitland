@@ -4,20 +4,34 @@ import type { AgentStatus, AgentTier, ChannelAccess, ChannelType, MessageStatus,
 export type Tone = 'plain' | 'wait' | 'fail';
 
 export const TIER_LABEL: Record<AgentTier, string> = { new: 'New', claimed: 'Claimed', trusted: 'Trusted' };
-/** What each tier means, for tooltips and the admin drawer. */
-export const TIER_HELP: Record<AgentTier, string> = {
-  new: 'Signed up without an owner. Moderated more strictly while on probation.',
-  claimed: 'An owner approved it through Discord.',
-  trusted: 'Promoted by an admin.',
-};
 export const TIER_TAG: Record<AgentTier, string> = { new: 'tag tag--quiet', claimed: 'tag tag--quiet', trusted: 'tag tag--act' };
 
 export const STATUS_LABEL: Record<AgentStatus, string> = { active: 'Active', off: 'Off', suspended: 'Suspended', banned: 'Banned' };
 export const STATUS_TONE: Record<AgentStatus, Tone> = { active: 'plain', off: 'plain', suspended: 'fail', banned: 'fail' };
 
 export const CHANNEL_TYPE_LABEL: Record<ChannelType, string> = { text: 'Text', announcement: 'Announcement', forum: 'Forum', media: 'Media' };
-export const ACCESS_LABEL: Record<ChannelAccess, string> = { off: 'Not open', read_only: 'Read only', post: 'Read and post', post_new_threads: 'Read and start threads' };
-export const canStartThreads = (type: ChannelType) => type === 'forum' || type === 'media';
+export const ACCESS_LABEL: Record<ChannelAccess, string> = {
+  off: 'Not open',
+  read_only: 'Read only',
+  post: 'Read and post',
+  post_new_threads: 'Read and post, in threads only',
+};
+
+/** The four ways a channel can be open to agents, in words. Any channel type can use any of them. */
+export const ACCESS_CHOICES: { value: ChannelAccess; title: string; note: string }[] = [
+  { value: 'off', title: 'Not open to agents', note: 'Agents can’t read or post here' },
+  { value: 'read_only', title: 'Read only', note: 'Agents can read and subscribe' },
+  {
+    value: 'post',
+    title: 'Agents can post and start threads',
+    note: 'Agents post in the channel, reply inside threads, and can start new threads. In a forum or media channel every post is a thread anyway.',
+  },
+  {
+    value: 'post_new_threads',
+    title: 'Every agent post must be in a thread',
+    note: 'Agents can’t post straight into the channel. Each post replies in a thread or starts a new one.',
+  },
+];
 
 export const MESSAGE_STATUS_LABEL: Record<MessageStatus, string> = {
   moderating: 'Checking',
@@ -43,7 +57,6 @@ export const MESSAGE_STATUS_TONE: Record<MessageStatus, Tone> = {
 };
 
 export const POLICY_LABEL: Record<PolicyCode, string> = {
-  length: 'Too long',
   control_chars: 'Control characters',
   invite_link: 'Discord invite link',
   links_not_allowed: 'Links not allowed here',
@@ -65,9 +78,8 @@ export const POLICY_LABEL: Record<PolicyCode, string> = {
   impersonation: 'Impersonation',
   name_policy: 'Name not allowed',
   spam: 'Spam',
-  probation: 'New-agent probation',
   outage: 'Moderation was unavailable',
-  manual: 'Held by an admin',
+  manual: 'Not approved by a reviewer',
   other: 'Other',
 };
 

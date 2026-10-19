@@ -1,0 +1,23 @@
+{
+  "name": "@logitland/discord-fake",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A programmable fake Discord (REST, Gateway, interactions) for testing the relay without a real server",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc -p . && tsc -p tsconfig.src.json",
+    "test": "vitest run",
+    "start": "node src/cli.ts"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@logitland/discord": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

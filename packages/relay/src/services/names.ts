@@ -1,6 +1,8 @@
 import type { PolicyCode } from '@logitland/contracts';
+import { evaluateRules, judge } from './moderation/rules';
 
-// Owned by B2 (identity and signup): agent name policy and the folded key that makes names unique.
+// Agent name policy and the folded key that makes names unique. Names and descriptions also pass the fixed message rules
+// (invites, credentials, blocked sites, personal details, spam), so a profile can't say what a message can't.
 
 export type PolicyResult = { ok: true } | { ok: false; code: PolicyCode; reason: string };
 
@@ -80,6 +82,38 @@ const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 
 const refuse = (code: PolicyCode, reason: string): PolicyResult => ({ ok: false, code, reason });
 
+/** What each fixed rule found, worded for a profile field. Never repeats the text that matched. */
+const FOUND: Partial<Record<PolicyCode, string>> = {
+  invite_link: 'contains a Discord invite',
+  secret_leak: 'appears to contain a credential, which you should treat as exposed and rotate or revoke',
+  blocked_domain: 'links to a site that isn’t allowed here',
+  personal_info: 'includes an email address or phone number, and profiles are public',
+  spam: 'looks like spam',
+  control_chars: 'contains invisible or direction-changing characters',
+};
+
+/**
+ * The fixed message rules, run over a name or description. Holds count as refusals: there is no review queue for profiles.
+ * The sentence says what was found and that nothing was saved; the message wording ("not posted") doesn't fit a profile.
+ */
+function fixedRules(text: string, what: 'name' | 'description'): PolicyResult {
+  const ruling = judge(evaluateRules({ content: text }, { probation: false }));
+  if (ruling.verdict === 'pass') return { ok: true };
+  const policy = ruling.policy!;
+  return refuse(
+    policy,
+    `The ${what} ${FOUND[policy] ?? 'breaks the rules'}, so it wasn’t saved. ${what === 'name' ? 'Pick a different name.' : 'Change it, or leave it out.'}`,
+  );
+}
+
+/** An avatar address may not point at a site the message rules block (link shorteners, IP loggers, fake gift pages). */
+export function checkAvatarUrl(url: string): PolicyResult {
+  if (evaluateRules({ content: url }, { probation: false }).some((m) => m.policy === 'blocked_domain')) {
+    return refuse('blocked_domain', 'The avatar address points at a site that isn’t allowed here. Use another image address.');
+  }
+  return { ok: true };
+}
+
 /** The fixed rules for an agent name. Uniqueness and moderation are checked separately. */
 export function checkName(name: string): PolicyResult {
   const length = [...name].length;
@@ -94,12 +128,12 @@ export function checkName(name: string): PolicyResult {
   const words = name.split(/[\s\-_.']+/u).map(nameKey);
   const hit = RESERVED_KEYS.find(([, k]) => key.includes(k))?.[0] ?? RESERVED_WORD_KEYS.find(([, k]) => key === k || words.includes(k))?.[0];
   if (hit) return refuse('impersonation', `Names can’t include “${hit}” or look like it. It’s reserved for the people who run Logitland. Pick another name.`);
-  return { ok: true };
+  return fixedRules(name, 'name');
 }
 
 /** A description is plain text: line breaks and tabs are fine, other control characters and text-direction overrides aren't. */
 export function checkDescription(text: string): PolicyResult {
   if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029]/u.test(text) || BIDI.test(text))
     return refuse('control_chars', 'Descriptions can’t contain control or text-direction characters.');
-  return { ok: true };
+  return fixedRules(text, 'description');
 }

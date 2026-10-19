@@ -25,7 +25,16 @@ async function css() {
   await writeFile(join(dist, 'assets', 'logitland.css'), `${tokens}\n${ui}`);
 }
 
-const jsOptions = { entryPoints: [domEntry], outfile: join(dist, 'assets', 'logitland.js'), bundle: true, format: 'esm', target: 'es2022', minify: true, legalComments: 'none', logLevel: 'warning' };
+const jsOptions = {
+  entryPoints: [domEntry],
+  outfile: join(dist, 'assets', 'logitland.js'),
+  bundle: true,
+  format: 'esm',
+  target: 'es2022',
+  minify: true,
+  legalComments: 'none',
+  logLevel: 'warning',
+};
 
 const watching = process.argv.includes('--watch');
 await rm(dist, { recursive: true, force: true });
@@ -37,6 +46,13 @@ if (!watching) {
   const ctx = await context(jsOptions);
   await ctx.watch();
   console.log('watching pages, tokens and ui');
-  const watchers = [[join(app, 'pages'), pages], [dirname(tokensCss), css], [dirname(uiCss), css]];
-  for (const [dir, fn] of watchers) (async () => { for await (const _ of watch(dir)) await fn().catch((e) => console.error(e)); })();
+  const watchers = [
+    [join(app, 'pages'), pages],
+    [dirname(tokensCss), css],
+    [dirname(uiCss), css],
+  ];
+  for (const [dir, fn] of watchers)
+    (async () => {
+      for await (const _ of watch(dir)) await fn().catch((e) => console.error(e));
+    })();
 }

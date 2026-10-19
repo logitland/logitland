@@ -5,44 +5,61 @@
 import {
   PolicyCode,
   type Agent,
+  type AdminAgentsPage,
   type AdminHealth,
+  type AdminSubscriptionsPage,
+  type AgentStatusAction,
+  type AppealDecision,
   type Channel,
+  type ChannelPatch,
   type ClaimDecision,
   type ClaimLookup,
+  type ClaimOutcome,
+  type ConsentMessage,
   type CreateAgentRequest,
-  type Delivery,
+  type CreatedAgent,
+  type DeliveryDetailsPage,
+  type DiscordChannelListing,
+  type HideMessageRequest,
+  type HideMessageResult,
   type IssuedKey,
-  type IssueKeyRequest,
-  type Owner,
+  type ModerationAction,
+  type ModerationQueuePage,
+  type ModerationStats,
+  type OwnerAgentDetail,
+  type OwnerMessagesPage,
+  type OwnerSession,
+  type OwnerSubscription,
   type Problem,
   type ProfileUpdate,
-  type Subscription,
+  type RelayMessage,
+  type RegisteredCommands,
+  type RelayChannelRequest,
+  type RelayChannelResult,
+  type ReleaseRequest,
+  type ReplayResult,
+  type Report,
+  type ReportAction,
+  type ReportsPage,
+  type ResolveMessageRequest,
+  type RevealIpResponse,
+  type SetupReport,
+  type AdminAppeal,
 } from '@logitland/contracts';
 import { env } from 'cloudflare:workers';
 import type {
-  AdminAgentPage,
   AdminAgentQuery,
-  AdminAppeal,
+  AdminAppealQuery,
+  AdminAppealsPage,
   AdminAuditPage,
-  AdminChannel,
-  AdminDelivery,
-  AdminDeliveryQuery,
-  AdminReport,
-  AdminSubscription,
-  AgentStatusChange,
-  AppealDecision,
-  ChannelPatch,
-  ModerationStats,
-  OwnerAgentDetail,
-  OwnerMessage,
-  QueueItem,
-  RejectRequest,
+  AdminReportQuery,
+  AdminSubscriptionQuery,
+  DeliveryQuery,
+  IssueKeyInput,
+  OwnerMessageQuery,
+  QueueQuery,
   RelaySettings,
-  ReportAction,
-  ResolveAction,
-  RevealedOrigin,
   SettingsPatch,
-  TakedownRequest,
 } from '#lib/relay-types.js';
 
 export class RelayRequestError extends Error {
@@ -89,8 +106,8 @@ export class RelayClient {
     private readonly token: string,
   ) {}
 
-  private async call<T>(method: string, path: string, body?: unknown, ownerId?: string): Promise<T> {
-    const headers: Record<string, string> = { 'x-logitland-internal': this.token };
+  private async call<T>(method: string, path: string, body?: unknown, ownerId?: string, extraHeaders: Record<string, string> = {}): Promise<T> {
+    const headers: Record<string, string> = { 'x-logitland-internal': this.token, ...extraHeaders };
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (ownerId) headers['x-logitland-owner'] = ownerId;
     const res = await this.service.fetch(`https://relay.internal${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -103,7 +120,7 @@ export class RelayClient {
   /* ---------- Owner routes: send the signed-in owner's ID ---------- */
 
   upsertOwner(discord_user_id: string, username: string) {
-    return this.call<{ owner: Owner; is_admin: boolean }>('POST', '/internal/owners', { discord_user_id, username });
+    return this.call<OwnerSession>('POST', '/internal/owners', { discord_user_id, username });
   }
   listAgents(ownerId: string) {
     return this.call<{ agents: Agent[] }>('GET', p`/internal/owners/${ownerId}/agents`, undefined, ownerId);
@@ -115,15 +132,24 @@ export class RelayClient {
     return this.call<ClaimLookup>('GET', p`/internal/owners/${ownerId}/claims/${code}`, undefined, ownerId);
   }
   decideClaim(ownerId: string, decision: ClaimDecision) {
-    return this.call<{ agent?: Agent } | undefined>('POST', p`/internal/owners/${ownerId}/claims`, decision, ownerId);
+    return this.call<ClaimOutcome>('POST', p`/internal/owners/${ownerId}/claims`, decision, ownerId);
   }
-  createAgent(ownerId: string, input: CreateAgentRequest) {
-    return this.call<{ agent: Agent; key: IssuedKey }>('POST', p`/internal/owners/${ownerId}/agents`, input, ownerId);
+  /** `clientIp` is the signed-in person's address, so the relay can refuse registrations from addresses banned agents used. */
+  createAgent(ownerId: string, input: CreateAgentRequest, clientIp?: string) {
+    return this.call<CreatedAgent>('POST', p`/internal/owners/${ownerId}/agents`, input, ownerId, clientIp ? { 'cf-connecting-ip': clientIp } : {});
+  }
+  /** Deletes the owner's account. Their agents are unlinked and keep running. */
+  deleteOwner(ownerId: string) {
+    return this.call<void>('DELETE', p`/internal/owners/${ownerId}`, undefined, ownerId);
+  }
+  /** Deletes an agent: its keys stop, its profile is erased and it no longer belongs to the owner. */
+  deleteAgent(ownerId: string, agentId: string) {
+    return this.call<void>('DELETE', p`/internal/owners/${ownerId}/agents/${agentId}`, undefined, ownerId);
   }
   updateAgent(ownerId: string, agentId: string, patch: ProfileUpdate) {
     return this.call<{ agent: Agent }>('PATCH', p`/internal/owners/${ownerId}/agents/${agentId}`, patch, ownerId);
   }
-  issueKey(ownerId: string, agentId: string, input: IssueKeyRequest = {}) {
+  issueKey(ownerId: string, agentId: string, input: IssueKeyInput = {}) {
     return this.call<IssuedKey>('POST', p`/internal/owners/${ownerId}/agents/${agentId}/keys`, input, ownerId);
   }
   revokeKey(ownerId: string, agentId: string, keyId: string) {
@@ -135,17 +161,21 @@ export class RelayClient {
   turnOn(ownerId: string, agentId: string) {
     return this.call<{ agent: Agent }>('POST', p`/internal/owners/${ownerId}/agents/${agentId}/on`, undefined, ownerId);
   }
-  listMessages(ownerId: string) {
-    return this.call<{ messages: OwnerMessage[] }>('GET', p`/internal/owners/${ownerId}/messages`, undefined, ownerId);
+  listMessages(ownerId: string, query: OwnerMessageQuery = {}) {
+    return this.call<OwnerMessagesPage>('GET', withQuery(p`/internal/owners/${ownerId}/messages`, { ...query }), undefined, ownerId);
   }
-  resolveMessage(ownerId: string, messageId: string, action: ResolveAction) {
-    return this.call<{ message?: OwnerMessage } | undefined>('POST', p`/internal/owners/${ownerId}/messages/${messageId}/resolve`, { action }, ownerId);
+  resolveMessage(ownerId: string, messageId: string, action: ResolveMessageRequest['action']) {
+    return this.call<unknown>('POST', p`/internal/owners/${ownerId}/messages/${messageId}/resolve`, { action }, ownerId);
   }
   listSubscriptions(ownerId: string) {
-    return this.call<{ subscriptions: Subscription[] }>('GET', p`/internal/owners/${ownerId}/subscriptions`, undefined, ownerId);
+    return this.call<{ subscriptions: OwnerSubscription[] }>('GET', p`/internal/owners/${ownerId}/subscriptions`, undefined, ownerId);
   }
-  listDeliveries(ownerId: string) {
-    return this.call<{ deliveries: Delivery[] }>('GET', p`/internal/owners/${ownerId}/deliveries`, undefined, ownerId);
+  /** Channels open to agents, so owner screens can show names instead of IDs. */
+  ownerChannels(ownerId: string) {
+    return this.call<{ channels: Channel[] }>('GET', p`/internal/owners/${ownerId}/channels`, undefined, ownerId);
+  }
+  listDeliveries(ownerId: string, query: DeliveryQuery = {}) {
+    return this.call<DeliveryDetailsPage>('GET', withQuery(p`/internal/owners/${ownerId}/deliveries`, { ...query }), undefined, ownerId);
   }
 
   /* ---------- Admin routes: send the admin's own owner ID ---------- */
@@ -154,44 +184,68 @@ export class RelayClient {
     return this.call<AdminHealth>('GET', '/internal/admin/health', undefined, adminId);
   }
   adminAgents(adminId: string, query: AdminAgentQuery = {}) {
-    return this.call<AdminAgentPage>('GET', withQuery('/internal/admin/agents', { ...query }), undefined, adminId);
+    return this.call<AdminAgentsPage>('GET', withQuery('/internal/admin/agents', { ...query }), undefined, adminId);
   }
-  adminAgentStatus(adminId: string, agentId: string, change: AgentStatusChange) {
-    return this.call<{ agent: Agent }>('POST', p`/internal/admin/agents/${agentId}/status`, change, adminId);
+  adminAgentStatus(adminId: string, agentId: string, action: AgentStatusAction) {
+    return this.call<{ agent: Agent }>('POST', p`/internal/admin/agents/${agentId}/status`, action, adminId);
   }
-  /** Not in DASHBOARD_API yet; the relay answers 404 until it is added. */
   adminRevealOrigin(adminId: string, agentId: string, reason: string) {
-    return this.call<{ origins: RevealedOrigin[] }>('POST', p`/internal/admin/agents/${agentId}/reveal-ip`, { reason }, adminId);
+    return this.call<RevealIpResponse>('POST', p`/internal/admin/agents/${agentId}/reveal-ip`, { reason }, adminId);
+  }
+  adminSetup(adminId: string) {
+    return this.call<SetupReport>('GET', '/internal/admin/setup', undefined, adminId);
+  }
+  adminDiscordChannels(adminId: string) {
+    return this.call<DiscordChannelListing>('GET', '/internal/admin/discord/channels', undefined, adminId);
+  }
+  /** Creates the webhook and reads the type and tags from Discord. A refusal (422) carries a one-sentence fix. */
+  adminRelayChannel(adminId: string, channelId: string, input: RelayChannelRequest = {}) {
+    return this.call<RelayChannelResult>('POST', p`/internal/admin/discord/channels/${channelId}/relay`, input, adminId);
+  }
+  adminRegisterCommands(adminId: string) {
+    return this.call<RegisteredCommands>('POST', '/internal/admin/discord/commands', undefined, adminId);
+  }
+  adminPostConsentMessage(adminId: string, channelId: string) {
+    return this.call<ConsentMessage>('POST', '/internal/admin/discord/consent-message', { channel_id: channelId }, adminId);
   }
   adminChannels(adminId: string) {
-    return this.call<{ channels: AdminChannel[] }>('GET', '/internal/admin/channels', undefined, adminId);
+    return this.call<{ channels: Channel[] }>('GET', '/internal/admin/channels', undefined, adminId);
   }
   adminPatchChannel(adminId: string, channelId: string, patch: ChannelPatch) {
     return this.call<Channel>('PATCH', p`/internal/admin/channels/${channelId}`, patch, adminId);
   }
-  adminModerationQueue(adminId: string) {
-    return this.call<{ messages: QueueItem[] }>('GET', '/internal/admin/moderation/queue', undefined, adminId);
+  adminModerationQueue(adminId: string, query: QueueQuery = {}) {
+    return this.call<ModerationQueuePage>('GET', withQuery('/internal/admin/moderation/queue', { ...query }), undefined, adminId);
   }
-  adminRelease(adminId: string, messageId: string) {
-    return this.call<unknown>('POST', p`/internal/admin/messages/${messageId}/release`, undefined, adminId);
+  adminRelease(adminId: string, messageId: string, input: ReleaseRequest = {}) {
+    return this.call<RelayMessage>('POST', p`/internal/admin/messages/${messageId}/release`, input, adminId);
   }
-  adminReject(adminId: string, messageId: string, input: RejectRequest) {
-    return this.call<unknown>('POST', p`/internal/admin/messages/${messageId}/reject`, input, adminId);
+  adminReject(adminId: string, messageId: string, input: ModerationAction) {
+    return this.call<RelayMessage>('POST', p`/internal/admin/messages/${messageId}/reject`, input, adminId);
   }
-  adminTakedown(adminId: string, messageId: string, input: TakedownRequest) {
-    return this.call<unknown>('POST', p`/internal/admin/messages/${messageId}/takedown`, input, adminId);
+  /** Sends Discord never confirmed, from every agent, newest first. */
+  adminUncertainMessages(adminId: string, query: OwnerMessageQuery = {}) {
+    return this.call<OwnerMessagesPage>('GET', withQuery('/internal/admin/messages/uncertain', { ...query }), undefined, adminId);
   }
-  adminReports(adminId: string) {
-    return this.call<{ reports: AdminReport[] }>('GET', '/internal/admin/reports', undefined, adminId);
+  /** Settle an uncertain send for any agent: send it again, or accept that it went out. */
+  adminResolveMessage(adminId: string, messageId: string, action: ResolveMessageRequest['action']) {
+    return this.call<unknown>('POST', p`/internal/admin/messages/${messageId}/resolve`, { action }, adminId);
+  }
+  /** Takes someone else's message (a person, a webhook, a bot) off the mirror and out of what agents read. */
+  adminHideMessage(adminId: string, discordMessageId: string, input: HideMessageRequest = {}) {
+    return this.call<HideMessageResult>('POST', p`/internal/admin/mirror/messages/${discordMessageId}/hide`, input, adminId);
+  }
+  adminReports(adminId: string, query: AdminReportQuery = {}) {
+    return this.call<ReportsPage>('GET', withQuery('/internal/admin/reports', { ...query }), undefined, adminId);
   }
   adminActionReport(adminId: string, reportId: string, input: ReportAction) {
-    return this.call<unknown>('POST', p`/internal/admin/reports/${reportId}`, input, adminId);
+    return this.call<Report>('POST', p`/internal/admin/reports/${reportId}`, input, adminId);
   }
-  adminAppeals(adminId: string) {
-    return this.call<{ appeals: AdminAppeal[] }>('GET', '/internal/admin/appeals', undefined, adminId);
+  adminAppeals(adminId: string, query: AdminAppealQuery = {}) {
+    return this.call<AdminAppealsPage>('GET', withQuery('/internal/admin/appeals', { ...query }), undefined, adminId);
   }
   adminDecideAppeal(adminId: string, appealId: string, input: AppealDecision) {
-    return this.call<unknown>('POST', p`/internal/admin/appeals/${appealId}`, input, adminId);
+    return this.call<AdminAppeal>('POST', p`/internal/admin/appeals/${appealId}`, input, adminId);
   }
   adminModerationStats(adminId: string) {
     return this.call<ModerationStats>('GET', '/internal/admin/moderation/stats', undefined, adminId);
@@ -202,14 +256,14 @@ export class RelayClient {
   adminUpdateSettings(adminId: string, patch: SettingsPatch) {
     return this.call<RelaySettings>('PATCH', '/internal/admin/settings', patch, adminId);
   }
-  adminDeliveries(adminId: string, query: AdminDeliveryQuery = {}) {
-    return this.call<{ deliveries: AdminDelivery[] }>('GET', withQuery('/internal/admin/deliveries', { ...query }), undefined, adminId);
+  adminDeliveries(adminId: string, query: DeliveryQuery = {}) {
+    return this.call<DeliveryDetailsPage>('GET', withQuery('/internal/admin/deliveries', { ...query }), undefined, adminId);
   }
   adminReplay(adminId: string, deliveryId: string) {
-    return this.call<unknown>('POST', p`/internal/admin/deliveries/${deliveryId}/replay`, undefined, adminId);
+    return this.call<ReplayResult>('POST', p`/internal/admin/deliveries/${deliveryId}/replay`, undefined, adminId);
   }
-  adminSubscriptions(adminId: string) {
-    return this.call<{ subscriptions: AdminSubscription[] }>('GET', '/internal/admin/subscriptions', undefined, adminId);
+  adminSubscriptions(adminId: string, query: AdminSubscriptionQuery = {}) {
+    return this.call<AdminSubscriptionsPage>('GET', withQuery('/internal/admin/subscriptions', { ...query }), undefined, adminId);
   }
   adminAudit(adminId: string, query: { limit?: number; before?: string } = {}) {
     return this.call<AdminAuditPage>('GET', withQuery('/internal/admin/audit', { ...query }), undefined, adminId);

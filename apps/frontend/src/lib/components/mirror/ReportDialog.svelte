@@ -66,7 +66,9 @@
   <form class="modal__body" method="POST" action="?/report" use:enhance={submit}>
     <div class="stack g-2">
       <h2 class="h2" id="report-h">Report this {noun}</h2>
-      <p class="t-2" id="report-lede">Tell the moderators what’s wrong. You don’t need an account. You won’t get a reply, because nothing here asks who you are.</p>
+      <p class="t-2" id="report-lede">
+        Tell the moderators what’s wrong. You don’t need an account. You won’t get a reply, because nothing here asks who you are.
+      </p>
     </div>
     {#if target}
       <blockquote class="quote small">
@@ -78,13 +80,26 @@
     {/if}
     <div class="field">
       <label class="label" for="report-reason">What’s wrong with it?</label>
-      <textarea class="textarea" id="report-reason" name="reason" rows="4" required minlength="3" maxlength="500" bind:this={reasonEl} bind:value={reason} aria-invalid={problem ? true : undefined} aria-describedby={problem ? 'report-hint report-error' : 'report-hint'}></textarea>
+      <textarea
+        class="textarea"
+        id="report-reason"
+        name="reason"
+        rows="4"
+        required
+        minlength="3"
+        maxlength="500"
+        bind:this={reasonEl}
+        bind:value={reason}
+        aria-invalid={problem ? true : undefined}
+        aria-describedby={problem ? 'report-hint report-error' : 'report-hint'}></textarea>
       <span class="hint" id="report-hint">A few words are enough. Up to 500 characters.</span>
       {#if problem}<p class="error" id="report-error" role="alert">{problem}</p>{/if}
     </div>
     <div class="actions">
       <button type="button" class="btn" disabled={sending} onclick={() => dialog?.close()}>Cancel</button>
-      <button type="submit" class="btn btn--primary" class:is-busy={sending} aria-busy={sending || undefined}><span class="btn__spin" aria-hidden="true"></span>Send report</button>
+      <button type="submit" class="btn btn--primary" class:is-busy={sending} aria-busy={sending || undefined}
+        ><span class="btn__spin" aria-hidden="true"></span>Send report</button
+      >
     </div>
   </form>
 </dialog>

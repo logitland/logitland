@@ -55,7 +55,13 @@ export async function insertEvent(s: Pick<Harness, 'relay'>, o: { channel?: stri
   const n = ++counter;
   const messageId = `31000000000000${String(n).padStart(4, '0')}`;
   const at = s.relay.now().toISOString();
-  const data = o.data ?? { message_id: messageId, thread_id: null, author: { kind: 'human', agent_id: null, author_id: 'p_test', display_name: 'tessellate' }, content: `hello ${n}`, created_at: at };
+  const data = o.data ?? {
+    message_id: messageId,
+    thread_id: null,
+    author: { kind: 'human', agent_id: null, author_id: 'p_test', display_name: 'tessellate' },
+    content: `hello ${n}`,
+    created_at: at,
+  };
   const payload = JSON.stringify({ id, type, schema_version: 1, observed_at: at, guild_id: GUILD, channel_id: channel, data });
   await s.relay.db
     .prepare('INSERT INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
@@ -71,8 +77,18 @@ export async function publish(s: Pick<Harness, 'relay'>, o: Parameters<typeof in
   return { event, ids: await fanOut(s.relay, event) };
 }
 
-export const one = async <T>(s: Pick<Harness, 'db'>, sql: string, ...args: unknown[]) => (await s.db.prepare(sql).bind(...args).first<T>())!;
-export const all = async <T>(s: Pick<Harness, 'db'>, sql: string, ...args: unknown[]) => (await s.db.prepare(sql).bind(...args).all<T>()).results;
+export const one = async <T>(s: Pick<Harness, 'db'>, sql: string, ...args: unknown[]) =>
+  (await s.db
+    .prepare(sql)
+    .bind(...args)
+    .first<T>())!;
+export const all = async <T>(s: Pick<Harness, 'db'>, sql: string, ...args: unknown[]) =>
+  (
+    await s.db
+      .prepare(sql)
+      .bind(...args)
+      .all<T>()
+  ).results;
 
 /** A receiver that records what it gets and answers with `reply`. */
 export function recorder(reply: Receiver = () => new Response(null, { status: 200 })) {

@@ -12,8 +12,10 @@ export type TimelineItem =
   | { key: string; kind: 'orphan'; threadId: string; replies: MirrorMessage[]; at: string };
 
 /** Oldest first. Replies sit under their thread's first message, or under a stub when it hasn't been loaded. */
-export function buildTimeline(messages: MirrorMessage[]): TimelineItem[] {
+/** `flat` lists every message on its own, for a page that is one thread. */
+export function buildTimeline(messages: MirrorMessage[], opts: { flat?: boolean } = {}): TimelineItem[] {
   const sorted = [...messages].sort((a, b) => compareIds(a.id, b.id));
+  if (opts.flat) return sorted.map((m) => ({ key: m.id, kind: 'message' as const, message: m, replies: [], at: m.at }));
   const byThread = new Map<string, MirrorMessage[]>();
   const roots = new Set<string>();
   for (const m of sorted) {
@@ -35,7 +37,15 @@ export function buildTimeline(messages: MirrorMessage[]): TimelineItem[] {
 
 /** True when two messages differ in anything the page shows. */
 export function changed(a: MirrorMessage, b: MirrorMessage): boolean {
-  return a.state !== b.state || a.text !== b.text || a.editedAt !== b.editedAt || a.voice?.kind !== b.voice?.kind || (a.voice?.kind === 'agent' && b.voice?.kind === 'agent' && a.voice.fresh !== b.voice.fresh);
+  return (
+    a.state !== b.state ||
+    a.text !== b.text ||
+    a.editedAt !== b.editedAt ||
+    a.replyTo !== b.replyTo ||
+    a.voice?.kind !== b.voice?.kind ||
+    (a.voice?.kind === 'agent' && b.voice?.kind === 'agent' && a.voice.fresh !== b.voice.fresh) ||
+    JSON.stringify(a.poll) !== JSON.stringify(b.poll)
+  );
 }
 
 /** Add messages that aren't there yet. `replace` lets newer data win for ones that are. */

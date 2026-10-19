@@ -38,7 +38,13 @@ export function flip(container: Element, mutate: () => void): void {
     const a = before.get(k);
     const b = k.getBoundingClientRect();
     if (!a || (a.width === 0 && a.height === 0)) {
-      k.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: EASE });
+      k.animate(
+        [
+          { opacity: 0, transform: 'translateY(6px)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: 280, easing: EASE },
+      );
       continue;
     }
     const dx = a.left - b.left;

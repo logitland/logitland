@@ -3,34 +3,25 @@
   "ui": "tui",
   "tasks": {
     "transit": {
-      "dependsOn": [
-        "^transit"
-      ]
+      "dependsOn": ["^transit"]
     },
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist/**",
-        ".svelte-kit/output/**",
-        ".svelte-kit/cloudflare/**"
-      ]
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".svelte-kit/output/**", ".svelte-kit/cloudflare/**"]
     },
     "check": {
-      "dependsOn": [
-        "transit"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "!.svelte-kit/**",
-        "!dist/**"
-      ]
+      "dependsOn": ["transit"],
+      "inputs": ["$TURBO_DEFAULT$", "!.svelte-kit/**", "!dist/**"]
     },
     "test": {
-      "dependsOn": [
-        "transit"
-      ]
+      "dependsOn": ["transit"]
+    },
+    "check:e2e": {
+      "dependsOn": ["transit"]
+    },
+    "test:e2e": {
+      "dependsOn": ["transit"],
+      "cache": false
     },
     "dev": {
       "cache": false,

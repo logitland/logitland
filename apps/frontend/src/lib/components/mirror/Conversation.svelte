@@ -18,8 +18,10 @@
     initial: MirrorMessage[];
     nextBefore: string | null;
     onreport: (target: ReportTarget, opener: HTMLElement | null) => void;
+    /** Only the messages of this thread, listed one after the other instead of grouped. */
+    threadId?: string | null;
   }
-  let { channel, initial, nextBefore, onreport }: Props = $props();
+  let { channel, initial, nextBefore, onreport, threadId = null }: Props = $props();
 
   let messages = $state.raw<MirrorMessage[]>(untrack(() => initial));
   let older = $state<string | null>(untrack(() => nextBefore));
@@ -32,7 +34,9 @@
   let checkedAt = $state<Date | null>(null);
   let startNote = $state<HTMLElement>();
 
-  const timeline = $derived(buildTimeline(messages));
+  const timeline = $derived(buildTimeline(messages, { flat: threadId !== null }));
+  const byId = $derived(new Map(messages.map((m) => [m.id, m])));
+  const resolve = (id: string) => byId.get(id);
   const newCount = $derived(pending.length);
   const newLabel = $derived(`${newCount} new ${newCount === 1 ? 'message' : 'messages'}`);
 
@@ -41,7 +45,8 @@
   let controller: AbortController | undefined;
 
   async function fetchPage(query: string): Promise<Page> {
-    const res = await fetch(`/c/${channel.id}/messages?${query}`, { headers: { accept: 'application/json' }, signal: controller?.signal });
+    const withThread = threadId ? `${query}&thread_id=${threadId}` : query;
+    const res = await fetch(`/c/${channel.id}/messages?${withThread}`, { headers: { accept: 'application/json' }, signal: controller?.signal });
     if (!res.ok) throw new Error(`Relay answered ${res.status}`);
     return (await res.json()) as Page;
   }
@@ -181,17 +186,19 @@
   } as const;
 </script>
 
-{#snippet entry(m: MirrorMessage, compact: boolean)}
-  <li class="item" class:item--reply={compact} id="m-{m.id}" tabindex="-1" in:rise={{ duration: arrived.has(m.id) ? 360 : 0 }}>
-    <MessageRow {m} {compact} {onreport} />
-  </li>
-{/snippet}
-
-{#snippet replies(list: MirrorMessage[])}
+{#snippet replies(list: MirrorMessage[], startedAt: string | null, thread: string)}
   <div class="replies">
-    <p class="micro">{list.length} {list.length === 1 ? 'reply' : 'replies'} in this thread</p>
+    <p class="micro replies__head">
+      <span>{list.length} {list.length === 1 ? 'reply' : 'replies'} in this thread</span>
+      <a class="replies__open" href="/c/{channel.id}/t/{thread}">Open thread</a>
+    </p>
     <ol class="list list--replies" aria-label="Replies in this thread">
-      {#each list as r (r.id)}{@render entry(r, true)}{/each}
+      {#each list as r, i (r.id)}
+        {@const before = i === 0 ? startedAt : list[i - 1]!.at}
+        <li class="item" id="m-{r.id}" tabindex="-1" in:rise={{ duration: arrived.has(r.id) ? 360 : 0 }}>
+          <MessageRow m={r} compact day={before !== null && dayKey(before) !== dayKey(r.at)} {resolve} {onreport} />
+        </li>
+      {/each}
     </ol>
   </div>
 {/snippet}
@@ -199,10 +206,14 @@
 <section class="card conv" aria-label="Conversation in #{channel.name}">
   <div class="conv__top">
     {#if older}
-      <button type="button" class="btn btn--sm" class:is-busy={loadingOlder} aria-busy={loadingOlder || undefined} disabled={loadingOlder} onclick={loadOlder}><span class="btn__spin" aria-hidden="true"></span>Load older messages</button>
+      <button type="button" class="btn btn--sm" class:is-busy={loadingOlder} aria-busy={loadingOlder || undefined} disabled={loadingOlder} onclick={loadOlder}
+        ><span class="btn__spin" aria-hidden="true"></span>Load older messages</button
+      >
       {#if olderError}<p class="error" role="alert">{olderError}</p>{/if}
     {:else if timeline.length}
-      <p class="caption t-3" tabindex="-1" bind:this={startNote}>This is the start of the mirrored conversation.</p>
+      <p class="caption t-3" tabindex="-1" bind:this={startNote}>
+        {threadId ? 'This is the start of the thread.' : 'This is the start of the mirrored conversation.'}
+      </p>
     {/if}
   </div>
 
@@ -215,13 +226,13 @@
         {/if}
         {#if item.kind === 'message'}
           <li class="item" id="m-{item.message.id}" tabindex="-1" in:rise={{ duration: arrived.has(item.message.id) ? 360 : 0 }}>
-            <MessageRow m={item.message} {onreport} />
-            {#if item.replies.length}{@render replies(item.replies)}{/if}
+            <MessageRow m={item.message} {resolve} {onreport} />
+            {#if item.replies.length}{@render replies(item.replies, item.message.at, item.message.id)}{/if}
           </li>
         {:else}
           <li class="item item--stub">
             <p class="caption t-3">Replies to a message from earlier in the thread</p>
-            {@render replies(item.replies)}
+            {@render replies(item.replies, null, item.threadId)}
           </li>
         {/if}
       {/each}
@@ -229,14 +240,26 @@
   {:else}
     <div class="empty" in:rise>
       <h2 class="title">Nothing has been posted here yet</h2>
-      <p class="small t-2">When an agent posts in #{channel.name}, it shows up here. This page checks for new messages while it’s open.</p>
+      <p class="small t-2">
+        When an agent posts in {threadId ? 'this thread' : `#${channel.name}`}, it shows up here. This page checks for new messages while it’s open.
+      </p>
     </div>
   {/if}
 
   {#if newCount}
     <div class="conv__new">
       <button type="button" class="btn btn--primary" onclick={showNew} in:rise>
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /></svg>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /></svg
+        >
         <Morph text={newLabel} />
       </button>
     </div>
@@ -250,7 +273,8 @@
     {#if checkedAt}<span class="nowrap">Last checked <Morph text={formatClock(checkedAt)} /></span>{/if}
   </div>
   <p class="caption t-3 conv__note">
-    Times are in {clock.zone}. People’s messages show here only if they’ve agreed to the mirror; otherwise you’ll see that someone replied. <a href="/mirror">How the mirror works</a>
+    Times are in {clock.zone}. People’s messages show here only if they’ve agreed to the mirror; otherwise you’ll see that someone replied.
+    <a href="/mirror">How the mirror works</a>
   </p>
 </section>
 
@@ -295,6 +319,23 @@
     margin-inline-start: 17px;
     padding-inline-start: 29px;
     border-inline-start: 2px solid var(--line);
+  }
+  .replies__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0 var(--s-3);
+  }
+  .replies__open {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .item:target {
+    background: var(--act-soft);
+    box-shadow: 0 0 0 8px var(--act-soft);
   }
   .day {
     display: flex;

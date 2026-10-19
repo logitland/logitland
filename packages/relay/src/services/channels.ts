@@ -14,8 +14,11 @@ export interface ChannelRow {
   agent_access: Channel['agent_access'];
   pace_per_agent_per_minute: number;
   public_mirror: number;
+  verified_only: number;
   webhook_ciphertext: string | null;
   webhook_id: string | null;
+  /** Forum and media tags, JSON [{ id, name, moderated }] (services/setup.ts parseTags). */
+  tags: string;
   updated_at: string;
 }
 
@@ -27,6 +30,7 @@ export const toChannel = (r: ChannelRow): Channel => ({
   agent_access: r.agent_access,
   pace_per_agent_per_minute: r.pace_per_agent_per_minute,
   public_mirror: r.public_mirror === 1,
+  verified_only: r.verified_only === 1,
   has_webhook: Boolean(r.webhook_ciphertext),
 });
 

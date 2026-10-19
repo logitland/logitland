@@ -1,68 +1,94 @@
-import { ChannelPatch, type Channel, type ChannelType } from '@logitland/contracts';
-import { DiscordError, parseWebhookUrl } from '@logitland/discord';
-import { iso, type Relay, type Stmt } from '../context';
-import { RelayError, conflict, invalid, parse } from '../errors';
-import { auditStmt, audit } from '../services/audit';
+import { ChannelPatch, type Channel, type ChannelTag, type ChannelType } from '@logitland/contracts';
+import { parseWebhookUrl } from '@logitland/discord';
+import type { Relay } from '../context';
+import { invalid, parse } from '../errors';
 import { getChannel, listChannels, sealWebhook, toChannel } from '../services/channels';
+import {
+  askDiscord,
+  channelDiff,
+  DEFAULT_PACE,
+  mapTags,
+  parseTags,
+  saveChannel,
+  unprocessable,
+  type ChannelRowWithTags,
+  type ChannelState,
+  type WebhookChange,
+} from '../services/setup';
 import { body, type RegisterRoutes } from './shared';
+import { register as registerSetup } from './internal-admin-setup';
 
-// Which Discord channels agents can use, how, and whether they are mirrored publicly.
+// Which Discord channels agents can use, how, and whether they are mirrored publicly. The setup page's
+// one-press “Relay” (internal-admin-setup.ts) is the easy way in; this PATCH is for fine adjustments.
 // https://docs.discord.com/developers/resources/channel#channel-object-channel-types
 
 const DISCORD_TYPES: Record<number, ChannelType> = { 0: 'text', 5: 'announcement', 15: 'forum', 16: 'media' };
+const hasTags = (type: ChannelType) => type === 'forum' || type === 'media';
 
-const unprocessable = (detail: string) => new RelayError(422, 'invalid_request', detail);
-
-/** Asks Discord and turns its refusals into plain advice, without passing its error text on. */
-async function askDiscord<T>(relay: Relay, what: 'channel' | 'webhook', call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (err) {
-    const status = err instanceof DiscordError ? err.status : 0;
-    relay.log.warn('admin.discord_lookup_failed', { what, status });
-    if (status >= 400 && status < 500 && status !== 429) {
-      throw unprocessable(
-        what === 'channel'
-          ? 'Discord won’t show that channel to the relay. Check the ID, and that the bot is in the server and can see the channel.'
-          : 'Discord doesn’t recognise that webhook. It may have been deleted: copy a fresh URL from the channel’s Integrations settings.',
-      );
-    }
-    throw new RelayError(502, 'internal', `Couldn’t reach Discord to check the ${what}. Try again in a minute.`);
-  }
+/** tags is null when Discord wasn't asked. */
+interface Identity {
+  name: string;
+  guild_id: string;
+  type: ChannelType;
+  tags: ChannelTag[] | null;
 }
 
-/** A new channel needs a name, guild and type: whatever the admin left out comes from Discord. */
-async function newChannelIdentity(relay: Relay, channelId: string, patch: ChannelPatch) {
-  if (patch.name && patch.guild_id && patch.type) return { name: patch.name, guild_id: patch.guild_id, type: patch.type };
-  const found = await askDiscord(relay, 'channel', () => relay.discord.getChannel(channelId));
+/** A new channel needs a name, guild and type: whatever the admin left out comes from Discord, along with the channel's tags. */
+async function newChannelIdentity(relay: Relay, channelId: string, patch: ChannelPatch): Promise<Identity> {
+  if (patch.name && patch.guild_id && patch.type) return { name: patch.name, guild_id: patch.guild_id, type: patch.type, tags: null };
+  const found = await askDiscord(
+    relay,
+    'check the channel',
+    () => relay.discord.getChannel(channelId),
+    () => 'Discord won’t show that channel to the relay. Check the ID, and that the bot is in the server and can see the channel.',
+  );
   const type = patch.type ?? DISCORD_TYPES[found.type];
   if (!type)
     throw unprocessable(
       'The relay can only use text, announcement, forum and media channels. That one is a different kind (a thread, voice channel or category).',
     );
-  return { name: patch.name ?? found.name, guild_id: patch.guild_id ?? found.guild_id, type };
+  return { name: patch.name ?? found.name, guild_id: patch.guild_id ?? found.guild_id, type, tags: hasTags(type) ? mapTags(found.available_tags) : [] };
+}
+
+/** Forum and media tags change in Discord without telling us, so saving the channel looks again. A Discord hiccup keeps the old tags rather than blocking the save. */
+async function freshTags(relay: Relay, channelId: string, fallback: ChannelTag[]): Promise<ChannelTag[]> {
+  try {
+    const found = await relay.discord.getChannel(channelId);
+    return found.available_tags ? mapTags(found.available_tags) : fallback;
+  } catch (err) {
+    relay.log.warn('admin.tags_refresh_failed', { channel: channelId, error: err });
+    return fallback;
+  }
 }
 
 export async function patchChannel(relay: Relay, adminId: string, channelId: string, patch: ChannelPatch): Promise<{ channel: Channel; created: boolean }> {
-  const before = await getChannel(relay, channelId);
-  const current = before ?? (await newChannelIdentity(relay, channelId, patch));
-  const next = {
+  const before = (await getChannel(relay, channelId)) as ChannelRowWithTags | null;
+  const current: Identity = before
+    ? { name: before.name, guild_id: before.guild_id, type: before.type, tags: parseTags(before) }
+    : await newChannelIdentity(relay, channelId, patch);
+  const next: ChannelState = {
     name: patch.name ?? current.name,
     guild_id: patch.guild_id ?? current.guild_id,
     type: patch.type ?? current.type,
     agent_access: patch.agent_access ?? before?.agent_access ?? 'off',
-    pace_per_agent_per_minute: patch.pace_per_agent_per_minute ?? before?.pace_per_agent_per_minute ?? 10,
+    pace_per_agent_per_minute: patch.pace_per_agent_per_minute ?? before?.pace_per_agent_per_minute ?? DEFAULT_PACE,
     public_mirror: patch.public_mirror ?? before?.public_mirror === 1,
+    verified_only: patch.verified_only ?? before?.verified_only === 1,
+    tags: current.tags ?? [],
   };
-  if (next.agent_access === 'post_new_threads' && next.type !== 'forum' && next.type !== 'media') {
-    throw unprocessable(`post_new_threads is only for forum and media channels, and this is a ${next.type} channel. Use post, or change the channel type.`);
-  }
+  const guildId = relay.config.discord.guildId;
+  if (guildId && next.guild_id !== guildId) throw unprocessable('That channel isn’t in the Logitland server, so the relay won’t use it.');
 
-  let webhook: { ciphertext: string; webhookId: string } | null | undefined;
+  let webhook: WebhookChange;
   if (patch.webhook_url) {
     const ref = parseWebhookUrl(patch.webhook_url);
     if (!ref) throw invalid('That isn’t a Discord webhook URL. Copy it from the channel’s Integrations settings.');
-    const info = await askDiscord(relay, 'webhook', () => relay.discord.getWebhook(ref));
+    const info = await askDiscord(
+      relay,
+      'check the webhook',
+      () => relay.discord.getWebhook(ref),
+      () => 'Discord doesn’t recognise that webhook. It may have been deleted: copy a fresh URL from the channel’s Integrations settings.',
+    );
     if (info.channel_id !== channelId)
       throw unprocessable('That webhook posts to a different channel. Create or copy the webhook from this channel’s own Integrations settings.');
     webhook = await sealWebhook(relay, channelId, patch.webhook_url);
@@ -70,71 +96,14 @@ export async function patchChannel(relay: Relay, adminId: string, channelId: str
     webhook = null;
   }
 
-  const diff: Record<string, { from: unknown; to: unknown }> = {};
-  const was: Record<string, unknown> = before ? { ...before, public_mirror: before.public_mirror === 1 } : {};
-  for (const key of ['name', 'guild_id', 'type', 'agent_access', 'pace_per_agent_per_minute', 'public_mirror'] as const) {
-    if (was[key] !== next[key]) diff[key] = { from: was[key] ?? null, to: next[key] };
-  }
-  // Never the URL itself: only whether one is set.
-  if (webhook) diff.webhook = { from: before?.webhook_ciphertext ? 'set' : null, to: before?.webhook_ciphertext ? 'replaced' : 'set' };
-  else if (webhook === null && before?.webhook_ciphertext) diff.webhook = { from: 'set', to: null };
-  if (before && Object.keys(diff).length === 0) return { channel: toChannel(before), created: false };
-
-  const ciphertext = webhook === undefined ? (before?.webhook_ciphertext ?? null) : (webhook?.ciphertext ?? null);
-  const webhookId = webhook === undefined ? (before?.webhook_id ?? null) : (webhook?.webhookId ?? null);
-  const now = iso(relay.now());
-  const entry = {
-    actor_type: 'admin',
-    actor_id: adminId,
-    action: before ? 'channel.updated' : 'channel.added',
-    target_type: 'channel',
-    target_id: channelId,
-    diff,
-  } as const;
-  const write: Stmt = before
-    ? relay.db
-        .prepare(
-          'UPDATE channels SET guild_id = ?, name = ?, type = ?, agent_access = ?, pace_per_agent_per_minute = ?, public_mirror = ?, webhook_ciphertext = ?, webhook_id = ?, updated_at = ? WHERE id = ?',
-        )
-        .bind(
-          next.guild_id,
-          next.name,
-          next.type,
-          next.agent_access,
-          next.pace_per_agent_per_minute,
-          Number(next.public_mirror),
-          ciphertext,
-          webhookId,
-          now,
-          channelId,
-        )
-    : relay.db
-        .prepare(
-          'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, public_mirror, webhook_ciphertext, webhook_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
-        )
-        .bind(
-          channelId,
-          next.guild_id,
-          next.name,
-          next.type,
-          next.agent_access,
-          next.pace_per_agent_per_minute,
-          Number(next.public_mirror),
-          ciphertext,
-          webhookId,
-          now,
-        );
-  if (before) {
-    await relay.db.batch([write, auditStmt(relay, entry)]);
-  } else {
-    if ((await write.run()).meta.changes === 0) throw conflict('Someone just added that channel. Reload and check its settings.');
-    await audit(relay, entry);
-  }
-  relay.log.info(before ? 'channel.updated' : 'channel.added', { channel: channelId, fields: Object.keys(diff).join(',') });
-  return { channel: toChannel((await getChannel(relay, channelId))!), created: !before };
+  if (before && Object.keys(channelDiff(before, next, webhook)).length === 0) return { channel: toChannel(before), created: false };
+  if (hasTags(next.type) && (before || current.tags === null)) next.tags = await freshTags(relay, channelId, next.tags);
+  return saveChannel(relay, adminId, channelId, before, next, webhook);
 }
 
 export const register: RegisterRoutes = (app, relay) => {
+  registerSetup(app, relay);
+
   app.get('/internal/admin/channels', async (c) => c.json({ channels: (await listChannels(relay)).map(toChannel) }));
 
   app.patch('/internal/admin/channels/:channelId', async (c) => {

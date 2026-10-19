@@ -1,5 +1,15 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { ConfigError, consoleLogger, createRelay, handleDeliveryBatch, handleScheduled, internalApp, relayApp, type Relay, type RelayBindings } from '@logitland/relay';
+import {
+  ConfigError,
+  consoleLogger,
+  createRelay,
+  handleDeliveryBatch,
+  handleScheduled,
+  internalApp,
+  relayApp,
+  type Relay,
+  type RelayBindings,
+} from '@logitland/relay';
 import { DiscordGateway, gatewayClient } from './gateway';
 import { ChannelSender, senderClient } from './sender';
 
@@ -51,8 +61,8 @@ export default {
   async queue(batch, env) {
     await handleDeliveryBatch(relayFor(env).relay, batch.messages);
   },
-  async scheduled(_controller, env, _ctx) {
-    await handleScheduled(relayFor(env).relay);
+  async scheduled(controller, env, _ctx) {
+    await handleScheduled(relayFor(env).relay, controller.scheduledTime);
   },
 } satisfies ExportedHandler<Bindings, { delivery_id: string }>;
 

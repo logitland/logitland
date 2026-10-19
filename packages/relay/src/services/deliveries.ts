@@ -1,9 +1,10 @@
-import { LIMITS, newId, type DeliveryDetail, type DeliveryStatus, type EventType } from '@logitland/contracts';
+import { ID_PREFIXES, LIMITS, newId, ulid, type DeliveryDetail, type DeliveryStatus, type EventType } from '@logitland/contracts';
 import { signHeaders } from '@logitland/webhooks';
-import { iso, type Relay } from '../context';
-import { audit, auditStmt } from './audit';
+import { iso, type Relay, type Stmt } from '../context';
+import { audit } from './audit';
 import { getChannel } from './channels';
 import { DestinationRefused, preflightDestination } from './destinations';
+import { getSettings } from './settings';
 import { dropPendingStmt, previousSecretAad, secretAad, urlAad, type SubscriptionRow } from './subscriptions';
 
 // The delivery ledger (D1) is the source of truth, whichever way deliveries are dispatched. With a Queue
@@ -20,14 +21,22 @@ export interface EventRow {
   payload: string;
 }
 
-export type AttemptResult = { outcome: 'delivered' } | { outcome: 'retry'; afterSeconds: number } | { outcome: 'failed' | 'dropped' | 'skipped'; reason: string };
+export type AttemptResult =
+  { outcome: 'delivered' } | { outcome: 'retry'; afterSeconds: number } | { outcome: 'failed' | 'dropped' | 'skipped'; reason: string };
 
 /** How long a claimed attempt may run before another worker may take the row. */
 const LEASE_MS = 5 * 60_000;
 /** The cron scan re-enqueues a due row only if it was last enqueued longer ago than this. */
 const REENQUEUE_AFTER_MS = 10 * 60_000;
+/** Rows one cron round takes when attempting inline (no Queue), where each attempt costs several queries. */
 const DRAIN_ROWS = 100;
-const INSERT_BATCH = 50;
+/** Rows one cron round re-enqueues (with a Queue), and the most rounds a run makes. */
+const DRAIN_ENQUEUE_ROWS = 500;
+const DRAIN_ROUNDS = 20;
+/** Deliveries one fan-out INSERT creates. */
+const FANOUT_ROWS = 500;
+/** Ids waiting to be enqueued are flushed at this many. */
+const ENQUEUE_FLUSH = 500;
 /** Queues: sendBatch takes 100 messages; a retry delay can be 24 hours at most (developers.cloudflare.com/queues/platform/limits). */
 const QUEUE_BATCH = 100;
 const QUEUE_MAX_DELAY_SECONDS = 86_400;
@@ -35,8 +44,9 @@ const RETRY_AFTER_MAX_SECONDS = 86_400;
 const FAILED_MESSAGE_RETRY_SECONDS = 60;
 const REPLAY_EXTRA_ATTEMPTS = 3;
 const GENERIC_ERROR = 'Internal error while delivering';
+const PAUSED = 'Deliveries are switched off by an admin (deliveries_paused). They are sent when it is switched back on.';
 
-/** Exponential backoff with jitter: 30 s, 1 min, 2 min … capped at 6 h, each between half and all of that. */
+/** Exponential backoff with jitter: 30 s, 1 min, 2 min … capped at 6 h, each between half and all of that (equal jitter). */
 export function backoffSeconds(attempt: number, random: () => number = Math.random): number {
   const ceiling = Math.min(30 * 2 ** Math.max(0, attempt - 1), 6 * 3600);
   return Math.max(5, Math.round(ceiling * (0.5 + random() / 2)));
@@ -47,55 +57,140 @@ const chunk = <T>(items: T[], size: number): T[][] => Array.from({ length: Math.
 /* ---------- Fan-out and enqueue ---------- */
 
 /**
- * Create one delivery per matching, active subscription and put them on the Queue. A subscription matches
- * through subscription_channels (the event's channel) and its event types, except that `subscription.gap`
- * goes to every active subscription of the channel. Returns the new delivery IDs; a repeated call for the
- * same event creates (and enqueues) nothing.
+ * What a fan-out may spend. D1 allows 1,000 queries per Worker invocation and the docs don't say whether the
+ * statements of a batch count one by one, so every statement counts. The caller's own work comes on top of this,
+ * which is why the share is well under the limit. An event that doesn't finish within it is left unfanned and
+ * the refan job continues it (the unique key on a subscription and event makes the repeat harmless).
  */
-export async function fanOut(relay: Relay, event: EventRow): Promise<string[]> {
-  const { results } = await relay.db
-    .prepare(
-      `SELECT s.id, s.events FROM subscription_channels sc
-       JOIN subscriptions s ON s.id = sc.subscription_id
-       JOIN agents a ON a.id = s.agent_id
-       WHERE sc.channel_id = ? AND s.status = 'active' AND a.status = 'active'`,
-    )
-    .bind(event.channel_id)
-    .all<{ id: string; events: string }>();
-  const matching = results.filter((s) => event.type === 'subscription.gap' || (JSON.parse(s.events) as string[]).includes(event.type));
-  if (!matching.length) return [];
+export interface FanOutBudget {
+  queries: number;
+  /** Date.now() after which no new round starts. */
+  deadline?: number;
+  /** Set once a fan-out had to stop early; from then on every later one stops at once. */
+  stopped?: boolean;
+}
+const FANOUT_QUERIES = 300;
+export const newFanOutBudget = (deadline?: number): FanOutBudget => ({ queries: FANOUT_QUERIES, ...(deadline === undefined ? {} : { deadline }) });
+const spent = (b: FanOutBudget) => b.queries <= 0 || (b.deadline !== undefined && Date.now() >= b.deadline);
 
+function observedAt(event: EventRow): string {
+  try {
+    const at = (JSON.parse(event.payload) as { observed_at?: unknown }).observed_at;
+    if (typeof at === 'string') return at;
+  } catch {
+    // A payload that isn't JSON falls through to "no limit".
+  }
+  return '9999-12-31T23:59:59.999Z';
+}
+
+/**
+ * The event types whose subscribers must hear this one. A removal goes to everyone who gets message text
+ * (message.created or message.updated), whether or not they asked for it, so receivers can delete what they stored.
+ */
+export function audienceOf(type: string): string[] {
+  return type === 'message.deleted' || type === 'message.bulk_deleted' ? [type, 'message.created', 'message.updated'] : [type];
+}
+
+// One statement creates a round of deliveries for one event: the active subscriptions of its channel that want
+// it and have no delivery for it yet, in subscription order after `after`. Ids are a time prefix and 64 random bits
+// (a ULID's shape, so they sort by time), made here so no round trip is needed per row. D1 runs a statement as a unit,
+// so nobody can add a delivery between the NOT EXISTS and the insert; the UNIQUE key is the backstop.
+const FANOUT_SQL = `INSERT OR IGNORE INTO deliveries (id, subscription_id, event_id, event_type, status, attempts, next_attempt_at, created_at)
+  SELECT ? || substr(hex(randomblob(8)), 1, 16), sc.subscription_id, ?, ?, 'pending', 0, ?, ?
+  FROM subscription_channels sc
+  JOIN subscriptions s ON s.id = sc.subscription_id
+  JOIN agents a ON a.id = s.agent_id
+  WHERE sc.channel_id = ? AND sc.subscription_id > ?
+    AND s.status = 'active' AND a.status = 'active' AND s.created_at <= ?
+    AND (? = 1 OR EXISTS (SELECT 1 FROM json_each(s.events) WHERE value IN (SELECT value FROM json_each(?))))
+    AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.subscription_id = sc.subscription_id AND d.event_id = ?)
+  ORDER BY sc.subscription_id LIMIT ?
+  RETURNING id, subscription_id`;
+
+/**
+ * Creates the event's deliveries a round of FANOUT_ROWS at a time and hands each round's IDs to `sink`.
+ * `subscription.gap` goes to every active subscription of the channel. A subscription only hears about events
+ * from after it existed, even when an event is fanned out late (refanJob). False when the budget ran out first.
+ */
+export async function fanOutEvent(relay: Relay, event: EventRow, budget: FanOutBudget, sink: (ids: string[]) => Promise<void>): Promise<boolean> {
   const now = relay.now();
   const at = iso(now);
-  const rows = matching.map((s) => ({ id: newId('delivery', now.getTime()), subscriptionId: s.id }));
-  const created: string[] = [];
-  for (const part of chunk(rows, INSERT_BATCH)) {
-    const inserted = await relay.db.batch(
-      part.map((r) =>
-        relay.db
-          .prepare("INSERT OR IGNORE INTO deliveries (id, subscription_id, event_id, event_type, status, attempts, next_attempt_at, created_at) VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)")
-          .bind(r.id, r.subscriptionId, event.id, event.type, at, at),
-      ),
-    );
-    part.forEach((r, i) => {
-      if (inserted[i]!.meta.changes === 1) created.push(r.id);
-    });
+  const prefix = `${ID_PREFIXES.delivery}_${ulid(now.getTime()).slice(0, 10)}`;
+  const observed = observedAt(event);
+  const audience = JSON.stringify(audienceOf(event.type));
+  let after = '';
+  for (;;) {
+    if (spent(budget)) {
+      budget.stopped = true;
+      return false;
+    }
+    budget.queries--;
+    const { results } = await relay.db
+      .prepare(FANOUT_SQL)
+      .bind(prefix, event.id, event.type, at, at, event.channel_id, after, observed, event.type === 'subscription.gap' ? 1 : 0, audience, event.id, FANOUT_ROWS)
+      .all<{ id: string; subscription_id: string }>();
+    if (results.length) await sink(results.map((r) => r.id));
+    if (results.length < FANOUT_ROWS) return true;
+    for (const r of results) if (r.subscription_id > after) after = r.subscription_id;
   }
-  await enqueue(relay, created);
+}
+
+/**
+ * Create one delivery per matching, active subscription and put them on the Queue. Returns the new delivery
+ * IDs; a repeated call for the same event creates (and enqueues) nothing. An event with more subscribers than
+ * one call's budget covers is finished by the refan job. A caller fanning out many events passes one `budget` for all
+ * of them and a `sink` that collects the IDs, to enqueue them together (the budget's `stopped` says it ran out).
+ */
+export async function fanOut(relay: Relay, event: EventRow, opts: { budget?: FanOutBudget; sink?: (ids: string[]) => Promise<void> } = {}): Promise<string[]> {
+  const budget = opts.budget ?? newFanOutBudget();
+  const created: string[] = [];
+  const out = opts.sink ? null : enqueuer(relay, budget);
+  await fanOutEvent(relay, event, budget, async (ids) => {
+    created.push(...ids);
+    await (opts.sink ?? out!.add)(ids);
+  });
+  await out?.flush();
+  if (budget.stopped) relay.log.warn('deliveries.fan_out_partial', { event_id: event.id, deliveries: created.length });
   return created;
 }
 
-async function markEnqueued(relay: Relay, ids: string[], at: Date): Promise<void> {
-  await relay.db.prepare('UPDATE deliveries SET enqueued_at = ? WHERE id IN (SELECT value FROM json_each(?))').bind(iso(at), JSON.stringify(ids)).run();
+/** Collects IDs and puts them on the Queue in bounded groups. */
+export function enqueuer(relay: Relay, budget?: FanOutBudget) {
+  let pending: string[] = [];
+  const flush = async () => {
+    const ids = pending;
+    pending = [];
+    if (ids.length) await enqueue(relay, ids, budget);
+  };
+  return {
+    async add(ids: string[]) {
+      pending.push(...ids);
+      if (pending.length >= ENQUEUE_FLUSH) await flush();
+    },
+    flush,
+  };
+}
+
+const MARK_ROWS = 500;
+
+async function markEnqueued(relay: Relay, ids: string[], at: Date, budget?: FanOutBudget): Promise<void> {
+  for (const part of chunk(ids, MARK_ROWS)) {
+    if (budget) budget.queries--;
+    await relay.db.prepare('UPDATE deliveries SET enqueued_at = ? WHERE id IN (SELECT value FROM json_each(?))').bind(iso(at), JSON.stringify(part)).run();
+  }
 }
 
 /**
  * Put deliveries on the Queue (100 per sendBatch, or one send each) and stamp enqueued_at. A failure is
- * logged and leaves enqueued_at empty, which is exactly what the cron scan looks for.
+ * logged and leaves enqueued_at empty, which is exactly what the cron scan looks for. While deliveries are
+ * paused nothing is enqueued, for the same reason: the scan sends them once the switch is off.
  */
-async function enqueue(relay: Relay, ids: string[]): Promise<void> {
+async function enqueue(relay: Relay, ids: string[], budget?: FanOutBudget): Promise<number> {
   const queue = relay.queue;
-  if (!queue) return;
+  if (!queue || !ids.length) return 0;
+  if (budget) budget.queries--;
+  if (await deliveriesPaused(relay)) return 0;
+  const sent: string[] = [];
   for (const part of chunk(ids, QUEUE_BATCH)) {
     try {
       if (queue.sendBatch) await queue.sendBatch(part.map((id) => ({ body: { delivery_id: id } })));
@@ -104,8 +199,10 @@ async function enqueue(relay: Relay, ids: string[]): Promise<void> {
       relay.log.error('deliveries.enqueue_failed', { count: part.length, error });
       continue;
     }
-    await markEnqueued(relay, part, relay.now());
+    sent.push(...part);
   }
+  await markEnqueued(relay, sent, relay.now(), budget);
+  return sent.length;
 }
 
 /* ---------- Attempts ---------- */
@@ -149,9 +246,11 @@ function retryAfterSeconds(header: string | null, now: Date): number | undefined
 /**
  * Try to send one delivery. Safe to run twice at once: the claim is a compare-and-set that also leases the
  * row, so the second caller gets `skipped`. Everything after the claim is recorded as an attempt, whatever
- * happens, so a leased row never sits with nothing written.
+ * happens, so a leased row never sits with nothing written. While deliveries are paused nothing is claimed.
+ * A caller that has just read the setting passes `paused` so it isn't read again.
  */
-export async function attemptDelivery(relay: Relay, deliveryId: string): Promise<AttemptResult> {
+export async function attemptDelivery(relay: Relay, deliveryId: string, opts: { paused?: boolean } = {}): Promise<AttemptResult> {
+  if (opts.paused ?? (await deliveriesPaused(relay))) return { outcome: 'skipped', reason: PAUSED };
   const now = relay.now();
   const claim = await relay.db
     .prepare(
@@ -163,7 +262,13 @@ export async function attemptDelivery(relay: Relay, deliveryId: string): Promise
     .first<Claim>();
   if (!claim) return { outcome: 'skipped', reason: 'Not due, or already handled' };
 
-  const attempt: Attempt = { deliveryId, subscriptionId: claim.subscription_id, n: claim.attempts, limit: claim.attempt_limit ?? LIMITS.deliveryMaxAttempts, startedAt: now };
+  const attempt: Attempt = {
+    deliveryId,
+    subscriptionId: claim.subscription_id,
+    n: claim.attempts,
+    limit: claim.attempt_limit ?? LIMITS.deliveryMaxAttempts,
+    startedAt: now,
+  };
   try {
     return await deliver(relay, attempt, claim.event_id);
   } catch (error) {
@@ -174,8 +279,13 @@ export async function attemptDelivery(relay: Relay, deliveryId: string): Promise
 
 async function deliver(relay: Relay, a: Attempt, eventId: string): Promise<AttemptResult> {
   const sub = await relay.db.prepare('SELECT * FROM subscriptions WHERE id = ?').bind(a.subscriptionId).first<SubscriptionRow>();
-  const agent = sub ? await relay.db.prepare('SELECT status, scopes FROM agents WHERE id = ?').bind(sub.agent_id).first<{ status: string; scopes: string }>() : null;
-  const event = await relay.db.prepare('SELECT seq, channel_id, payload FROM events WHERE id = ?').bind(eventId).first<{ seq: number; channel_id: string; payload: string }>();
+  const agent = sub
+    ? await relay.db.prepare('SELECT status, scopes FROM agents WHERE id = ?').bind(sub.agent_id).first<{ status: string; scopes: string }>()
+    : null;
+  const event = await relay.db
+    .prepare('SELECT seq, channel_id, payload FROM events WHERE id = ?')
+    .bind(eventId)
+    .first<{ seq: number; channel_id: string; payload: string }>();
   const channel = event ? await getChannel(relay, event.channel_id) : null;
 
   // Re-check before sending: what was true at fan-out may not be now.
@@ -228,15 +338,31 @@ async function deliver(relay: Relay, a: Attempt, eventId: string): Promise<Attem
       disable: 'The destination answered 410 Gone, so the relay stopped sending. Create a new subscription to start again.',
     });
   }
-  if (code === 429 || code === 408 || code >= 500) return settle(relay, a, retryOrFail(a, code, `${code} from the destination`, retryAfterSeconds(res.headers.get('retry-after'), relay.now())));
+  if (code === 429 || code === 408 || code >= 500)
+    return settle(relay, a, retryOrFail(a, code, `${code} from the destination`, retryAfterSeconds(res.headers.get('retry-after'), relay.now())));
   // Redirects are never followed, and other 4xx won't get better by waiting.
   return settle(relay, a, { status: 'failed', code, error: code >= 300 && code < 400 ? `${code} redirect not followed` : `${code} from the destination` });
 }
 
 /**
+ * An audit entry that is written only if `when` is true at the moment the statement runs, inside the same batch as
+ * the change it records. Deciding from a read taken earlier would let two concurrent failures both audit a pause
+ * (or neither), so the entry follows the batch's own state: it is the first statement to look at the subscription,
+ * before the update that changes it.
+ */
+function auditWhen(relay: Relay, entry: { action: string; subscriptionId: string; reason: string }, when: string, ...args: unknown[]): Stmt {
+  return relay.db
+    .prepare(
+      `INSERT INTO audit_log (id, actor_type, actor_id, action, target_type, target_id, reason, diff, created_at)
+       SELECT ?, 'system', 'relay', ?, 'subscription', ?, ?, NULL, ? WHERE ${when}`,
+    )
+    .bind(newId('audit'), entry.action, entry.subscriptionId, entry.reason, iso(relay.now()), ...args);
+}
+
+/**
  * Record an attempt's outcome: the delivery row, the attempt row and whatever it means for the
  * subscription, in one batch. Only deliveries that end `failed` count toward the failure streak; retries
- * don't, and neither do drops.
+ * don't, and neither do drops. A pause or a disable is audited once, by the batch that makes it.
  */
 async function settle(relay: Relay, a: Attempt, s: Settlement): Promise<AttemptResult> {
   const finished = relay.now();
@@ -244,31 +370,51 @@ async function settle(relay: Relay, a: Attempt, s: Settlement): Promise<AttemptR
   const code = 'code' in s ? s.code : null;
   const error = 'error' in s ? s.error : null;
   const next = s.status === 'retrying' ? iso(new Date(finished.getTime() + s.afterSeconds * 1000)) : null;
-  const stmts = [
+  const stmts: Stmt[] = [
     relay.db
-      .prepare('UPDATE deliveries SET status = ?, last_status_code = ?, last_error = ?, next_attempt_at = ?, delivered_at = COALESCE(?, delivered_at) WHERE id = ?')
+      .prepare(
+        'UPDATE deliveries SET status = ?, last_status_code = ?, last_error = ?, next_attempt_at = ?, delivered_at = COALESCE(?, delivered_at) WHERE id = ?',
+      )
       .bind(s.status, code, error, next, s.status === 'delivered' ? at : null, a.deliveryId),
     relay.db
       .prepare('INSERT OR IGNORE INTO delivery_attempts (delivery_id, n, started_at, status_code, error, duration_ms) VALUES (?, ?, ?, ?, ?, ?)')
       .bind(a.deliveryId, a.n, iso(a.startedAt), code, error, Math.max(0, finished.getTime() - a.startedAt.getTime())),
   ];
+  /** Index of the audit statement whose change count says whether this batch moved the subscription. */
+  let moved = -1;
+  let movedAction = '';
 
   if (s.status === 'delivered') {
     stmts.push(relay.db.prepare('UPDATE subscriptions SET failure_streak = 0 WHERE id = ? AND failure_streak != 0').bind(a.subscriptionId));
   } else if (s.status === 'failed' && s.disable) {
+    moved = stmts.length;
+    movedAction = 'subscription.disabled';
     stmts.push(
-      relay.db.prepare("UPDATE subscriptions SET status = 'disabled', paused_reason = ? WHERE id = ?").bind(s.disable, a.subscriptionId),
+      auditWhen(
+        relay,
+        { action: movedAction, subscriptionId: a.subscriptionId, reason: s.disable },
+        "EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status != 'disabled')",
+        a.subscriptionId,
+      ),
+      relay.db
+        .prepare("UPDATE subscriptions SET status = 'disabled', paused_reason = ? WHERE id = ? AND status != 'disabled'")
+        .bind(s.disable, a.subscriptionId),
       dropPendingStmt(relay, a.subscriptionId, 'The subscription was disabled'),
       relay.db.prepare('DELETE FROM subscription_channels WHERE subscription_id = ?').bind(a.subscriptionId),
-      auditStmt(relay, { actor_type: 'system', actor_id: 'relay', action: 'subscription.disabled', target_type: 'subscription', target_id: a.subscriptionId, reason: s.disable }),
     );
-    relay.log.warn('subscription.disabled', { subscription_id: a.subscriptionId, delivery_id: a.deliveryId });
   } else if (s.status === 'failed') {
-    const sub = await relay.db.prepare('SELECT status, failure_streak FROM subscriptions WHERE id = ?').bind(a.subscriptionId).first<{ status: string; failure_streak: number }>();
-    const pausing = sub?.status === 'active' && sub.failure_streak + 1 >= LIMITS.pauseAfterFailedDeliveries;
-    const reason = `Paused after ${LIMITS.pauseAfterFailedDeliveries} failed deliveries in a row. Fix the destination, then resume it.`;
-    // The CASE decides the pause (so concurrent failures can't both miss it); the extras below follow the read above.
+    const limit = LIMITS.pauseAfterFailedDeliveries;
+    const reason = `Paused after ${limit} failed deliveries in a row. Fix the destination, then resume it.`;
+    moved = stmts.length;
+    movedAction = 'subscription.paused';
     stmts.push(
+      auditWhen(
+        relay,
+        { action: movedAction, subscriptionId: a.subscriptionId, reason },
+        "EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status = 'active' AND failure_streak + 1 >= ?)",
+        a.subscriptionId,
+        limit,
+      ),
       relay.db
         .prepare(
           `UPDATE subscriptions SET failure_streak = failure_streak + 1,
@@ -277,18 +423,14 @@ async function settle(relay: Relay, a: Attempt, s: Settlement): Promise<AttemptR
              paused_at = CASE WHEN status = 'active' AND failure_streak + 1 >= ? THEN ? ELSE paused_at END
            WHERE id = ?`,
         )
-        .bind(LIMITS.pauseAfterFailedDeliveries, LIMITS.pauseAfterFailedDeliveries, reason, LIMITS.pauseAfterFailedDeliveries, at, a.subscriptionId),
+        .bind(limit, limit, reason, limit, at, a.subscriptionId),
+      // Only a subscription that is paused now (by this batch or an earlier one) loses what was waiting.
+      dropPendingStmt(relay, a.subscriptionId, 'The subscription was paused', 'paused'),
     );
-    if (pausing) {
-      stmts.push(
-        dropPendingStmt(relay, a.subscriptionId, 'The subscription was paused'),
-        auditStmt(relay, { actor_type: 'system', actor_id: 'relay', action: 'subscription.paused', target_type: 'subscription', target_id: a.subscriptionId, reason }),
-      );
-      relay.log.warn('subscription.paused', { subscription_id: a.subscriptionId, failure_streak: sub.failure_streak + 1 });
-    }
   }
 
-  await relay.db.batch(stmts);
+  const results = await relay.db.batch(stmts);
+  if (moved >= 0 && results[moved]!.meta.changes === 1) relay.log.warn(movedAction, { subscription_id: a.subscriptionId, delivery_id: a.deliveryId });
   switch (s.status) {
     case 'delivered':
       return { outcome: 'delivered' };
@@ -301,43 +443,58 @@ async function settle(relay: Relay, a: Attempt, s: Settlement): Promise<AttemptR
 
 /* ---------- Cron, Queue consumer and replay ---------- */
 
+const deliveriesPaused = async (relay: Relay) => (await getSettings(relay)).deliveries_paused;
+
 /**
  * Cron: recover deliveries that are due. In Queue mode, re-enqueue those never enqueued or last enqueued
- * over 10 minutes ago (the Queue normally holds retries itself). Without a Queue, attempt them here.
- * Takes up to 100 rows a run and returns how many.
+ * over 10 minutes ago (the Queue normally holds retries itself), up to DRAIN_ENQUEUE_ROWS a round and
+ * DRAIN_ROUNDS rounds a run, so a backlog (after a pause or a Queue outage) clears faster than new events arrive.
+ * Without a Queue, attempt up to DRAIN_ROWS here. Stops early at `deadline`. Does nothing while deliveries are
+ * paused. Returns how many rows it took.
  */
-export async function drainDue(relay: Relay): Promise<number> {
-  const now = relay.now();
+export async function drainDue(relay: Relay, ctx: { deadline?: number } = {}): Promise<number> {
+  if (await deliveriesPaused(relay)) return 0;
   const queued = Boolean(relay.queue);
-  const { results } = await relay.db
-    .prepare(
-      `SELECT id FROM deliveries
-       WHERE status IN ('pending', 'retrying') AND next_attempt_at <= ? ${queued ? 'AND (enqueued_at IS NULL OR enqueued_at < ?)' : ''}
-       ORDER BY next_attempt_at LIMIT ?`,
-    )
-    .bind(...(queued ? [iso(now), iso(new Date(now.getTime() - REENQUEUE_AFTER_MS)), DRAIN_ROWS] : [iso(now), DRAIN_ROWS]))
-    .all<{ id: string }>();
-  const ids = results.map((r) => r.id);
-  if (queued) {
-    await enqueue(relay, ids);
-    return ids.length;
-  }
-  for (const id of ids) {
-    try {
-      await attemptDelivery(relay, id);
-    } catch (error) {
-      relay.log.error('deliveries.drain_failed', { delivery_id: id, error });
+  const limit = queued ? DRAIN_ENQUEUE_ROWS : DRAIN_ROWS;
+  const late = () => ctx.deadline !== undefined && Date.now() >= ctx.deadline;
+  let total = 0;
+  for (let round = 0; round < (queued ? DRAIN_ROUNDS : 1); round++) {
+    const now = relay.now();
+    const { results } = await relay.db
+      .prepare(
+        `SELECT id FROM deliveries
+         WHERE status IN ('pending', 'retrying') AND next_attempt_at <= ? ${queued ? 'AND (enqueued_at IS NULL OR enqueued_at < ?)' : ''}
+         ORDER BY next_attempt_at LIMIT ?`,
+      )
+      .bind(...(queued ? [iso(now), iso(new Date(now.getTime() - REENQUEUE_AFTER_MS)), limit] : [iso(now), limit]))
+      .all<{ id: string }>();
+    const ids = results.map((r) => r.id);
+    total += ids.length;
+    if (queued) {
+      // Rows the Queue refused stay due, so another round would only ask again.
+      if ((await enqueue(relay, ids)) < ids.length) break;
+    } else {
+      for (const id of ids) {
+        if (late()) break;
+        try {
+          await attemptDelivery(relay, id, { paused: false });
+        } catch (error) {
+          relay.log.error('deliveries.drain_failed', { delivery_id: id, error });
+        }
+      }
     }
+    if (ids.length < limit || late()) break;
   }
-  return ids.length;
+  return total;
 }
 
 /**
  * Admin replay: same webhook-id, a new attempt timestamp, after the same checks as any attempt. A row
  * under an active lease (or waiting for its next retry) is refused. Replaying an exhausted delivery grants
- * three more attempts.
+ * three more attempts. Refused while deliveries are paused.
  */
 export async function replayDelivery(relay: Relay, deliveryId: string, adminId?: string): Promise<AttemptResult> {
+  if (await deliveriesPaused(relay)) return { outcome: 'skipped', reason: PAUSED };
   const at = iso(relay.now());
   const r = await relay.db
     .prepare(
@@ -347,21 +504,44 @@ export async function replayDelivery(relay: Relay, deliveryId: string, adminId?:
     )
     .bind(at, LIMITS.deliveryMaxAttempts, REPLAY_EXTRA_ATTEMPTS, deliveryId, at)
     .run();
-  if (r.meta.changes !== 1) return { outcome: 'skipped', reason: 'That delivery is being attempted or is waiting for its next retry. Replay it once it has finished.' };
-  await audit(relay, { actor_type: adminId ? 'admin' : 'system', actor_id: adminId ?? 'relay', action: 'delivery.replayed', target_type: 'delivery', target_id: deliveryId });
-  return attemptDelivery(relay, deliveryId);
+  if (r.meta.changes !== 1)
+    return { outcome: 'skipped', reason: 'That delivery is being attempted or is waiting for its next retry. Replay it once it has finished.' };
+  await audit(relay, {
+    actor_type: adminId ? 'admin' : 'system',
+    actor_id: adminId ?? 'relay',
+    action: 'delivery.replayed',
+    target_type: 'delivery',
+    target_id: deliveryId,
+  });
+  return attemptDelivery(relay, deliveryId, { paused: false });
 }
 
 /**
  * Queue consumer body. Each message is handled on its own: one that throws is retried after 60 seconds and
  * doesn't affect the others. A delivery that wants a retry is handed back to the Queue with its delay
- * (capped at the Queues maximum of 24 hours).
+ * (capped at the Queues maximum of 24 hours). While deliveries are paused the messages are acknowledged and their
+ * rows made due for the cron scan again, which sends them once the switch is off.
  */
 export async function handleDeliveryBatch(
   relay: Relay,
   messages: readonly { body: unknown; ack(): void; retry(options?: { delaySeconds?: number }): void }[],
 ): Promise<AttemptResult[]> {
   const out: AttemptResult[] = [];
+  const paused = await deliveriesPaused(relay);
+  if (paused) {
+    const ids = messages.map((m) => (m.body as { delivery_id?: unknown } | null)?.delivery_id).filter((id): id is string => typeof id === 'string');
+    if (ids.length) {
+      await relay.db
+        .prepare("UPDATE deliveries SET enqueued_at = NULL WHERE status IN ('pending', 'retrying') AND id IN (SELECT value FROM json_each(?))")
+        .bind(JSON.stringify(ids))
+        .run();
+    }
+    for (const m of messages) {
+      m.ack();
+      out.push({ outcome: 'skipped', reason: PAUSED });
+    }
+    return out;
+  }
   for (const m of messages) {
     try {
       const id = (m.body as { delivery_id?: unknown } | null)?.delivery_id;
@@ -369,7 +549,7 @@ export async function handleDeliveryBatch(
         m.ack();
         continue;
       }
-      const result = await attemptDelivery(relay, id);
+      const result = await attemptDelivery(relay, id, { paused: false });
       out.push(result);
       if (result.outcome === 'retry') {
         const delaySeconds = Math.min(result.afterSeconds, QUEUE_MAX_DELAY_SECONDS);
@@ -440,7 +620,9 @@ export async function listDeliveries(
   const attempts = new Map<string, DeliveryDetail['attempt_log']>();
   if (results.length) {
     const { results: rows } = await relay.db
-      .prepare('SELECT delivery_id, n, started_at, status_code, error, duration_ms FROM delivery_attempts WHERE delivery_id IN (SELECT value FROM json_each(?)) ORDER BY delivery_id, n')
+      .prepare(
+        'SELECT delivery_id, n, started_at, status_code, error, duration_ms FROM delivery_attempts WHERE delivery_id IN (SELECT value FROM json_each(?)) ORDER BY delivery_id, n',
+      )
       .bind(JSON.stringify(results.map((r) => r.id)))
       .all<DeliveryDetail['attempt_log'][number] & { delivery_id: string }>();
     for (const { delivery_id, ...attempt } of rows) attempts.set(delivery_id, [...(attempts.get(delivery_id) ?? []), attempt]);

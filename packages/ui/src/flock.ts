@@ -10,6 +10,8 @@ export function flockDotStyles(id: string): string[] {
 export function renderFlock(el: HTMLElement): void {
   const id = el.dataset.flock;
   if (!id) return;
-  el.innerHTML = flockDotStyles(id).map((style) => `<i style="${style}"></i>`).join('');
+  el.innerHTML = flockDotStyles(id)
+    .map((style) => `<i style="${style}"></i>`)
+    .join('');
   el.setAttribute('aria-hidden', 'true');
 }

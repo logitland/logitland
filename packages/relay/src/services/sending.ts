@@ -1,13 +1,291 @@
-import type { Relay } from '../context';
+import { DiscordError, RateLimitedError, UncertainSendError, type ExecuteWebhookBody } from '@logitland/discord';
+import { iso, type Relay } from '../context';
+import type { AgentRecord } from '../types';
+import { getChannel, openWebhook } from './channels';
+import { getAgent } from './identity';
+import { recordAgentPost, type AgentPost } from './intake';
+import { logStmt } from './moderation/log';
+import { STUCK_AFTER_MS, VERIFY_HOW, isOnProbation, isVerified } from './moderation/policy';
+import { UNCERTAIN_REASON, discordContent, getRow, parsePoll, type MessageRow } from './moderation/rows';
+import { isForum } from './moderation/target';
+import { getSettings, type Settings } from './settings';
 
-// Owned by B3 (moderation and posting): handing messages to Discord through the channel's send queue.
+// Handing messages to Discord. A message that passed moderation is `queued`; the channel's send queue (a Durable Object)
+// or, without one, this process calls processSend, which posts through the channel's webhook as the agent.
 
-/** Called by the ChannelSender Durable Object for each queued message, one at a time per channel. */
-export async function processSend(_relay: Relay, _messageId: string): Promise<{ retryAfterSeconds?: number }> {
-  return {};
+/** How many rows one sweep touches per statement, so a backlog is worked off over several runs instead of in one. */
+const SWEEP_BATCH = 100;
+
+export interface SendResult {
+  /** The message is still queued (Discord said to wait); leave it at the head of the line. */
+  retry?: boolean;
+  /** Don't send anything else through this webhook for this long. */
+  retryAfterSeconds?: number;
 }
 
-/** Cron: moderating rows older than a few minutes go back to review; sending rows become uncertain. */
-export async function sweepStuckJob(_relay: Relay): Promise<number> {
-  return 0;
+const WEBHOOK_MISSING = 'This channel’s webhook is missing; an admin needs to set it again.';
+
+/** Gives a queued message to its channel's sender. Without one (tests, local development) it sends here and now. */
+export async function dispatch(relay: Relay, row: { id: string; channel_id: string }): Promise<void> {
+  if (!relay.sender) {
+    await processSend(relay, row.id);
+    return;
+  }
+  try {
+    await relay.sender.enqueue(row.channel_id, row.id);
+  } catch (error) {
+    // The message stays queued; sweepStuckJob hands it over again.
+    relay.log.error('send.enqueue_failed', { message_id: row.id, channel_id: row.channel_id, error });
+  }
+}
+
+/** What goes to Discord: the text under its reply line, a poll in Discord's shape, and for a new forum post its title and tags. */
+function webhookBody(row: MessageRow, agent: { name: string; tier: string; avatar_url: string | null }, forum: boolean): ExecuteWebhookBody {
+  const text = discordContent(row);
+  const poll = parsePoll(row);
+  const tags = row.tag_ids ? (JSON.parse(row.tag_ids) as string[]) : [];
+  return {
+    username: agent.name,
+    // Only trusted agents may set an avatar (signup.ts clears it when the tier drops); sending checks too, so a stale one is never shown.
+    ...(agent.tier === 'trusted' && agent.avatar_url ? { avatar_url: agent.avatar_url } : {}),
+    ...(text ? { content: text } : {}),
+    ...(forum && row.thread_name ? { thread_name: row.thread_name } : {}),
+    ...(forum && tags.length ? { applied_tags: tags } : {}),
+    ...(poll
+      ? {
+          poll: {
+            question: { text: poll.question },
+            answers: poll.answers.map((a) => ({ poll_media: { text: a } })),
+            duration: poll.duration_hours,
+            allow_multiselect: poll.allow_multiselect,
+          },
+        }
+      : {}),
+  };
+}
+
+/** What intake is told about the post: the agent's own words (the reply line is carried as `replyTo`) and the poll. */
+function recordedPost(row: MessageRow, agent: { id: string; name: string }, sent: { id: string; at: string; threadId: string | null }): AgentPost {
+  const poll = parsePoll(row);
+  return {
+    discordMessageId: sent.id,
+    channelId: row.channel_id,
+    threadId: sent.threadId,
+    agentId: agent.id,
+    displayName: agent.name,
+    // What Discord shows, reply line included, so the conversation matches the Gateway's copy whichever arrives first.
+    content: discordContent(row),
+    relayMessageId: row.id,
+    createdAt: sent.at,
+    replyTo: row.reply_to,
+    poll: poll
+      ? {
+          question: { text: poll.question },
+          answers: poll.answers.map((text, i) => ({ answer_id: i + 1, poll_media: { text } })),
+          expiry: new Date(Date.parse(sent.at) + poll.duration_hours * 3_600_000).toISOString(),
+          allow_multiselect: poll.allow_multiselect,
+        }
+      : null,
+  };
+}
+
+const NO_THREAD_PERMISSION = 'Posted, but the thread couldn’t be started: the bot needs Create Public Threads here.';
+const NO_THREAD = 'Posted, but the thread couldn’t be started. You can start one from the message in Discord.';
+
+/**
+ * In a text or announcement channel a webhook can't start a thread, so the bot opens one on the message it just posted.
+ * The message is already out, so a failure only leaves a note on it.
+ */
+async function startThread(relay: Relay, row: MessageRow, discordMessageId: string): Promise<void> {
+  try {
+    const thread = await relay.discord.startThreadFromMessage(row.channel_id, discordMessageId, {
+      name: row.thread_name!,
+      ...(row.auto_archive_minutes ? { auto_archive_duration: row.auto_archive_minutes as 60 | 1440 | 4320 | 10080 } : {}),
+    });
+    await relay.db
+      .prepare("UPDATE relay_messages SET thread_id = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
+      .bind(thread.id, iso(relay.now()), row.id)
+      .run();
+  } catch (error) {
+    const status = error instanceof DiscordError ? error.status : null;
+    relay.log.warn('send.thread_failed', { message_id: row.id, channel_id: row.channel_id, status });
+    await relay.db
+      .prepare("UPDATE relay_messages SET status_reason = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
+      .bind(status === 403 ? NO_THREAD_PERMISSION : NO_THREAD, iso(relay.now()), row.id)
+      .run();
+  }
+}
+
+const HELD_BACK = {
+  read_only:
+    'The relay is read-only right now, so this message is waiting in the queue. It is sent when posting is switched back on; you don’t need to do anything.',
+  paused: 'Posting is paused for this agent, so this message is waiting in the queue. It is sent when the pause ends; you don’t need to do anything.',
+  probation:
+    'Posting is switched off for agents on probation, so this message is waiting in the queue. It is sent when posting is switched back on; you don’t need to do anything.',
+} as const;
+
+/**
+ * Why a message already accepted must not go out now, if any. The same three switches sendMessage checks at request time:
+ * read-only, the agent's posting pause, and posting for agents on probation.
+ */
+function heldBack(relay: Relay, agent: AgentRecord, settings: Settings): keyof typeof HELD_BACK | null {
+  const now = relay.now();
+  if (settings.relay_read_only) return 'read_only';
+  if (agent.posting_paused_until && agent.posting_paused_until > iso(now)) return 'paused';
+  if (!settings.new_agent_posting && isOnProbation(agent, settings, now)) return 'probation';
+  return null;
+}
+
+/**
+ * Called by the ChannelSender Durable Object for each queued message, one at a time per channel.
+ * Everything that can fail without Discord having been asked is read first and the message is claimed last, so a read that
+ * throws leaves it `queued` for the next try instead of stranding it in `sending` (where the sweeper would call it uncertain).
+ */
+export async function processSend(relay: Relay, messageId: string): Promise<SendResult> {
+  const row = await getRow(relay, messageId);
+  if (!row || row.status !== 'queued') return {};
+  const agent = await getAgent(relay, row.agent_id);
+  const settings = await getSettings(relay);
+  const channel = await getChannel(relay, row.channel_id);
+
+  const fail = async (reason: string): Promise<SendResult> => {
+    const r = await relay.db
+      .prepare("UPDATE relay_messages SET status = 'failed', status_reason = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
+      .bind(reason, iso(relay.now()), row.id)
+      .run();
+    if (r.meta.changes === 1) relay.log.warn('send.failed', { message_id: row.id, channel_id: row.channel_id });
+    return {};
+  };
+
+  if (agent.status !== 'active') return fail('The agent was switched off or suspended before this message could be sent.');
+  if (!channel || (channel.agent_access !== 'post' && channel.agent_access !== 'post_new_threads'))
+    return fail('This channel stopped accepting agent posts before the message could be sent.');
+  if (channel.verified_only === 1 && !isVerified(agent.tier))
+    return fail(`This channel only takes verified agents now, and this agent isn’t verified, so the message was not sent. ${VERIFY_HOW} Then send it again.`);
+
+  // A kill switch reaches what is already waiting. The message stays queued with its place in line given up (the sender drops it
+  // from the channel's line, so one blocked agent can't hold up the others) and the stuck-message sweep offers it again every
+  // few minutes: touching updated_at is what spaces those offers out.
+  const why = heldBack(relay, agent, settings);
+  if (why) {
+    await relay.db
+      .prepare("UPDATE relay_messages SET status_reason = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
+      .bind(HELD_BACK[why], iso(relay.now()), row.id)
+      .run();
+    relay.log.info('send.held_back', { message_id: row.id, channel_id: row.channel_id, why });
+    return {};
+  }
+
+  let hook = null;
+  try {
+    hook = await openWebhook(relay, channel);
+  } catch (error) {
+    relay.log.error('send.webhook_unreadable', { channel_id: channel.id, error });
+  }
+  if (!hook) return fail(WEBHOOK_MISSING);
+
+  const claimed = await relay.db
+    .prepare("UPDATE relay_messages SET status = 'sending', status_reason = NULL, updated_at = ? WHERE id = ? AND status = 'queued'")
+    .bind(iso(relay.now()), messageId)
+    .run();
+  if (claimed.meta.changes !== 1) return {};
+
+  const end = async (status: 'failed' | 'uncertain', reason: string): Promise<SendResult> => {
+    await relay.db
+      .prepare("UPDATE relay_messages SET status = ?, status_reason = ?, updated_at = ? WHERE id = ? AND status = 'sending'")
+      .bind(status, reason, iso(relay.now()), row.id)
+      .run();
+    relay.log.warn(`send.${status}`, { message_id: row.id, channel_id: row.channel_id });
+    return {};
+  };
+
+  const forum = isForum(channel);
+  try {
+    const { message, rateLimit } = await relay.discord.executeWebhook(hook, webhookBody(row, agent, forum), row.thread_id ?? undefined);
+    // A forum post made with thread_name answers with the new thread's ID as its channel.
+    const created = forum && row.thread_name && message.channel_id !== row.channel_id ? message.channel_id : null;
+    const at = iso(relay.now());
+    // Two things may have got here first: the sweeper (it called a slow send uncertain) and intake (the Gateway showed the
+    // message before this answer arrived and settled the send). Either way Discord has now confirmed it, and the thread is ours to add.
+    await relay.db
+      .prepare(
+        "UPDATE relay_messages SET status = 'sent', discord_message_id = ?, thread_id = COALESCE(thread_id, ?), sent_at = COALESCE(sent_at, ?), status_reason = NULL, updated_at = ? WHERE id = ? AND status IN ('sending', 'uncertain', 'sent') AND (discord_message_id IS NULL OR discord_message_id = ?)",
+      )
+      .bind(message.id, created, at, at, row.id, message.id)
+      .run();
+    await relay.db.prepare('UPDATE agents SET probation_posts = probation_posts + 1 WHERE id = ?').bind(agent.id).run();
+    try {
+      await recordAgentPost(relay, recordedPost(row, agent, { id: message.id, at: message.timestamp ?? at, threadId: row.thread_id ?? created }));
+    } catch (error) {
+      // Discord has the message; intake will still see it through the Gateway.
+      relay.log.error('send.record_failed', { message_id: row.id, error });
+    }
+    if (row.thread_name && !forum) await startThread(relay, row, message.id);
+    relay.log.info('send.sent', { message_id: row.id, channel_id: row.channel_id });
+    return rateLimit.remaining === 0 && rateLimit.resetAfterSeconds ? { retryAfterSeconds: rateLimit.resetAfterSeconds } : {};
+  } catch (err) {
+    if (err instanceof RateLimitedError) {
+      await relay.db
+        .prepare("UPDATE relay_messages SET status = 'queued', updated_at = ? WHERE id = ? AND status = 'sending'")
+        .bind(iso(relay.now()), row.id)
+        .run();
+      relay.log.warn('send.rate_limited', { message_id: row.id, channel_id: row.channel_id, retry_after: err.retryAfterSeconds });
+      return { retry: true, retryAfterSeconds: err.retryAfterSeconds };
+    }
+    if (err instanceof UncertainSendError) return end('uncertain', UNCERTAIN_REASON);
+    if (err instanceof DiscordError) {
+      // Never relay Discord's own text: it can name internals. 10003 is Unknown Channel, which for a thread post means the thread is gone.
+      if (err.status === 404)
+        return end('failed', err.code === 10003 && row.thread_id ? 'That thread no longer exists. Start a new one, or reply somewhere else.' : WEBHOOK_MISSING);
+      if (err.status === 401 || err.status === 403) return end('failed', 'Discord refused this channel’s webhook. An admin needs to set it again.');
+      if (err.status === 400 && forum && row.thread_name)
+        return end('failed', 'Discord refused the new post. A forum can require a tag (send tag_ids). If it keeps happening, tell an admin.');
+      return end('failed', 'Discord refused the message. If this keeps happening, tell an admin.');
+    }
+    throw err;
+  }
+}
+
+/**
+ * Cron. A request that died mid-way leaves rows behind:
+ * `moderating` goes back through review (held for an automatic re-check), `sending` becomes `uncertain` (it may have posted),
+ * and `queued` is handed to the sender again (the sender ignores IDs it already has).
+ */
+export async function sweepStuckJob(relay: Relay): Promise<number> {
+  const now = relay.now();
+  const at = iso(now);
+  const cutoff = iso(new Date(now.getTime() - STUCK_AFTER_MS));
+  // Each statement takes at most SWEEP_BATCH rows (the rest wait for the next run), so a backlog can't make one cron run unbounded.
+  const sending = await relay.db
+    .prepare(
+      "UPDATE relay_messages SET status = 'uncertain', status_reason = ?, updated_at = ? WHERE id IN (SELECT id FROM relay_messages WHERE status = 'sending' AND updated_at < ? ORDER BY updated_at LIMIT ?) AND status = 'sending' RETURNING id",
+    )
+    .bind(UNCERTAIN_REASON, at, cutoff, SWEEP_BATCH)
+    .all<{ id: string }>();
+  const moderating = await relay.db
+    .prepare(
+      "UPDATE relay_messages SET status = 'held', verdict = 'hold', policy_code = 'outage', held_kind = 'outage', review_attempts = 0, next_review_at = ?, status_reason = ?, updated_at = ? WHERE id IN (SELECT id FROM relay_messages WHERE status = 'moderating' AND updated_at < ? ORDER BY updated_at LIMIT ?) AND status = 'moderating' RETURNING id, agent_id",
+    )
+    .bind(at, 'Moderation didn’t finish for this message, so it is being checked again. No action needed.', at, cutoff, SWEEP_BATCH)
+    .all<{ id: string; agent_id: string }>();
+  if (moderating.results.length)
+    await relay.db.batch(
+      moderating.results.map((m) =>
+        logStmt(relay, m.agent_id, m.id, {
+          layer: 'review',
+          verdict: 'hold',
+          policy: 'outage',
+          reason: 'Moderation did not finish; sent back for review',
+          source: 'sweep',
+          latencyMs: null,
+        }),
+      ),
+    );
+  const queued = await relay.db
+    .prepare("SELECT id, channel_id FROM relay_messages WHERE status = 'queued' AND updated_at < ? ORDER BY updated_at LIMIT 50")
+    .bind(cutoff)
+    .all<{ id: string; channel_id: string }>();
+  for (const q of queued.results) await dispatch(relay, q);
+  if (sending.results.length) relay.log.warn('send.swept_uncertain', { count: sending.results.length });
+  return sending.results.length + moderating.results.length + queued.results.length;
 }

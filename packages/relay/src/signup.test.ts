@@ -1,13 +1,18 @@
 import { LIMITS, PolicyProblem, SignupChallenge, SignupResponse } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { sha256 } from './crypto';
-import { leadingZeroBits } from './services/pow';
+import { clientHashes, recordOrigin } from './services/origins';
+import { consumeChallenge, issueChallenge, leadingZeroBits } from './services/pow';
+import { hit } from './services/limits';
 import { updateSettings } from './services/settings';
+import { signup } from './services/signup';
 import type { Moderator } from './services/moderation/classifier';
 import { count, easyChallenges, getChallenge, ipHeader, signUp, signedUp, solve } from './signup.helpers';
-import { harness } from './testing';
+import { harness, seedAgent } from './testing';
 
-const verdict = (v: 'pass' | 'hold' | 'block', policy_code?: 'harassment' | 'spam', reason = 'test'): Moderator => ({ review: async () => ({ verdict: v, policy_code, reason }) });
+const verdict = (v: 'pass' | 'hold' | 'block', policy_code?: 'harassment' | 'spam', reason = 'test'): Moderator => ({
+  review: async () => ({ verdict: v, policy_code, reason }),
+});
 const unavailable: Moderator = { review: async () => ({ verdict: null, unavailable: true, reason: 'down' }) };
 const refuseWhen = (word: string, code: 'harassment' | 'spam'): Moderator => ({
   review: async (req) => (req.content.includes(word) ? { verdict: 'block', policy_code: code, reason: 'matched' } : { verdict: 'pass' }),
@@ -23,7 +28,10 @@ describe('proof of work', () => {
     expect(c.difficulty).toBe(LIMITS.powDifficulty);
     expect(c.challenge).toMatch(/^pow_/);
     expect(new Date(c.expires_at).getTime() - h.now().getTime()).toBe(LIMITS.powTtlSeconds * 1000);
-    const row = await h.db.prepare('SELECT difficulty, used_at, net_hmac FROM pow_challenges WHERE id = ?').bind(c.challenge).first<{ difficulty: number; used_at: string | null; net_hmac: string }>();
+    const row = await h.db
+      .prepare('SELECT difficulty, used_at, net_hmac FROM pow_challenges WHERE id = ?')
+      .bind(c.challenge)
+      .first<{ difficulty: number; used_at: string | null; net_hmac: string }>();
     expect(row).toMatchObject({ difficulty: LIMITS.powDifficulty, used_at: null });
     expect(row!.net_hmac).toMatch(/^[0-9a-f]{64}$/);
     expect(res.headers.get('cache-control')).toBe('no-store');
@@ -49,9 +57,19 @@ describe('proof of work', () => {
     expect((await getChallenge(h, ipHeader('198.51.100.1'))).difficulty).toBe(8);
     h.advance(61 * 60_000);
     expect((await getChallenge(h)).difficulty).toBe(8);
-    await updateSettings(h.relay, 'own_test_setup', { pow_difficulty: LIMITS.powMaxDifficulty });
-    for (const ip of ips.slice(0, 3)) await signedUp(h, `Later ${ip}`, { headers: ipHeader(ip) }).catch(() => undefined);
-    expect((await getChallenge(h, ipHeader('203.0.113.12'))).difficulty).toBeLessThanOrEqual(LIMITS.powMaxDifficulty);
+  });
+
+  it('never rises above the maximum', async () => {
+    const h = harness();
+    await updateSettings(h.relay, 'own_test_setup', { pow_difficulty: 25 });
+    for (let i = 0; i < 6; i++)
+      await recordOrigin(
+        h.relay,
+        (await seedAgent(h.relay, { tier: 'new' })).id,
+        { ip: `203.0.113.${20 + i}`, asn: null, asOrganization: null, country: null },
+        'signup',
+      );
+    expect((await getChallenge(h)).difficulty).toBe(LIMITS.powMaxDifficulty);
   });
 
   it('limits how many challenges a network can ask for', async () => {
@@ -78,7 +96,7 @@ describe('proof of work', () => {
     const nonce = solve(c.challenge, c.difficulty);
     const first = await h.call('POST', '/v1/agents', { name: 'Once', challenge: c.challenge, nonce });
     expect(first.status).toBe(201);
-    const again = await h.call('POST', '/v1/agents', { name: 'Twice', challenge: c.challenge, nonce }, ipHeader('198.51.100.2'));
+    const again = await h.call('POST', '/v1/agents', { name: 'Twice', challenge: c.challenge, nonce });
     expect(again.status).toBe(409);
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(1);
   });
@@ -89,7 +107,7 @@ describe('proof of work', () => {
     const c = await getChallenge(h);
     const nonce = solve(c.challenge, c.difficulty);
     const post = (name: string, ip: string) => h.call('POST', '/v1/agents', { name, challenge: c.challenge, nonce }, ipHeader(ip));
-    const statuses = (await Promise.all([post('Racer One', '198.51.100.1'), post('Racer Two', '198.51.100.2')])).map((r) => r.status).sort();
+    const statuses = (await Promise.all([post('Racer One', '203.0.113.20'), post('Racer Two', '203.0.113.21')])).map((r) => r.status).sort();
     expect(statuses).toEqual([201, 409]);
   });
 
@@ -110,9 +128,38 @@ describe('proof of work', () => {
 
     const old = await getChallenge(h, ipHeader('198.51.100.3'));
     h.advance(LIMITS.powTtlSeconds * 1000 + 1000);
-    const expired = await h.call('POST', '/v1/agents', { name: 'Late', challenge: old.challenge, nonce: solve(old.challenge, old.difficulty) });
+    const expired = await h.call(
+      'POST',
+      '/v1/agents',
+      { name: 'Late', challenge: old.challenge, nonce: solve(old.challenge, old.difficulty) },
+      ipHeader('198.51.100.3'),
+    );
     expect(expired.status).toBe(410);
     expect((await expired.json()).code).toBe('expired');
+  });
+
+  it('only works from the network it was issued to, and is not spent by a refusal from another', async () => {
+    const h = harness();
+    await easyChallenges(h);
+    const c = await getChallenge(h);
+    const nonce = solve(c.challenge, c.difficulty);
+    const elsewhere = await h.call('POST', '/v1/agents', { name: 'Borrowed', challenge: c.challenge, nonce }, ipHeader('198.51.100.9'));
+    expect(elsewhere.status).toBe(403);
+    expect((await elsewhere.json()).detail).toContain('different network');
+    expect(await h.db.prepare('SELECT used_at FROM pow_challenges WHERE id = ?').bind(c.challenge).first()).toEqual({ used_at: null });
+    // Another address in the same /24 is the same network.
+    expect((await h.call('POST', '/v1/agents', { name: 'Borrowed', challenge: c.challenge, nonce }, ipHeader('203.0.113.200'))).status).toBe(201);
+  });
+
+  it('refuses to spend a challenge for another network even when the first check is skipped', async () => {
+    const h = harness();
+    await easyChallenges(h);
+    const c = await getChallenge(h);
+    const other = await clientHashes(h.relay, { ip: '198.51.100.9', asn: null, asOrganization: null, country: null });
+    await expect(consumeChallenge(h.relay, c.challenge, other.net)).rejects.toMatchObject({ status: 403 });
+    const own = await clientHashes(h.relay, { ip: '203.0.113.7', asn: null, asOrganization: null, country: null });
+    await consumeChallenge(h.relay, c.challenge, own.net);
+    await expect(consumeChallenge(h.relay, c.challenge, own.net)).rejects.toMatchObject({ status: 409 });
   });
 });
 
@@ -127,7 +174,13 @@ describe('signing up', () => {
     expect(body.tier).toBe('new');
     expect(body.key.secret).toMatch(/^lk_/);
     expect(body.key.scopes).toEqual(['messages:read', 'messages:write', 'subscriptions:manage']);
-    expect(body.limits).toEqual({ posts_per_minute: LIMITS.postsPerMinute, posts_per_day: LIMITS.postsPerDay, subscriptions_max: 3 });
+    // Unverified: it hasn't been claimed yet, so it posts less often than a verified agent.
+    expect(body.limits).toEqual({ posts_per_minute: LIMITS.unverifiedPostsPerMinute, posts_per_day: LIMITS.unverifiedPostsPerDay, subscriptions_max: 3 });
+    expect(LIMITS.unverifiedPostsPerMinute).toBeLessThan(LIMITS.postsPerMinute);
+    expect(body.claim.note).toContain('Verify your agent with Discord');
+    expect(body.claim.note).toContain('only if you don’t have a Discord account');
+    expect(body.claim.note).toContain(`${LIMITS.unverifiedPostsPerMinute} a minute and ${LIMITS.unverifiedPostsPerDay} a day`);
+    expect(body.claim.note).toContain('verified-only channels');
     expect(body.claim.claim_url).toBe(`https://logitland.test/claim/${body.claim.user_code}`);
     expect(body.claim.expires_in).toBe(LIMITS.claimCodeSeconds);
 
@@ -149,8 +202,15 @@ describe('signing up', () => {
     const key = await h.db.prepare('SELECT * FROM api_keys WHERE agent_id = ?').bind(body.agent_id).first<Record<string, unknown>>();
     expect(key).toMatchObject({ id: body.key.id, label: 'signup', hash: await sha256(body.key.secret), revoked_at: null, expires_at: null });
     expect(key!.hash).not.toBe(body.key.secret);
-    expect(await h.db.prepare('SELECT * FROM claims WHERE user_code = ?').bind(body.claim.user_code).first()).toMatchObject({ agent_id: body.agent_id, decision: null });
-    expect(await h.db.prepare("SELECT * FROM audit_log WHERE action = 'agent.signed_up'").first()).toMatchObject({ actor_type: 'agent', actor_id: body.agent_id, target_id: body.agent_id });
+    expect(await h.db.prepare('SELECT * FROM claims WHERE user_code = ?').bind(body.claim.user_code).first()).toMatchObject({
+      agent_id: body.agent_id,
+      decision: null,
+    });
+    expect(await h.db.prepare("SELECT * FROM audit_log WHERE action = 'agent.signed_up'").first()).toMatchObject({
+      actor_type: 'agent',
+      actor_id: body.agent_id,
+      target_id: body.agent_id,
+    });
     expect(h.discordCalls).toHaveLength(0);
 
     const me = await h.call('GET', '/v1/me', undefined, h.as(body.key.secret));
@@ -172,7 +232,10 @@ describe('signing up', () => {
     const h = harness();
     await easyChallenges(h);
     const body = await signedUp(h, 'Plain Bot');
-    expect(await h.db.prepare('SELECT description, owner_hint FROM agents WHERE id = ?').bind(body.agent_id).first()).toEqual({ description: null, owner_hint: null });
+    expect(await h.db.prepare('SELECT description, owner_hint FROM agents WHERE id = ?').bind(body.agent_id).first()).toEqual({
+      description: null,
+      owner_hint: null,
+    });
   });
 
   it('is refused with 403 while signups are closed, and no challenge is issued', async () => {
@@ -219,12 +282,52 @@ describe('signup limits', () => {
     expect((await signUp(h, 'Elsewhere', { headers: ipHeader('203.0.114.1') })).status).toBe(201);
   });
 
-  it('treats IPv6 addresses in the same /64 as one network', async () => {
+  it('treats every address in an IPv6 /64 as one address', async () => {
     const h = harness();
     await easyChallenges(h);
     const statuses: number[] = [];
-    for (let i = 1; i <= 6; i++) statuses.push((await signUp(h, `Six ${i}`, { headers: ipHeader(`2001:db8:1:2::${i}`) })).status);
+    for (let i = 1; i <= 5; i++) statuses.push((await signUp(h, `Six ${i}`, { headers: ipHeader(`2001:db8:1:2::${i}`) })).status);
+    expect(statuses).toEqual([201, 201, 201, 429, 429]);
+    expect((await signUp(h, 'Next door', { headers: ipHeader('2001:db8:1:3::1') })).status).toBe(201);
+  });
+
+  it('treats every /64 in an IPv6 /48 as one network', async () => {
+    const h = harness();
+    await easyChallenges(h);
+    const statuses: number[] = [];
+    for (let i = 1; i <= 6; i++) statuses.push((await signUp(h, `Broker ${i}`, { headers: ipHeader(`2001:db8:7:${i}::1`) })).status);
     expect(statuses).toEqual([201, 201, 201, 201, 201, 429]);
+    expect((await signUp(h, 'Other prefix', { headers: ipHeader('2001:db8:8::1') })).status).toBe(201);
+  });
+
+  it('allows 30 signups an hour from one provider, however many networks it has', async () => {
+    const h = harness();
+    await easyChallenges(h);
+    const signAs = async (name: string, ip: string, asn: number | null) => {
+      const client = { ip, asn, asOrganization: null, country: null };
+      const c = await issueChallenge(h.relay, client);
+      return signup(h.relay, { name, challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) }, client).then(
+        () => 201,
+        (e: { status: number }) => e.status,
+      );
+    };
+    const statuses: number[] = [];
+    for (let i = 0; i <= LIMITS.signupsPerAsnPerHour; i++) statuses.push(await signAs(`Provider ${i}`, `198.51.${100 + i}.1`, 64500));
+    expect(statuses.filter((s) => s === 201)).toHaveLength(LIMITS.signupsPerAsnPerHour);
+    expect(statuses.at(-1)).toBe(429);
+    expect(await signAs('Other provider', '192.0.2.77', 64501)).toBe(201);
+    expect(await signAs('No provider known', '192.0.2.78', null)).toBe(201);
+  });
+
+  it('stops all signups for the hour once the relay-wide cap is reached', async () => {
+    const h = harness();
+    await easyChallenges(h);
+    for (let i = 0; i < LIMITS.signupsPerHour; i++) await hit(h.relay, { key: 'signup:all:h', limit: LIMITS.signupsPerHour, windowSeconds: 3600 });
+    const res = await signUp(h, 'Too Late', { headers: ipHeader('198.51.100.40') });
+    expect(res.status).toBe(429);
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(0);
+    h.advance(61 * 60_000);
+    expect((await signUp(h, 'On Time', { headers: ipHeader('198.51.100.40') })).status).toBe(201);
   });
 
   it('allows 20 signups a day from one network', async () => {
@@ -250,7 +353,7 @@ describe('signup limits', () => {
     const nonce = solve(c.challenge, c.difficulty);
     expect((await h.call('POST', '/v1/agents', { name: 'Blocked', challenge: c.challenge, nonce })).status).toBe(429);
     expect(await h.db.prepare('SELECT used_at FROM pow_challenges WHERE id = ?').bind(c.challenge).first()).toEqual({ used_at: null });
-    expect((await h.call('POST', '/v1/agents', { name: 'Blocked', challenge: c.challenge, nonce }, ipHeader('198.51.100.7'))).status).toBe(201);
+    expect((await h.call('POST', '/v1/agents', { name: 'Blocked', challenge: c.challenge, nonce }, ipHeader('203.0.113.50'))).status).toBe(201);
   });
 });
 
@@ -276,12 +379,10 @@ describe('signup names', () => {
     ['0fficial Staff', 'impersonation'],
     ['m.o.d', 'impersonation'],
     ['Server Mod', 'impersonation'],
-    ['x', 'name_policy'],
-    ['a b c d e f g h i j k l m n o p q r s t u v w x y z', 'name_policy'],
     ['Bad$Name', 'name_policy'],
     ['Emoji 🙂 Bot', 'name_policy'],
-    ['Zero​Width', 'name_policy'],
-    ['Bidi‮Name', 'name_policy'],
+    ['Zero\u200bWidth', 'name_policy'],
+    ['Bidi\u202eName', 'name_policy'],
     ['--', 'name_policy'],
   ])('refuses %j as %s', async (name, code) => {
     const h = harness();
@@ -290,6 +391,16 @@ describe('signup names', () => {
     expect(res.status).toBe(422);
     expect(PolicyProblem.parse(await res.json()).policy_code).toBe(code);
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(0);
+  });
+
+  it('refuses names outside 2 to 32 characters while validating the request', async () => {
+    const h = harness();
+    await easyChallenges(h);
+    for (const name of ['x', 'a b c d e f g h i j k l m n o p q r s t u v w x y z']) {
+      const res = await signUp(h, name);
+      expect(res.status).toBe(400);
+      expect((await res.json()).errors[0].path).toBe('name');
+    }
   });
 
   it('accepts ordinary names that merely contain a short reserved word', async () => {
@@ -342,8 +453,14 @@ describe('signup moderation', () => {
     const problem = PolicyProblem.parse(await res.json());
     expect(problem.policy_code).toBe('harassment');
     expect(problem.detail).toContain('Pick a different name');
+    expect(problem.detail).toContain('wasn’t saved');
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(0);
-    expect(await h.db.prepare('SELECT layer, verdict, policy_code, source FROM moderation_log').first()).toEqual({ layer: 'admission', verdict: 'block', policy_code: 'harassment', source: 'jev_laya' });
+    expect(await h.db.prepare('SELECT layer, verdict, policy_code, source FROM moderation_log').first()).toEqual({
+      layer: 'admission',
+      verdict: 'block',
+      policy_code: 'harassment',
+      source: 'jev_laya',
+    });
   });
 
   it('refuses a held description, defaulting the policy code', async () => {
@@ -389,24 +506,58 @@ describe('signup moderation', () => {
     ]);
   });
 
-  it('accepts what passed the fixed rules when no classifier answers, and logs the outage', async () => {
+  it('refuses with 503 and a retry time when no classifier answers, and logs the outage', async () => {
     const h = harness({ moderator: unavailable, fallbackModerator: unavailable });
     await easyChallenges(h);
     const res = await signUp(h, 'Outage Bot', { description: 'Hello' });
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(503);
+    expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+    const problem = await res.json();
+    expect(problem.code).toBe('unavailable');
+    expect(problem.detail).toContain('name');
+    expect(problem.detail).toContain('get a new one');
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(0);
     const { results } = await h.db.prepare('SELECT layer, verdict, policy_code, source FROM moderation_log ORDER BY id').all();
-    expect(results).toEqual([
-      { layer: 'admission', verdict: 'pass', policy_code: 'outage', source: 'outage' },
-      { layer: 'admission', verdict: 'pass', policy_code: 'outage', source: 'outage' },
-    ]);
+    expect(results).toEqual([{ layer: 'admission', verdict: 'block', policy_code: 'outage', source: 'outage' }]);
     expect(h.log.lines.some((l) => l.event === 'profile.moderation_unavailable')).toBe(true);
   });
 
-  it('accepts when the first classifier is down and there is no fallback', async () => {
-    const h = harness({ moderator: unavailable, fallbackModerator: null });
+  it('refuses the same way in refuse mode, and when the first classifier is down with no fallback', async () => {
+    const h = harness({ moderator: unavailable, fallbackModerator: null, env: { MODERATION_OUTAGE: 'refuse' } });
     await easyChallenges(h);
-    expect((await signUp(h, 'Lonely Bot')).status).toBe(201);
-    expect(await h.db.prepare('SELECT source FROM moderation_log').first()).toEqual({ source: 'outage' });
+    expect((await signUp(h, 'Lonely Bot')).status).toBe(503);
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(0);
+  });
+
+  it('refuses a name or description that breaks the fixed message rules, without asking a classifier', async () => {
+    let calls = 0;
+    const h = harness({ moderator: { review: async () => (calls++, { verdict: 'pass' }) } });
+    await easyChallenges(h);
+    const cases: [string, { description?: string }, string][] = [
+      ['Bit Dot Ly', { description: 'Find us at bit.ly/xyz' }, 'blocked_domain'],
+      ['Invite Bot', { description: 'Join discord.gg/abcdef' }, 'invite_link'],
+      ['Secret Bot', { description: 'my key is lk_abcdefghijklmnopqrstuvwxyz1234' }, 'secret_leak'],
+      ['Mail Bot', { description: 'Write to ada@orrery.dev' }, 'personal_info'],
+      ['bit.ly', {}, 'blocked_domain'],
+    ];
+    for (const [name, rest, code] of cases) {
+      const res = await signUp(h, name, { ...rest, headers: ipHeader(`198.51.100.${cases.findIndex((c) => c[0] === name) + 1}`) });
+      expect(res.status, name).toBe(422);
+      const problem = PolicyProblem.parse(await res.json());
+      expect(problem.policy_code, name).toBe(code);
+      expect(problem.detail).not.toContain('lk_abc');
+    }
+    expect(calls).toBe(0);
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(0);
+  });
+
+  it('keeps the challenge when the fixed rules refuse, like any other check before the limits', async () => {
+    const h = harness();
+    await easyChallenges(h);
+    const c = await getChallenge(h);
+    const nonce = solve(c.challenge, c.difficulty);
+    expect((await h.call('POST', '/v1/agents', { name: 'Fine Name', description: 'See bit.ly/x', challenge: c.challenge, nonce })).status).toBe(422);
+    expect((await h.call('POST', '/v1/agents', { name: 'Fine Name', description: 'A plain one', challenge: c.challenge, nonce })).status).toBe(201);
   });
 
   it('does not call the classifier for names the fixed rules or uniqueness already refuse', async () => {

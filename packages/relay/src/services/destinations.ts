@@ -79,7 +79,9 @@ function expandV6(addr: string): number[] | null {
   const tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
   const missing = 8 - head.length - tail.length;
   if (parts.length === 1 ? head.length !== 8 : missing < 1) return null;
-  const groups = [...head, ...Array<string>(parts.length === 2 ? missing : 0).fill('0'), ...tail].map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : Number.NaN));
+  const groups = [...head, ...Array<string>(parts.length === 2 ? missing : 0).fill('0'), ...tail].map((g) =>
+    /^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : Number.NaN,
+  );
   return groups.some(Number.isNaN) ? null : groups;
 }
 

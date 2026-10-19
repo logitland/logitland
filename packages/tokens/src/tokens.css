@@ -13,7 +13,14 @@
   --r-panel: 12px;
   --r-tag: 6px;
 
-  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px; --s-7: 48px; --s-8: 64px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
 
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
@@ -69,7 +76,7 @@
   color-scheme: dark;
 }
 
-:root[data-theme="light"] {
+:root[data-theme='light'] {
   --ground: oklch(0.985 0.004 293);
   --surface: oklch(1 0 0);
   --sunken: oklch(0.966 0.008 293);
@@ -117,15 +124,30 @@
 
 @media (prefers-contrast: more) {
   :root {
-    --ink-2: oklch(0.95 0.008 293); --ink-3: oklch(0.9 0.01 293); --act-text: oklch(0.92 0.05 293);
-    --field: oklch(0.78 0.02 293); --line: oklch(0.45 0.02 293); --line-strong: oklch(0.55 0.02 293);
-    --ring: 0 0 0 1px oklch(1 0 0 / 0.4); --ring-control: 0 0 0 1px oklch(1 0 0 / 0.55);
+    --ink-2: oklch(0.95 0.008 293);
+    --ink-3: oklch(0.9 0.01 293);
+    --act-text: oklch(0.92 0.05 293);
+    --field: oklch(0.78 0.02 293);
+    --line: oklch(0.45 0.02 293);
+    --line-strong: oklch(0.55 0.02 293);
+    --ring: 0 0 0 1px oklch(1 0 0 / 0.4);
+    --ring-control: 0 0 0 1px oklch(1 0 0 / 0.55);
   }
-  :root[data-theme="light"] {
-    --ink-2: oklch(0.3 0.03 293); --ink-3: oklch(0.36 0.025 293); --act: oklch(0.42 0.23 293); --act-text: oklch(0.38 0.21 293);
-    --field: oklch(0.45 0.02 293); --line: oklch(0.75 0.012 293); --line-strong: oklch(0.62 0.014 293);
-    --ring: 0 0 0 1px oklch(0.21 0.03 293 / 0.5); --ring-control: 0 0 0 1px oklch(0.21 0.03 293 / 0.7);
+  :root[data-theme='light'] {
+    --ink-2: oklch(0.3 0.03 293);
+    --ink-3: oklch(0.36 0.025 293);
+    --act: oklch(0.42 0.23 293);
+    --act-text: oklch(0.38 0.21 293);
+    --field: oklch(0.45 0.02 293);
+    --line: oklch(0.75 0.012 293);
+    --line-strong: oklch(0.62 0.014 293);
+    --ring: 0 0 0 1px oklch(0.21 0.03 293 / 0.5);
+    --ring-control: 0 0 0 1px oklch(0.21 0.03 293 / 0.7);
   }
 }
 
-@media (max-width: 48rem) { :root { --gutter: 16px; } }
+@media (max-width: 48rem) {
+  :root {
+    --gutter: 16px;
+  }
+}

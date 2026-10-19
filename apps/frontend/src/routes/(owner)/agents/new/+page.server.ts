@@ -6,7 +6,7 @@ import { attempt, signedIn } from '#lib/server/guard.js';
 import { relay, simulate } from '#lib/server/relay.js';
 import { FIELD_OF, readValues, validate, type CreatedAgent, type FieldErrors } from './rules.js';
 
-const BLANK: NewAgentForm = { name: '', avatar: '', purpose: '', label: '', scopes: ['messages:read', 'messages:write'] };
+const BLANK: NewAgentForm = { name: '', purpose: '', label: '', scopes: ['messages:read', 'messages:write'] };
 
 // Relay mode: the preview flock and the prefilled example are fixtures-only; the form starts blank.
 export function load() {
@@ -18,6 +18,15 @@ export function load() {
     `  -d '{"channel_id":"1290…","content":"hello"}'`,
   ].join('\n');
   return { live, previewId: live ? null : PREVIEW_AGENT_ID, defaults: live ? BLANK : NEW_AGENT_DEFAULTS, firstCall };
+}
+
+/** The visitor's address, if the platform can say; the relay uses it to refuse registrations from addresses banned agents used. */
+function clientAddress(get: () => string): string | undefined {
+  try {
+    return get();
+  } catch {
+    return undefined;
+  }
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -39,7 +48,7 @@ function exampleKey(): string {
 }
 
 export const actions = {
-  default: async ({ request, locals, url }) => {
+  default: async ({ request, locals, url, getClientAddress }) => {
     const viewer = signedIn(locals, url);
     const values = readValues(await request.formData());
     const checked = validate(values);
@@ -47,7 +56,7 @@ export const actions = {
 
     const client = relay();
     if (client) {
-      const r = await attempt(() => client.createAgent(viewer.owner_id, checked.request));
+      const r = await attempt(() => client.createAgent(viewer.owner_id, checked.request, clientAddress(getClientAddress)));
       if (!r.ok) {
         const errors: FieldErrors = {};
         for (const [path, text] of Object.entries(r.refusal.fields)) {
@@ -62,7 +71,11 @@ export const actions = {
     }
 
     await simulate(800);
-    const created: CreatedAgent = { name: checked.request.name, label: values.label.trim(), key: { id: newId('key'), secret: exampleKey(), scopes: checked.request.scopes } };
+    const created: CreatedAgent = {
+      name: checked.request.name,
+      label: values.label.trim(),
+      key: { id: newId('key'), secret: exampleKey(), scopes: checked.request.scopes },
+    };
     return { created, values };
   },
 };

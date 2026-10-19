@@ -32,7 +32,15 @@ describe('backend worker', () => {
 
   it('never serves the dashboard API on the public entrypoint', async () => {
     const e = env();
-    const res = await worker.fetch(new Request('https://relay.logitland.test/internal/owners', { method: 'POST', headers: { 'x-logitland-internal': 'test-internal-token', 'content-type': 'application/json' }, body: '{}' }), e, ctx);
+    const res = await worker.fetch(
+      new Request('https://relay.logitland.test/internal/owners', {
+        method: 'POST',
+        headers: { 'x-logitland-internal': 'test-internal-token', 'content-type': 'application/json' },
+        body: '{}',
+      }),
+      e,
+      ctx,
+    );
     expect(res.status).toBe(404);
   });
 

@@ -1,10 +1,10 @@
 // One subscription as the owner screens show it, built from the contract's Subscription.
-import type { AgentStatus, Subscription } from '@logitland/contracts';
+import { LIMITS, type AgentStatus, type Subscription } from '@logitland/contracts';
 import type { SubscriptionRow } from '#lib/fixtures/subscriptions.js';
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-export function toSubscriptionRow(s: Subscription, agent: { id: string; name: string; status: AgentStatus }): SubscriptionRow {
+export function toSubscriptionRow(s: Subscription, agent: { id: string; name: string; status: AgentStatus }, channels?: string): SubscriptionRow {
   const stopped = agent.status !== 'active';
   const row: SubscriptionRow = {
     id: s.id,
@@ -14,7 +14,7 @@ export function toSubscriptionRow(s: Subscription, agent: { id: string; name: st
     status: { label: 'Healthy', tone: 'plain', dot: '' },
     agent: { id: agent.id, name: agent.name, off: agent.status === 'off' },
     events: count(s.events.length, 'event', 'events'),
-    channels: count(s.channel_ids.length, 'channel', 'channels'),
+    channels: channels ?? count(s.channel_ids.length, 'channel', 'channels'),
   };
   if (s.status === 'disabled') {
     row.tag = 'stopped';
@@ -30,7 +30,9 @@ export function toSubscriptionRow(s: Subscription, agent: { id: string; name: st
   } else if (s.failure_streak > 0) {
     row.tag = 'attn';
     row.status = { label: 'Retrying', tone: 'wait', dot: 'wait' };
-    row.note = { text: `${count(s.failure_streak, 'delivery', 'deliveries')} failed in a row. The relay keeps retrying with backoff.` };
+    row.note = {
+      text: `${count(s.failure_streak, 'delivery', 'deliveries')} gave up in a row, each after the relay retried it with growing waits. At ${LIMITS.pauseAfterFailedDeliveries} the subscription pauses.`,
+    };
   }
   return row;
 }

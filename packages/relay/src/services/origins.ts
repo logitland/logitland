@@ -1,17 +1,22 @@
 import { LIMITS } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
 import { hmac } from '../crypto';
+import { forbidden } from '../errors';
 import type { ClientInfo } from '../types';
 
-// Owned by B2 (identity and signup): where agents connect from. HMACs kept, raw IP sealed for 30 days.
+// Where agents connect from. Keyed hashes are kept 90 days after last seen (longer for banned agents, until their ban record
+// expires), the raw address sealed for 30 days.
 
 const DAY_MS = 86_400_000;
+/** Rows one cleanup statement touches, and how many statements one run may use, so a backlog is worked off without a long query. */
+const CLEANUP_BATCH = 500;
+const CLEANUP_ROUNDS = 20;
 const originAad = (agentId: string) => `agent_origins.ip:${agentId}`;
 
 interface ParsedIp {
-  /** The address in one spelling per host: dotted quad, or eight zero-padded hextets. */
+  /** What one host can be told apart by: the dotted quad, or the /64 of an IPv6 address (one subscriber always gets at least a /64). */
   address: string;
-  /** The /24 (IPv4) or /64 (IPv6) the address belongs to. */
+  /** The /24 (IPv4) or /48 (IPv6) the address belongs to. */
   network: string;
 }
 
@@ -63,10 +68,13 @@ function parseIp(raw: string): ParsedIp {
     return { address: q.join('.'), network: `${q.slice(0, 3).join('.')}.0/24` };
   }
   const hextets = v6.map((g) => g.toString(16).padStart(4, '0'));
-  return { address: hextets.join(':'), network: `${hextets.slice(0, 4).join(':')}::/64` };
+  return { address: `${hextets.slice(0, 4).join(':')}::/64`, network: `${hextets.slice(0, 3).join(':')}::/48` };
 }
 
-/** HMACs of the caller's IP and its /24 (IPv4) or /64 (IPv6) network, for rate-limit keys and bans. Null without an IP. */
+/**
+ * HMACs of the caller's address (IPv4, or the /64 of an IPv6 address) and of its network (IPv4 /24, IPv6 /48), for rate-limit
+ * keys and bans. A person can move around inside their own /64 for free, so nothing is limited more finely than that. Null without an IP.
+ */
 export async function clientHashes(relay: Relay, client: ClientInfo): Promise<{ ip: string | null; net: string | null }> {
   if (!client.ip) return { ip: null, net: null };
   const { address, network } = parseIp(client.ip);
@@ -100,15 +108,85 @@ export async function recordOrigin(relay: Relay, agentId: string, client: Client
   await (await originStmt(relay, agentId, client, kind))?.run();
 }
 
-/** Cron: delete sealed raw IPs past their purge time, and challenges that expired an hour ago. Returns the IPs purged. */
+/** Cron: clear sealed raw IPs past their purge time, and delete challenges that expired an hour ago. Returns the IPs purged. */
 export async function purgeRawIpsJob(relay: Relay): Promise<number> {
   const now = relay.now();
-  const purged = await relay.db.prepare('UPDATE agent_origins SET ip_sealed = NULL WHERE ip_sealed IS NOT NULL AND ip_purge_after <= ?').bind(iso(now)).run();
-  await relay.db
-    .prepare('DELETE FROM pow_challenges WHERE expires_at < ?')
-    .bind(iso(new Date(now.getTime() - 3_600_000)))
-    .run();
-  return purged.meta.changes;
+  let purged = 0;
+  for (let i = 0; i < CLEANUP_ROUNDS; i++) {
+    const r = await relay.db
+      .prepare('UPDATE agent_origins SET ip_sealed = NULL, ip_purge_after = NULL WHERE id IN (SELECT id FROM agent_origins WHERE ip_purge_after <= ? LIMIT ?)')
+      .bind(iso(now), CLEANUP_BATCH)
+      .run();
+    purged += r.meta.changes;
+    if (r.meta.changes < CLEANUP_BATCH) break;
+  }
+  const cutoff = iso(new Date(now.getTime() - 3_600_000));
+  for (let i = 0; i < CLEANUP_ROUNDS; i++) {
+    const r = await relay.db
+      .prepare('DELETE FROM pow_challenges WHERE id IN (SELECT id FROM pow_challenges WHERE expires_at < ? LIMIT ?)')
+      .bind(cutoff, CLEANUP_BATCH)
+      .run();
+    if (r.meta.changes < CLEANUP_BATCH) break;
+  }
+  return purged;
+}
+
+/**
+ * Cron: origin rows older than the retention are deleted, except those of an agent whose ban record is still running, and
+ * expired ban records go. Returns the rows deleted.
+ */
+export async function pruneOriginsJob(relay: Relay): Promise<number> {
+  const now = relay.now();
+  const cutoff = iso(new Date(now.getTime() - LIMITS.originRetentionDays * DAY_MS));
+  let removed = 0;
+  for (let i = 0; i < CLEANUP_ROUNDS; i++) {
+    const r = await relay.db
+      .prepare(
+        'DELETE FROM agent_origins WHERE id IN (SELECT o.id FROM agent_origins o WHERE o.seen_at < ? AND NOT EXISTS (SELECT 1 FROM banned_origins b WHERE b.agent_id = o.agent_id AND b.expires_at > ?) LIMIT ?)',
+      )
+      .bind(cutoff, iso(now), CLEANUP_BATCH)
+      .run();
+    removed += r.meta.changes;
+    if (r.meta.changes < CLEANUP_BATCH) break;
+  }
+  const bans = await relay.db.prepare('DELETE FROM banned_origins WHERE expires_at <= ?').bind(iso(now)).run();
+  return removed + bans.meta.changes;
+}
+
+/* ---------- Bans ---------- */
+
+/** Refuses a request from an address or network that belongs to a banned agent whose ban record is still running. */
+export async function assertOriginNotBanned(relay: Relay, client: ClientInfo): Promise<void> {
+  const { ip, net } = await clientHashes(relay, client);
+  const hashes = [ip, net].filter((h): h is string => h !== null);
+  if (!hashes.length) return;
+  const banned = await relay.db
+    .prepare(`SELECT 1 AS x FROM banned_origins WHERE hash IN (${hashes.map(() => '?').join(', ')}) AND expires_at > ? LIMIT 1`)
+    .bind(...hashes, iso(relay.now()))
+    .first();
+  if (banned) throw forbidden('Signups from this network aren’t accepted.');
+}
+
+/**
+ * The statements that record where a banned agent connected from (every address and network on file), for the batch that bans it.
+ * `guard` is the batch's precondition, so a ban that loses a race leaves no record.
+ */
+export function banOriginStmts(relay: Relay, agentId: string, guard: string, ...guardBinds: unknown[]): Stmt[] {
+  const now = relay.now();
+  const created = iso(now);
+  const expires = iso(new Date(now.getTime() + LIMITS.bannedOriginDays * DAY_MS));
+  return (['ip', 'net'] as const).map((kind) =>
+    relay.db
+      .prepare(
+        `INSERT INTO banned_origins (hash, kind, agent_id, created_at, expires_at) SELECT DISTINCT ${kind}_hmac, '${kind}', agent_id, ?, ? FROM agent_origins WHERE agent_id = ? AND ${guard} ON CONFLICT (hash, agent_id) DO UPDATE SET expires_at = excluded.expires_at`,
+      )
+      .bind(created, expires, agentId, ...guardBinds),
+  );
+}
+
+/** Reinstating an agent lifts the ban record on its addresses. */
+export function liftOriginBanStmt(relay: Relay, agentId: string, guard: string, ...guardBinds: unknown[]): Stmt {
+  return relay.db.prepare(`DELETE FROM banned_origins WHERE agent_id = ? AND ${guard}`).bind(agentId, ...guardBinds);
 }
 
 export interface RevealedOrigin {

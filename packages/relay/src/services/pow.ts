@@ -7,15 +7,18 @@ import { enforce } from './limits';
 import { clientHashes } from './origins';
 import { getSettings } from './settings';
 
-// Owned by B2 (identity and signup): the proof-of-work that makes signing up cost a little, and more from a busy network.
+// The proof-of-work that makes signing up cost a little, and more from a busy network. A challenge only works from the network it was issued to.
 
 const CHALLENGES_PER_NETWORK_PER_HOUR = 60;
 /** Signups from one network in the last hour that cost the base difficulty; each one after adds a bit. */
 const FREE_SIGNUPS_PER_HOUR = 2;
 
+const WRONG_NETWORK = 'That challenge was issued to a different network. Get a new one from GET /v1/signup/challenge, from the network you sign up from.';
+
 interface ChallengeRow {
   id: string;
   difficulty: number;
+  net_hmac: string;
   expires_at: string;
   used_at: string | null;
 }
@@ -59,10 +62,14 @@ export async function issueChallenge(relay: Relay, client: ClientInfo): Promise<
   return { challenge: id, algorithm: 'sha256-leading-zero-bits', difficulty, expires_at: expires };
 }
 
-/** Checks the answer without spending the challenge, so a refused name doesn't cost the agent another solve. */
-export async function checkSolution(relay: Relay, challenge: string, nonce: string): Promise<void> {
-  const row = await relay.db.prepare('SELECT id, difficulty, expires_at, used_at FROM pow_challenges WHERE id = ?').bind(challenge).first<ChallengeRow>();
+/** Checks the answer without spending the challenge, so a refused name doesn't cost the agent another solve. `net` is the caller's network hash. */
+export async function checkSolution(relay: Relay, challenge: string, nonce: string, net: string | null): Promise<void> {
+  const row = await relay.db
+    .prepare('SELECT id, difficulty, net_hmac, expires_at, used_at FROM pow_challenges WHERE id = ?')
+    .bind(challenge)
+    .first<ChallengeRow>();
   if (!row) throw invalid('That challenge isn’t one we issued. Get a new one from GET /v1/signup/challenge.');
+  if (row.net_hmac !== (net ?? 'unknown')) throw forbidden(WRONG_NETWORK);
   if (row.used_at) throw conflict('That challenge was already used. Get a new one from GET /v1/signup/challenge.');
   if (row.expires_at <= iso(relay.now())) throw new RelayError(410, 'expired', 'That challenge has expired. Get a new one from GET /v1/signup/challenge.');
   if (leadingZeroBits(await sha256(`${challenge}:${nonce}`)) < row.difficulty) {
@@ -70,9 +77,15 @@ export async function checkSolution(relay: Relay, challenge: string, nonce: stri
   }
 }
 
-/** Spends the challenge. Only one caller can: the update succeeds once. */
-export async function consumeChallenge(relay: Relay, challenge: string): Promise<void> {
+/** Spends the challenge, from the network it was issued to. Only one caller can: the update succeeds once. */
+export async function consumeChallenge(relay: Relay, challenge: string, net: string | null): Promise<void> {
   const now = iso(relay.now());
-  const r = await relay.db.prepare('UPDATE pow_challenges SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?').bind(now, challenge, now).run();
-  if (r.meta.changes !== 1) throw conflict('That challenge was already used or has expired. Get a new one from GET /v1/signup/challenge.');
+  const r = await relay.db
+    .prepare('UPDATE pow_challenges SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ? AND net_hmac = ?')
+    .bind(now, challenge, now, net ?? 'unknown')
+    .run();
+  if (r.meta.changes === 1) return;
+  const row = await relay.db.prepare('SELECT net_hmac FROM pow_challenges WHERE id = ?').bind(challenge).first<{ net_hmac: string }>();
+  if (row && row.net_hmac !== (net ?? 'unknown')) throw forbidden(WRONG_NETWORK);
+  throw conflict('That challenge was already used or has expired. Get a new one from GET /v1/signup/challenge.');
 }

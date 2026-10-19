@@ -1,8 +1,9 @@
 import { IssueKeyRequest, ProfileUpdate, type ApiKey, type Scope } from '@logitland/contracts';
-import { error, fail } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import { AGENT_DETAILS, type AgentDetail, type KeyRow } from '#lib/fixtures/agent.js';
 import { ago, shortDate } from '#lib/format.js';
 import { STATUS_LABEL } from '#lib/labels.js';
+import { channelList, channelNames } from '#lib/server/channel-names.js';
 import { attempt, refused, signedIn } from '#lib/server/guard.js';
 import { RelayRequestError, relay, simulate } from '#lib/server/relay.js';
 import { toSubscriptionRow } from '#lib/subscription-view.js';
@@ -49,14 +50,15 @@ export async function load({ params, locals }) {
   const ownerId = locals.viewer.owner_id;
   let detail;
   let subs;
+  let names;
   try {
-    [detail, subs] = await Promise.all([client.agentDetail(ownerId, params.id), client.listSubscriptions(ownerId)]);
+    [detail, subs, names] = await Promise.all([client.agentDetail(ownerId, params.id), client.listSubscriptions(ownerId), channelNames(client, ownerId)]);
   } catch (e) {
     if (e instanceof RelayRequestError && (e.status === 404 || e.status === 403)) error(404, 'No such agent');
     throw e;
   }
   const { agent: a, keys } = detail;
-  const subscriptions = subs.subscriptions.filter((s) => s.agent_id === a.id).map((s) => toSubscriptionRow(s, a));
+  const subscriptions = subs.subscriptions.filter((s) => s.agent_id === a.id).map((s) => toSubscriptionRow(s, a, channelList(s.channel_ids, names)));
   const agent: AgentDetail = {
     id: a.id,
     name: a.name,
@@ -111,7 +113,13 @@ export const actions = {
     await simulate(800);
     // Fixtures mode: an example key in the real format. It works nowhere.
     const expires = expires_in_days ? `expires ${shortDate(new Date(Date.now() + expires_in_days * 86_400_000).toISOString())}` : 'no expiry';
-    const row: KeyRow = { id: `key_${randomChars(4, ALPHANUMERIC)}`, label: label ?? null, scopes: 'read, write, subscriptions', expiry: expires, lastUsed: 'Not used yet' };
+    const row: KeyRow = {
+      id: `key_${randomChars(4, ALPHANUMERIC)}`,
+      label: label ?? null,
+      scopes: 'read, write, subscriptions',
+      expiry: expires,
+      lastUsed: 'Not used yet',
+    };
     return { issued: { secret: `lk_${randomChars(40, 'ABCDEFGHJKMNPQRSTVWXYZ0123456789')}`, row } };
   },
 
@@ -147,7 +155,8 @@ export const actions = {
     const patch: Record<string, string | null> = {};
     if (text('name') !== text('was_name')) patch.name = text('name');
     if (text('description') !== text('was_description')) patch.description = text('description') || null;
-    if (text('avatar_url') !== text('was_avatar_url')) patch.avatar_url = text('avatar_url') || null;
+    // Only trusted agents have the field, so a form without it leaves the avatar alone.
+    if (form.has('avatar_url') && text('avatar_url') !== text('was_avatar_url')) patch.avatar_url = text('avatar_url') || null;
     if (!Object.keys(patch).length) return { saved: true as const, unchanged: true as const };
 
     const parsed = ProfileUpdate.safeParse(patch);
@@ -177,8 +186,25 @@ export const actions = {
     await simulate(700);
     // Fixtures mode: a name containing "impersonat" shows how a moderation refusal reads.
     if (/impersonat/i.test(parsed.data.name ?? '')) {
-      return fail(422, { message: 'That name looks like it is pretending to be someone else.', policy: 'impersonation' as const, fields: {} as Record<string, string> });
+      return fail(422, {
+        message: 'That name looks like it is pretending to be someone else.',
+        policy: 'impersonation' as const,
+        fields: {} as Record<string, string>,
+      });
     }
     return { saved: true as const, unchanged: false as const, name: parsed.data.name };
+  },
+
+  // Deleting an agent stops its keys and erases its profile. Messages it already posted stay in Discord.
+  delete: async ({ params, locals, url }) => {
+    const viewer = signedIn(locals, url);
+    const client = relay();
+    if (client) {
+      const r = await attempt(() => client.deleteAgent(viewer.owner_id, params.id));
+      if (!r.ok) return refused(r.refusal);
+    } else {
+      await simulate(800);
+    }
+    redirect(303, '/agents');
   },
 };

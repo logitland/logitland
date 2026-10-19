@@ -2,12 +2,25 @@ import { ClaimDecision, CreateAgentRequest, IssueKeyRequest, OwnerSignIn, Profil
 import type { Context } from 'hono';
 import { invalid, parse } from '../errors';
 import { decideClaim, lookupClaim } from '../services/claims';
-import { isAdmin, issueKey, listKeys, listOwnerAgents, ownedAgent, revokeKey, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
+import {
+  deleteAgent,
+  deleteOwner,
+  isAdmin,
+  issueKey,
+  listKeys,
+  listOwnerAgents,
+  ownedAgent,
+  revokeKey,
+  toAgent,
+  turnOff,
+  turnOn,
+  upsertOwner,
+} from '../services/identity';
 import { createOwnedAgent, updateProfile } from '../services/signup';
 import { body, type Env, type RegisterRoutes } from './shared';
 
-// Owned by B2 (identity and signup): what a signed-in owner does with their agents. The internal app has already
-// checked the dashboard token and that x-logitland-owner is the :ownerId in the path; ownedAgent makes sure the agent is theirs.
+// What a signed-in owner does with their agents. The internal app has already checked the dashboard token and that
+// x-logitland-owner is the :ownerId in the path; ownedAgent makes sure the agent is theirs.
 // Contracts and paths: packages/contracts/src/api.ts.
 
 /** A JSON body whose every field is optional: an empty body means "all defaults". */
@@ -28,6 +41,11 @@ export const register: RegisterRoutes = (app, relay) => {
     return c.json({ owner, is_admin: isAdmin(relay, owner) });
   });
 
+  app.delete('/internal/owners/:ownerId', async (c) => {
+    await deleteOwner(relay, c.req.param('ownerId'));
+    return c.body(null, 204);
+  });
+
   app.get('/internal/owners/:ownerId/agents', async (c) => c.json({ agents: (await listOwnerAgents(relay, c.req.param('ownerId'))).map(toAgent) }));
 
   app.get('/internal/owners/:ownerId/agents/:agentId', async (c) => {
@@ -41,13 +59,18 @@ export const register: RegisterRoutes = (app, relay) => {
 
   app.post('/internal/owners/:ownerId/agents', async (c) => {
     c.header('cache-control', 'no-store');
-    return c.json(await createOwnedAgent(relay, c.req.param('ownerId'), parse(CreateAgentRequest, await body(c))), 201);
+    return c.json(await createOwnedAgent(relay, c.req.param('ownerId'), parse(CreateAgentRequest, await body(c)), c.get('client')), 201);
   });
 
   app.patch('/internal/owners/:ownerId/agents/:agentId', async (c) => {
     const ownerId = c.req.param('ownerId');
     const agent = await ownedAgent(relay, ownerId, c.req.param('agentId'));
     return c.json({ agent: toAgent(await updateProfile(relay, agent, parse(ProfileUpdate, await body(c)), { type: 'owner', id: ownerId })) });
+  });
+
+  app.delete('/internal/owners/:ownerId/agents/:agentId', async (c) => {
+    await deleteAgent(relay, c.req.param('ownerId'), c.req.param('agentId'));
+    return c.body(null, 204);
   });
 
   app.post('/internal/owners/:ownerId/agents/:agentId/keys', async (c) => {

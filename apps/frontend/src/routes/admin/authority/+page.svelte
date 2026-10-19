@@ -17,7 +17,10 @@
 <header class="a-header">
   <div class="page-head__text head-text">
     <h1 class="h1">Who can do what</h1>
-    <p class="t-3">Three systems decide what happens in Logitland: the relay, Mia’s Discord MCP, and Discord itself. This map shows where each power lives, so nobody assumes a relay key carries Discord authority.</p>
+    <p class="t-3">
+      Three systems decide what happens in Logitland: the relay, Mia’s Discord MCP, and Discord itself. This map shows where each power lives, so nobody assumes
+      a relay key carries Discord authority.
+    </p>
   </div>
 </header>
 
@@ -35,7 +38,11 @@
         <div class="card lane" class:is-on={role === lane.role} class:is-dim={role !== 'all' && role !== lane.role}>
           <ol class="cord cord--wide" aria-label={lane.label}>
             {#each lane.steps as s (s.kicker)}
-              <li><span class="knot knot--{s.knot}" aria-hidden="true"></span><span class="tiny t-3">{s.kicker}</span><strong class="fw-600 t-ink">{s.title}</strong><span class="caption t-2">{s.detail}</span></li>
+              <li>
+                <span class="knot knot--{s.knot}" aria-hidden="true"></span><span class="tiny t-3">{s.kicker}</span><strong class="fw-600 t-ink"
+                  >{s.title}</strong
+                ><span class="caption t-2">{s.detail}</span>
+              </li>
             {/each}
           </ol>
         </div>
@@ -66,7 +73,9 @@
               <th scope="row">{row.action}</th>
               {#each data.columns as c (c.key)}
                 {@const cell = row.cells[c.key]}
-                <td class:is-on={role === c.key}><span class={VERDICT[cell.verdict].cls}>{VERDICT[cell.verdict].label}</span>{#if cell.how}<span class="how">{cell.how}</span>{/if}</td>
+                <td class:is-on={role === c.key}
+                  ><span class={VERDICT[cell.verdict].cls}>{VERDICT[cell.verdict].label}</span>{#if cell.how}<span class="how">{cell.how}</span>{/if}</td
+                >
               {/each}
             </tr>
           {/each}
@@ -78,11 +87,17 @@
   <div class="grid-2 g-4" style="--min: 300px" data-enter="3">
     <section class="card g-2" aria-labelledby="console-h">
       <h2 id="console-h" class="title">Who gets this console</h2>
-      <p>Members holding [admin role] in the Logitland server. The relay checks the role at sign-in with Get Guild Member and again every [interval]. Signing in with Discord alone only makes you an owner.</p>
+      <p>
+        Admins are the Discord accounts whose user IDs are listed in the relay’s <code>ADMIN_DISCORD_IDS</code> setting. The relay checks that list on every request
+        the console makes for admin data, so taking an ID off it cuts that person off at once. Signing in with Discord alone only makes you an owner, and a role in
+        the Discord server doesn’t make anyone an admin here.
+      </p>
     </section>
     <section class="card g-2" aria-labelledby="link-h">
       <h2 id="link-h" class="title">Admin agents aren’t listed here</h2>
-      <p>They sign in to the MCP, not the relay, so the relay has no record of them. Linking an MCP caller to a relay owner would be new work in both systems.</p>
+      <p>
+        They sign in to the MCP, not the relay, so the relay has no record of them. Linking an MCP caller to a relay owner would be new work in both systems.
+      </p>
     </section>
     <section class="card g-2 notice--wait" aria-labelledby="q-h">
       <h2 id="q-h" class="title">For the group to decide</h2>

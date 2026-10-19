@@ -5,7 +5,7 @@ import { recordGap } from './services/intake';
 import type { SubscriptionRow } from './services/subscriptions';
 import { BENCH, LOUNGE, seedAgent, seedChannel } from './testing';
 
-// B1 owns recordGap; replacing it keeps these tests independent of its progress and shows how resume calls it.
+// Replacing recordGap shows how resume calls it.
 vi.mock('./services/intake', async (importOriginal) => ({ ...(await importOriginal<typeof import('./services/intake')>()), recordGap: vi.fn(async () => 1) }));
 
 const count = async (s: Awaited<ReturnType<typeof setup>>, sql = 'SELECT COUNT(*) AS n FROM subscriptions') => (await one<{ n: number }>(s, sql)).n;
@@ -38,8 +38,15 @@ describe('creating a subscription', () => {
     expect(await s.relay.secrets.open(row.url_ciphertext, `subscriptions.url:${sub.id}`)).toBe(HOOK);
     expect(await s.relay.secrets.open(row.secret_ciphertext, `subscriptions.secret:${sub.id}`)).toBe(sub.secret);
     await expect(s.relay.secrets.open(row.secret_ciphertext, `subscriptions.url:${sub.id}`)).rejects.toThrow();
-    expect(await all(s, 'SELECT channel_id FROM subscription_channels WHERE subscription_id = ? ORDER BY channel_id', sub.id)).toEqual([{ channel_id: LOUNGE }, { channel_id: BENCH }]);
-    expect(await one(s, 'SELECT actor_type, actor_id, action FROM audit_log WHERE target_id = ?', sub.id)).toEqual({ actor_type: 'agent', actor_id: s.agent.id, action: 'subscription.created' });
+    expect(await all(s, 'SELECT channel_id FROM subscription_channels WHERE subscription_id = ? ORDER BY channel_id', sub.id)).toEqual([
+      { channel_id: LOUNGE },
+      { channel_id: BENCH },
+    ]);
+    expect(await one(s, 'SELECT actor_type, actor_id, action FROM audit_log WHERE target_id = ?', sub.id)).toEqual({
+      actor_type: 'agent',
+      actor_id: s.agent.id,
+      action: 'subscription.created',
+    });
 
     const list = (await (await s.call('GET', '/v1/subscriptions', undefined, s.auth)).json()) as { subscriptions: Record<string, unknown>[] };
     expect(list.subscriptions).toHaveLength(1);
@@ -51,7 +58,8 @@ describe('creating a subscription', () => {
     const s = await setup();
     const sub = await subscribe(s, { channel_ids: [LOUNGE, LOUNGE, BENCH, LOUNGE], events: ['message.created', 'message.created', 'message.deleted'] });
     expect(sub.channel_ids).toEqual([LOUNGE, BENCH]);
-    expect(sub.events).toEqual(['message.created', 'message.deleted']);
+    // Events asked for once each, and the removals that go with message text.
+    expect(sub.events).toEqual(['message.created', 'message.deleted', 'message.bulk_deleted']);
     expect(await count(s, 'SELECT COUNT(*) AS n FROM subscription_channels')).toBe(2);
   });
 
@@ -215,10 +223,19 @@ describe('deleting a subscription', () => {
 
     const res = await s.call('DELETE', `/v1/subscriptions/${sub.id}`, undefined, s.auth);
     expect(res.status).toBe(204);
-    expect(await one(s, 'SELECT status, paused_reason FROM subscriptions WHERE id = ?', sub.id)).toEqual({ status: 'disabled', paused_reason: 'Removed by the agent' });
-    expect(await one(s, 'SELECT status, next_attempt_at, last_error FROM deliveries WHERE id = ?', ids[0])).toMatchObject({ status: 'dropped', next_attempt_at: null });
+    expect(await one(s, 'SELECT status, paused_reason FROM subscriptions WHERE id = ?', sub.id)).toEqual({
+      status: 'disabled',
+      paused_reason: 'Removed by the agent',
+    });
+    expect(await one(s, 'SELECT status, next_attempt_at, last_error FROM deliveries WHERE id = ?', ids[0])).toMatchObject({
+      status: 'dropped',
+      next_attempt_at: null,
+    });
     expect(await count(s, 'SELECT COUNT(*) AS n FROM subscription_channels')).toBe(0);
-    expect(await one(s, "SELECT actor_id, action FROM audit_log WHERE action = 'subscription.deleted'")).toEqual({ actor_id: s.agent.id, action: 'subscription.deleted' });
+    expect(await one(s, "SELECT actor_id, action FROM audit_log WHERE action = 'subscription.deleted'")).toEqual({
+      actor_id: s.agent.id,
+      action: 'subscription.deleted',
+    });
 
     expect(((await (await s.call('GET', '/v1/subscriptions', undefined, s.auth)).json()) as { subscriptions: unknown[] }).subscriptions).toEqual([]);
     expect((await s.call('DELETE', `/v1/subscriptions/${sub.id}`, undefined, s.auth)).status).toBe(404);
@@ -245,7 +262,12 @@ describe('deleting a subscription', () => {
 
 describe('resuming a subscription', () => {
   const pause = (s: Awaited<ReturnType<typeof setup>>, id: string, pausedAt = '2026-10-19T03:10:00.000Z') =>
-    s.db.prepare("UPDATE subscriptions SET status = 'paused', failure_streak = 50, paused_reason = 'Paused after 50 failed deliveries in a row.', paused_at = ? WHERE id = ?").bind(pausedAt, id).run();
+    s.db
+      .prepare(
+        "UPDATE subscriptions SET status = 'paused', failure_streak = 50, paused_reason = 'Paused after 50 failed deliveries in a row.', paused_at = ? WHERE id = ?",
+      )
+      .bind(pausedAt, id)
+      .run();
 
   it('resets the streak and records a gap over the paused window for the subscription’s channels', async () => {
     const s = await setup();
@@ -258,7 +280,14 @@ describe('resuming a subscription', () => {
     expect(await res.json()).toMatchObject({ id: sub.id, status: 'active', failure_streak: 0, paused_reason: null });
     expect(await one(s, 'SELECT paused_at FROM subscriptions WHERE id = ?', sub.id)).toEqual({ paused_at: null });
     expect(recordGap).toHaveBeenCalledTimes(1);
-    expect(recordGap).toHaveBeenCalledWith(s.relay, expect.objectContaining({ channelIds: expect.arrayContaining([LOUNGE, BENCH]), windowStart: '2026-10-19T03:10:00.000Z', windowEnd: '2026-10-19T03:20:00.000Z' }));
+    expect(recordGap).toHaveBeenCalledWith(
+      s.relay,
+      expect.objectContaining({
+        channelIds: expect.arrayContaining([LOUNGE, BENCH]),
+        windowStart: '2026-10-19T03:10:00.000Z',
+        windowEnd: '2026-10-19T03:20:00.000Z',
+      }),
+    );
     expect(vi.mocked(recordGap).mock.calls[0]![1].reason).toContain('GET /v1/events');
     expect(await one(s, "SELECT actor_id FROM audit_log WHERE action = 'subscription.resumed'")).toEqual({ actor_id: s.agent.id });
   });
@@ -269,7 +298,9 @@ describe('resuming a subscription', () => {
     const insert = async (status: string, createdAt: string, deliveredAt: string | null) => {
       const event = await insertEvent(s);
       await s.db
-        .prepare("INSERT INTO deliveries (id, subscription_id, event_id, event_type, status, attempts, created_at, delivered_at) VALUES (?, ?, ?, 'message.created', ?, 1, ?, ?)")
+        .prepare(
+          "INSERT INTO deliveries (id, subscription_id, event_id, event_type, status, attempts, created_at, delivered_at) VALUES (?, ?, ?, 'message.created', ?, 1, ?, ?)",
+        )
         .bind(`del_${event.id.slice(4)}`, sub.id, event.id, status, createdAt, deliveredAt)
         .run();
     };
@@ -358,7 +389,10 @@ describe('rotating the secret', () => {
   it('lets only one of two simultaneous rotations win', async () => {
     const s = await setup();
     const sub = await subscribe(s);
-    const results = await Promise.all([s.call('POST', `/v1/subscriptions/${sub.id}/rotate-secret`, undefined, s.auth), s.call('POST', `/v1/subscriptions/${sub.id}/rotate-secret`, undefined, s.auth)]);
+    const results = await Promise.all([
+      s.call('POST', `/v1/subscriptions/${sub.id}/rotate-secret`, undefined, s.auth),
+      s.call('POST', `/v1/subscriptions/${sub.id}/rotate-secret`, undefined, s.auth),
+    ]);
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
   });
 

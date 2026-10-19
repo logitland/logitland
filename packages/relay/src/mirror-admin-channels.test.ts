@@ -16,7 +16,10 @@ async function setup() {
 }
 
 /** Plays Discord: channels by ID and webhooks by ID, with the channel each webhook posts to. */
-function discordKnows(h: Harness, o: { channels?: Record<string, { type: number; name: string; guild_id?: string }>; webhooks?: Record<string, string> }) {
+function discordKnows(
+  h: Harness,
+  o: { channels?: Record<string, { type: number; name: string; guild_id?: string; available_tags?: unknown[] }>; webhooks?: Record<string, string> },
+) {
   h.setDiscord(async (req) => {
     const path = new URL(req.url).pathname.replace('/api/v10', '');
     const channel = /^\/channels\/(\d+)$/.exec(path);
@@ -49,7 +52,17 @@ describe('GET /internal/admin/channels', () => {
     expect(res.status).toBe(200);
     const { channels } = (await res.json()) as { channels: Channel[] };
     expect(channels).toEqual([
-      { id: BENCH, guild_id: GUILD, name: 'bench', type: 'text', agent_access: 'off', pace_per_agent_per_minute: 10, public_mirror: false, has_webhook: false },
+      {
+        id: BENCH,
+        guild_id: GUILD,
+        name: 'bench',
+        type: 'text',
+        agent_access: 'off',
+        pace_per_agent_per_minute: 10,
+        public_mirror: false,
+        verified_only: false,
+        has_webhook: false,
+      },
       {
         id: LOUNGE,
         guild_id: GUILD,
@@ -58,6 +71,7 @@ describe('GET /internal/admin/channels', () => {
         agent_access: 'post',
         pace_per_agent_per_minute: 10,
         public_mirror: true,
+        verified_only: false,
         has_webhook: true,
       },
     ]);
@@ -87,6 +101,7 @@ describe('adding a channel', () => {
       agent_access: 'post_new_threads',
       pace_per_agent_per_minute: 10,
       public_mirror: true,
+      verified_only: false,
       has_webhook: false,
     });
     expect(h.discordCalls.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([`GET /api/v10/channels/${FORUM}`]);
@@ -150,33 +165,110 @@ describe('adding a channel', () => {
   });
 });
 
-describe('channel type rules', () => {
-  it('allow post_new_threads only in forum and media channels', async () => {
+describe('agents starting new threads', () => {
+  it('is allowed in every kind of channel: forums and media take posts, text and announcement channels get a thread from a message', async () => {
+    const { h, patch } = await setup();
+    const kinds = [
+      [LOUNGE, 'text'],
+      [BENCH, 'announcement'],
+      [FORUM, 'forum'],
+      ['110000000000000004', 'media'],
+    ] as const;
+    for (const [id, type] of kinds) {
+      await seedChannel(h.relay, { id, type, access: 'post', name: type });
+      const res = await patch(id, { agent_access: 'post_new_threads' });
+      expect(res.status, type).toBe(200);
+      expect(((await res.json()) as Channel).agent_access).toBe('post_new_threads');
+    }
+    expect((await patch(LOUNGE, { name: 'lounge', guild_id: GUILD, type: 'announcement', agent_access: 'post_new_threads' })).status).toBe(200);
+  });
+
+  it('can be set when adding a text channel', async () => {
+    const { h, patch } = await setup();
+    expect((await patch(LOUNGE, { name: 'x', guild_id: GUILD, type: 'text', agent_access: 'post_new_threads' })).status).toBe(201);
+    expect((await getChannel(h.relay, LOUNGE))!.agent_access).toBe('post_new_threads');
+  });
+});
+
+describe('only channels in the Logitland server', () => {
+  const OTHER = '999999999999999999';
+
+  it('refuses a channel moved to, or added from, another server', async () => {
+    const { h, patch } = await setup();
+    await seedChannel(h.relay, { id: LOUNGE });
+    const moved = await patch(LOUNGE, { guild_id: OTHER });
+    expect(moved.status).toBe(422);
+    expect(((await moved.json()) as { detail: string }).detail).toContain('isn’t in the Logitland server');
+    expect((await getChannel(h.relay, LOUNGE))!.guild_id).toBe(GUILD);
+
+    expect((await patch(BENCH, { name: 'x', guild_id: OTHER, type: 'text' })).status).toBe(422);
+    expect(await getChannel(h.relay, BENCH)).toBeNull();
+
+    discordKnows(h, { channels: { [FORUM]: { type: 15, name: 'elsewhere', guild_id: OTHER } } });
+    expect((await patch(FORUM, { agent_access: 'post' })).status).toBe(422);
+    expect(await getChannel(h.relay, FORUM)).toBeNull();
+    expect(await audits(h)).toEqual([]);
+  });
+
+  it('also refuses further changes to a channel that is already recorded under another server', async () => {
+    const { h, patch } = await setup();
+    await seedChannel(h.relay, { id: LOUNGE });
+    await h.db.prepare('UPDATE channels SET guild_id = ? WHERE id = ?').bind(OTHER, LOUNGE).run();
+    expect((await patch(LOUNGE, { pace_per_agent_per_minute: 3 })).status).toBe(422);
+    expect((await patch(LOUNGE, { guild_id: GUILD, pace_per_agent_per_minute: 3 })).status).toBe(200);
+  });
+});
+
+describe('forum and media tags', () => {
+  const TAGS = [
+    { id: '700000000000000011', name: 'Idea', moderated: false },
+    { id: '700000000000000012', name: 'Official', moderated: true },
+  ];
+  const tagsOf = async (h: Harness, id: string) =>
+    JSON.parse((await h.db.prepare('SELECT tags FROM channels WHERE id = ?').bind(id).first<{ tags: string }>())!.tags) as unknown[];
+
+  it('are read from Discord when a new forum channel is added', async () => {
+    const { h, patch } = await setup();
+    discordKnows(h, { channels: { [FORUM]: { type: 15, name: 'ideas', available_tags: TAGS } } });
+    expect((await patch(FORUM, { agent_access: 'post' })).status).toBe(201);
+    expect(await tagsOf(h, FORUM)).toEqual(TAGS);
+  });
+
+  it('are refreshed whenever an existing forum or media channel is saved', async () => {
+    const { h, patch } = await setup();
+    await seedChannel(h.relay, { id: FORUM, type: 'forum', name: 'ideas' });
+    expect(await tagsOf(h, FORUM)).toEqual([]);
+    discordKnows(h, { channels: { [FORUM]: { type: 15, name: 'ideas', available_tags: TAGS } } });
+    await patch(FORUM, { pace_per_agent_per_minute: 4 });
+    expect(await tagsOf(h, FORUM)).toEqual(TAGS);
+    expect(h.discordCalls.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([`GET /api/v10/channels/${FORUM}`]);
+    expect((await audits(h)).map((a) => Object.keys(JSON.parse(a.diff)))).toEqual([['pace_per_agent_per_minute']]);
+  });
+
+  it('are read for a new forum channel even when the admin gave every field', async () => {
+    const { h, patch } = await setup();
+    discordKnows(h, { channels: { [FORUM]: { type: 15, name: 'ideas', available_tags: TAGS } } });
+    await patch(FORUM, { name: 'ideas', guild_id: GUILD, type: 'forum' });
+    expect(await tagsOf(h, FORUM)).toEqual(TAGS);
+  });
+
+  it('keep the old tags, and the save goes through, when Discord can’t be reached', async () => {
+    const { h, patch } = await setup();
+    await seedChannel(h.relay, { id: FORUM, type: 'forum', name: 'ideas' });
+    await h.db.prepare('UPDATE channels SET tags = ? WHERE id = ?').bind(JSON.stringify(TAGS), FORUM).run();
+    h.setDiscord(async () => new Response('down', { status: 503 }));
+    expect((await patch(FORUM, { pace_per_agent_per_minute: 4 })).status).toBe(200);
+    expect(await tagsOf(h, FORUM)).toEqual(TAGS);
+    expect(h.log.lines.some((l) => l.event === 'admin.tags_refresh_failed')).toBe(true);
+  });
+
+  it('are not looked up for text channels or when nothing changes', async () => {
     const { h, patch } = await setup();
     await seedChannel(h.relay, { id: LOUNGE, type: 'text', access: 'post' });
-    await seedChannel(h.relay, { id: FORUM, type: 'forum', access: 'post', name: 'forum' });
-
-    const text = await patch(LOUNGE, { agent_access: 'post_new_threads' });
-    expect(text.status).toBe(422);
-    expect(((await text.json()) as { detail: string }).detail).toContain('forum and media');
-    expect((await getChannel(h.relay, LOUNGE))!.agent_access).toBe('post');
-
-    expect((await patch(FORUM, { agent_access: 'post_new_threads' })).status).toBe(200);
-    expect((await patch(LOUNGE, { type: 'media', agent_access: 'post_new_threads' })).status).toBe(200);
-    expect((await getChannel(h.relay, LOUNGE))!.type).toBe('media');
-  });
-
-  it('refuse to turn a thread-starting channel into a text channel', async () => {
-    const { h, patch } = await setup();
-    await seedChannel(h.relay, { id: FORUM, type: 'forum', access: 'post_new_threads', name: 'forum' });
-    expect((await patch(FORUM, { type: 'text' })).status).toBe(422);
-    expect((await patch(FORUM, { type: 'text', agent_access: 'post' })).status).toBe(200);
-  });
-
-  it('refuse a new channel with post_new_threads when its type is text', async () => {
-    const { h, patch } = await setup();
-    expect((await patch(LOUNGE, { name: 'x', guild_id: GUILD, type: 'text', agent_access: 'post_new_threads' })).status).toBe(422);
-    expect(await getChannel(h.relay, LOUNGE)).toBeNull();
+    await seedChannel(h.relay, { id: FORUM, type: 'forum', name: 'ideas', access: 'post' });
+    await patch(LOUNGE, { pace_per_agent_per_minute: 4 });
+    await patch(FORUM, { agent_access: 'post' });
+    expect(h.discordCalls).toHaveLength(0);
   });
 });
 
@@ -264,6 +356,7 @@ describe('changing a channel', () => {
       agent_access: 'post',
       pace_per_agent_per_minute: 6,
       public_mirror: true,
+      verified_only: false,
       has_webhook: true,
     });
     const entries = await audits(h);

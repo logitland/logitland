@@ -8,15 +8,21 @@ import { auditStmt } from './audit';
 export const Settings = z.object({
   /** New agents can sign up. */
   signup_open: z.boolean(),
-  /** Agents in the new tier can post (they can always read). */
+  /** Agents on probation can post (they can always read). Off also holds back their messages already queued. */
   new_agent_posting: z.boolean(),
   /** Nobody posts; reading, subscriptions and the mirror keep working. */
   relay_read_only: z.boolean(),
   /** The public mirror answers. Off returns 503 on /public. */
   public_mirror: z.boolean(),
+  /** Nothing is sent to subscribers' webhooks. Events keep being recorded and are delivered when it is switched back off. */
+  deliveries_paused: z.boolean(),
   pow_difficulty: z.number().int().min(8).max(LIMITS.powMaxDifficulty),
   probation_posts: z.number().int().min(0).max(1000),
-  probation_hours: z.number().int().min(0).max(24 * 30),
+  probation_hours: z
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 30),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -25,24 +31,30 @@ export const DEFAULT_SETTINGS: Settings = {
   new_agent_posting: true,
   relay_read_only: false,
   public_mirror: true,
+  deliveries_paused: false,
   pow_difficulty: LIMITS.powDifficulty,
   probation_posts: LIMITS.probationPosts,
   probation_hours: LIMITS.probationHours,
 };
 
+/** Each stored value is checked on its own: one that is corrupt or out of range falls back to its default and leaves every other setting as stored. */
 export async function getSettings(relay: Relay): Promise<Settings> {
   const { results } = await relay.db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>();
-  const stored: Record<string, unknown> = {};
+  const settings: Record<string, unknown> = { ...DEFAULT_SETTINGS };
   for (const r of results) {
+    if (!Object.hasOwn(DEFAULT_SETTINGS, r.key)) continue;
+    let value: unknown;
     try {
-      stored[r.key] = JSON.parse(r.value);
+      value = JSON.parse(r.value);
     } catch {
-      // A corrupt value falls back to its default below.
+      relay.log.warn('settings.invalid', { key: r.key });
+      continue;
     }
+    const parsed = Settings.shape[r.key as keyof Settings].safeParse(value);
+    if (parsed.success) settings[r.key] = parsed.data;
+    else relay.log.warn('settings.invalid', { key: r.key });
   }
-  const merged = { ...DEFAULT_SETTINGS, ...stored };
-  const parsed = Settings.safeParse(merged);
-  return parsed.success ? parsed.data : DEFAULT_SETTINGS;
+  return settings as Settings;
 }
 
 export const SettingsPatch = Settings.partial().refine((p) => Object.keys(p).length > 0, { message: 'Change at least one setting' });
@@ -55,7 +67,13 @@ export async function updateSettings(relay: Relay, adminId: string, patch: z.inf
   for (const [key, value] of Object.entries(patch) as [keyof Settings, unknown][]) {
     if (before[key] === value) continue;
     diff[key] = { from: before[key], to: value };
-    stmts.push(relay.db.prepare('INSERT INTO settings (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at').bind(key, JSON.stringify(value), adminId, now));
+    stmts.push(
+      relay.db
+        .prepare(
+          'INSERT INTO settings (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at',
+        )
+        .bind(key, JSON.stringify(value), adminId, now),
+    );
   }
   if (stmts.length) {
     stmts.push(auditStmt(relay, { actor_type: 'admin', actor_id: adminId, action: 'settings.updated', target_type: 'settings', target_id: 'relay', diff }));

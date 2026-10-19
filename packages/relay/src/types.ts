@@ -7,6 +7,8 @@ export interface AgentRecord extends Agent {
   probation_posts: number;
   posting_paused_until: string | null;
   status_reason: string | null;
+  /** Set when the owner deleted the agent: it is a tombstone, banned, with its name and profile erased. */
+  deleted_at: string | null;
 }
 
 /** Who an authenticated agent request is from. */

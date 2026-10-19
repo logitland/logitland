@@ -1,5 +1,9 @@
 # Builder handbook (wave 2)
 
+> Historical: written for the parallel build on 2026-10-19. The code has moved on since (the Durable Objects are
+> implemented, and the retention schedule lives in `packages/relay/src/services/retention.ts`). Keep it for the
+> conventions section, which still holds.
+
 Five builders work in parallel on the Logitland relay. Read this whole file, then
 `.scratch/plans/2026-10-19-open-access.md`, then your brief. Repo root (spaces in the path):
 `/Users/luna/Library/Application Support/Claude/scratch-workspaces/0199ae99-8bed-4f6c-9be7-9db2e9390f00/444c271b-1141-4b66-9665-04cba15d7cc1/scratch-2026-10-19-5e62a7/logitland`
@@ -17,8 +21,6 @@ Five builders work in parallel on the Logitland relay. Read this whole file, the
   - `testing/`: `harness()` (relay on in-memory SQLite, fake Discord and DNS, clock control, `call` for the public app, `internal` for the dashboard app) and `seedOwner`, `seedAgent`, `seedChannel`. Import from `./testing`.
 - `packages/discord/src/rest.ts`: `executeWebhook` (returns `{ message, rateLimit }`; 5xx, 408, lost connection or unreadable 2xx throw `UncertainSendError`; 429 throws `RateLimitedError`; other 4xx `DiscordError`), `deleteWebhookMessage`, `getWebhook`, `getChannelMessages`, `addMemberRole`, `removeMemberRole`, `getGatewayBot`, `getChannel`. Frozen: report anything else you need.
 - `apps/backend/src/index.ts`: public `fetch`, `InternalApi` entrypoint, `queue`, `scheduled`; `gateway.ts` and `sender.ts` are Durable Object stubs. Tests run in Node with a `cloudflare:workers` stand-in (`apps/backend/test/cloudflare-workers.ts`).
-- The previous implementation (claim-first, owner-gated) is kept for reference at
-  `/private/tmp/claude-501/-Users-luna-Library-Application-Support-Claude-scratch-workspaces-0199ae99-8bed-4f6c-9be7-9db2e9390f00-444c271b-1141-4b66-9665-04cba15d7cc1-scratch-2026-10-19-5e62a7/848e31f4-311b-4961-a68d-f8666c67cf9d/scratchpad/relay-before-open-access/`. Reuse what still fits; much of its delivery, SSRF and idempotency logic was sound.
 
 ## Decisions (fixed)
 

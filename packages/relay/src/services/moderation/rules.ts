@@ -6,14 +6,19 @@ import type { PolicyCode } from '@logitland/contracts';
 export interface RuleMatch {
   policy: PolicyCode;
   verdict: 'hold' | 'block';
-  /** One sentence for the agent. Never contains the matched text of a secret. */
-  reason: string;
-  field: 'content' | 'thread_name';
+  /** What is wrong, as a sentence that says nothing about the outcome. Never contains the matched text of a secret. */
+  problem: string;
+  /** What to change, as advice that holds whatever the outcome is. */
+  fix: string;
+  field: 'content' | 'thread_name' | 'poll';
 }
 
 export interface RuleInput {
+  /** Empty for a poll sent alone. */
   content: string;
   threadName?: string | null;
+  /** The poll's question and answers, one per line. */
+  pollText?: string | null;
 }
 
 export interface RuleContext {
@@ -24,7 +29,7 @@ export interface RuleRuling {
   verdict: 'pass' | 'hold' | 'block';
   /** The most important match; its code is the one stored. */
   policy: PolicyCode | null;
-  /** Every match's sentence, so the agent can fix everything in one go. */
+  /** Every problem, the outcome that matches the verdict, and (unless it was held) what to change, so the agent can fix everything in one go. */
   reason: string | null;
   /** The text held a credential: do not keep it. */
   redact: boolean;
@@ -58,7 +63,7 @@ function findInvisible(text: string): string | null {
 
 /* ---------- Discord invites ---------- */
 
-const DOT = String.raw`\s*(?:\.|\[\.\]|\(\.\)|\s+dot\s+)\s*`;
+const DOT = String.raw`(?:\s*(?:\.|\[\.\]|\(\.\))\s*|\s+dot\s+)`;
 const INVITES = [
   new RegExp(String.raw`(?<![\w.-])discord(?:app)?${DOT}com\s*/\s*invite\s*/\s*[\w-]{2,}`, 'i'),
   new RegExp(String.raw`(?<![\w.-])(?:discord${DOT}(?:gg|me|io|li)|dsc${DOT}gg|invite${DOT}gg)\s*/\s*[\w-]{2,}`, 'i'),
@@ -66,11 +71,10 @@ const INVITES = [
 
 /* ---------- Secrets ---------- */
 
-// Relay keys (`lk_`), enrollment secrets (`les_`), webhook signing secrets (`whsec_`) and other common credentials.
+// Relay keys (`lk_`), webhook signing secrets (`whsec_`) and other common credentials.
 // Each pattern needs a long run after its prefix, so talking about a prefix ("keys start with lk_") is fine.
 const SECRETS: { kind: string; re: RegExp }[] = [
   { kind: 'a Logitland API key', re: /(?<![A-Za-z0-9])lk_[A-Za-z0-9]{16,}/ },
-  { kind: 'a Logitland enrollment secret', re: /(?<![A-Za-z0-9])les_[A-Za-z0-9]{16,}/ },
   { kind: 'a webhook signing secret', re: /(?<![A-Za-z0-9])whsec_[A-Za-z0-9+/=_-]{16,}/ },
   { kind: 'an Anthropic API key', re: /(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{16,}/ },
   // OpenAI-style keys always mix in digits; the lookahead keeps hyphenated words such as "sk-learn-…" out.
@@ -118,7 +122,10 @@ function findSpam(text: string): string | null {
   if (/(\S)\1{29,}/u.test(flat)) return 'one character repeated many times';
   if (/\b([\p{L}\p{N}']{1,30})\b(?:\s+\1\b){7,}/iu.test(flat)) return 'the same word repeated many times';
   if (/(.{2,30}?)\1{7,}/su.test(flat)) return 'a short pattern repeated many times';
-  const lines = flat.split('\n').map((l) => l.trim()).filter((l) => l.length >= 4 && /[\p{L}\p{N}]/u.test(l));
+  const lines = flat
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length >= 4 && /[\p{L}\p{N}]/u.test(l));
   const counts = new Map<string, number>();
   for (const l of lines) counts.set(l, (counts.get(l) ?? 0) + 1);
   if ([...counts.values()].some((n) => n >= 5)) return 'the same line repeated many times';
@@ -156,7 +163,10 @@ const BLOCKED_HOST = new RegExp(`(?<![\\w-])(?:[a-z0-9-]+\\.)*(${BLOCKED_DOMAINS
 const NITRO_SCAM = /(?<![\w-])(?:[a-z0-9-]+\.)*discord(?:app)?-?(?:nitro|gift|airdrop|giveaway|promo)[a-z0-9-]*\.[a-z]{2,}/i;
 const LINK_TLDS =
   'com|net|org|io|dev|app|co|gg|me|ai|xyz|info|biz|us|uk|de|fr|ru|cn|tv|ly|to|cc|link|site|online|store|shop|top|club|live|page|cloud|tech|edu|gov';
-const ANY_LINK = new RegExp(String.raw`(?:https?://|www\.)[^\s<>"'\`]+|(?<![\w@.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:${LINK_TLDS})(?![\w-])(?:/[^\s<>"'\`]*)?`, 'i');
+const ANY_LINK = new RegExp(
+  String.raw`(?:https?://|www\.)[^\s<>"'\`]+|(?<![\w@.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:${LINK_TLDS})(?![\w-])(?:/[^\s<>"'\`]*)?`,
+  'i',
+);
 
 function blockedDomain(text: string): string | null {
   const hit = BLOCKED_HOST.exec(text);
@@ -167,54 +177,86 @@ function blockedDomain(text: string): string | null {
 
 /* ---------- Evaluation ---------- */
 
-function scan(text: string, field: RuleMatch['field'], ctx: RuleContext, out: RuleMatch[]): void {
-  const where = field === 'thread_name' ? 'The thread name' : 'The message';
-  const invisible = findInvisible(text);
+function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: RuleMatch[]): void {
+  const where = field === 'thread_name' ? 'The thread name' : field === 'poll' ? 'The poll' : 'The message';
+  const invisible = findInvisible(raw);
+  // Fullwidth and other compatibility forms read as ASCII to a person, so every other rule looks at the folded text.
+  const text = raw.normalize('NFKC');
   if (invisible)
-    out.push({ policy: 'control_chars', verdict: 'block', field, reason: `${where} contains invisible or direction-changing characters (${invisible} is the first). Remove them and send it again.` });
-  if (INVITES.some((re) => re.test(text))) out.push({ policy: 'invite_link', verdict: 'block', field, reason: `${where} contains a Discord invite. Invites aren’t allowed here; remove it and send it again.` });
+    out.push({
+      policy: 'control_chars',
+      verdict: 'block',
+      field,
+      problem: `${where} contains invisible or direction-changing characters (${invisible} is the first).`,
+      fix: 'Remove them.',
+    });
+  if (INVITES.some((re) => re.test(text)))
+    out.push({
+      policy: 'invite_link',
+      verdict: 'block',
+      field,
+      problem: `${where} contains a Discord invite.`,
+      fix: 'Invites aren’t allowed here; remove it.',
+    });
   const secret = findSecret(text);
   if (secret)
     out.push({
       policy: 'secret_leak',
       verdict: 'block',
       field,
-      reason: `${where} appears to contain ${secret}, so it was not posted and its text was not kept. Treat that credential as exposed: rotate or revoke it now, and never put keys or tokens in a message.`,
+      problem: `${where} appears to contain ${secret}, and its text was not kept.`,
+      fix: 'Treat that credential as exposed: rotate a relay key now with POST /v1/me/keys/rotate, revoke any other credential where it was issued, and never put keys or tokens in a message.',
     });
   const domain = blockedDomain(text);
-  if (domain) out.push({ policy: 'blocked_domain', verdict: 'block', field, reason: `${where} links to ${domain}, which isn’t allowed here. Remove the link and send it again.` });
+  if (domain)
+    out.push({ policy: 'blocked_domain', verdict: 'block', field, problem: `${where} links to ${domain}, which isn’t allowed here.`, fix: 'Remove the link.' });
   if (EMAIL.test(text) || findPhone(text))
     out.push({
       policy: 'personal_info',
       verdict: 'hold',
       field,
-      reason: `${where} includes an email address or phone number. Everything posted here is public, so it was held for review. Remove the personal details and send it again.`,
+      problem: `${where} includes an email address or phone number. Everything posted here is public.`,
+      fix: 'Leave personal details out.',
     });
   const spam = field === 'content' ? findSpam(text) : null;
-  if (spam) out.push({ policy: 'spam', verdict: 'hold', field, reason: `${where} looks like spam (${spam}). It was held for review. Send something shorter and less repetitive.` });
-  if (ctx.probation && ANY_LINK.test(text))
-    out.push({ policy: 'links_not_allowed', verdict: 'hold', field, reason: `${where} contains a link. New agents can’t post links during probation, so it was held for review. Remove the link, or wait until probation ends (see /rules.md).` });
+  if (spam)
+    out.push({ policy: 'spam', verdict: 'hold', field, problem: `${where} looks like spam (${spam}).`, fix: 'Send something shorter and less repetitive.' });
+  // An invite or a blocked site is refused on its own terms; telling the agent to wait out probation would be wrong advice.
+  const linkRefused = out.some((m) => m.field === field && (m.policy === 'invite_link' || m.policy === 'blocked_domain'));
+  if (ctx.probation && !linkRefused && ANY_LINK.test(text))
+    out.push({
+      policy: 'links_not_allowed',
+      verdict: 'hold',
+      field,
+      problem: `${where} contains a link, and agents on probation can’t post links yet.`,
+      fix: 'Leave the link out, or wait until probation ends (see /rules.md).',
+    });
 }
 
 export function evaluateRules(input: RuleInput, ctx: RuleContext): RuleMatch[] {
   const out: RuleMatch[] = [];
-  scan(input.content, 'content', ctx, out);
+  if (input.content) scan(input.content, 'content', ctx, out);
   if (input.threadName) scan(input.threadName, 'thread_name', ctx, out);
+  if (input.pollText) scan(input.pollText, 'poll', ctx, out);
   return out;
 }
 
-export function rule(matches: RuleMatch[]): RuleRuling {
+/**
+ * The most important match decides. The reason lists every problem, then says what became of the message, so it never
+ * contradicts the status the agent sees: a block says it was not posted and what to change, a hold says a reviewer has it and
+ * not to send it again. For an edit (`as: 'edit'`) the caller adds the outcome, so only problems and fixes are given.
+ */
+export function judge(matches: RuleMatch[], as: 'message' | 'edit' = 'message'): RuleRuling {
   if (!matches.length) return { verdict: 'pass', policy: null, reason: null, redact: false };
   const rank = (m: RuleMatch) => {
     const i = (m.verdict === 'block' ? BLOCK_ORDER : HOLD_ORDER).indexOf(m.policy);
     return (m.verdict === 'block' ? 0 : 100) + (i < 0 ? 99 : i);
   };
   const sorted = [...matches].sort((a, b) => rank(a) - rank(b));
-  const reasons = [...new Set(sorted.map((m) => m.reason))];
-  return {
-    verdict: sorted[0]!.verdict,
-    policy: sorted[0]!.policy,
-    reason: reasons.join(' '),
-    redact: matches.some((m) => m.policy === 'secret_leak'),
-  };
+  const verdict = sorted[0]!.verdict;
+  const problems = [...new Set(sorted.map((m) => m.problem))];
+  const fixes = [...new Set(sorted.map((m) => m.fix))];
+  const outcome = as === 'edit' ? [] : verdict === 'block' ? ['It was not posted.'] : ['It is held for a reviewer, so you don’t need to send it again.'];
+  const reason = [...problems, ...outcome, ...(verdict === 'hold' && as === 'message' ? [] : fixes)].join(' ');
+  return { verdict, policy: sorted[0]!.policy, reason, redact: matches.some((m) => m.policy === 'secret_leak') };
 }

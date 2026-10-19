@@ -22,16 +22,19 @@ export interface ModerationRequest {
   strikes?: number;
 }
 
-/** A pass may carry a policy_code: a flag that lets an established agent through but holds a new agent on probation. */
+/** A pass may carry a policy_code: a flag that lets an established agent through but holds an agent on probation. */
 export type ModerationResult = { verdict: Verdict; policy_code?: PolicyCode; reason?: string } | { verdict: null; unavailable: true; reason: string };
 
 export interface Moderator {
+  /** Which classifier this is, for the setup checklist. */
+  readonly name?: 'jev-laya' | 'dev' | 'unconfigured' | 'workers-ai';
   review(req: ModerationRequest): Promise<ModerationResult>;
 }
 
 /** Calls a Jev/Laya HTTP endpoint. Request and response shapes are placeholders; a `policy_code` in the answer is kept when it is one of ours. */
 export function httpModerator(url: string, token: string, fetcher: typeof fetch = fetch, timeoutMs = 4000): Moderator {
   return {
+    name: 'jev-laya',
     async review(req) {
       try {
         const res = await fetcher(url, {
@@ -43,10 +46,15 @@ export function httpModerator(url: string, token: string, fetcher: typeof fetch 
         if (!res.ok) return { verdict: null, unavailable: true, reason: `Jev/Laya answered ${res.status}` };
         const data = (await res.json()) as { verdict?: string; reason?: string; policy_code?: string };
         const policy = PolicyCodeSchema.safeParse(data.policy_code);
-        if (data.verdict === 'pass' || data.verdict === 'hold' || data.verdict === 'block') return { verdict: data.verdict, reason: data.reason, ...(policy.success ? { policy_code: policy.data } : {}) };
+        if (data.verdict === 'pass' || data.verdict === 'hold' || data.verdict === 'block')
+          return { verdict: data.verdict, reason: data.reason, ...(policy.success ? { policy_code: policy.data } : {}) };
         return { verdict: null, unavailable: true, reason: 'Jev/Laya returned no verdict' };
       } catch (err) {
-        return { verdict: null, unavailable: true, reason: err instanceof Error && err.name === 'TimeoutError' ? 'Jev/Laya timed out' : 'Jev/Laya is unreachable' };
+        return {
+          verdict: null,
+          unavailable: true,
+          reason: err instanceof Error && err.name === 'TimeoutError' ? 'Jev/Laya timed out' : 'Jev/Laya is unreachable',
+        };
       }
     },
   };
@@ -55,6 +63,7 @@ export function httpModerator(url: string, token: string, fetcher: typeof fetch 
 /** For local development only: passes everything except text containing a hold or block marker. */
 export function devModerator(): Moderator {
   return {
+    name: 'dev',
     async review({ content }) {
       if (content.includes('[block]')) return { verdict: 'block', reason: 'Matched the development block marker' };
       if (content.includes('[hold]')) return { verdict: 'hold', reason: 'Matched the development hold marker' };

@@ -21,6 +21,8 @@
     <p class="small t-2">{problem.detail}</p>
   </div>
   {#if problem.problem !== 'off'}
-    <button type="button" class="btn btn--sm" class:is-busy={retrying} aria-busy={retrying || undefined} disabled={retrying} onclick={retry}><span class="btn__spin" aria-hidden="true"></span>Try again</button>
+    <button type="button" class="btn btn--sm" class:is-busy={retrying} aria-busy={retrying || undefined} disabled={retrying} onclick={retry}
+      ><span class="btn__spin" aria-hidden="true"></span>Try again</button
+    >
   {/if}
 </div>

@@ -9,8 +9,6 @@ import { busy, collapse, flip, motionOK, pop, reveal, transition } from './motio
 
 export { busy, collapse, flip, motionOK, morph, pop, renderFlock, reveal, seeded, textOf, transition };
 export const rng = lcg;
-/** Kept for page scripts written against the CDN build; torph is bundled now, so it is always ready. */
-export const torphReady: Promise<void> = Promise.resolve();
 
 const root = document.documentElement;
 
@@ -167,7 +165,8 @@ function syncTheme(): void {
 
 /* ---------- Segmented controls: a sliding selection ---------- */
 
-const segSelected = (seg: Element) => seg.querySelector<HTMLElement>(':scope > [aria-pressed="true"], :scope > [aria-selected="true"], :scope > [aria-current="page"]');
+const segSelected = (seg: Element) =>
+  seg.querySelector<HTMLElement>(':scope > [aria-pressed="true"], :scope > [aria-selected="true"], :scope > [aria-current="page"]');
 export function placeSeg(seg: HTMLElement): void {
   let ind = seg.querySelector<HTMLElement>(':scope > .seg__ind');
   if (!ind) {
@@ -191,7 +190,11 @@ function initSegs(scope: ParentNode = document): void {
     if (segs.has(seg)) continue;
     segs.add(seg);
     placeSeg(seg);
-    new MutationObserver(() => placeSeg(seg)).observe(seg, { attributes: true, subtree: true, attributeFilter: ['aria-pressed', 'aria-selected', 'aria-current', 'hidden'] });
+    new MutationObserver(() => placeSeg(seg)).observe(seg, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['aria-pressed', 'aria-selected', 'aria-current', 'hidden'],
+    });
     new ResizeObserver(() => placeSeg(seg)).observe(seg);
   }
 }
@@ -276,7 +279,12 @@ function initTabs(scope: ParentNode = document): void {
       const i = tabs.indexOf(document.activeElement as HTMLElement);
       if (i < 0) return;
       const vertical = list.getAttribute('aria-orientation') === 'vertical';
-      const moves: Record<string, number> = { [vertical ? 'ArrowDown' : 'ArrowRight']: i + 1, [vertical ? 'ArrowUp' : 'ArrowLeft']: i - 1, Home: 0, End: tabs.length - 1 };
+      const moves: Record<string, number> = {
+        [vertical ? 'ArrowDown' : 'ArrowRight']: i + 1,
+        [vertical ? 'ArrowUp' : 'ArrowLeft']: i - 1,
+        Home: 0,
+        End: tabs.length - 1,
+      };
       const next = moves[e.key];
       if (next === undefined) return;
       e.preventDefault();

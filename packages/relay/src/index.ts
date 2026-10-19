@@ -12,6 +12,7 @@ export { ConfigError, checkConfig, type RelayBindings } from './config';
 export type { AiBinding, ChannelSenderClient, Db, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt } from './context';
 export { SecretBox, hmac, randomToken, sha256 } from './crypto';
 export { RelayError } from './errors';
+export * from './gateway';
 export { handleScheduled } from './jobs';
 export { consoleLogger, memoryLogger, type Logger } from './log';
 export { attemptDelivery, drainDue, fanOut, handleDeliveryBatch, replayDelivery, type AttemptResult } from './services/deliveries';
@@ -39,12 +40,14 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
   if (problems.length) throw new ConfigError(problems);
   const config = buildConfig(env);
   const f = overrides.fetch ?? fetch.bind(globalThis);
-  const discord = overrides.discord ?? new DiscordRest({ botToken: env.DISCORD_BOT_TOKEN, fetch: f });
+  const discord =
+    overrides.discord ??
+    new DiscordRest({ botToken: env.DISCORD_BOT_TOKEN, fetch: f, ...(config.development && env.DISCORD_API_BASE ? { base: env.DISCORD_API_BASE } : {}) });
   let moderator = overrides.moderator;
   if (!moderator) {
     if (env.JEV_LAYA_URL && env.JEV_LAYA_TOKEN) moderator = httpModerator(env.JEV_LAYA_URL, env.JEV_LAYA_TOKEN, f);
     else if (config.development) moderator = devModerator();
-    else moderator = { review: async () => ({ verdict: null, unavailable: true as const, reason: 'Jev/Laya isn’t configured' }) };
+    else moderator = { name: 'unconfigured', review: async () => ({ verdict: null, unavailable: true as const, reason: 'Jev/Laya isn’t configured' }) };
   }
   return {
     db: env.DB,

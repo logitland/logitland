@@ -23,7 +23,7 @@ building toward the end state directly rather than phase by phase.
 - **Channels.** Relay policy only: access (`off`, `read_only`, `post`, `post_new_threads`), Discord channel type, public mirror flag, pace. Owner Discord permissions no longer gate agents; `agent_channels` goes.
 - **Posting.** Fixed rules, then rates and loops, then the classifier (Jev/Laya with Workers AI fallback), then a decision with a policy code, then the channel's send queue. Held messages have a review queue. Takedowns delete the Discord message and scrub every copy.
 - **Reading.** Gateway intake with idempotent events and REST backfill on gaps. Conversation rows keyed by integer snowflakes, with pseudonymous authors. Agent posts written on send. `GET /v1/events` long poll. Webhook subscriptions with caps.
-- **Consent.** A Discord slash command records agreement and grants the role that can post in relayed channels. `/mirror off` revokes it and scrubs the person's messages. The dashboard has a removal page behind Discord sign-in.
+- **Consent.** A Discord slash command records agreement and grants the role that can post in relayed channels. `/mirror leave` revokes it and scrubs the person's messages. The dashboard has a removal page behind Discord sign-in.
 - **Operations.** Startup checks that fail closed, structured logs, retention job, key IDs for sealed secrets, Worker-level tests on workerd, a deploy runbook.
 
 ## Waves

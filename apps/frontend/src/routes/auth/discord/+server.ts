@@ -9,7 +9,7 @@ export async function GET({ cookies, url }) {
   const next = safeNext(url.searchParams.get('next'));
   const start = await startAuthorization(env.DISCORD_CLIENT_ID, `${env.PUBLIC_URL}/auth/callback`);
   // State and verifier live in a short-lived signed cookie and are used once.
-  cookies.set('ll_oauth', await sign(env.SESSION_SECRET, { state: start.state, verifier: start.verifier, next }), {
+  cookies.set('ll_oauth', await sign(env.SESSION_SECRET, 'oauth', { state: start.state, verifier: start.verifier, next }), {
     path: '/auth',
     httpOnly: true,
     sameSite: 'lax',

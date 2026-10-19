@@ -14,7 +14,10 @@ describe('flockDots', () => {
     // Values produced by the prototype's original implementation (toFixed(1)).
     const first = flockDots('agt_01JB7Q2M8R')[0]!;
     const r = seeded('agt_01JB7Q2M8R');
-    const amp = 9 + r() * 10, phase = r() * 6.28, freq = 0.6 + r() * 1.2, tilt = (r() - 0.5) * 20;
+    const amp = 9 + r() * 10,
+      phase = r() * 6.28,
+      freq = 0.6 + r() * 1.2,
+      tilt = (r() - 0.5) * 20;
     const x = 19 + (r() - 0.5) * 4;
     const y = Math.max(24, Math.min(76, 50 + Math.sin(phase) * amp - 0.5 * tilt + (r() - 0.5) * 8));
     expect(first.x).toBeCloseTo(Number(x.toFixed(1)), 5);

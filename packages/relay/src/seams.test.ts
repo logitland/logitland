@@ -7,6 +7,7 @@ import { readPage } from './services/conversation';
 import { openWebhook, usableChannel } from './services/channels';
 import { getSettings, updateSettings } from './services/settings';
 import { ADMIN_DISCORD, BENCH, LOUNGE, harness, seedAgent, seedChannel, seedOwner } from './testing';
+import { agree } from './consent.testkit';
 
 const prodEnv = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   DB: {} as RelayBindings['DB'],
@@ -23,6 +24,7 @@ const prodEnv = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   JEV_LAYA_URL: 'https://jev.logitland.org/review',
   JEV_LAYA_TOKEN: 't',
   ADMIN_DISCORD_IDS: '200000000000000099',
+  DELIVERIES: { send: async () => undefined },
   ...over,
 });
 
@@ -32,7 +34,9 @@ describe('configuration fails closed', () => {
   });
 
   it('names every missing or unsafe setting', () => {
-    const problems = checkConfig(prodEnv({ DISCORD_BOT_TOKEN: undefined, INTERNAL_TOKEN: 'dev-internal-token', PUBLIC_URL: 'http://localhost:8787', JEV_LAYA_URL: undefined }));
+    const problems = checkConfig(
+      prodEnv({ DISCORD_BOT_TOKEN: undefined, INTERNAL_TOKEN: 'dev-internal-token', PUBLIC_URL: 'http://localhost:8787', JEV_LAYA_URL: undefined }),
+    );
     expect(problems).toEqual(
       expect.arrayContaining([
         'DISCORD_BOT_TOKEN is missing',
@@ -42,6 +46,19 @@ describe('configuration fails closed', () => {
         'No classifier: set JEV_LAYA_URL and JEV_LAYA_TOKEN, or bind AI',
       ]),
     );
+  });
+
+  it('needs the DELIVERIES queue binding', () => {
+    expect(checkConfig(prodEnv({ DELIVERIES: undefined }))).toEqual(['The DELIVERIES queue binding is missing']);
+    // Development runs without a queue: the cron scan sends the deliveries.
+    expect(
+      checkConfig({
+        ...prodEnv({ DELIVERIES: undefined }),
+        RELAY_MODE: 'development',
+        PUBLIC_URL: 'http://localhost:8787',
+        DASHBOARD_URL: 'http://localhost:5173',
+      }),
+    ).toEqual([]);
   });
 
   it('accepts Workers AI alone as the classifier', () => {
@@ -113,29 +130,37 @@ describe('channel policy', () => {
     expect((await usableChannel(h.relay, BENCH, 'read')).id).toBe(BENCH);
     await expect(usableChannel(h.relay, BENCH, 'send')).rejects.toMatchObject({ status: 403 });
     await expect(usableChannel(h.relay, '119999999999999999', 'read')).rejects.toMatchObject({ status: 404 });
-    expect((await openWebhook(h.relay, (await usableChannel(h.relay, LOUNGE, 'send'))))?.id).toBe('600000000000000001');
+    expect((await openWebhook(h.relay, await usableChannel(h.relay, LOUNGE, 'send')))?.id).toBe('600000000000000001');
   });
 });
 
 describe('conversation reads', () => {
-  it('orders snowflakes numerically and hides people who haven’t agreed from the public', async () => {
+  it('orders snowflakes numerically and hides people who hadn’t agreed, from agents and the public alike', async () => {
     const h = harness();
     const ins = (id: string, kind: string, person: string | null, content: string) =>
       h.db
-        .prepare("INSERT INTO conversation (message_id, channel_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, created_at) VALUES (?, ?, ?, NULL, 'p_x', ?, 'name', ?, '2026-10-19T03:00:00.000Z')")
+        .prepare(
+          "INSERT INTO conversation (message_id, channel_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, created_at) VALUES (?, ?, ?, NULL, 'p_x', ?, 'name', ?, '2026-10-19T03:00:00.000Z')",
+        )
         .bind(id, LOUNGE, kind, person, content)
         .run();
     await ins('999999999999999999', 'agent', null, 'older, 18 digits');
     await ins('1234567890123456789', 'human', '700000000000000001', 'newer, 19 digits');
-    const agentView = await readPage(h.relay, LOUNGE, { view: 'agent' });
-    expect(agentView.messages.map((m) => m.message_id)).toEqual(['1234567890123456789', '999999999999999999']);
-    expect(agentView.messages[0]!.content).toBe('newer, 19 digits');
-    const publicView = await readPage(h.relay, LOUNGE, { view: 'public' });
-    expect(publicView.messages[0]!.content).toBeNull();
-    expect(publicView.messages[0]!.author.display_name).toBe('A person in Discord');
-    await h.db.prepare("INSERT INTO consents (discord_user_id, guild_id, method, granted_at) VALUES ('700000000000000001', '1', 'command', '2026-10-19T03:00:00Z')").run();
-    expect((await readPage(h.relay, LOUNGE, { view: 'public' })).messages[0]!.content).toBe('newer, 19 digits');
-    expect((await readPage(h.relay, LOUNGE, { view: 'agent', before: '1234567890123456789' })).messages.map((m) => m.message_id)).toEqual(['999999999999999999']);
+    for (const view of ['agent', 'public'] as const) {
+      const page = await readPage(h.relay, LOUNGE, { view });
+      expect(page.messages.map((m) => m.message_id)).toEqual(['1234567890123456789', '999999999999999999']);
+      expect(page.messages[0]!.content).toBeNull();
+      expect(page.messages[0]!.author).toMatchObject({ kind: 'human', display_name: 'A person in Discord', author_id: 'p_withheld' });
+      expect(page.messages[1]!.content).toBe('older, 18 digits');
+    }
+    // Agreeing at the very moment of the message counts; the same person agreeing later doesn't reveal what they wrote before.
+    await agree(h, '700000000000000001', { at: '2026-10-19T03:00:00.000Z' });
+    for (const view of ['agent', 'public'] as const) expect((await readPage(h.relay, LOUNGE, { view })).messages[0]!.content).toBe('newer, 19 digits');
+    await h.db.prepare('UPDATE consents SET granted_at = ?').bind('2026-10-19T03:00:00.001Z').run();
+    for (const view of ['agent', 'public'] as const) expect((await readPage(h.relay, LOUNGE, { view })).messages[0]!.content).toBeNull();
+    expect((await readPage(h.relay, LOUNGE, { view: 'agent', before: '1234567890123456789' })).messages.map((m) => m.message_id)).toEqual([
+      '999999999999999999',
+    ]);
   });
 });
 
@@ -180,5 +205,18 @@ describe('cron', () => {
     expect(out.gateway).toBe('failed');
     expect(out.held).toBe(0);
     expect(h.log.lines.some((l) => l.event === 'cron.job_failed' && l.fields.job === 'gateway')).toBe(true);
+  });
+});
+
+describe('owner channel names', () => {
+  it('lists channels open to agents for the signed-in owner only', async () => {
+    const h = harness();
+    await seedChannel(h.relay, { id: LOUNGE, access: 'post', name: 'lounge' });
+    await seedChannel(h.relay, { id: BENCH, access: 'off', name: 'bench' });
+    const owner = await seedOwner(h.relay);
+    const res = await h.internal('GET', `/internal/owners/${owner.id}/channels`, undefined, { 'x-logitland-owner': owner.id });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { channels: { name: string }[] }).channels.map((c) => c.name)).toEqual(['lounge']);
+    expect((await h.internal('GET', `/internal/owners/${owner.id}/channels`)).status).toBe(403);
   });
 });

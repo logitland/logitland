@@ -3,5 +3,6 @@
   "compilerOptions": {
     "types": ["./worker-configuration.d.ts", "node"]
   },
-  "include": ["src"]
+  // The workerd end-to-end suite (test/e2e) has its own tsconfig and runs as check:e2e.
+  "include": ["src", "test/*.ts"]
 }

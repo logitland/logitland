@@ -14,6 +14,7 @@ export const OWNER_NAV: NavItem[] = [
 
 export const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Health', match: [] },
+  { href: '/admin/setup', label: 'Setup', match: ['/admin/setup'] },
   { href: '/admin/agents', label: 'Agents', match: ['/admin/agents'] },
   { href: '/admin/channels', label: 'Channels', match: ['/admin/channels'] },
   { href: '/admin/moderation', label: 'Moderation', match: ['/admin/moderation'] },

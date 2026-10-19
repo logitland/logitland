@@ -2,18 +2,13 @@ import type { ConsentStatus, PersonRemoval } from '@logitland/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import { scrubPerson } from './services/scrub';
 import { GUILD, LOUNGE, harness, seedChannel, seedOwner, type Harness } from './testing';
+import { agree } from './consent.testkit';
 
-// scrubPerson (B1) was a stub while this was written; the stand-in keeps its contract.
-vi.mock('./services/scrub', () => ({
-  scrubMessage: vi.fn(),
-  scrubPerson: vi.fn(async (relay: import('./context').Relay, discordUserId: string) => {
-    const r = await relay.db
-      .prepare("UPDATE conversation SET content = NULL, deleted_at = ?, removed_by = 'author' WHERE discord_user_id = ? AND deleted_at IS NULL")
-      .bind(relay.now().toISOString(), discordUserId)
-      .run();
-    return { messages: r.meta.changes };
-  }),
-}));
+// The real scrubPerson, wrapped so tests can see how it was called and make it fail.
+vi.mock('./services/scrub', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./services/scrub')>();
+  return { ...real, scrubPerson: vi.fn(real.scrubPerson) };
+});
 
 const PERSON = '700000000000000001';
 const ROLE = '500000000000000001';
@@ -28,10 +23,7 @@ async function setup() {
 }
 
 async function agreed(h: Harness, person = PERSON) {
-  await h.db
-    .prepare("INSERT INTO consents (discord_user_id, guild_id, method, granted_at) VALUES (?, ?, 'command', '2026-10-19T02:00:00.000Z')")
-    .bind(person, GUILD)
-    .run();
+  await agree(h, person, { guild: GUILD, at: '2026-10-19T02:00:00.000Z' });
 }
 
 async function said(h: Harness, id: string, person = PERSON) {
@@ -100,6 +92,14 @@ describe('POST /internal/people/:discordUserId/removal', () => {
     expect(out).toMatchObject({ mode: 'leave', removed_messages: 2, role_removed: true, consent: { agreed: false, method: 'command', mirrored_messages: 0 } });
     expect(out.consent.revoked_at).toBe(h.now().toISOString());
     expect(vi.mocked(scrubPerson)).toHaveBeenCalledWith(h.relay, PERSON);
+    const rows = (
+      await h.db
+        .prepare('SELECT content, deleted_at, removed_by FROM conversation WHERE channel_id = ?')
+        .bind(LOUNGE)
+        .all<{ content: string | null; deleted_at: string | null; removed_by: string | null }>()
+    ).results;
+    expect(rows.filter((r) => r.content !== null || r.deleted_at === null)).toEqual([]);
+    expect(rows.every((r) => r.removed_by === 'author')).toBe(true);
     expect(h.discordCalls.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([`DELETE /api/v10/guilds/${GUILD}/members/${PERSON}/roles/${ROLE}`]);
     expect(await audits(h)).toEqual([
       { actor_type: 'owner', actor_id: me.id, action: 'consent.revoked', target_id: PERSON },
@@ -138,6 +138,15 @@ describe('POST /internal/people/:discordUserId/removal', () => {
     h.setDiscord(async () => Response.json({ message: 'Unknown Member', code: 10007 }, { status: 404 }));
     const out = (await (await h.internal('POST', `/internal/people/${PERSON}/removal`, { mode: 'leave' }, as(me))).json()) as PersonRemoval;
     expect(out.role_removed).toBe(true);
+  });
+
+  it('keeps scrubbing while the scrubber says there is more, and adds the rounds up', async () => {
+    const { h, me, as } = await setup();
+    await agreed(h);
+    vi.mocked(scrubPerson).mockResolvedValueOnce({ messages: 5000, more: true }).mockResolvedValueOnce({ messages: 7, more: false });
+    const out = (await (await h.internal('POST', `/internal/people/${PERSON}/removal`, { mode: 'remove_messages' }, as(me))).json()) as PersonRemoval;
+    expect(out.removed_messages).toBe(5007);
+    expect((await audits(h)).map((a) => a.action)).toEqual(['person.messages_removed']);
   });
 
   it('can be repeated: nothing more to remove, nothing more to audit', async () => {

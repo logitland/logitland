@@ -1,20 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { relayApp } from './app';
+import type { RelayBindings } from './config';
+import { CONSENT_NOTICE_VERSION, consentNotice } from './services/consent';
 import { scrubPerson } from './services/scrub';
 import { GUILD, LOUNGE, harness, seedChannel, type Harness } from './testing';
 
-// scrubPerson (B1) was a stub while this was written, so it is replaced by a stand-in that keeps its contract:
-// tombstone the person's messages and say how many.
-vi.mock('./services/scrub', () => ({
-  scrubMessage: vi.fn(),
-  scrubPerson: vi.fn(async (relay: import('./context').Relay, discordUserId: string) => {
-    const r = await relay.db
-      .prepare("UPDATE conversation SET content = NULL, deleted_at = ?, removed_by = 'author' WHERE discord_user_id = ? AND deleted_at IS NULL")
-      .bind(relay.now().toISOString(), discordUserId)
-      .run();
-    return { messages: r.meta.changes };
-  }),
-}));
+// The real scrubPerson, wrapped so tests can see how it was called and make it fail.
+vi.mock('./services/scrub', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./services/scrub')>();
+  return { ...real, scrubPerson: vi.fn(real.scrubPerson) };
+});
 
 const PERSON = '700000000000000001';
 const APP_ID = '400000000000000001';
@@ -22,30 +17,24 @@ const ROLE = '500000000000000001';
 const TOKEN = 'interaction-token-abc123';
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
-async function setup(opts: { start?: string } = {}) {
-  const h = harness(opts);
+async function setup(opts: { start?: string; keyless?: boolean; env?: Partial<RelayBindings> } = {}) {
   const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as CryptoKeyPair;
-  h.relay.config.discord.publicKey = hex(await crypto.subtle.exportKey('raw', pair.publicKey));
-  const app = relayApp(h.relay);
-  const pending: Promise<unknown>[] = [];
-  const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException() {}, props: {} };
-
+  const publicKey = hex(await crypto.subtle.exportKey('raw', pair.publicKey));
+  const h = harness({ start: opts.start, env: { ...(opts.keyless ? {} : { DISCORD_PUBLIC_KEY: publicKey }), ...opts.env } });
   const sign = async (raw: string, timestamp = String(Math.floor(h.now().getTime() / 1000)), key = pair.privateKey) => ({
     'x-signature-ed25519': hex(await crypto.subtle.sign({ name: 'Ed25519' }, key, new TextEncoder().encode(timestamp + raw))),
     'x-signature-timestamp': timestamp,
   });
   /** Posts an interaction signed by Discord's key (or with the headers you give), and waits for deferred work. */
-  async function sendRaw(raw: string, headers?: Record<string, string>) {
-    const res = await app.request(
-      '/discord/interactions',
-      { method: 'POST', headers: { 'content-type': 'application/json', ...(headers ?? (await sign(raw))) }, body: raw },
-      undefined,
-      ctx,
-    );
-    await Promise.all(pending.splice(0));
+  async function send(payload: unknown, headers?: Record<string, string>) {
+    const res = await h.call('POST', '/discord/interactions', payload, headers ?? (await sign(JSON.stringify(payload))));
+    await h.settle();
     return res;
   }
-  const send = (payload: unknown, headers?: Record<string, string>) => sendRaw(JSON.stringify(payload), headers);
+  /** The harness only sends JSON bodies, so a body that isn't JSON goes straight to the app. */
+  async function sendRaw(raw: string) {
+    return relayApp(h.relay).request('/discord/interactions', { method: 'POST', headers: await sign(raw), body: raw });
+  }
   return { h, send, sendRaw, sign, pair };
 }
 
@@ -59,9 +48,36 @@ const command = (sub: string, o: { guild?: string | null; user?: string; roles?:
   ...(o.guild === null ? { user: { id: o.user ?? PERSON } } : { guild_id: o.guild ?? GUILD, member: member(o.user, o.roles) }),
   data: { id: '810000000000000001', name: 'mirror', type: 1, options: [{ name: sub, type: 1 }] },
 });
+/** The welcome message's button is `mirror_agree`; the one in the reply to /mirror agree is `mirror_agree_cmd`. */
+const CMD_BUTTON = 'mirror_agree_cmd';
 const button = (customId = 'mirror_agree') => ({ ...base, type: 3, guild_id: GUILD, member: member(), data: { custom_id: customId, component_type: 2 } });
 
-const jsonOf = async (res: Response) => (await res.json()) as { type: number; data?: { content?: string; flags?: number } };
+const jsonOf = async (res: Response) =>
+  (await res.json()) as {
+    type: number;
+    data?: { content?: string; flags?: number; components?: { type: number; components: { custom_id: string; label: string }[] }[] };
+  };
+
+const historyRows = async (h: Harness) =>
+  (
+    await h.db.prepare('SELECT discord_user_id, guild_id, action, method, notice_version, interaction_id, at FROM consent_history ORDER BY id').all<{
+      discord_user_id: string;
+      guild_id: string | null;
+      action: string;
+      method: string | null;
+      notice_version: string | null;
+      interaction_id: string | null;
+      at: string;
+    }>()
+  ).results;
+/** What the person sees last: the follow-up that replaced "thinking…". */
+const lastFollowUp = async (h: Harness) =>
+  (
+    (await h.discordCalls
+      .filter((r) => r.method === 'PATCH')
+      .at(-1)!
+      .json()) as { content: string }
+  ).content;
 
 const personRow = (h: Harness) =>
   h.db.prepare('SELECT * FROM consents WHERE discord_user_id = ?').bind(PERSON).first<{ method: string; granted_at: string; revoked_at: string | null }>();
@@ -124,77 +140,183 @@ describe('interaction requests', () => {
   });
 
   it('refuse everything when no public key is configured, rather than trust the request', async () => {
-    const { send, h } = await setup();
-    h.relay.config.discord.publicKey = null;
+    const { send } = await setup({ keyless: true });
     expect((await send({ ...base, type: 1 })).status).toBe(503);
   });
 
   it('reject a signed body that isn’t an interaction, and anything unsigned', async () => {
-    const { send, sendRaw, sign } = await setup();
+    const { send, sendRaw } = await setup();
     expect((await send({ hello: 'world' })).status).toBe(400);
-    expect((await sendRaw('not json', await sign('not json'))).status).toBe(400);
+    expect((await sendRaw('not json')).status).toBe(400);
     expect((await send({ ...base, type: 1 }, {})).status).toBe(401);
   });
 });
 
 describe('/mirror agree', () => {
-  it('records the agreement, gives the role with an audit reason, and explains in plain words', async () => {
+  it('shows the notice with an agree button, and agrees to nothing', async () => {
     const { h, send } = await setup();
-    const res = await send(command('agree'));
-    const out = await jsonOf(res);
+    const out = await jsonOf(await send(command('agree')));
     expect(out.type).toBe(4);
     expect(out.data!.flags).toBe(64);
-    expect(out.data!.content).toContain('You agreed to the Logitland public mirror');
-    expect(out.data!.content).toContain(h.relay.config.publicUrl);
-    expect(out.data!.content).toContain('/mirror leave');
-    expect(out.data!.content).toContain('role');
+    expect(out.data!.content).toBe(consentNotice(h.relay.config.dashboardUrl));
+    expect(out.data!.components).toEqual([{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: let me chat', custom_id: CMD_BUTTON }] }]);
 
-    expect(await personRow(h)).toMatchObject({ method: 'command', revoked_at: null, granted_at: h.now().toISOString() });
-    expect(discordPaths(h)).toEqual([`PUT /api/v10/guilds/${GUILD}/members/${PERSON}/roles/${ROLE}`]);
+    expect(await personRow(h)).toBeNull();
+    expect(await historyRows(h)).toEqual([]);
+    expect(await audits(h)).toEqual([]);
+    expect(h.discordCalls).toHaveLength(0);
+  });
+
+  it('has a notice that fits in a Discord message and says what is shared, with whom, and how to leave', async () => {
+    const { h } = await setup();
+    const notice = consentNotice(h.relay.config.dashboardUrl);
+    expect(notice.length).toBeLessThan(2000);
+    for (const part of [
+      'from that moment on',
+      'Nothing you wrote before you agreed is copied',
+      'messages, polls, thread titles',
+      'display name',
+      'public web page and a public API',
+      'Search engines may index',
+      'Every AI agent connected to Logitland',
+      'webhook servers',
+      'Automated moderation',
+      'Cloudflare Workers AI',
+      '/mirror leave',
+      'deletes what Logitland holds of yours',
+      'can’t be recalled',
+      'Discord keeps its own copy',
+      `${h.relay.config.dashboardUrl}/privacy`,
+      `${h.relay.config.dashboardUrl}/mirror`,
+    ])
+      expect(notice).toContain(part);
+    // The mirror site, never the relay's own address.
+    expect(notice).not.toContain(h.relay.config.publicUrl);
+  });
+
+  it('agrees only when the button in that reply is pressed, and records the notice and the interaction', async () => {
+    const { h, send } = await setup();
+    const res = await send(button(CMD_BUTTON));
+    expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
+
+    expect(await personRow(h)).toMatchObject({
+      method: 'command',
+      notice_version: CONSENT_NOTICE_VERSION,
+      interaction_id: base.id,
+      revoked_at: null,
+      granted_at: h.now().toISOString(),
+    });
+    expect(await historyRows(h)).toEqual([
+      {
+        discord_user_id: PERSON,
+        guild_id: GUILD,
+        action: 'granted',
+        method: 'command',
+        notice_version: CONSENT_NOTICE_VERSION,
+        interaction_id: base.id,
+        at: h.now().toISOString(),
+      },
+    ]);
+    expect(discordPaths(h)).toEqual([
+      `PUT /api/v10/guilds/${GUILD}/members/${PERSON}/roles/${ROLE}`,
+      `PATCH /api/v10/webhooks/${APP_ID}/${TOKEN}/messages/@original`,
+    ]);
     const call = h.discordCalls[0]!;
     expect(call.headers.get('authorization')).toBe('Bot test-bot-token');
     expect(decodeURIComponent(call.headers.get('x-audit-log-reason')!)).toBe('Agreed to the Logitland public mirror');
+    const followUp = await lastFollowUp(h);
+    expect(followUp).toContain('You agreed to the Logitland public mirror');
+    expect(followUp).toContain(`${h.relay.config.dashboardUrl}/privacy`);
+    expect(followUp).toContain('You have the chat role');
+    expect(followUp).toContain('/mirror leave');
     expect(await audits(h)).toEqual([{ actor_type: 'public', actor_id: PERSON, action: 'consent.granted', target_id: PERSON, reason: 'command', diff: null }]);
   });
 
   it('works from the welcome message’s button and records the method', async () => {
     const { h, send } = await setup();
-    const out = await jsonOf(await send(button()));
-    expect(out.data!.content).toContain('You agreed');
-    expect(await personRow(h)).toMatchObject({ method: 'button', revoked_at: null });
-    expect(discordPaths(h)).toHaveLength(1);
+    expect(await (await send(button())).json()).toEqual({ type: 5, data: { flags: 64 } });
+    expect(await personRow(h)).toMatchObject({ method: 'button', notice_version: CONSENT_NOTICE_VERSION, revoked_at: null });
+    expect((await historyRows(h))[0]).toMatchObject({ action: 'granted', method: 'button' });
+    expect(await lastFollowUp(h)).toContain('You agreed');
   });
 
-  it('keeps the original time and method when asked again, and still re-applies the role', async () => {
+  it('answers before the role call, so a slow Discord can’t miss the three-second deadline', async () => {
+    const { h, sign } = await setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.setDiscord(async (req) => {
+      if (req.method === 'PUT') await gate;
+      return Response.json({});
+    });
+    const payload = button(CMD_BUTTON);
+    const res = await h.call('POST', '/discord/interactions', payload, await sign(JSON.stringify(payload)));
+    expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
+    // The agreement is already on record; only the role is still on its way.
+    expect(await personRow(h)).toMatchObject({ revoked_at: null });
+    expect(h.discordCalls.filter((r) => r.method === 'PATCH')).toHaveLength(0);
+    release();
+    await h.settle();
+    expect(await lastFollowUp(h)).toContain('You have the chat role');
+  });
+
+  it('keeps the original time, method and notice when asked again, writes no second record, and still re-applies the role', async () => {
     const { h, send } = await setup();
-    await send(command('agree'));
+    await send(button(CMD_BUTTON));
     const first = await personRow(h);
     h.advance(3_600_000);
-    const out = await jsonOf(await send(button()));
-    expect(out.data!.content).toContain('You had already agreed');
+    await send({ ...button(), id: '800000000000000002' });
+    expect(await lastFollowUp(h)).toContain('You had already agreed');
     expect(await personRow(h)).toEqual(first);
     expect(await audits(h)).toHaveLength(1);
-    expect(discordPaths(h)).toHaveLength(2);
+    expect(await historyRows(h)).toHaveLength(1);
+    expect(h.discordCalls.filter((r) => r.method === 'PUT')).toHaveLength(2);
   });
 
-  it('agrees again after leaving, with a new time', async () => {
+  it('agrees again after leaving, with a new time, and keeps every step in the history', async () => {
     const { h, send } = await setup();
-    await send(command('agree'));
-    await send(command('leave'));
+    await send(button(CMD_BUTTON));
+    await send({ ...command('leave'), id: '800000000000000002' });
     expect((await personRow(h))!.revoked_at).not.toBeNull();
     h.advance(3_600_000);
-    await send(button());
-    expect(await personRow(h)).toMatchObject({ method: 'button', revoked_at: null, granted_at: h.now().toISOString() });
+    await send({ ...button(), id: '800000000000000003' });
+    expect(await personRow(h)).toMatchObject({ method: 'button', revoked_at: null, granted_at: h.now().toISOString(), interaction_id: '800000000000000003' });
     expect((await audits(h)).map((a) => a.action)).toEqual(['consent.granted', 'consent.revoked', 'consent.granted']);
+    expect((await historyRows(h)).map((r) => [r.action, r.method, r.interaction_id])).toEqual([
+      ['granted', 'command', base.id],
+      ['revoked', 'command', '800000000000000002'],
+      ['granted', 'button', '800000000000000003'],
+    ]);
   });
 
   it('keeps the agreement and says so when Discord won’t give the role', async () => {
     const { h, send } = await setup();
     h.setDiscord(async () => Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 }));
-    const out = await jsonOf(await send(command('agree')));
-    expect(out.data!.content).toContain('couldn’t give you the chat role');
+    await send(button(CMD_BUTTON));
+    expect(await lastFollowUp(h)).toContain('couldn’t give you the chat role');
     expect(await personRow(h)).toMatchObject({ revoked_at: null });
     expect(h.log.lines.some((l) => l.event === 'consent.role_failed')).toBe(true);
+  });
+
+  it('ends consistent when an agree and a leave overlap: the role follows the agreement, whichever finishes last', async () => {
+    const { h, sign } = await setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const roleCalls: string[] = [];
+    h.setDiscord(async (req) => {
+      if (new URL(req.url).pathname.includes('/roles/')) {
+        roleCalls.push(req.method);
+        if (req.method === 'PUT') await gate;
+      }
+      return Response.json({});
+    });
+    const post = async (payload: unknown) => h.call('POST', '/discord/interactions', payload, await sign(JSON.stringify(payload)));
+    await post(button(CMD_BUTTON)); // agreement recorded; the role call is waiting on Discord
+    await post({ ...command('leave', { roles: [ROLE] }), id: '800000000000000002' }); // agreement ended; the leave takes the role away
+    release();
+    await h.settle();
+    expect((await personRow(h))!.revoked_at).not.toBeNull();
+    // The late grant found the agreement gone and took the role back: the last word is a removal.
+    expect(roleCalls.at(-1)).toBe('DELETE');
   });
 });
 
@@ -202,7 +324,7 @@ describe('/mirror leave', () => {
   it('ends the agreement at once, defers, then removes the role, scrubs the person and edits the reply', async () => {
     const { h, send } = await setup();
     await seedChannel(h.relay, { publicMirror: true });
-    await send(command('agree'));
+    await send(button(CMD_BUTTON));
     await someone(h, '310000000000000001');
     await someone(h, '310000000000000002');
     h.discordCalls.length = 0;
@@ -221,7 +343,7 @@ describe('/mirror leave', () => {
     const edit = h.discordCalls[1]!;
     expect(edit.headers.get('authorization')).toBeNull();
     const followUp = (await edit.json()) as { content: string; allowed_mentions: unknown };
-    expect(followUp.content).toContain('I deleted 2 of your messages');
+    expect(followUp.content).toContain('I deleted 2 messages of yours');
     expect(followUp.content).toContain('The chat role is gone');
     expect(followUp.allowed_mentions).toEqual({ parse: [] });
 
@@ -241,7 +363,7 @@ describe('/mirror leave', () => {
   it('says so, and finishes the job on a retry, when part of it fails', async () => {
     const { h, send } = await setup();
     await seedChannel(h.relay, { publicMirror: true });
-    await send(command('agree'));
+    await send(button(CMD_BUTTON));
     await someone(h, '310000000000000001');
     h.discordCalls.length = 0;
     h.setDiscord(async (req) =>
@@ -249,7 +371,7 @@ describe('/mirror leave', () => {
     );
     await send(command('leave', { roles: [ROLE] }));
     const followUp = (await h.discordCalls.at(-1)!.json()) as { content: string };
-    expect(followUp.content).toContain('I deleted 1 of your message');
+    expect(followUp.content).toContain('I deleted 1 message of yours');
     expect(followUp.content).toContain('Ask a moderator to remove it');
 
     // The agreement is already over, but the role is still there: leaving again has work to do.
@@ -262,7 +384,7 @@ describe('/mirror leave', () => {
 
   it('tells the person when removing their messages fails, without losing the revoked agreement', async () => {
     const { h, send } = await setup();
-    await send(command('agree'));
+    await send(button(CMD_BUTTON));
     vi.mocked(scrubPerson).mockRejectedValueOnce(new Error('database is locked'));
     h.discordCalls.length = 0;
     await send(command('leave', { roles: [ROLE] }));
@@ -275,7 +397,7 @@ describe('/mirror leave', () => {
 
   it('retries the follow-up edit when Discord hasn’t registered the acknowledgement yet', async () => {
     const { h, send } = await setup();
-    await send(command('agree'));
+    await send(button(CMD_BUTTON));
     let patches = 0;
     h.setDiscord(async (req) => {
       if (req.method !== 'PATCH') return Response.json({});
@@ -286,14 +408,26 @@ describe('/mirror leave', () => {
     expect(patches).toBe(2);
   });
 
-  it('answers straight away when there is nothing to remove', async () => {
+  it('runs the whole clean-up even when there is nothing to remove', async () => {
     const { h, send } = await setup();
     const res = await send(command('leave'));
-    const out = await jsonOf(res);
-    expect(out.type).toBe(4);
-    expect(out.data!.flags).toBe(64);
-    expect(out.data!.content).toContain('nothing to remove');
-    expect(h.discordCalls).toHaveLength(0);
+    expect(await res.json()).toEqual({ type: 5, data: { flags: 64 } });
+    expect(vi.mocked(scrubPerson)).toHaveBeenLastCalledWith(h.relay, PERSON);
+    expect(await lastFollowUp(h)).toContain('I had no messages of yours to delete');
+    expect(discordPaths(h)).toEqual([
+      `DELETE /api/v10/guilds/${GUILD}/members/${PERSON}/roles/${ROLE}`,
+      `PATCH /api/v10/webhooks/${APP_ID}/${TOKEN}/messages/@original`,
+    ]);
+  });
+
+  it('cleans up tombstones of someone with no live messages, which an early return used to leave naming them', async () => {
+    const { h, send } = await setup();
+    await seedChannel(h.relay, { publicMirror: true });
+    await someone(h, '310000000000000001', { deleted: true });
+    await send(command('leave'));
+    expect(
+      await h.db.prepare('SELECT discord_user_id, display_name, author_ref FROM conversation WHERE message_id = ?').bind('310000000000000001').first(),
+    ).toEqual({ discord_user_id: null, display_name: 'Former participant', author_ref: 'p_removed' });
   });
 
   it('removes messages even from someone who never agreed', async () => {
@@ -304,7 +438,7 @@ describe('/mirror leave', () => {
     expect((await jsonOf(res)).type).toBe(5);
     expect(vi.mocked(scrubPerson)).toHaveBeenLastCalledWith(h.relay, PERSON);
     const followUp = (await h.discordCalls.at(-1)!.json()) as { content: string };
-    expect(followUp.content).toContain('I deleted 1 of your message');
+    expect(followUp.content).toContain('I deleted 1 message of yours');
   });
 });
 
@@ -321,11 +455,14 @@ describe('/mirror status', () => {
     const { h, send } = await setup();
     await seedChannel(h.relay, { id: LOUNGE, publicMirror: true });
     await seedChannel(h.relay, { id: '110000000000000002', name: 'bench', publicMirror: false });
-    await send(command('agree'));
+    // Mirrored only counts channels that are also relayed: this one is switched on for the mirror but closed to agents.
+    await seedChannel(h.relay, { id: '110000000000000003', name: 'dark', publicMirror: true, access: 'off' });
+    await send(button(CMD_BUTTON));
     await someone(h, '310000000000000001');
     await someone(h, '310000000000000002');
     await someone(h, '310000000000000003', { deleted: true });
     await someone(h, '310000000000000004', { channel: '110000000000000002' });
+    await someone(h, '310000000000000006', { channel: '110000000000000003' });
     await someone(h, '310000000000000005', { person: '700000000000000002' });
     const out = await jsonOf(await send(command('status')));
     expect(out.data!.content).toContain('agreed to the public mirror on 2026-10-19 with the /mirror command');
@@ -335,7 +472,7 @@ describe('/mirror status', () => {
   it('shows nothing mirrored after leaving', async () => {
     const { h, send } = await setup();
     await seedChannel(h.relay, { publicMirror: true });
-    await send(command('agree'));
+    await send(button(CMD_BUTTON));
     await someone(h, '310000000000000001');
     await send(command('leave'));
     const out = await jsonOf(await send(command('status')));
@@ -358,6 +495,7 @@ describe('outside the Logitland server', () => {
     const s = await setup();
     for (const sub of ['agree', 'leave', 'status']) await wrong(s, command(sub, { guild: '999999999999999999' }));
     await wrong(s, { ...button(), guild_id: '999999999999999999' });
+    await wrong(s, { ...button(CMD_BUTTON), guild_id: '999999999999999999' });
   });
 
   it('does the same in a direct message', async () => {
@@ -366,8 +504,7 @@ describe('outside the Logitland server', () => {
   });
 
   it('does the same when the relay has no guild configured', async () => {
-    const s = await setup();
-    s.h.relay.config.discord.guildId = null;
+    const s = await setup({ env: { DISCORD_GUILD_ID: undefined } });
     await wrong(s, command('agree'));
   });
 });

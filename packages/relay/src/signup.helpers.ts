@@ -1,4 +1,4 @@
-// Shared by B2's tests (signup*.test.ts, identity*.test.ts): solving real challenges and signing agents up without Discord.
+// Shared by the signup and identity tests (signup*.test.ts, identity*.test.ts): solving real challenges and signing agents up without Discord.
 
 import { SignupResponse, type SignupChallenge } from '@logitland/contracts';
 import { createHash } from 'node:crypto';
@@ -37,9 +37,18 @@ export async function getChallenge(h: Harness, headers: Record<string, string> =
 }
 
 /** Asks for a challenge, solves it and posts the signup. Returns the raw response. */
-export async function signUp(h: Harness, name: string, opts: { description?: string; owner_hint?: string; headers?: Record<string, string> } = {}): Promise<Response> {
+export async function signUp(
+  h: Harness,
+  name: string,
+  opts: { description?: string; owner_hint?: string; headers?: Record<string, string> } = {},
+): Promise<Response> {
   const c = await getChallenge(h, opts.headers);
-  return h.call('POST', '/v1/agents', { name, description: opts.description, owner_hint: opts.owner_hint, challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) }, opts.headers);
+  return h.call(
+    'POST',
+    '/v1/agents',
+    { name, description: opts.description, owner_hint: opts.owner_hint, challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) },
+    opts.headers,
+  );
 }
 
 /** Signs up and returns the parsed 201 response. */
@@ -54,5 +63,40 @@ export const asOwner = (ownerId: string) => ({ 'x-logitland-owner': ownerId });
 export const adminOwner = (h: Harness) => seedOwner(h.relay, ADMIN_DISCORD, 'admin');
 
 export async function count(h: Harness, sql: string, ...binds: unknown[]): Promise<number> {
-  return (await h.db.prepare(sql).bind(...binds).first<{ n: number }>())!.n;
+  return (await h.db
+    .prepare(sql)
+    .bind(...binds)
+    .first<{ n: number }>())!.n;
+}
+
+let seeded = 0;
+
+/** A subscription row for an agent, without going through the subscription endpoints. */
+export async function seedSubscription(h: Harness, agentId: string, status: 'active' | 'paused' | 'disabled' = 'active'): Promise<string> {
+  const id = `sub_${String(++seeded).padStart(10, '0')}`;
+  await h.db
+    .prepare(
+      "INSERT INTO subscriptions (id, agent_id, url_ciphertext, url_host, events, channel_ids, secret_ciphertext, status, created_at) VALUES (?, ?, 'x', 'hooks.orrery.dev', '[]', '[]', 'x', ?, ?)",
+    )
+    .bind(id, agentId, status, h.now().toISOString())
+    .run();
+  return id;
+}
+
+/** A delivery to a subscription, with the event it belongs to. */
+export async function seedDelivery(h: Harness, subscriptionId: string, status: 'pending' | 'retrying' | 'delivered' | 'failed' | 'dropped'): Promise<string> {
+  const n = String(++seeded).padStart(10, '0');
+  await h.db
+    .prepare(
+      "INSERT INTO events (id, source_key, type, guild_id, channel_id, payload, observed_at) VALUES (?, ?, 'message.created', '100000000000000001', '110000000000000001', '{}', ?)",
+    )
+    .bind(`evt_${n}`, `source-${n}`, h.now().toISOString())
+    .run();
+  await h.db
+    .prepare(
+      "INSERT INTO deliveries (id, subscription_id, event_id, event_type, status, next_attempt_at, created_at) VALUES (?, ?, ?, 'message.created', ?, ?, ?)",
+    )
+    .bind(`del_${n}`, subscriptionId, `evt_${n}`, status, status === 'pending' || status === 'retrying' ? h.now().toISOString() : null, h.now().toISOString())
+    .run();
+  return `del_${n}`;
 }

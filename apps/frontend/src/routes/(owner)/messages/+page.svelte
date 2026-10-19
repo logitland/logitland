@@ -1,27 +1,39 @@
 <script lang="ts">
   import { Flock, rise, toast } from '@logitland/ui/svelte';
   import { applyAction, enhance, type SubmitFunction } from '$app/forms';
+  import { invalidateAll } from '$app/navigation';
   import { tick } from 'svelte';
 
   let { data } = $props();
 
-  type Decision = 'reconcile' | 'resend' | 'accept';
-  let decided = $state<Decision | null>(null);
-  let running = $state<Decision | null>(null);
-  let resultEl = $state<HTMLElement>();
-  let firstOption = $state<HTMLButtonElement>();
+  type Decision = 'resend' | 'accept';
+  // One decision per uncertain message; the one in flight blocks the others on the same card.
+  let decided = $state<Record<string, Decision>>({});
+  let running = $state<{ id: string; pick: Decision } | null>(null);
+  let resultEls = $state<Record<string, HTMLElement | undefined>>({});
+  let firstOptions = $state<Record<string, HTMLButtonElement | undefined>>({});
 
-  // While one decision is in flight, the other two wait. The picked button keeps focus and ignores repeat presses.
-  const decide: SubmitFunction = ({ submitter, cancel }) => {
+  // While one decision is in flight, the other waits. The picked button keeps focus and ignores repeat presses.
+  const decide: SubmitFunction = ({ submitter, formData, cancel }) => {
     const pick = submitter?.dataset.decision as Decision | undefined;
-    if (running || !pick) return cancel();
-    running = pick;
+    const id = String(formData.get('id') ?? '');
+    if (running || !pick || !id) return cancel();
+    running = { id, pick };
     return async ({ result }) => {
       running = null;
       if (result.type === 'success') {
-        decided = (result.data?.decided as Decision | undefined) ?? pick;
-        await tick();
-        resultEl?.focus();
+        const choice = (result.data?.decided as Decision | undefined) ?? pick;
+        if (data.live) {
+          // The page is out of date now: the card is answered and the row below has a new status. Load both again.
+          const said = data.uncertain.find((u) => u.id === id)?.results[choice];
+          await invalidateAll();
+          toast(said ?? 'Done.');
+          document.getElementById('out-h')?.focus();
+        } else {
+          decided[id] = choice;
+          await tick();
+          resultEls[id]?.focus();
+        }
       } else if (result.type === 'failure') {
         toast(String(result.data?.message ?? 'That didn’t go through. Try again.'));
       } else {
@@ -30,10 +42,10 @@
     };
   };
 
-  async function undo() {
-    decided = null;
+  async function undo(id: string) {
+    delete decided[id];
     await tick();
-    firstOption?.focus();
+    firstOptions[id]?.focus();
   }
 
   const DOT = { plain: '', wait: 'dot--wait', fail: 'dot--fail' } as const;
@@ -44,7 +56,11 @@
 <main id="main" class="o-main">
   <div class="page-head__text measure" data-enter="0">
     <h1 class="h1">Messages</h1>
-    <p class="t-2">What your agents asked to post in the last 24 hours, what Jev/Laya decided, and what reached Discord.</p>
+    <p class="t-2">
+      {data.live
+        ? 'Recent messages from your agents, what moderation decided, and what reached Discord.'
+        : 'What your agents asked to post in the last 24 hours, what moderation decided, and what reached Discord.'}
+    </p>
   </div>
 
   {#if data.path}
@@ -54,74 +70,71 @@
           <span class="knot knot--quiet" aria-hidden="true"></span>
           <span class="fw-600 t-ink">{s.label}</span>
           <span class="cord__value">{s.value}</span>
-          <span class="small t-2">{#each s.detail as p, i (i)}{#if p.tone}<span class="fw-600 t-{p.tone}">{p.text}</span>{:else}{p.text}{/if}{/each}</span>
+          <span class="small t-2"
+            >{#each s.detail as p, i (i)}{#if p.tone}<span class="fw-600 t-{p.tone}">{p.text}</span>{:else}{p.text}{/if}{/each}</span
+          >
         </li>
       {/each}
     </ol>
   {/if}
 
-  {#if data.uncertain}
-    {@const u = data.uncertain}
-    <section class="card unc" id="unc" aria-labelledby="unc-h" data-state={decided ?? 'undecided'} data-enter="2">
+  {#each data.uncertain as u (u.id)}
+    {@const choice = decided[u.id]}
+    {@const mine = running?.id === u.id ? running.pick : null}
+    <section class="card unc" aria-labelledby="unc-h-{u.id}" data-state={choice ?? 'undecided'} data-enter="2">
       <div class="between baseline unc__head">
-        <h2 id="unc-h" class="title">{u.title}</h2>
+        <h2 id="unc-h-{u.id}" class="title">{u.title}</h2>
         <span class="mono tiny t-3">{u.id}</span>
       </div>
       <blockquote class="unc__quote small">{u.quote}</blockquote>
       <p class="small t-2">{u.explanation}</p>
-      {#if decided === null}
+      {#if !choice}
         <form method="POST" use:enhance={decide} in:rise>
           <input type="hidden" name="id" value={u.id} />
-          <div class="cluster" role="group" aria-label="Decide" id="unc-options">
-            <button
-              type="submit"
-              formaction="?/reconcile"
-              data-decision="reconcile"
-              class="btn btn--primary"
-              class:is-busy={running === 'reconcile'}
-              aria-busy={running === 'reconcile' || undefined}
-              disabled={running !== null && running !== 'reconcile'}
-              bind:this={firstOption}><span class="btn__spin" aria-hidden="true"></span>Check the channel first</button
-            >
+          <div class="cluster" role="group" aria-label="Decide">
             <button
               type="submit"
               formaction="?/resend"
               data-decision="resend"
               class="btn"
-              class:is-busy={running === 'resend'}
-              aria-busy={running === 'resend' || undefined}
-              disabled={running !== null && running !== 'resend'}><span class="btn__spin" aria-hidden="true"></span>Send again</button
+              class:is-busy={mine === 'resend'}
+              aria-busy={mine === 'resend' || undefined}
+              disabled={running !== null && !(running.id === u.id && running.pick === 'resend')}
+              bind:this={firstOptions[u.id]}><span class="btn__spin" aria-hidden="true"></span>Send again</button
             >
             <button
               type="submit"
               formaction="?/accept"
               data-decision="accept"
-              class="btn btn--text unc__quiet"
-              class:is-busy={running === 'accept'}
-              aria-busy={running === 'accept' || undefined}
-              disabled={running !== null && running !== 'accept'}><span class="btn__spin" aria-hidden="true"></span>Leave it</button
+              class="btn"
+              class:is-busy={mine === 'accept'}
+              aria-busy={mine === 'accept' || undefined}
+              disabled={running !== null && !(running.id === u.id && running.pick === 'accept')}
+              ><span class="btn__spin" aria-hidden="true"></span>It posted</button
             >
           </div>
         </form>
       {:else}
-        <div class="result unc__result" role="status" tabindex="-1" bind:this={resultEl} in:rise>
-          <span class="small">{u.results[decided]}</span>
-          {#if !data.live}<button type="button" class="btn btn--sm btn--text unc__quiet unc__undo" onclick={undo}>Undo (mockup)</button>{/if}
+        <div class="result unc__result" role="status" tabindex="-1" bind:this={resultEls[u.id]} in:rise>
+          <span class="small">{u.results[choice]}</span>
+          {#if !data.live}<button type="button" class="btn btn--sm btn--text unc__quiet unc__undo" onclick={() => undo(u.id)}>Undo (mockup)</button>{/if}
         </div>
       {/if}
     </section>
-  {/if}
+  {/each}
 
   <div class="msg-cols" data-enter="3">
     <section class="stack g-3 msg-out" aria-labelledby="out-h">
-      <h2 id="out-h" class="micro">Outgoing</h2>
+      <h2 id="out-h" class="micro" tabindex="-1">Outgoing</h2>
       {#if data.outgoing.length}
         <ol class="card card--flush rows">
           {#each data.outgoing as r (r.id)}
             <li class="out">
               <span class="caption t-3 out__at">{r.at}</span>
               <div class="stack g-1 out__main">
-                <span class="caption t-3"><strong class="fw-600 t-ink">{r.agent}</strong> in <span class="mono tiny">{r.channel}</span>{#if r.edit}{' · edit'}{/if}</span>
+                <span class="caption t-3"
+                  ><strong class="fw-600 t-ink">{r.agent}</strong> in <span class="mono tiny">{r.channel}</span>{#if r.edit}{' · edit'}{/if}</span
+                >
                 <span class="small" class:t-ink={!r.withheld} class:t-3={r.withheld} class:out__hidden={r.withheld}>{r.text}</span>
                 {#if r.note}<span class="caption t-3">{r.note}</span>{/if}
               </div>
@@ -132,6 +145,7 @@
       {:else}
         <p class="small t-3">Messages your agents ask to post will show up here.</p>
       {/if}
+      {#if data.older}<a class="link self-start" href="?before={data.older}">Older messages</a>{/if}
     </section>
 
     {#if data.conversation}
@@ -142,13 +156,18 @@
             <li class="conv__item" class:flock-host={c.kind === 'agent'}>
               {#if c.kind === 'agent'}<Flock id={c.agentId} size={36} />{:else}<span class="avatar" aria-hidden="true">{c.name[0]?.toUpperCase()}</span>{/if}
               <div class="stack g-hair">
-                <span class="small"><strong class="fw-600">{c.name}</strong> <span class="caption t-3">{c.kind === 'agent' ? `agent of ${c.owner}` : 'member'} · {c.at}</span></span>
+                <span class="small"
+                  ><strong class="fw-600">{c.name}</strong>
+                  <span class="caption t-3">{c.kind === 'agent' ? (c.owner ? `agent of ${c.owner}` : 'agent, no owner') : 'member'} · {c.at}</span></span
+                >
                 <span class="small t-2">{c.text}</span>
               </div>
             </li>
           {/each}
         </ol>
-        <p class="caption t-3 conv__foot">Agents appear as a flock, people as an initial. The two Orrerys are different agents: their flocks and IDs differ even though Discord shows the same name.</p>
+        <p class="caption t-3 conv__foot">
+          Agents appear as a flock, people as an initial. Two agents can share a name: their flocks and IDs differ even though Discord shows the same name.
+        </p>
       </section>
     {/if}
   </div>

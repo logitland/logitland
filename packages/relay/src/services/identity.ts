@@ -1,16 +1,16 @@
 import type { AdminAgent, AdminAgentsPage, Agent, AgentStatus, AgentStatusAction, AgentTier, ApiKey, IssuedKey, Owner, Scope } from '@logitland/contracts';
-import { newId } from '@logitland/contracts';
+import { LIMITS, newId } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
-import { randomToken, sha256 } from '../crypto';
-import { conflict, forbidden, notFound, unauthorized } from '../errors';
+import { hmac, randomToken, sha256 } from '../crypto';
+import { conflict, forbidden, invalid, notFound, unauthorized } from '../errors';
 import type { AgentPrincipal, AgentRecord, ClientInfo } from '../types';
 import type { AuditInput } from './audit';
 import { auditStmt } from './audit';
-import { hit, peek } from './limits';
-import { clientHashes, recordOrigin } from './origins';
+import { enforce, hit, peek } from './limits';
+import { banOriginStmts, clientHashes, liftOriginBanStmt, recordOrigin } from './origins';
 import { nameKey } from './names';
 
-// Owned by B2 (identity and signup). The functions marked as seams are called by other parts; keep their signatures.
+// Agents, owners and keys. The functions marked as seams are called by other parts; keep their signatures.
 // Signup, profiles and claims live in signup.ts and claims.ts.
 
 export interface AgentRow {
@@ -29,6 +29,7 @@ export interface AgentRow {
   probation_posts: number;
   posting_paused_until: string | null;
   status_reason: string | null;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -94,11 +95,81 @@ export function isAdmin(relay: Relay, owner: Owner): boolean {
   return relay.config.adminDiscordIds.includes(owner.discord_user_id);
 }
 
+const DAY_MS = 86_400_000;
+/** The first second of 2015: Discord snowflakes count milliseconds from here (docs.discord.com, "Snowflakes"). */
+const DISCORD_EPOCH = 1_420_070_400_000n;
+
+/** When a Discord account was created: the timestamp in the top 42 bits of its ID. */
+export const discordAccountCreated = (discordUserId: string): Date => new Date(Number((BigInt(discordUserId) >> 22n) + DISCORD_EPOCH));
+
+/**
+ * Claiming an agent and registering one from the dashboard need an owner with some history: a Discord account at least
+ * ownerMinAccountAgeDays old. Throwaway accounts are the cheap way round probation and the signup limits.
+ */
+export async function assertOwnerEstablished(relay: Relay, ownerId: string): Promise<Owner> {
+  const owner = await getOwner(relay, ownerId);
+  const oldEnough = new Date(discordAccountCreated(owner.discord_user_id).getTime() + LIMITS.ownerMinAccountAgeDays * DAY_MS);
+  if (oldEnough.getTime() > relay.now().getTime()) {
+    throw forbidden(
+      `Claiming an agent or registering one needs a Discord account at least ${LIMITS.ownerMinAccountAgeDays} days old. Yours will be old enough on ${iso(oldEnough).slice(0, 10)}.`,
+    );
+  }
+  return owner;
+}
+
+/**
+ * A rate-limit key for something an owner does. It follows the Discord account rather than the owner row, so deleting the
+ * account and signing in again doesn't start a fresh allowance. Hashed: counters hold no Discord IDs.
+ */
+export async function ownerLimitKey(relay: Relay, discordUserId: string, name: string): Promise<string> {
+  return `${name}:${await hmac(relay.config.hashKey, `owner:${discordUserId}`)}`;
+}
+
+/** The tier an agent falls back to when nobody vouches for it any more: unverified, unless an admin made it trusted. */
+const UNLINKED_TIER = "CASE WHEN tier = 'trusted' THEN tier ELSE 'new' END";
+
+/**
+ * Deletes an owner's account. Their agents are unlinked and keep running, but unverified again (tier new, unless an admin made
+ * them trusted) since no person stands behind them; claim decisions they made lose their name but stay on record, and the
+ * audit trail keeps only the owner ID, which no longer points at anyone.
+ */
+export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> {
+  const owner = await getOwner(relay, ownerId);
+  const { results: agents } = await relay.db.prepare('SELECT id, tier FROM agents WHERE owner_id = ?').bind(ownerId).all<{ id: string; tier: AgentTier }>();
+  const unverified = agents.filter((a) => a.tier === 'claimed').map((a) => a.id);
+  const exists = 'EXISTS (SELECT 1 FROM owners WHERE id = ?)';
+  const results = await relay.db.batch([
+    auditIf(
+      relay,
+      {
+        actor_type: 'owner',
+        actor_id: ownerId,
+        action: 'owner.deleted',
+        target_type: 'owner',
+        target_id: ownerId,
+        diff: {
+          agents_unlinked: { from: agents.map((a) => a.id), to: null },
+          ...(unverified.length ? { agents_unverified: { from: unverified, to: 'new' } } : {}),
+        },
+      },
+      exists,
+      ownerId,
+    ),
+    relay.db
+      .prepare(`UPDATE agents SET owner_id = NULL, tier = ${UNLINKED_TIER}, updated_at = ? WHERE owner_id = ? AND ${exists}`)
+      .bind(iso(relay.now()), ownerId, ownerId),
+    relay.db.prepare(`UPDATE claims SET decided_by = NULL WHERE decided_by = ? AND ${exists}`).bind(ownerId, ownerId),
+    relay.db.prepare('DELETE FROM owners WHERE id = ?').bind(ownerId),
+  ]);
+  if (results[3]!.meta.changes !== 1) throw notFound('No such owner');
+  relay.log.info('owner.deleted', { owner_id: owner.id, agents: agents.length });
+}
+
 /* ---------- Audit inside a batch ---------- */
 
 /**
- * An audit entry written only if `guard` holds, so a batch that lost a race to another writer doesn't
- * record an action that never happened. `guard` is a SQL condition over state the batch changed earlier.
+ * An audit entry written only if `guard` holds. Put it first in the batch with the same precondition as the change that
+ * follows, so a batch that loses a race to another writer (or repeats a change already made) leaves no entry for it.
  */
 export function auditIf(relay: Relay, entry: AuditInput, guard: string, ...guardBinds: unknown[]): Stmt {
   return relay.db
@@ -150,12 +221,12 @@ export async function newKey(
   relay: Relay,
   agentId: string,
   scopes: Scope[],
-  opts: { label?: string | null; expiresInDays?: number } = {},
+  opts: { label?: string | null; expiresInDays?: number; expiresAt?: string | null } = {},
 ): Promise<{ key: IssuedKey; stmt: Stmt }> {
   const secret = randomToken('lk_');
   const id = newId('key') as IssuedKey['id'];
   const now = relay.now();
-  const expires = opts.expiresInDays ? iso(new Date(now.getTime() + opts.expiresInDays * 86_400_000)) : null;
+  const expires = opts.expiresAt ?? (opts.expiresInDays ? iso(new Date(now.getTime() + opts.expiresInDays * 86_400_000)) : null);
   const key: IssuedKey = {
     id,
     agent_id: agentId as IssuedKey['agent_id'],
@@ -204,18 +275,101 @@ export async function listKeys(relay: Relay, agentId: string): Promise<ApiKey[]>
 }
 
 export async function revokeKey(relay: Relay, agentId: string, keyId: string, actor: { type: 'owner' | 'admin'; id: string }): Promise<void> {
-  const now = iso(relay.now());
-  const [revoked] = await relay.db.batch([
-    relay.db.prepare('UPDATE api_keys SET revoked_at = ? WHERE id = ? AND agent_id = ? AND revoked_at IS NULL').bind(now, keyId, agentId),
+  const [, revoked] = await relay.db.batch([
     auditIf(
       relay,
       { actor_type: actor.type, actor_id: actor.id, action: 'key.revoked', target_type: 'key', target_id: keyId, diff: { agent: { from: agentId, to: null } } },
-      'EXISTS (SELECT 1 FROM api_keys WHERE id = ? AND revoked_at = ?)',
+      'EXISTS (SELECT 1 FROM api_keys WHERE id = ? AND agent_id = ? AND revoked_at IS NULL)',
       keyId,
-      now,
+      agentId,
     ),
+    relay.db.prepare('UPDATE api_keys SET revoked_at = ? WHERE id = ? AND agent_id = ? AND revoked_at IS NULL').bind(iso(relay.now()), keyId, agentId),
   ]);
   if (revoked!.meta.changes !== 1) throw notFound('No active key with that ID');
+}
+
+const KEY_ROTATIONS_PER_AGENT_PER_HOUR = 5;
+
+/**
+ * An agent replaces the key it is calling with: the old one stops working, and the new one (same scopes, label and expiry) is
+ * returned once. Works for any agent, claimed or not, so a leaked key never needs an owner to fix.
+ */
+export async function rotateKey(relay: Relay, principal: AgentPrincipal): Promise<IssuedKey> {
+  const { agent, keyId, scopes } = principal;
+  await enforce(
+    relay,
+    [{ key: `rotate:${agent.id}:h`, limit: KEY_ROTATIONS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
+    `You can replace your key ${KEY_ROTATIONS_PER_AGENT_PER_HOUR} times an hour.`,
+  );
+  const old = (await relay.db
+    .prepare('SELECT label, expires_at FROM api_keys WHERE id = ?')
+    .bind(keyId)
+    .first<{ label: string | null; expires_at: string | null }>())!;
+  const { key, stmt } = await newKey(relay, agent.id, scopes, { label: old.label, expiresAt: old.expires_at });
+  const [, revoked] = await relay.db.batch([
+    auditIf(
+      relay,
+      { actor_type: 'agent', actor_id: agent.id, action: 'key.rotated', target_type: 'key', target_id: keyId, diff: { key: { from: keyId, to: key.id } } },
+      'EXISTS (SELECT 1 FROM api_keys WHERE id = ? AND revoked_at IS NULL)',
+      keyId,
+    ),
+    relay.db.prepare('UPDATE api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').bind(iso(relay.now()), keyId),
+    stmt,
+  ]);
+  if (revoked!.meta.changes !== 1) {
+    // Another rotation with the same key got there first; the key made here was never shown to anyone.
+    await relay.db.prepare('DELETE FROM api_keys WHERE id = ?').bind(key.id).run();
+    throw unauthorized('That key isn’t valid');
+  }
+  return key;
+}
+
+const DELETED_REASON = 'Deleted by its owner';
+
+/**
+ * An owner deletes an agent. The row stays as a tombstone so messages, strikes and audit history keep pointing somewhere: it is
+ * banned, unlinked, its name, description, avatar and hint are erased, its keys are revoked, its subscriptions stop and the
+ * addresses on file are deleted. Only active or off agents can be deleted: a suspended or banned one is for an admin to resolve.
+ */
+export async function deleteAgent(relay: Relay, ownerId: string, agentId: string): Promise<void> {
+  const agent = await ownedAgent(relay, ownerId, agentId);
+  if (agent.status !== 'active' && agent.status !== 'off') throw forbidden(`This agent is ${agent.status}. Only a relay admin can change that.`);
+  const now = iso(relay.now());
+  const guard = `EXISTS (SELECT 1 FROM agents WHERE id = ? AND owner_id = ? AND status IN ('active', 'off') AND deleted_at IS NULL)`;
+  const g = [agentId, ownerId];
+  const results = await relay.db.batch([
+    auditIf(
+      relay,
+      {
+        actor_type: 'owner',
+        actor_id: ownerId,
+        action: 'agent.deleted',
+        target_type: 'agent',
+        target_id: agentId,
+        diff: { status: { from: agent.status, to: 'banned' }, owner_id: { from: ownerId, to: null } },
+      },
+      guard,
+      ...g,
+    ),
+    relay.db
+      .prepare(`UPDATE subscriptions SET status = 'paused', paused_reason = 'Agent deleted' WHERE agent_id = ? AND status = 'active' AND ${guard}`)
+      .bind(agentId, ...g),
+    relay.db
+      .prepare(
+        `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL WHERE status IN ('pending', 'retrying') AND subscription_id IN (SELECT id FROM subscriptions WHERE agent_id = ?) AND ${guard}`,
+      )
+      .bind(agentId, ...g),
+    relay.db.prepare(`UPDATE api_keys SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL AND ${guard}`).bind(now, agentId, ...g),
+    relay.db.prepare(`UPDATE claims SET expires_at = ? WHERE agent_id = ? AND decision IS NULL AND expires_at > ? AND ${guard}`).bind(now, agentId, now, ...g),
+    relay.db.prepare(`DELETE FROM agent_origins WHERE agent_id = ? AND ${guard}`).bind(agentId, ...g),
+    relay.db
+      .prepare(
+        `UPDATE agents SET status = 'banned', status_reason = ?, owner_id = NULL, tier = ${UNLINKED_TIER}, name = 'Deleted agent', name_key = '~deleted~' || id, description = NULL, avatar_url = NULL, owner_hint = NULL, deleted_at = ?, updated_at = ? WHERE id = ? AND owner_id = ? AND status IN ('active', 'off') AND deleted_at IS NULL`,
+      )
+      .bind(DELETED_REASON, now, now, agentId, ownerId),
+  ]);
+  if (results[results.length - 1]!.meta.changes !== 1) throw conflict('This agent changed while you were acting. Reload it and try again.');
+  relay.log.info('agent.deleted', { agent_id: agentId });
 }
 
 /* ---------- Authentication (seam) ---------- */
@@ -227,7 +381,8 @@ const LAST_USED_REFRESH_MS = 5 * 60_000;
  * Bookkeeping is throttled so reads stay reads: last_used_at moves at most every 5 minutes, and where the agent connects
  * from is recorded at most once a day per network.
  */
-export async function authenticateKey(relay: Relay, secret: string, client: ClientInfo): Promise<AgentPrincipal> {
+/** `allowStatuses` lets a route accept agents that aren't active, e.g. a suspended agent reading its status or appealing. */
+export async function authenticateKey(relay: Relay, secret: string, client: ClientInfo, opts: { allowStatuses?: AgentStatus[] } = {}): Promise<AgentPrincipal> {
   if (!secret.startsWith('lk_')) throw unauthorized('Send your relay key as a Bearer token');
   const row = await relay.db
     .prepare('SELECT * FROM api_keys WHERE hash = ?')
@@ -237,7 +392,7 @@ export async function authenticateKey(relay: Relay, secret: string, client: Clie
   const nowIso = iso(now);
   if (!row || row.revoked_at || (row.expires_at && row.expires_at <= nowIso)) throw unauthorized('That key isn’t valid');
   const agent = await getAgent(relay, row.agent_id);
-  if (agent.status !== 'active') throw forbidden(`This agent is ${agent.status}`);
+  if (agent.status !== 'active' && !opts.allowStatuses?.includes(agent.status)) throw forbidden(`This agent is ${agent.status}`);
 
   const stale = iso(new Date(now.getTime() - LAST_USED_REFRESH_MS));
   if (!row.last_used_at || row.last_used_at < stale) {
@@ -269,36 +424,23 @@ interface Transition {
   /** Pause its subscriptions and drop deliveries still waiting. */
   stopDeliveries?: boolean;
   revokeKeys?: boolean;
+  /** Record where the agent connected from, so the same operator can't just sign up again. */
+  banOrigins?: boolean;
+  /** Lift that record. */
+  liftBan?: boolean;
 }
 
 /**
- * Moves an agent between statuses in one batch. The status update is a compare-and-set; everything after it
- * (pausing subscriptions, dropping deliveries, revoking keys, the audit entry) only applies if it took effect.
+ * Moves an agent between statuses in one batch. Every statement is guarded by the same precondition (the agent is still in
+ * one of the `from` statuses), and the status update goes last, so either everything applies or nothing does: pausing
+ * subscriptions, dropping deliveries, revoking keys and the audit entry.
  */
 async function transition(relay: Relay, agent: AgentRecord, t: Transition): Promise<AgentRecord> {
   const now = iso(relay.now());
-  const applied = 'EXISTS (SELECT 1 FROM agents WHERE id = ? AND status = ? AND updated_at = ?)';
-  const guard = [agent.id, t.to, now];
+  const inFrom = `status IN (${t.from.map(() => '?').join(', ')})`;
+  const precondition = `EXISTS (SELECT 1 FROM agents WHERE id = ? AND ${inFrom})`;
+  const guard = [agent.id, ...t.from];
   const stmts: Stmt[] = [
-    relay.db
-      .prepare(`UPDATE agents SET status = ?, status_reason = ?, updated_at = ? WHERE id = ? AND status IN (${t.from.map(() => '?').join(', ')})`)
-      .bind(t.to, t.statusReason, now, agent.id, ...t.from),
-  ];
-  if (t.stopDeliveries) {
-    stmts.push(
-      relay.db
-        .prepare(`UPDATE subscriptions SET status = 'paused', paused_reason = ? WHERE agent_id = ? AND status = 'active' AND ${applied}`)
-        .bind(`Agent ${t.to === 'off' ? 'turned off' : t.to}`, agent.id, ...guard),
-      relay.db
-        .prepare(
-          `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL WHERE status IN ('pending', 'retrying') AND subscription_id IN (SELECT id FROM subscriptions WHERE agent_id = ?) AND ${applied}`,
-        )
-        .bind(agent.id, ...guard),
-    );
-  }
-  if (t.revokeKeys)
-    stmts.push(relay.db.prepare(`UPDATE api_keys SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL AND ${applied}`).bind(now, agent.id, ...guard));
-  stmts.push(
     auditIf(
       relay,
       {
@@ -310,12 +452,35 @@ async function transition(relay: Relay, agent: AgentRecord, t: Transition): Prom
         reason: t.reason,
         diff: { status: { from: agent.status, to: t.to } },
       },
-      applied,
+      precondition,
       ...guard,
     ),
+  ];
+  if (t.stopDeliveries) {
+    stmts.push(
+      relay.db
+        .prepare(`UPDATE subscriptions SET status = 'paused', paused_reason = ? WHERE agent_id = ? AND status = 'active' AND ${precondition}`)
+        .bind(`Agent ${t.to === 'off' ? 'turned off' : t.to}`, agent.id, ...guard),
+      relay.db
+        .prepare(
+          `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL WHERE status IN ('pending', 'retrying') AND subscription_id IN (SELECT id FROM subscriptions WHERE agent_id = ?) AND ${precondition}`,
+        )
+        .bind(agent.id, ...guard),
+    );
+  }
+  if (t.revokeKeys)
+    stmts.push(
+      relay.db.prepare(`UPDATE api_keys SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL AND ${precondition}`).bind(now, agent.id, ...guard),
+    );
+  if (t.banOrigins) stmts.push(...banOriginStmts(relay, agent.id, precondition, ...guard));
+  if (t.liftBan) stmts.push(liftOriginBanStmt(relay, agent.id, precondition, ...guard));
+  stmts.push(
+    relay.db
+      .prepare(`UPDATE agents SET status = ?, status_reason = ?, updated_at = ? WHERE id = ? AND ${inFrom}`)
+      .bind(t.to, t.statusReason, now, agent.id, ...t.from),
   );
   const results = await relay.db.batch(stmts);
-  if (results[0]!.meta.changes !== 1) throw conflict('This agent’s status changed while you were acting. Reload it and try again.');
+  if (results[results.length - 1]!.meta.changes !== 1) throw conflict('This agent’s status changed while you were acting. Reload it and try again.');
   return getAgent(relay, agent.id);
 }
 
@@ -344,6 +509,7 @@ export async function turnOn(relay: Relay, ownerId: string, agentId: string): Pr
 
 export async function adminAct(relay: Relay, adminId: string, agentId: string, input: AgentStatusAction): Promise<AgentRecord> {
   const agent = await getAgent(relay, agentId);
+  if (agent.deleted_at) throw conflict('The owner deleted this agent, so it can’t be changed.');
   const actor = { type: 'admin' as const, id: adminId };
   const { reason } = input;
   switch (input.action) {
@@ -370,16 +536,25 @@ export async function adminAct(relay: Relay, adminId: string, agentId: string, i
         statusReason: reason,
         stopDeliveries: true,
         revokeKeys: true,
+        banOrigins: true,
       });
     case 'reinstate':
       if (agent.status !== 'suspended' && agent.status !== 'banned') throw conflict('Only suspended or banned agents can be reinstated.');
-      return transition(relay, agent, { from: ['suspended', 'banned'], to: 'active', action: 'agent.reinstated', actor, reason, statusReason: null });
+      return transition(relay, agent, {
+        from: ['suspended', 'banned'],
+        to: 'active',
+        action: 'agent.reinstated',
+        actor,
+        reason,
+        statusReason: null,
+        liftBan: true,
+      });
     case 'set_tier': {
       const tier = input.tier as AgentTier;
       if (agent.tier === tier) return agent;
-      const now = iso(relay.now());
-      const [changed] = await relay.db.batch([
-        relay.db.prepare('UPDATE agents SET tier = ?, updated_at = ? WHERE id = ? AND tier = ?').bind(tier, now, agent.id, agent.tier),
+      // Only trusted agents have an avatar, so losing the tier takes the avatar with it.
+      const dropsAvatar = tier !== 'trusted' && agent.avatar_url !== null;
+      const [, changed] = await relay.db.batch([
         auditIf(
           relay,
           {
@@ -389,13 +564,15 @@ export async function adminAct(relay: Relay, adminId: string, agentId: string, i
             target_type: 'agent',
             target_id: agent.id,
             reason,
-            diff: { tier: { from: agent.tier, to: tier } },
+            diff: { tier: { from: agent.tier, to: tier }, ...(dropsAvatar ? { avatar_url: { from: agent.avatar_url, to: null } } : {}) },
           },
-          'EXISTS (SELECT 1 FROM agents WHERE id = ? AND tier = ? AND updated_at = ?)',
+          'EXISTS (SELECT 1 FROM agents WHERE id = ? AND tier = ?)',
           agent.id,
-          tier,
-          now,
+          agent.tier,
         ),
+        relay.db
+          .prepare("UPDATE agents SET tier = ?, avatar_url = CASE WHEN ? = 'trusted' THEN avatar_url ELSE NULL END, updated_at = ? WHERE id = ? AND tier = ?")
+          .bind(tier, tier, iso(relay.now()), agent.id, agent.tier),
       ]);
       if (changed!.meta.changes !== 1) throw conflict('This agent changed while you were acting. Reload it and try again.');
       return getAgent(relay, agent.id);
@@ -417,6 +594,8 @@ type AdminRow = AgentRow & {
 };
 
 const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+/** D1 refuses a LIKE pattern over 50 bytes (developers.cloudflare.com/d1/platform/limits). */
+const LIKE_PATTERN_MAX_BYTES = 50;
 
 export async function listAgentsAdmin(
   relay: Relay,
@@ -438,8 +617,12 @@ export async function listAgentsAdmin(
   const q = f.q?.trim();
   if (q) {
     const key = nameKey(q);
+    const patterns = [`%${likeEscape(q)}%`, ...(key ? [`%${likeEscape(key)}%`] : [])];
+    if (patterns.some((p) => new TextEncoder().encode(p).length > LIKE_PATTERN_MAX_BYTES)) {
+      throw invalid('That search is too long. Search for a shorter part of the name.');
+    }
     where.push(`(a.id = ? OR a.name LIKE ? ESCAPE '\\' OR ow.username LIKE ? ESCAPE '\\'${key ? " OR a.name_key LIKE ? ESCAPE '\\'" : ''})`);
-    binds.push(q, `%${likeEscape(q)}%`, `%${likeEscape(q)}%`, ...(key ? [`%${likeEscape(key)}%`] : []));
+    binds.push(q, patterns[0]!, patterns[0]!, ...(key ? [patterns[1]!] : []));
   }
   const weekAgo = iso(new Date(now.getTime() - 7 * 86_400_000));
   const { results } = await relay.db

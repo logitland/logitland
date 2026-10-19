@@ -80,11 +80,22 @@ export function redactWebhook(ref: WebhookRef): string {
   return `wh_…${ref.id.slice(-4)}`;
 }
 
+export interface PollCreate {
+  question: { text: string };
+  answers: { poll_media: { text: string } }[];
+  duration?: number;
+  allow_multiselect?: boolean;
+}
+
 export interface ExecuteWebhookBody {
-  content: string;
+  content?: string;
   username: string;
   avatar_url?: string;
+  /** Forum and media channels only: starts a post with this title. */
   thread_name?: string;
+  /** Forum and media channels only: tag IDs for the new post. */
+  applied_tags?: string[];
+  poll?: PollCreate;
 }
 
 export interface DiscordUser {
@@ -124,14 +135,51 @@ export interface GuildMember {
   roles: string[];
 }
 
+export interface ForumTag {
+  id: string;
+  name: string;
+  moderated?: boolean;
+  emoji_name?: string | null;
+}
+
 export interface GuildChannel {
   id: string;
   guild_id: string;
   name: string;
+  /** 0 text, 5 announcement, 10/11/12 threads, 15 forum, 16 media; others are voice and categories. */
   type: number;
   parent_id?: string | null;
+  position?: number;
   permission_overwrites?: Overwrite[];
+  available_tags?: ForumTag[];
+  thread_metadata?: { archived: boolean; locked?: boolean; auto_archive_duration?: number };
 }
+
+export interface CurrentApplication {
+  id: string;
+  name: string;
+  /** GATEWAY_MESSAGE_CONTENT is 1 << 18 (100+ servers), GATEWAY_MESSAGE_CONTENT_LIMITED is 1 << 19 (under 100). */
+  flags?: number;
+  interactions_endpoint_url?: string | null;
+}
+
+export interface CreatedWebhook {
+  id: string;
+  token: string;
+  channel_id: string;
+  name?: string | null;
+}
+
+export interface ApplicationCommand {
+  id?: string;
+  name: string;
+  description: string;
+  type?: number;
+  options?: readonly unknown[];
+}
+
+/** Bit flags on the application that show the Message Content intent is on. */
+export const MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19);
 
 export interface RestOptions {
   botToken?: string;
@@ -145,6 +193,11 @@ export class DiscordRest {
   private readonly f: typeof fetch;
   constructor(private readonly opts: RestOptions = {}) {
     this.f = opts.fetch ?? fetch.bind(globalThis);
+  }
+
+  /** The API root calls go to: Discord's, or a development fake. */
+  get apiBase(): string {
+    return this.opts.base ?? DISCORD_API;
   }
 
   /**
@@ -195,10 +248,55 @@ export class DiscordRest {
     return this.send<GatewayBot>('GET', '/gateway/bot', undefined, true);
   }
 
+  getCurrentUser(): Promise<DiscordUser> {
+    return this.send<DiscordUser>('GET', '/users/@me', undefined, true);
+  }
+
+  getCurrentApplication(): Promise<CurrentApplication> {
+    return this.send<CurrentApplication>('GET', '/applications/@me', undefined, true);
+  }
+
+  getGuildChannels(guildId: string): Promise<GuildChannel[]> {
+    return this.send<GuildChannel[]>('GET', `/guilds/${guildId}/channels`, undefined, true);
+  }
+
+  /** Needs Manage Webhooks. Names can't contain "clyde" or "discord". */
+  createWebhook(channelId: string, name: string, reason: string): Promise<CreatedWebhook> {
+    return this.send<CreatedWebhook>('POST', `/channels/${channelId}/webhooks`, { name }, true, false, reason);
+  }
+
+  /** Text and announcement channels only; a message can have one thread. Needs Create Public Threads. */
+  startThreadFromMessage(
+    channelId: string,
+    messageId: string,
+    thread: { name: string; auto_archive_duration?: 60 | 1440 | 4320 | 10080 },
+  ): Promise<GuildChannel> {
+    return this.send<GuildChannel>('POST', `/channels/${channelId}/messages/${messageId}/threads`, thread, true);
+  }
+
+  /** A message from the bot itself, for example the mirror's consent prompt with its button. */
+  createMessage(channelId: string, body: { content: string; components?: unknown[] }): Promise<DiscordMessage> {
+    return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions: { parse: [] } }, true);
+  }
+
+  getGuildCommands(applicationId: string, guildId: string): Promise<ApplicationCommand[]> {
+    return this.send<ApplicationCommand[]>('GET', `/applications/${applicationId}/guilds/${guildId}/commands`, undefined, true);
+  }
+
+  /** Replaces every guild command with this list. */
+  putGuildCommands(applicationId: string, guildId: string, commands: readonly ApplicationCommand[]): Promise<ApplicationCommand[]> {
+    return this.send<ApplicationCommand[]>('PUT', `/applications/${applicationId}/guilds/${guildId}/commands`, commands, true);
+  }
+
   /** Discord does not keep allowed_mentions from the original message, so it is sent again. */
   async editWebhookMessage(hook: WebhookRef, messageId: string, content: string, threadId?: string): Promise<DiscordMessage> {
     const q = threadId ? `?${new URLSearchParams({ thread_id: threadId })}` : '';
-    return this.send<DiscordMessage>('PATCH', `/webhooks/${hook.id}/${hook.token}/messages/${messageId}${q}`, { content, allowed_mentions: { parse: [] } }, false);
+    return this.send<DiscordMessage>(
+      'PATCH',
+      `/webhooks/${hook.id}/${hook.token}/messages/${messageId}${q}`,
+      { content, allowed_mentions: { parse: [] } },
+      false,
+    );
   }
 
   /** Needs no privileged intent. */

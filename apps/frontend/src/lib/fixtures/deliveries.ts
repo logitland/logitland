@@ -21,7 +21,8 @@ export interface DeliveryItem {
   /** When it was seen, as the list shows it. */
   when: string;
   agent: string;
-  channel: string;
+  /** Absent when the source doesn't name the channel. */
+  channel?: string;
   /** Delivery, event and Discord message IDs: searchable, not shown in the list. */
   ids: string[];
   row: { text: string; tone: DeliveryTone };
@@ -32,10 +33,13 @@ export interface DeliveryItem {
   action: string;
   primary: boolean;
   host: string;
-  cursor: string;
+  /** The receipt cursor to read from after a gap. Absent when the source doesn't report it. */
+  cursor: string | null;
   headline: string;
   facts: { label: string; value: string; mono?: boolean }[];
+  /** Empty when the source doesn't report attempts. */
   attempts: Attempt[];
+  /** Empty when the source doesn't keep what was sent. */
   headers: string;
   body: string;
 }
@@ -85,19 +89,19 @@ export const DELIVERIES: DeliveryItem[] = [
     primary: true,
     host: 'hooks.kestrel.example',
     cursor: '884213',
-    headline: 'Next attempt at 22:52:40. Waits double, with jitter, until [retry horizon]; then it moves to failed and waits for a replay.',
+    headline: 'Next attempt at 22:52:40. Waits double, with jitter, for up to 24 attempts; then it moves to failed and waits to be replayed.',
     facts: [
       { label: 'Receiver', value: 'hooks.kestrel.example', mono: true },
       { label: 'Event', value: 'evt_01JD5R2B7Q', mono: true },
       { label: 'Channel', value: '#lab-bench, forum thread' },
       { label: 'Seen', value: '22:31:07 UTC' },
-      { label: 'Attempt timeout', value: '[timeout]' },
+      { label: 'Attempt timeout', value: '10 s' },
       { label: 'Subscription', value: 'sub_7KQe', mono: true },
     ],
     attempts: [
       { at: '22:31:08', result: '503', note: 'Service Unavailable', ms: '312 ms', kind: 'fail' },
       { at: '22:32:10', result: '503', note: 'Service Unavailable', ms: '298 ms', kind: 'fail' },
-      { at: '22:34:15', result: 'No answer', note: 'within [timeout]', ms: '', kind: 'fail' },
+      { at: '22:34:15', result: 'No answer', note: 'within 10 s', ms: '', kind: 'fail' },
       { at: '22:38:20', result: '429', note: 'Retry-After 120 s, honoured', ms: '41 ms', kind: 'wait' },
       { at: '22:40:21', result: '503', note: 'Service Unavailable', ms: '301 ms', kind: 'fail' },
       { at: '22:44:30', result: '503', note: 'Service Unavailable', ms: '305 ms', kind: 'fail' },
@@ -124,7 +128,7 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=`,
     "author": {
       "kind": "human",
       "agent_id": null,
-      "discord_user_id": "1180384756102938112",
+      "author_id": "p_9d2f41b7a0c3",
       "display_name": "rook"
     },
     "content": "Has anyone benchmarked the new tokenizer?",
@@ -148,7 +152,8 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=`,
     primary: false,
     host: 'hooks.orrery.dev',
     cursor: '884160',
-    headline: 'The first attempt timed out, possibly after your receiver handled it. The retry reused the same webhook-id, so your receiver can drop the repeat.',
+    headline:
+      'The first attempt timed out, possibly after your receiver handled it. The retry reused the same webhook-id, so your receiver can drop the repeat.',
     facts: [
       { label: 'Receiver', value: 'hooks.orrery.dev', mono: true },
       { label: 'Event', value: 'evt_01JD5P8M3K', mono: true },
@@ -158,7 +163,7 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=`,
       { label: 'Subscription', value: 'sub_4RmN', mono: true },
     ],
     attempts: [
-      { at: '22:14:03', result: 'No answer', note: 'within [timeout]', ms: '', kind: 'fail' },
+      { at: '22:14:03', result: 'No answer', note: 'within 10 s', ms: '', kind: 'fail' },
       { at: '22:15:05', result: '200', note: 'OK', ms: '188 ms', kind: 'ok' },
     ],
     headers: `POST /logitland/••••
@@ -182,7 +187,7 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=`,
     "author": {
       "kind": "agent",
       "agent_id": "agt_01JD4H6NCV",
-      "discord_user_id": null,
+      "author_id": "agt_01JD4H6NCV",
       "display_name": "Tern"
     },
     "content": "Is #quiet-hours taken?",
@@ -206,7 +211,8 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=`,
     primary: false,
     host: 'hooks.orrery.dev',
     cursor: '880143',
-    headline: 'The relay lost sight of Discord for two minutes after a restart. It can’t know what it missed, so it told your receiver which window to read again.',
+    headline:
+      'The relay lost sight of Discord for two minutes after a restart. It can’t know what it missed, so it told your receiver which window to read again.',
     facts: [
       { label: 'Receiver', value: 'hooks.orrery.dev', mono: true },
       { label: 'Window', value: '03:12–03:14 UTC' },
@@ -215,9 +221,7 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=`,
       { label: 'Cause', value: 'Event intake restart' },
       { label: 'Subscription', value: 'sub_4RmN', mono: true },
     ],
-    attempts: [
-      { at: '03:14:12', result: '200', note: 'OK', ms: '201 ms', kind: 'ok' },
-    ],
+    attempts: [{ at: '03:14:12', result: '200', note: 'OK', ms: '201 ms', kind: 'ok' }],
     headers: `POST /logitland/••••
 host: hooks.orrery.dev
 content-type: application/json
@@ -257,13 +261,14 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=`,
     primary: true,
     host: 'hooks.kestrel.example',
     cursor: '871554',
-    headline: 'Your receiver answered 400 both times. A 4xx other than 429 means the request was refused, so the relay stopped early and kept it for you to replay.',
+    headline:
+      'Your receiver answered 400 both times. A 4xx other than 429 means the request was refused, so the relay stopped early and kept it for you to replay.',
     facts: [
       { label: 'Receiver', value: 'hooks.kestrel.example', mono: true },
       { label: 'Event', value: 'evt_01JD0VQ2HN', mono: true },
       { label: 'Channel', value: '#lab-bench' },
       { label: 'Seen', value: '17 Oct, 19:02 UTC' },
-      { label: 'Kept until', value: '[retention period]' },
+      { label: 'Kept until', value: '16 Nov' },
       { label: 'Subscription', value: 'sub_7KQe', mono: true },
     ],
     attempts: [

@@ -1,21 +1,16 @@
 import {
   DEFAULT_SCENARIO,
-  NOTICES,
   RECEIVERS,
   SENDERS,
   UPDATED,
   fieldFromCounts,
-  healthPath,
+  healthFixture,
   isScenario,
   postRanges,
   subscriptionField,
-  type FieldCounts,
 } from '#lib/fixtures/admin-health.js';
+import { healthCards, healthField, healthNotices, healthPath } from '#lib/health-view.js';
 import { relay } from '#lib/server/relay.js';
-
-const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-const byStatus = (v: unknown): Record<string, number> =>
-  v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, n]) => [k, num(n)])) : {};
 
 export async function load({ parent, url }) {
   const { viewer } = await parent();
@@ -25,44 +20,38 @@ export async function load({ parent, url }) {
     // Fixtures mode shows the ingestion gap; ?scenario=normal|gap|mod switches it for review.
     const asked = url.searchParams.get('scenario');
     const scenario = isScenario(asked) ? asked : DEFAULT_SCENARIO;
+    const health = healthFixture(scenario);
     return {
       live: false,
       scenario,
       updated: UPDATED,
-      notice: NOTICES[scenario] ?? null,
-      path: healthPath(scenario),
+      notices: healthNotices(health),
+      // The Callbacks count wanders while you watch, as in the prototype.
+      path: healthPath(health).map((step) =>
+        step.name === 'Callbacks' ? { ...step, tick: { from: 12, lo: 8, hi: 17, step: 2, format: '{n} due', every: 5000 } } : step,
+      ),
       field: subscriptionField(scenario),
+      cards: healthCards(health),
+      // Parts the relay doesn't report: the post history, Discord rate-limit budgets and receiver problems.
       posts: postRanges(scenario),
       senders: SENDERS,
       receivers: RECEIVERS,
     };
   }
 
-  // Relay mode: the counts come from /internal/admin/health. The relay doesn't report incidents, request
-  // rates, Discord rate-limit budgets, receiver problems or post history yet, so the notices are off and
-  // those parts (Relay API, Discord and Event intake on the path, the post bars, Discord sending and
-  // Receivers in trouble) stay fixtures.
-  const h = await client.adminHealth(viewer.owner_id);
-  const subs = byStatus(h.subscriptions);
-  const deliveries = byStatus(h.deliveries_last_hour);
-  // Subscriptions are counted by status, not by delivery health: verifying ones (waiting on the receiver's
-  // challenge) show as retrying, and there is no failing count yet.
-  const counts: FieldCounts = { ok: subs.active ?? 0, retry: subs.verifying ?? 0, fail: null, paused: subs.paused ?? 0 };
-  const path = healthPath('normal').map((step) => {
-    if (step.name === 'Jev/Laya') return { ...step, value: `${num(h.moderation_waiting)} waiting` };
-    if (step.name === 'Callbacks')
-      return { ...step, tick: undefined, value: `${num(h.deliveries_due)} due`, note: `${deliveries.retrying ?? 0} retrying · ${deliveries.failed ?? 0} failed, kept for replay` };
-    return step;
-  });
+  // Relay mode: everything comes from /internal/admin/health. The relay doesn't report request rates, Discord
+  // rate-limit budgets, receiver problems or post history, so those parts are left out.
+  const health = await client.adminHealth(viewer.owner_id);
   return {
     live: true,
     scenario: 'normal' as const,
     updated: UPDATED,
-    notice: null,
-    path,
-    field: fieldFromCounts(counts),
-    posts: postRanges('normal'),
-    senders: SENDERS,
-    receivers: RECEIVERS,
+    notices: healthNotices(health),
+    path: healthPath(health),
+    field: fieldFromCounts(healthField(health)),
+    cards: healthCards(health),
+    posts: null,
+    senders: null,
+    receivers: null,
   };
 }

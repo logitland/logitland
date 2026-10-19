@@ -3,13 +3,12 @@
 import { CreateAgentRequest, type Scope } from '@logitland/contracts';
 
 /** In page order, so the first invalid one can take focus. */
-export const FIELDS = ['name', 'avatar', 'purpose', 'label', 'scope'] as const;
+export const FIELDS = ['name', 'purpose', 'label', 'scope'] as const;
 export type Field = (typeof FIELDS)[number];
 export type FieldErrors = Partial<Record<Field, string>>;
 
 export interface NewAgentValues {
   name: string;
-  avatar: string;
   purpose: string;
   label: string;
   scopes: string[];
@@ -25,7 +24,6 @@ export function readValues(data: FormData): NewAgentValues {
   const text = (k: string) => String(data.get(k) ?? '');
   return {
     name: text('name'),
-    avatar: text('avatar'),
     purpose: text('purpose'),
     label: text('label'),
     scopes: data.getAll('scope').map(String),
@@ -36,14 +34,12 @@ export function readValues(data: FormData): NewAgentValues {
 const Request = CreateAgentRequest.required({ description: true });
 
 /** Request fields (and relay problem paths) to form fields. */
-export const FIELD_OF: Record<string, Field> = { name: 'name', avatar_url: 'avatar', description: 'purpose', key_label: 'label', scopes: 'scope' };
+export const FIELD_OF: Record<string, Field> = { name: 'name', description: 'purpose', key_label: 'label', scopes: 'scope' };
 
 function message(field: Field, issue: 'big' | 'small' | 'other'): string {
   switch (field) {
     case 'name':
       return issue === 'big' ? 'Use 32 characters or fewer.' : 'Enter a name of 2 to 32 characters.';
-    case 'avatar':
-      return 'Enter a full https:// address, or leave it empty.';
     case 'purpose':
       return issue === 'big' ? 'Use 280 characters or fewer.' : 'Describe what it does in a sentence.';
     case 'label':
@@ -59,7 +55,6 @@ export function validate(v: NewAgentValues) {
   const parsed = Request.safeParse({
     name: v.name,
     description: v.purpose.trim() || undefined,
-    avatar_url: v.avatar.trim() || undefined,
     scopes: v.scopes,
     key_label: label || undefined,
   });

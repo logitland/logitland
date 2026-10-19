@@ -9,6 +9,7 @@ import * as adminDeliveries from './routes/internal-admin-deliveries';
 import * as adminModeration from './routes/internal-admin-moderation';
 import * as adminOps from './routes/internal-admin-ops';
 import * as ownerAgents from './routes/internal-owner-agents';
+import * as ownerChannels from './routes/internal-owner-channels';
 import * as ownerMessages from './routes/internal-owner-messages';
 import * as ownerSubscriptions from './routes/internal-owner-subscriptions';
 import * as people from './routes/internal-people';
@@ -31,6 +32,12 @@ function base(relay: Relay, maxBody: number): App {
     return c.json(new RelayError(500, 'internal').toProblem(), 500, { 'content-type': 'application/problem+json' });
   });
   app.notFound((c) => c.json(new RelayError(404, 'not_found', 'No such route').toProblem(), 404, { 'content-type': 'application/problem+json' }));
+  // Workers Cache stores a 200 that carries no Cache-Control for two hours, and a hit never reaches the Worker (so no
+  // auth check). Everything is private unless the handler chose otherwise: only the public mirror and the docs do.
+  app.use('*', async (c, next) => {
+    await next();
+    if (!c.res.headers.has('cache-control')) c.header('cache-control', 'private, no-store');
+  });
   app.use('*', async (c, next) => {
     c.set('client', clientInfo(c));
     await next();
@@ -47,10 +54,19 @@ function base(relay: Relay, maxBody: number): App {
   return app;
 }
 
-const PUBLIC_ROUTES: RegisterRoutes[] = [site.register, v1Signup.register, v1Read.register, v1Messages.register, v1Subscriptions.register, publicMirror.register, discordInteractions.register];
+const PUBLIC_ROUTES: RegisterRoutes[] = [
+  site.register,
+  v1Signup.register,
+  v1Read.register,
+  v1Messages.register,
+  v1Subscriptions.register,
+  publicMirror.register,
+  discordInteractions.register,
+];
 
 const INTERNAL_ROUTES: RegisterRoutes[] = [
   ownerAgents.register,
+  ownerChannels.register,
   ownerMessages.register,
   ownerSubscriptions.register,
   people.register,

@@ -1,12 +1,18 @@
 // Native Discord OAuth for owners: authorization code with PKCE and state, scope `identify`.
 // Endpoints: https://docs.discord.com/developers/topics/oauth2. Ownership binds to the Discord user ID.
-// UNVERIFIED (auth.md research): whether Discord enforces PKCE. State is checked regardless.
+// Discord's OAuth2 page recommends the authorization code grant "with PKCE" for production apps, but lists no code_challenge or
+// code_verifier parameter, so whether Discord checks them is undocumented. We send them anyway; state is checked on our side regardless.
+// Read on 2026-10-19.
 
 const AUTHORIZE = 'https://discord.com/oauth2/authorize';
 const TOKEN = 'https://discord.com/api/oauth2/token';
 const ME = 'https://discord.com/api/v10/users/@me';
 
-const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 
 export interface OAuthStart {
   url: string;
@@ -38,7 +44,13 @@ export interface DiscordUser {
 }
 
 /** Exchanges the code, reads the user, and drops the token: the dashboard keeps no Discord credentials. */
-export async function finishAuthorization(opts: { clientId: string; clientSecret: string; redirectUri: string; code: string; verifier: string }): Promise<DiscordUser> {
+export async function finishAuthorization(opts: {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  code: string;
+  verifier: string;
+}): Promise<DiscordUser> {
   const tokenRes = await fetch(TOKEN, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${btoa(`${opts.clientId}:${opts.clientSecret}`)}` },

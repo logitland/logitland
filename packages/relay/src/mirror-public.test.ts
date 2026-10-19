@@ -1,16 +1,9 @@
-import type { ConversationPage, PublicAgentProfile } from '@logitland/contracts';
-import { describe, expect, it, vi } from 'vitest';
+import { LIMITS, type ConversationPage, type PublicAgentProfile } from '@logitland/contracts';
+import { describe, expect, it } from 'vitest';
+import { clientHashes } from './services/origins';
 import { updateSettings } from './services/settings';
-import { createReport } from './services/reports';
 import { ADMIN_DISCORD, BENCH, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
-
-// clientHashes (B2) and createReport (B3) were stubs while this was written. The stand-ins keep their contracts:
-// a stable per-IP value, and a report ID back.
-vi.mock('./services/origins', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./services/origins')>()),
-  clientHashes: async (_relay: unknown, client: { ip: string | null }) => ({ ip: client.ip ? `iph_${client.ip}` : null, net: null }),
-}));
-vi.mock('./services/reports', () => ({ createReport: vi.fn(async () => ({ id: 'rpt_0000000001' })) }));
+import { agree } from './consent.testkit';
 
 const PERSON = '700000000000000001';
 const DASHBOARD = 'https://logitland.test';
@@ -51,10 +44,7 @@ async function message(
 }
 
 const consent = (h: Harness, person: string, revoked = false) =>
-  h.db
-    .prepare('INSERT INTO consents (discord_user_id, guild_id, method, granted_at, revoked_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(person, '100000000000000001', 'command', '2026-10-19T02:00:00Z', revoked ? '2026-10-19T02:30:00Z' : null)
-    .run();
+  agree(h, person, { guild: '100000000000000001', at: '2026-10-19T02:00:00.000Z', revokedAt: revoked ? '2026-10-19T02:30:00.000Z' : null });
 
 describe('public channel pages', () => {
   it('show an agent’s words in full and a person’s only while they have agreed', async () => {
@@ -92,7 +82,7 @@ describe('public channel pages', () => {
     expect((await h.call('GET', `/public/channels/${LOUNGE}/messages`)).status).toBe(200);
 
     const list = await h.call('GET', '/public/channels');
-    expect(await list.json()).toEqual({ channels: [{ id: LOUNGE, name: 'lounge', type: 'text' }] });
+    expect(await list.json()).toEqual({ channels: [{ id: LOUNGE, name: 'lounge', type: 'text', tags: [] }] });
   });
 
   it('page newest first with before, limit and thread_id', async () => {
@@ -138,10 +128,10 @@ describe('public headers', () => {
     const older = await h.call('GET', `/public/channels/${LOUNGE}/messages?before=310000000000000009`);
     const channels = await h.call('GET', '/public/channels');
     const profile = await h.call('GET', `/public/agents/${agent.id}`);
-    expect(newest.headers.get('cache-control')).toBe('public, max-age=10, stale-while-revalidate=20');
-    expect(older.headers.get('cache-control')).toBe('public, max-age=60');
-    expect(channels.headers.get('cache-control')).toBe('public, max-age=30');
-    expect(profile.headers.get('cache-control')).toBe('public, max-age=30');
+    expect(newest.headers.get('cache-control')).toBe('public, max-age=5, stale-while-revalidate=10');
+    expect(older.headers.get('cache-control')).toBe('public, max-age=30');
+    expect(channels.headers.get('cache-control')).toBe('public, max-age=15');
+    expect(profile.headers.get('cache-control')).toBe('public, max-age=15');
     for (const res of [newest, older, channels, profile]) {
       expect(res.headers.get('access-control-allow-origin')).toBe('*');
       expect(res.headers.get('set-cookie')).toBeNull();
@@ -177,6 +167,7 @@ describe('the public mirror kill switch', () => {
       expect(res.status, path).toBe(503);
       expect(res.headers.get('retry-after')).not.toBeNull();
       expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(((await res.json()) as { code: string }).code).toBe('unavailable');
     }
 
     await updateSettings(h.relay, admin.id, { public_mirror: true });
@@ -206,7 +197,7 @@ describe('public rate limits', () => {
     const agent = await seedAgent(h.relay);
     const report = (ip = '203.0.113.7') =>
       h.call('POST', '/public/reports', { target_type: 'agent', target_id: agent.id, reason: 'posting spam' }, { 'cf-connecting-ip': ip });
-    for (let n = 0; n < 10; n++) expect((await report()).status).toBe(201);
+    for (let n = 0; n < LIMITS.publicReportsPerHour; n++) expect((await report()).status).toBe(201);
     const limited = await report();
     expect(limited.status).toBe(429);
     expect(limited.headers.get('retry-after')).not.toBeNull();
@@ -254,26 +245,42 @@ describe('public agent profiles', () => {
 });
 
 describe('public reports', () => {
-  it('pass a valid report to the moderation seam with the reporter’s IP hash', async () => {
+  it('pass a valid report to the moderation queue with the reporter’s IP hash, never the IP', async () => {
     const h = harness();
     await seedChannel(h.relay, { publicMirror: true });
     const agent = await seedAgent(h.relay);
     await message(h, '310000000000000001', { agentId: agent.id });
-    vi.mocked(createReport).mockClear();
+    const { ip } = await clientHashes(h.relay, { ip: '203.0.113.7', asn: null, asOrganization: null, country: null });
+    const reports = async () =>
+      (
+        await h.db
+          .prepare('SELECT id, target_type, target_id, channel_id, reason, reporter_kind, reporter_ref, status FROM reports ORDER BY rowid')
+          .all<Record<string, string>>()
+      ).results;
 
     const asMessage = await h.call('POST', '/public/reports', { target_type: 'message', target_id: '310000000000000001', reason: 'This is spam' });
     expect(asMessage.status).toBe(201);
-    expect(await asMessage.json()).toEqual({ id: 'rpt_0000000001' });
+    const { id } = (await asMessage.json()) as { id: string };
+    expect(id).toMatch(/^rpt_/);
     expect(asMessage.headers.get('set-cookie')).toBeNull();
-    expect(vi.mocked(createReport)).toHaveBeenLastCalledWith(
-      expect.anything(),
-      { target_type: 'message', target_id: '310000000000000001', reason: 'This is spam' },
-      { kind: 'public', ref: 'iph_203.0.113.7' },
-    );
+    expect(await reports()).toEqual([
+      {
+        id,
+        target_type: 'message',
+        target_id: '310000000000000001',
+        channel_id: LOUNGE,
+        reason: 'This is spam',
+        reporter_kind: 'public',
+        reporter_ref: ip,
+        status: 'open',
+      },
+    ]);
+    expect(ip).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(await reports())).not.toContain('203.0.113.7');
 
     const asAgent = await h.call('POST', '/public/reports', { target_type: 'agent', target_id: agent.id, reason: 'Impersonation' });
     expect(asAgent.status).toBe(201);
-    expect(vi.mocked(createReport)).toHaveBeenCalledTimes(2);
+    expect((await reports()).map((r) => r.target_type)).toEqual(['message', 'agent']);
   });
 
   it('refuse reports about things the public can’t see, or that don’t make sense', async () => {
@@ -283,7 +290,6 @@ describe('public reports', () => {
     const agent = await seedAgent(h.relay);
     const banned = await seedAgent(h.relay, { status: 'banned' });
     await message(h, '310000000000000002', { channel: BENCH, agentId: agent.id });
-    vi.mocked(createReport).mockClear();
 
     const post = (b: unknown) => h.call('POST', '/public/reports', b);
     expect((await post({ target_type: 'message', target_id: '310000000000000002', reason: 'hidden channel' })).status).toBe(404);
@@ -293,7 +299,7 @@ describe('public reports', () => {
     expect((await post({ target_type: 'message', target_id: agent.id, reason: 'wrong kind of ID' })).status).toBe(400);
     expect((await post({ target_type: 'message', target_id: '310000000000000002', reason: 'x' })).status).toBe(400);
     expect((await h.call('POST', '/public/reports')).status).toBe(400);
-    expect(vi.mocked(createReport)).not.toHaveBeenCalled();
+    expect((await h.db.prepare('SELECT COUNT(*) AS n FROM reports').first<{ n: number }>())!.n).toBe(0);
   });
 
   it('allow only the dashboard’s origin, including the preflight', async () => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FLIP, Flock, Morph, fold, reveal, rise, toast } from '@logitland/ui/svelte';
+  import { FLIP, Flock, Morph, fold, reveal, rise } from '@logitland/ui/svelte';
   import { tick, untrack } from 'svelte';
   import { flip } from 'svelte/animate';
   import type { ActorFilter, AuditItem } from '#lib/fixtures/admin-audit.js';
@@ -7,7 +7,9 @@
   let { data } = $props();
 
   // Show change / Hide change.
-  let open = $state<Record<string, boolean>>(untrack(() => Object.fromEntries(data.days.flatMap((d) => d.entries.flatMap((e) => (e.diff ? [[e.id, e.diff.open]] : []))))));
+  let open = $state<Record<string, boolean>>(
+    untrack(() => Object.fromEntries(data.days.flatMap((d) => d.entries.flatMap((e) => (e.diff ? [[e.id, e.diff.open]] : []))))),
+  );
   async function toggle(id: string) {
     open[id] = !open[id];
     if (!open[id]) return;
@@ -42,12 +44,13 @@
 <header class="a-header">
   <div class="page-head__text head-text">
     <h1 class="h1">Audit trail</h1>
-    <p class="t-3">Every change to relay settings and credentials, and who made it. Changes made in Discord appear only when the relay reads Discord’s audit log.</p>
+    <p class="t-3">
+      Every change to relay settings and credentials, and who made it. Changes made in Discord appear only when the relay reads Discord’s audit log.
+    </p>
   </div>
   <div class="a-tools" role="search">
     <label class="sr-only" for="au-search">Search the audit trail</label>
     <input class="input input--sm" id="au-search" type="search" placeholder="Actor, agent, key or request" autocomplete="off" bind:value={query} />
-    <button type="button" class="btn btn--sm" onclick={() => toast('Exporting isn’t part of this mockup.')}>Export CSV</button>
   </div>
 </header>
 
@@ -79,12 +82,17 @@
                   <span class="mono tiny t-3 wrap-any">{e.meta}</span>
                 </div>
                 {#if e.diff}
-                  <button type="button" class="btn btn--sm au-toggle" aria-expanded={open[e.id] ?? false} aria-controls="diff-{e.id}" onclick={() => toggle(e.id)}
-                    ><Morph text={open[e.id] ? 'Hide change' : 'Show change'} /></button
+                  <button
+                    type="button"
+                    class="btn btn--sm au-toggle"
+                    aria-expanded={open[e.id] ?? false}
+                    aria-controls="diff-{e.id}"
+                    onclick={() => toggle(e.id)}><Morph text={open[e.id] ? 'Hide change' : 'Show change'} /></button
                   >
-                  <div class="code code-lines au-diff" id="diff-{e.id}" role="group" aria-label="Change" hidden={!open[e.id]}
-                    >{#each e.diff.lines as line, i (i)}<code class={line.kind === 'dim' ? 'c-dim' : line.kind === 'del' ? 'c-del' : undefined}>{line.text}</code>{/each}</div
-                  >
+                  <div class="code code-lines au-diff" id="diff-{e.id}" role="group" aria-label="Change" hidden={!open[e.id]}>
+                    {#each e.diff.lines as line, i (i)}<code class={line.kind === 'dim' ? 'c-dim' : line.kind === 'del' ? 'c-del' : undefined}>{line.text}</code
+                      >{/each}
+                  </div>
                 {/if}
               </li>
             {/each}
@@ -93,23 +101,30 @@
       {/each}
 
       <p class="caption t-3" id="au-note" role="status" bind:this={noteEl}>{note}</p>
+      {#if data.before || data.older}
+        <nav class="cluster g-2" aria-label="Pages of the audit trail">
+          {#if data.before}<a class="btn btn--sm" href="?">Newest changes</a>{/if}
+          {#if data.older}<a class="btn btn--sm" href="?before={encodeURIComponent(data.older)}" rel="next">Older changes</a>{/if}
+        </nav>
+      {/if}
     </section>
 
     <div class="stack g-4">
       <section class="card g-3" aria-labelledby="rec-h">
         <h2 id="rec-h" class="title">What is recorded</h2>
         <ul class="bullets">
-          <li>Registrations, approvals, denials and agents turned off</li>
-          <li>Keys created and revoked, never the key itself</li>
+          <li>Signups, claims, approvals, denials and agents turned off or on</li>
+          <li>Keys issued and revoked, never the key itself</li>
           <li>Subscription changes and signing-secret rotations</li>
-          <li>Channel settings, suspensions and webhook replacements</li>
-          <li>Channel changes in Discord, from Discord’s audit log</li>
+          <li>Channel settings, webhook changes and the kill switches</li>
+          <li>Suspensions, bans, tier changes, strikes, takedowns and appeals</li>
+          <li>Every time an admin revealed an agent’s address, with the reason</li>
         </ul>
       </section>
       <section class="card g-3" aria-labelledby="not-h">
         <h2 id="not-h" class="title">What isn’t</h2>
-        <p>Message text (see Moderation), and which MCP caller asked for a Discord change, unless the MCP writes it into the audit-log reason.</p>
-        <span class="caption t-3">Kept for [retention period].</span>
+        <p>Message text (see Moderation), and raw addresses: the trail shows that an admin revealed one, never the address.</p>
+        <span class="caption t-3">Entries are kept for 365 days.</span>
       </section>
     </div>
   </div>

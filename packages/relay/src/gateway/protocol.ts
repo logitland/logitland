@@ -10,8 +10,15 @@ export const Op = { Dispatch: 0, Heartbeat: 1, Identify: 2, Resume: 6, Reconnect
 export const Intents = { Guilds: 1 << 0, GuildMessages: 1 << 9, MessageContent: 1 << 15 } as const;
 export const INTENTS = Intents.Guilds | Intents.GuildMessages | Intents.MessageContent;
 
-/** How long to wait for HELLO after the socket opens before trying again. */
+/** How long to wait for the socket to open, and then for HELLO, before trying again. */
 export const HELLO_TIMEOUT_MS = 20_000;
+/**
+ * Discord allows 1000 IDENTIFYs in 24 hours and resets the bot token when they run out
+ * (https://docs.discord.com/developers/events/gateway). After the first rejected session the wait grows from 5 s to
+ * this cap (about 290 a day at the cap), and a connection that held for STABLE_MS starts the count again.
+ */
+export const INVALID_BACKOFF_MAX_MS = 5 * 60_000;
+const STABLE_MS = 5 * 60_000;
 
 export type CloseAction = { action: 'resume' } | { action: 'identify' } | { action: 'stop'; status: string };
 
@@ -115,6 +122,11 @@ export class GatewayConnection {
   private attempts = 0;
   private resumeRejections = 0;
   private notBefore = 0;
+  /** When the pending retry fires. A start() before then (cron, the alarm) waits for it instead of skipping the backoff. */
+  private retryAt = 0;
+  /** Sessions rejected one after another, and when the connection last became ready. */
+  private invalidStreak = 0;
+  private readyAt: number | null = null;
   private lastFrame = 0;
   private timers: Partial<Record<TimerName, () => void>> = {};
   private stopped: string | null = null;
@@ -151,6 +163,7 @@ export class GatewayConnection {
   async start(): Promise<void> {
     if (this.phase !== 'idle' && this.phase !== 'waiting' && this.phase !== 'stopped') return;
     if (this.deps.now() < this.notBefore) return;
+    if (this.phase === 'waiting' && this.deps.now() < this.retryAt) return;
     this.clearTimer('retry');
     this.stopped = null;
     await this.open();
@@ -179,10 +192,27 @@ export class GatewayConnection {
     try {
       const url = this.resuming ? this.session.resumeUrl! : await this.deps.gatewayUrl();
       if (gen !== this.gen) return;
-      const socket = await this.deps.connect(withParams(url), {
+      const opening = this.deps.connect(withParams(url), {
         message: (data) => this.onMessage(gen, data),
         close: (code, reason) => this.onClose(gen, code, reason),
       });
+      let cancelWait = () => {};
+      const timeout = new Promise<never>((_, reject) => {
+        cancelWait = this.deps.setTimer(() => reject(new Error('Timed out opening the connection')), HELLO_TIMEOUT_MS);
+      });
+      let socket: GatewaySocket;
+      try {
+        socket = await Promise.race([opening, timeout]);
+      } catch (err) {
+        // A socket that opens after we gave up must not be left running.
+        opening.then(
+          (late) => late.close(4000, 'superseded'),
+          () => {},
+        );
+        throw err;
+      } finally {
+        cancelWait();
+      }
       if (gen !== this.gen) {
         socket.close(4000, 'superseded');
         return;
@@ -202,7 +232,11 @@ export class GatewayConnection {
     if (err instanceof GatewayStopError) return this.stop(err.message);
     if (err instanceof IdentifyLimitError) {
       this.notBefore = this.deps.now() + err.retryAfterMs;
-      return this.retryLater(err.message, err.retryAfterMs, `waiting: Discord’s limit on new sessions is used up, trying again in ${Math.ceil(err.retryAfterMs / 60_000)} min`);
+      return this.retryLater(
+        err.message,
+        err.retryAfterMs,
+        `waiting: Discord’s limit on new sessions is used up, trying again in ${Math.ceil(err.retryAfterMs / 60_000)} min`,
+      );
     }
     this.retryLater(err instanceof Error ? err.message : String(err));
   }
@@ -288,6 +322,7 @@ export class GatewayConnection {
 
   private ready(resumed: boolean): void {
     this.phase = 'ready';
+    this.readyAt = this.deps.now();
     this.attempts = 0;
     this.resumeRejections = 0;
     this.setStatus('connected');
@@ -304,8 +339,13 @@ export class GatewayConnection {
       this.timers.invalid = this.deps.setTimer(() => this.handshake(), wait);
       return;
     }
-    if (this.session.sessionId) this.loseSession();
-    this.timers.invalid = this.deps.setTimer(() => this.retryLater('Discord rejected the session', 0), wait);
+    // An established session that Discord says may be resumed is resumed on a fresh connection.
+    if (!(resumable && this.phase === 'ready') && this.session.sessionId) this.loseSession();
+    if (this.readyAt !== null && this.deps.now() - this.readyAt > STABLE_MS) this.invalidStreak = 0;
+    this.readyAt = null;
+    const streak = this.invalidStreak++;
+    const more = streak === 0 ? 0 : Math.min(INVALID_BACKOFF_MAX_MS, 5_000 * 2 ** (streak - 1)) * (0.5 + this.deps.random() / 2);
+    this.timers.invalid = this.deps.setTimer(() => this.retryLater('Discord rejected the session', more), wait);
   }
 
   private onClose(gen: number, code: number, reason: string): void {
@@ -328,7 +368,9 @@ export class GatewayConnection {
     this.drop();
     this.phase = 'waiting';
     this.setStatus(status, reason);
-    this.timers.retry = this.deps.setTimer(() => void this.open(), delayMs ?? this.backoff());
+    const delay = delayMs ?? this.backoff();
+    this.retryAt = this.deps.now() + delay;
+    this.timers.retry = this.deps.setTimer(() => void this.open(), delay);
   }
 
   // 0 to 1 s for the first retry, then 1, 2, 4 … 60 s with jitter.

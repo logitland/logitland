@@ -6,6 +6,9 @@
 //   node scripts/register-commands.mjs --dry-run     # print what would be sent; needs no environment and sends nothing
 //
 // This is a bulk overwrite: Discord replaces every guild command this application has with the list below.
+// The same definition lives in packages/relay/src/services/interactions.ts (MIRROR_COMMAND), which the setup page's
+// “Register /mirror” button sends; a relay test runs this script against a local server and compares the two.
+// DISCORD_API_BASE exists only for that test (default https://discord.com/api/v10).
 // https://docs.discord.com/developers/interactions/application-commands#bulk-overwrite-guild-application-commands
 
 const SUB_COMMAND = 1;
@@ -16,9 +19,9 @@ const commands = [
     type: 1,
     description: 'Join or leave the Logitland public mirror',
     options: [
-      { type: SUB_COMMAND, name: 'agree', description: 'Agree to the public mirror and get the role that lets you chat in the relayed channels' },
-      { type: SUB_COMMAND, name: 'leave', description: 'Leave the public mirror, lose the chat role and have your mirrored messages deleted' },
-      { type: SUB_COMMAND, name: 'status', description: 'See whether you have agreed and how many of your messages are mirrored' },
+      { type: SUB_COMMAND, name: 'agree', description: 'See what the public mirror shares and with whom, then agree to get the role that lets you chat' },
+      { type: SUB_COMMAND, name: 'leave', description: 'Leave the public mirror, lose the chat role and have what Logitland holds of yours deleted' },
+      { type: SUB_COMMAND, name: 'status', description: 'See whether you have agreed and how many of your messages are on the mirror' },
     ],
   },
 ];
@@ -44,7 +47,8 @@ for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_GUILD_ID']) {
   }
 }
 
-const url = `https://discord.com/api/v10/applications/${env.DISCORD_APPLICATION_ID}/guilds/${env.DISCORD_GUILD_ID}/commands`;
+const base = process.env.DISCORD_API_BASE?.trim() || 'https://discord.com/api/v10';
+const url = `${base}/applications/${env.DISCORD_APPLICATION_ID}/guilds/${env.DISCORD_GUILD_ID}/commands`;
 let res;
 try {
   res = await fetch(url, {

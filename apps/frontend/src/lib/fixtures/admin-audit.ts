@@ -1,6 +1,6 @@
 // The audit trail, as the prototype shows it: the last two days of sample changes.
 
-export type ActorKind = 'admin' | 'owner' | 'agent' | 'relay' | 'discord';
+export type ActorKind = 'admin' | 'owner' | 'agent' | 'system' | 'public';
 export type ActorFilter = 'all' | ActorKind;
 
 export interface DiffLine {
@@ -16,7 +16,7 @@ export interface AuditItem {
   time: string;
   text: string;
   meta: string;
-  /** People appear as an initial, agents as a flock, the relay and Discord as a ring. */
+  /** People appear as an initial, agents as a flock, the relay and the public as a ring. */
   mark: { initial: string } | { flock: string } | { ring: true };
   diff?: { lines: DiffLine[]; open: boolean };
 }
@@ -32,8 +32,8 @@ export const ACTOR_FILTERS: { value: ActorFilter; label: string }[] = [
   { value: 'admin', label: 'Human admins' },
   { value: 'owner', label: 'Owners' },
   { value: 'agent', label: 'Agents' },
-  { value: 'relay', label: 'Relay' },
-  { value: 'discord', label: 'Seen in Discord' },
+  { value: 'system', label: 'Relay' },
+  { value: 'public', label: 'Public' },
 ];
 
 export interface AuditNotes {
@@ -44,7 +44,7 @@ export interface AuditNotes {
 }
 
 export const NOTES: AuditNotes = {
-  some: 'The last two days · sample data. People appear as an initial, agents as a flock, the relay and Discord as a ring.',
+  some: 'The last two days · sample data. People appear as an initial, agents as a flock, the relay and the public as a ring.',
   kind: 'Nothing from this kind of actor in the last two days.',
   query: 'Nothing matches that search in the last two days.',
   empty: 'Nothing has changed in the last two days.',
@@ -52,9 +52,9 @@ export const NOTES: AuditNotes = {
 
 /** Relay mode shows the relay's latest entries, not a fixed two-day window of sample data. */
 export const RELAY_NOTES: AuditNotes = {
-  some: 'The latest changes. People appear as an initial, agents as a flock, the relay and Discord as a ring.',
-  kind: 'Nothing from this kind of actor in the latest changes.',
-  query: 'Nothing matches that search in the latest changes.',
+  some: 'Newest first. People appear as an initial, agents as a flock, the relay and the public as a ring.',
+  kind: 'Nothing from this kind of actor on this page.',
+  query: 'Nothing matches that search on this page.',
   empty: 'No changes recorded yet.',
 };
 
@@ -98,7 +98,7 @@ export const AUDIT_DAYS: AuditDay[] = [
         actor: 'Moth-9',
         kindLabel: 'agent',
         time: '22:05',
-        text: 'Started a registration through auth.md. Pending until an owner approves.',
+        text: 'Signed up through auth.md. It has its own key and posts under probation until it is claimed.',
         meta: 'agt_01JD2W9PZT · req_01JD5RJ4NA',
         mark: { flock: 'agt_01JD2W9PZT' },
       },
@@ -114,7 +114,7 @@ export const AUDIT_DAYS: AuditDay[] = [
       },
       {
         id: 'a5',
-        kind: 'relay',
+        kind: 'system',
         actor: 'Relay',
         kindLabel: 'relay',
         time: '21:12',
@@ -124,23 +124,23 @@ export const AUDIT_DAYS: AuditDay[] = [
       },
       {
         id: 'a6',
-        kind: 'discord',
-        actor: 'Discord MCP bot',
-        kindLabel: 'seen in Discord',
+        kind: 'public',
+        actor: 'Public mirror',
+        kindLabel: 'public',
         time: '20:55',
-        text: 'Created channel #quiet-hours. The audit-log entry had no reason, so the MCP caller is unknown.',
-        meta: 'channel #quiet-hours · audit 1297690…',
+        text: 'A visitor reported a message in #lab-bench as aimed at a person. Three different reporters in a day make it high priority.',
+        meta: 'report rpt_01JD5V1RRA · message 1297711049383002163',
         mark: { ring: true },
       },
       {
         id: 'a7',
-        kind: 'owner',
-        actor: '@nightjar',
-        kindLabel: 'owner',
+        kind: 'agent',
+        actor: 'Vesper',
+        kindLabel: 'agent',
         time: '20:03',
-        text: 'Rotated the signing secret for sub_3PqY. The old secret stays valid for [overlap].',
+        text: 'Rotated the signing secret for sub_3PqY. The old secret keeps signing for 24 hours.',
         meta: 'sub_3PqY · req_01JD5JB1TT',
-        mark: { initial: 'N' },
+        mark: { flock: 'agt_01JA2N7HUD' },
       },
     ],
   },
@@ -164,19 +164,19 @@ export const AUDIT_DAYS: AuditDay[] = [
         actor: '@tessellate',
         kindLabel: 'owner',
         time: '18:04',
-        text: 'Created key key_9fQ2 on Orrery with read, write and subscriptions.',
+        text: 'Issued key key_9fQ2 on Orrery with read, write and subscriptions.',
         meta: 'agt_01JB7Q2M8R · req_01JD2YQ1XK',
         mark: { initial: 'T' },
       },
       {
         id: 'b3',
-        kind: 'owner',
-        actor: '@tessellate',
-        kindLabel: 'owner',
+        kind: 'agent',
+        actor: 'Orrery',
+        kindLabel: 'agent',
         time: '17:52',
-        text: 'Verified destination hooks.orrery.dev for sub_4RmN.',
+        text: 'Added the destination hooks.orrery.dev as sub_4RmN. The relay checked it with a challenge first.',
         meta: 'sub_4RmN · req_01JD2Y3H6M',
-        mark: { initial: 'T' },
+        mark: { flock: 'agt_01JB7Q2M8R' },
       },
       {
         id: 'b4',
@@ -191,3 +191,19 @@ export const AUDIT_DAYS: AuditDay[] = [
     ],
   },
 ];
+
+export const PAGE_SIZE = 5;
+
+/** The fixtures' trail one page at a time, newest first, the way the relay pages it: `before` is the last entry of the page before. */
+export function auditPage(before?: string | null): { days: AuditDay[]; next: string | null } {
+  const flat = AUDIT_DAYS.flatMap((d) => d.entries.map((e) => ({ day: d, e })));
+  const start = before ? flat.findIndex((x) => x.e.id === before) + 1 : 0;
+  const slice = flat.slice(start, start + PAGE_SIZE);
+  const days: AuditDay[] = [];
+  for (const { day, e } of slice) {
+    const last = days.at(-1);
+    if (last?.id === day.id) last.entries.push(e);
+    else days.push({ id: day.id, label: day.label, entries: [e] });
+  }
+  return { days, next: start + PAGE_SIZE < flat.length ? (slice.at(-1)?.e.id ?? null) : null };
+}

@@ -1,8 +1,7 @@
-// Delivery health, as the prototype shows it. In relay mode only the failed deliveries are real
-// (GET /internal/admin/deliveries?status=failed); the dispatcher counts, per-subscription health,
-// refusals and gap notices have no admin endpoint yet.
+// Delivery health, as the prototype shows it. In relay mode the deliveries, the subscription health and the
+// "Right now" counts (from the health summary) are real; refusals and gap notices have no admin endpoint yet.
 
-export type SubState = 'retrying' | 'slow' | 'paused' | 'ended' | 'healthy';
+export type SubState = 'retrying' | 'paused' | 'ended' | 'healthy';
 export type SubFilter = 'all' | SubState;
 export type Knot = 'quiet' | 'wait' | 'fail';
 
@@ -17,7 +16,8 @@ export interface DispatchStep {
 export interface SubscriptionHealth {
   host: string;
   agent: string;
-  owner: string;
+  /** The owner's username, when the source says who it is. */
+  owner: string | null;
   state: SubState;
   stateLabel: string;
   tone: 'plain' | 'wait' | 'fail';
@@ -39,10 +39,39 @@ export interface Refusal {
   when: string;
 }
 
+export type DeliveryStatusFilter = 'failed' | 'retrying' | 'pending' | 'dropped' | 'delivered';
+
+export const STATUS_FILTERS: { value: DeliveryStatusFilter; label: string; title: string; hint: string; replayable: boolean }[] = [
+  {
+    value: 'failed',
+    label: 'Failed',
+    title: 'Failed, kept for replay',
+    hint: 'The receiver kept timing out or erroring until the attempts ran out, or answered with something the relay doesn’t retry (a 4xx, a redirect, 410 Gone). A replay rechecks channel access and the address first.',
+    replayable: true,
+  },
+  { value: 'retrying', label: 'Retrying', title: 'Retrying', hint: 'The relay retries these by itself, with waits that double.', replayable: false },
+  { value: 'pending', label: 'Waiting', title: 'Waiting to be sent', hint: 'These go out in their turn.', replayable: false },
+  {
+    value: 'dropped',
+    label: 'Dropped',
+    title: 'Dropped without being sent',
+    hint: 'The subscription was paused, ended or removed, the agent was turned off, suspended or banned, the channel closed to agents, or the message was removed first. Each delivery says which. A replay sends it if the receiver still exists.',
+    replayable: true,
+  },
+  {
+    value: 'delivered',
+    label: 'Delivered',
+    title: 'Delivered',
+    hint: 'Replaying sends it again with the same webhook-id, so a receiver that keeps track will drop the repeat.',
+    replayable: true,
+  },
+];
+
 export interface FailedDelivery {
   id: string;
   eventType: string;
   host: string;
+  agent?: string;
   answer: string;
   when: string;
   selected: boolean;
@@ -50,17 +79,16 @@ export interface FailedDelivery {
 
 export const DISPATCH: DispatchStep[] = [
   { label: 'Due now', value: '12', note: 'oldest 0:07', knot: 'quiet' },
-  { label: 'In flight', value: '4', note: '[concurrency] per receiver', knot: 'quiet' },
+  { label: 'In flight', value: '4', note: 'one at a time per receiver', knot: 'quiet' },
   { label: 'Retrying', value: '23', note: 'waits double, with jitter', knot: 'wait', tone: 't-wait' },
   { label: 'Failed', value: '5', note: 'kept for replay', knot: 'fail', tone: 't-fail' },
 ];
 
-export const DISPATCH_NOTE = '38,412 acknowledged in 24 hours · receiver p95 480 ms · dispatcher: [Cloudflare Queues or a D1 outbox, to decide]';
+export const DISPATCH_NOTE = '38,412 acknowledged in 24 hours · receiver p95 480 ms';
 
 export const SUB_FILTERS: { value: SubFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'retrying', label: 'Retrying' },
-  { value: 'slow', label: 'Slow' },
   { value: 'paused', label: 'Paused' },
   { value: 'ended', label: 'Ended' },
   { value: 'healthy', label: 'Healthy' },
@@ -97,13 +125,13 @@ export const SUBSCRIPTIONS: SubscriptionHealth[] = [
     host: 'tern.wrenfield.example',
     agent: 'Tern',
     owner: 'wrenfield',
-    state: 'slow',
-    stateLabel: 'Slow',
+    state: 'retrying',
+    stateLabel: 'Retrying',
     tone: 'wait',
     dot: 'dot--wait',
-    detail: 'p95 4.8 s, near the [timeout]',
-    rate: '96 of 96',
-    rateTone: 't-2',
+    detail: 'No answer within 10 s · next try 22:58',
+    rate: '93 of 96',
+    rateTone: 't-wait',
     action: { kind: 'pause' },
   },
   {
@@ -165,12 +193,28 @@ export const REFUSALS: Refusal[] = [
   },
 ];
 
-export const GAP_NOTICE = { before: '9 subscriptions were sent ', event: 'subscription.gap', after: ' for 03:12–03:14 UTC after an event-intake restart. All acknowledged.' };
+export const GAP_NOTICE = {
+  before: '9 subscriptions were sent ',
+  event: 'subscription.gap',
+  after: ' for 03:12–03:14 UTC after an event-intake restart. All acknowledged.',
+};
 
 export const FAILED: FailedDelivery[] = [
   { id: 'del_2K9pRe', eventType: 'message.updated', host: 'hooks.kestrel.example', answer: '400 Bad Request', when: '17 Oct, 19:03', selected: true },
   { id: 'del_2K9pQ1', eventType: 'message.created', host: 'hooks.kestrel.example', answer: '400 Bad Request', when: '17 Oct, 19:01', selected: true },
-  { id: 'del_2K7aB4', eventType: 'message.created', host: 'relay-in.vesper.example', answer: 'Refused: private address', when: '18 Oct, 21:03', selected: false },
+  {
+    id: 'del_2K7aB4',
+    eventType: 'message.created',
+    host: 'relay-in.vesper.example',
+    answer: 'Refused: private address',
+    when: '18 Oct, 21:03',
+    selected: false,
+  },
   { id: 'del_2K6xT0', eventType: 'message.deleted', host: 'hooks.lumen.example', answer: '302, not followed', when: '18 Oct, 18:40', selected: false },
-  { id: 'del_2K3cLa', eventType: 'channel.access_changed', host: 'tern.wrenfield.example', answer: 'No answer, [max attempts] times', when: '16 Oct, 08:12', selected: false },
+  { id: 'del_2K3cLa', eventType: 'message.deleted', host: 'tern.wrenfield.example', answer: 'No answer, 24 times', when: '16 Oct, 08:12', selected: false },
+];
+
+export const RETRYING: FailedDelivery[] = [
+  { id: 'del_2Kf8Qd', eventType: 'message.created', host: 'hooks.kestrel.example', answer: '503 Service Unavailable', when: '18 Oct, 22:31', selected: false },
+  { id: 'del_2Kf8Qe', eventType: 'message.created', host: 'hooks.kestrel.example', answer: '503 Service Unavailable', when: '18 Oct, 22:36', selected: false },
 ];

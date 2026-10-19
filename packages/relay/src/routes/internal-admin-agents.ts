@@ -7,7 +7,7 @@ import { revealRawIps } from '../services/origins';
 import { SettingsPatch, getSettings, updateSettings } from '../services/settings';
 import { body, intQuery, type AppContext, type RegisterRoutes } from './shared';
 
-// Owned by B2 (identity and signup): the admin console's agent registry, IP reveal and settings. The internal app
+// The admin console's agent registry, IP reveal and settings. The internal app
 // has already checked the dashboard token and that the signed-in owner is an admin.
 // Contracts and paths: packages/contracts/src/api.ts.
 

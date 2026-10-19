@@ -18,7 +18,7 @@
   const shown = $derived.by(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return items;
-    return items.filter((i) => [i.eventType, i.when, `${i.agent} · ${i.channel}`, i.row.text, ...i.ids].join(' ').toLowerCase().includes(needle));
+    return items.filter((i) => [i.eventType, i.when, `${i.agent} ${i.channel ?? ''}`, i.row.text, ...i.ids].join(' ').toLowerCase().includes(needle));
   });
 
   // The relay's clock, so the scheduled attempt counts down and new attempts get a time.
@@ -129,7 +129,11 @@
   <div class="page-head" data-enter="0">
     <div class="page-head__text measure">
       <h1 class="h1">Deliveries</h1>
-      <p class="t-2">Every event the relay sent to your agents’ receivers, each attempt, and exactly what was sent.</p>
+      <p class="t-2">
+        {data.live
+          ? 'Events the relay sent to your agents’ receivers, each attempt, and how each one went.'
+          : 'Every event the relay sent to your agents’ receivers, each attempt, and exactly what was sent.'}
+      </p>
     </div>
     <div class="dl-search">
       <label class="sr-only" for="d-search">Search deliveries</label>
@@ -146,15 +150,18 @@
               <span class="dot {DOT[it.row.tone]}" aria-hidden="true"></span>
               <span class="dl-row__text">
                 <span class="dl-row__top"><span class="mono tiny">{it.eventType}</span><span class="caption t-3">{it.when}</span></span>
-                <span class="small t-2">{it.agent} · {it.channel}</span>
+                <span class="small t-2">{it.channel ? `${it.agent} · ${it.channel}` : it.agent}</span>
                 <Morph class="caption fw-600 {ROW_TEXT[it.row.tone]}" text={it.row.text} />
               </span>
             </button>
           </li>
         {/each}
-        {#if !shown.length}<li class="dl-empty caption t-3">No deliveries match.</li>{/if}
+        {#if !shown.length}<li class="dl-empty caption t-3">
+            {items.length ? 'No deliveries match.' : 'Events sent to your agents’ receivers will show up here.'}
+          </li>{/if}
       </ul>
-      <span class="caption t-3 dl__keep">Kept for [retention period].</span>
+      <span class="caption t-3 dl__keep">Deliveries are kept for 30 days after they finish.</span>
+      {#if data.older}<a class="link dl__keep" href="?before={data.older}">Older deliveries</a>{/if}
     </section>
 
     {#if d}
@@ -163,72 +170,124 @@
           <div class="stack g-2 det-head__text">
             <div class="cluster g-3">
               <Morph as="h2" id="det-h" class="mono det-id" text={d.id} />
-              <span class="tag {TAG[d.tone]}" id="det-tag"><span class="dot {DOT[d.tone]}" id="det-tag-dot" aria-hidden="true"></span><Morph id="det-state" text={d.state} /></span>
+              <span class="tag {TAG[d.tone]}" id="det-tag"
+                ><span class="dot {DOT[d.tone]}" id="det-tag-dot" aria-hidden="true"></span><Morph id="det-state" text={d.state} /></span
+              >
             </div>
             {#key d.id}<p class="small t-2" id="det-headline" in:rise>{d.headline}</p>{/key}
           </div>
-          <form method="POST" action="?/{d.act ?? 'retry'}" use:enhance={act} hidden={!d.act}>
+          <form method="POST" action="?/{d.act ?? 'retry'}" use:enhance={act} hidden={!d.act || data.live}>
             <input type="hidden" name="id" value={d.id} />
-            <button type="submit" class="btn" class:btn--primary={d.primary} class:is-busy={acting} aria-busy={acting || undefined} id="det-action" bind:this={actionBtn}
-              ><span class="btn__spin" aria-hidden="true"></span><Morph id="det-action-label" text={d.action || ' '} /></button
+            <button
+              type="submit"
+              class="btn"
+              class:btn--primary={d.primary}
+              class:is-busy={acting}
+              aria-busy={acting || undefined}
+              id="det-action"
+              bind:this={actionBtn}><span class="btn__spin" aria-hidden="true"></span><Morph id="det-action-label" text={d.action || ' '} /></button
             >
           </form>
         </div>
 
         <dl class="facts" id="det-facts">
           {#each d.facts as f, j (j)}
-            <div class="stack g-hair"><Morph as="dt" class="stat__label" text={f.label} /><Morph as="dd" class={f.mono ? 'mono tiny t-ink' : 'small t-ink'} text={f.value} /></div>
+            <div class="stack g-hair">
+              <Morph as="dt" class="stat__label" text={f.label} /><Morph as="dd" class={f.mono ? 'mono tiny t-ink' : 'small t-ink'} text={f.value} />
+            </div>
           {/each}
         </dl>
 
-        <div class="stack g-3">
-          <h3 class="micro">Attempts</h3>
-          <div id="att-wrap">
-            {#key d.id}
-              <ol class="thread" id="att-list" in:rise>
-                {#each d.attempts as t (t)}
-                  <li in:rise>
-                    <span
-                      class="thread__knot"
-                      class:thread__knot--fail={t.kind === 'fail'}
-                      class:thread__knot--wait={t.kind === 'wait'}
-                      class:thread__knot--ring={t.kind === 'next'}
-                      class:att-ok={t.kind === 'ok'}
-                      aria-hidden="true"
-                    ></span>
-                    <div class="att">
-                      <span class="caption t-3">{t.at}</span>
-                      <span class="small"><strong class="fw-600 {RESULT[t.kind]}">{t.result}</strong> <span class="t-3">{t.note}</span></span>
-                      {#if t.kind === 'next'}<Morph class="caption t-3" id="next-in" text={nextLabel(t.at)} />{:else}<span class="caption t-3">{t.ms}</span>{/if}
-                    </div>
-                  </li>
-                {/each}
-              </ol>
+        {#if d.attempts.length}
+          <div class="stack g-3">
+            <h3 class="micro">Attempts</h3>
+            <div id="att-wrap">
+              {#key d.id}
+                <ol class="thread" id="att-list" in:rise>
+                  {#each d.attempts as t (t)}
+                    <li in:rise>
+                      <span
+                        class="thread__knot"
+                        class:thread__knot--fail={t.kind === 'fail'}
+                        class:thread__knot--wait={t.kind === 'wait'}
+                        class:thread__knot--ring={t.kind === 'next'}
+                        class:att-ok={t.kind === 'ok'}
+                        aria-hidden="true"
+                      ></span>
+                      <div class="att">
+                        <span class="caption t-3">{t.at}</span>
+                        <span class="small"><strong class="fw-600 {RESULT[t.kind]}">{t.result}</strong> <span class="t-3">{t.note}</span></span>
+                        {#if t.kind === 'next'}<Morph class="caption t-3" id="next-in" text={nextLabel(t.at)} />{:else}<span class="caption t-3">{t.ms}</span
+                          >{/if}
+                      </div>
+                    </li>
+                  {/each}
+                </ol>
+              {/key}
+            </div>
+          </div>
+        {/if}
+
+        {#if d.body}
+          <div class="stack g-3">
+            <div class="seg tabs self-start" class:is-ready={segReady} role="tablist" aria-label="Show" bind:this={tablist}>
+              <span class="seg__ind" aria-hidden="true" style="width: {ind.w}px; translate: {ind.x}px 0"></span>
+              <button
+                type="button"
+                role="tab"
+                id="tab-body"
+                aria-selected={tab === 'body'}
+                aria-controls="code-body"
+                tabindex={tab === 'body' ? 0 : -1}
+                onkeydown={onTabKey}
+                onclick={() => (tab = 'body')}>Body</button
+              >
+              <button
+                type="button"
+                role="tab"
+                id="tab-headers"
+                aria-selected={tab === 'headers'}
+                aria-controls="code-headers"
+                tabindex={tab === 'headers' ? 0 : -1}
+                onkeydown={onTabKey}
+                onclick={() => (tab = 'headers')}>Headers</button
+              >
+            </div>
+            {#key `${d.id}:${tab}`}
+              <!-- The panels are the pre blocks themselves, as in the prototype. -->
+              <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+              <pre class="code" id="code-body" role="tabpanel" aria-labelledby="tab-body" tabindex="0" hidden={tab !== 'body'} in:rise>{d.body}</pre>
+              <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
+              <pre
+                class="code"
+                id="code-headers"
+                role="tabpanel"
+                aria-labelledby="tab-headers"
+                tabindex="0"
+                hidden={tab !== 'headers'}
+                in:rise>{d.headers}</pre>
             {/key}
+            {#if tab === 'body'}
+              <span class="caption t-3" id="note-body" in:rise>The event as the receiver got it.</span>
+            {:else}
+              <span class="caption t-3" id="note-headers" in:rise
+                >Built fresh for each attempt from a fixed list. No keys, tokens or cookies are ever attached.</span
+              >
+            {/if}
           </div>
-        </div>
+        {/if}
 
-        <div class="stack g-3">
-          <div class="seg tabs self-start" class:is-ready={segReady} role="tablist" aria-label="Show" bind:this={tablist}>
-            <span class="seg__ind" aria-hidden="true" style="width: {ind.w}px; translate: {ind.x}px 0"></span>
-            <button type="button" role="tab" id="tab-body" aria-selected={tab === 'body'} aria-controls="code-body" tabindex={tab === 'body' ? 0 : -1} onkeydown={onTabKey} onclick={() => (tab = 'body')}>Body</button>
-            <button type="button" role="tab" id="tab-headers" aria-selected={tab === 'headers'} aria-controls="code-headers" tabindex={tab === 'headers' ? 0 : -1} onkeydown={onTabKey} onclick={() => (tab = 'headers')}>Headers</button>
-          </div>
-          {#key `${d.id}:${tab}`}
-            <!-- The panels are the pre blocks themselves, as in the prototype. -->
-            <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-            <pre class="code" id="code-body" role="tabpanel" aria-labelledby="tab-body" tabindex="0" hidden={tab !== 'body'} in:rise>{d.body}</pre>
-            <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-            <pre class="code" id="code-headers" role="tabpanel" aria-labelledby="tab-headers" tabindex="0" hidden={tab !== 'headers'} in:rise>{d.headers}</pre>
-          {/key}
-          {#if tab === 'body'}
-            <span class="caption t-3" id="note-body" in:rise>Proposed event schema.</span>
-          {:else}
-            <span class="caption t-3" id="note-headers" in:rise>Built fresh for each attempt from a fixed list. No keys, tokens or cookies are ever attached.</span>
-          {/if}
-        </div>
-
-        <p class="small t-2 det-foot">Missed events? Read the channel from cursor <Morph class="mono tiny t-ink det-cursor" id="det-cursor" text={d.cursor} />. Reads return messages that still exist; missed edits and deletions only arrive as events.</p>
+        {#if d.cursor}
+          <p class="small t-2 det-foot">
+            Missed events? Read the channel from cursor <Morph class="mono tiny t-ink det-cursor" id="det-cursor" text={d.cursor} />. Reads return messages that
+            still exist; missed edits and deletions only arrive as events.
+          </p>
+        {:else if data.live}
+          <p class="small t-2 det-foot">
+            Missed events? An agent can read the channel again through the API. Reads return messages that still exist; missed edits and deletions only arrive
+            as events.
+          </p>
+        {/if}
       </section>
     {/if}
   </div>

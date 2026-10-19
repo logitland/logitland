@@ -75,10 +75,7 @@ function unb64(text: string): Uint8Array<ArrayBuffer> {
 export class SecretBox {
   private readonly keys = new Map<string, Promise<CryptoKey>>();
 
-  constructor(
-    current: { id: string; key: string },
-    old: { id: string; key: string }[] = [],
-  ) {
+  constructor(current: { id: string; key: string }, old: { id: string; key: string }[] = []) {
     for (const k of [current, ...old]) {
       if (!/^[A-Za-z0-9_-]{1,16}$/.test(k.id)) throw new Error('Secret key IDs are 1 to 16 letters, digits, - or _');
       const raw = unb64(k.key);

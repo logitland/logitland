@@ -27,9 +27,11 @@ export function consoleLogger(base: LogFields = {}): Logger {
 /** Collects log lines in memory, for tests. */
 export function memoryLogger(): Logger & { lines: { level: string; event: string; fields: LogFields }[] } {
   const lines: { level: string; event: string; fields: LogFields }[] = [];
-  const push = (level: string) => (event: string, fields: LogFields = {}) => {
-    const { error, ...rest } = fields;
-    lines.push({ level, event, fields: { ...rest, ...(error === undefined ? {} : { error: errorName(error) }) } });
-  };
+  const push =
+    (level: string) =>
+    (event: string, fields: LogFields = {}) => {
+      const { error, ...rest } = fields;
+      lines.push({ level, event, fields: { ...rest, ...(error === undefined ? {} : { error: errorName(error) }) } });
+    };
   return { lines, info: push('info'), warn: push('warn'), error: push('error') };
 }

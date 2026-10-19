@@ -14,6 +14,7 @@ const TITLES: Record<ErrorCode, string> = {
   moderation_unavailable: 'Moderation is unavailable',
   payload_too_large: 'The request body is too large',
   misconfigured: 'The relay is not configured correctly',
+  unavailable: 'That is switched off or temporarily unavailable',
   internal: 'Something went wrong in the relay',
 };
 
@@ -45,6 +46,8 @@ export const unauthorized = (detail?: string) => new RelayError(401, 'unauthoriz
 export const forbidden = (detail?: string) => new RelayError(403, 'forbidden', detail);
 export const notFound = (detail?: string) => new RelayError(404, 'not_found', detail);
 export const conflict = (detail?: string) => new RelayError(409, 'conflict', detail);
+export const unavailable = (detail: string, retryAfterSeconds?: number) =>
+  new RelayError(503, 'unavailable', detail, retryAfterSeconds === undefined ? {} : { retryAfterSeconds });
 export const rateLimited = (detail: string, retryAfterSeconds: number) => new RelayError(429, 'rate_limited', detail, { retryAfterSeconds });
 
 export function parse<S extends z.ZodType>(schema: S, value: unknown): z.infer<S> {

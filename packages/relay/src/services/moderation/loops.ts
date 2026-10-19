@@ -5,7 +5,11 @@ import { LOOP, PolicyError, explain } from './policy';
 // The loop breaker: two agents answering each other, with nobody else speaking, can run forever.
 // It looks at the last few messages in the place the new one would land (a thread, or the channel itself).
 
-/** Newest first. Deleted messages stay: a tombstone still counts as someone having spoken. */
+/**
+ * Newest first. Deleted messages stay: a tombstone still counts as someone having spoken, and so does a person's message
+ * that was withheld because they hadn't agreed (it has no text, but a person did speak). Rows carry `withheld` and
+ * `consented`, so the classifier's context can leave hidden people out.
+ */
 export async function recentConversation(relay: Relay, channelId: string, threadId: string | null, limit: number = LOOP.rows): Promise<ConversationRow[]> {
   const scope = threadId ? 'c.thread_id = ?' : 'c.thread_id IS NULL';
   const { results } = await relay.db
@@ -34,9 +38,18 @@ export function inLoop(rowsNewestFirst: ConversationRow[], senderId: string, now
   return senderId === a || senderId === b;
 }
 
-/** Throws the 429 for a loop. Returns the rows it read so the classifier can use them as context. */
-export async function checkLoop(relay: Relay, input: { agentId: string; channelId: string; threadId: string | null }): Promise<ConversationRow[]> {
+/**
+ * Throws the 429 for a loop. Returns the rows it read so the classifier can use them as context. A new forum or media post
+ * (`startsThread`) is not part of any loop and has no conversation to read, so nothing is read for it. A thread started in a
+ * text channel is not that: its first message lands in the channel itself.
+ */
+export async function checkLoop(
+  relay: Relay,
+  input: { agentId: string; channelId: string; threadId: string | null; startsThread?: boolean },
+): Promise<ConversationRow[]> {
+  if (input.startsThread) return [];
   const rows = await recentConversation(relay, input.channelId, input.threadId);
-  if (inLoop(rows, input.agentId, relay.now())) throw new PolicyError(429, 'rate_limited', 'loop', explain('loop'), { retryAfterSeconds: LOOP.retryAfterSeconds });
+  if (inLoop(rows, input.agentId, relay.now()))
+    throw new PolicyError(429, 'rate_limited', 'loop', explain('loop'), { retryAfterSeconds: LOOP.retryAfterSeconds });
   return rows;
 }

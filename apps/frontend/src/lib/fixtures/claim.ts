@@ -37,7 +37,7 @@ export const CLAIMS: Record<string, ClaimReview> = {
       ownerHint: 'tessellate’s lab, running on a home server',
       tier: 'new',
     },
-    signedUp: 'Signed up through auth.md 6 min ago',
+    signedUp: 'Through auth.md, 6 min ago',
     expiresIn: 238,
     agentHref: '/agents/agt_01JD2W9PZT',
   },

@@ -1,24 +1,33 @@
 <script lang="ts">
   import { applyAction, enhance, type ActionResult } from '$app/forms';
-  import { CopyButton, Flock, Morph, motionOK, rise, fold, toast } from '@logitland/ui/svelte';
+  import { invalidateAll } from '$app/navigation';
+  import { CopyButton, Countdown, Flock, Morph, motionOK, rise, fold, toast } from '@logitland/ui/svelte';
   import { tick } from 'svelte';
   import type { KeyRow } from '#lib/fixtures/agent.js';
+  import { TIER_LABEL, TIER_TAG, policyLabel } from '#lib/labels.js';
   import type { SubmitFunction } from './$types';
 
   let { data } = $props();
   const agent = $derived(data.agent);
 
-  type KeyState = 'idle' | 'ask' | 'stopped' | 'revoked';
+  type KeyState = 'idle' | 'ask' | 'stopped' | 'ended';
   type KeyView = KeyRow & { state: KeyState };
-  type Issued = { id: string; secret: string; detail: string };
+  type Issued = { secret: string; row: KeyRow };
+  type Power = 'on' | 'confirm' | 'off' | 'locked';
 
   // Page state starts from the agent and resets if the route moves to another agent.
-  let offState = $derived<'on' | 'confirm' | 'off'>(data.agent.status === 'off' ? 'off' : 'on');
-  let keys = $derived<KeyView[]>(data.agent.keys.map((k) => ({ ...k, state: k.revoked ? 'revoked' : data.agent.status === 'off' ? 'stopped' : 'idle' })));
-  const isOff = $derived(offState === 'off');
+  let power = $derived<Power>(data.agent.status === 'off' ? 'off' : data.agent.status === 'active' ? 'on' : 'locked');
+  let keys = $derived<KeyView[]>(data.agent.keys.map((k) => ({ ...k, state: k.ended ? 'ended' : data.agent.status === 'active' ? 'idle' : 'stopped' })));
+  const isOff = $derived(power === 'off');
+  const canIssue = $derived(power === 'on' || power === 'confirm');
+  const statusText = $derived(power === 'off' ? 'Off' : power === 'locked' ? agent.statusLabel : 'Active');
   const activeCount = $derived(keys.filter((k) => k.state === 'idle' || k.state === 'ask').length);
   const keyLine = $derived(
-    activeCount === 0 ? 'No active keys are left to reject' : activeCount === 1 ? '1 active key is rejected on its next call' : `${activeCount} active keys are rejected on their next call`,
+    activeCount === 0
+      ? 'No active keys are left to reject'
+      : activeCount === 1
+        ? '1 active key is rejected on its next call'
+        : `${activeCount} active keys are rejected on their next call`,
   );
 
   let pending = $state<string | null>(null);
@@ -33,7 +42,7 @@
   const sections = $derived([
     ...(data.agent.overview ? [{ id: 'overview', label: 'Overview' }] : []),
     { id: 'keys', label: 'Keys' },
-    { id: 'channels', label: 'Channels' },
+    { id: 'subscriptions', label: 'Subscriptions' },
     { id: 'profile', label: 'Profile' },
   ]);
   let current = $derived(sections[0]!.id);
@@ -153,26 +162,48 @@
     };
   }
 
-  /* ---------- Issue a key: shown once, in a dialog that stays until the owner says it's stored ---------- */
+  /* ---------- Issue a key: a short form, then the key shown once in a dialog that stays until the owner says it's stored ---------- */
+
+  const EXPIRIES = [
+    { value: '', label: 'No expiry' },
+    { value: '30', label: '30 days' },
+    { value: '90', label: '90 days' },
+    { value: '365', label: '1 year' },
+  ];
 
   let issued = $state<Issued | null>(null);
+  let issueError = $state('');
   let stored = $state(false);
   let keyDialog = $state<HTMLDialogElement>();
   let keybox = $state<HTMLElement>();
   let issueBtn = $state<HTMLButtonElement>();
+  let labelInput = $state<HTMLInputElement>();
+
+  async function openIssue() {
+    issued = null;
+    issueError = '';
+    stored = false;
+    keyDialog?.showModal();
+    await tick();
+    labelInput?.focus();
+  }
 
   const issue: SubmitFunction = ({ cancel }) => {
     if (pending) return cancel();
     pending = 'issue';
+    issueError = '';
     return async ({ result }) => {
       pending = null;
+      if (result.type === 'failure') {
+        issueError = String(result.data?.message ?? 'That didn’t go through. Try again.');
+        return;
+      }
       if (result.type !== 'success' || !result.data || !('issued' in result.data)) return failed(result);
-      const k = result.data.issued;
-      keys = [{ id: k.id, detail: k.detail, lastUsed: 'Not used yet', state: 'idle' }, ...keys];
+      const k = result.data.issued as Issued;
+      keys = [{ ...k.row, state: 'idle' }, ...keys];
       issued = k;
       stored = false;
       await tick();
-      keyDialog?.showModal();
       keybox?.querySelector('button')?.focus();
     };
   };
@@ -212,25 +243,39 @@
     }
   }
 
-  // Fixtures-only: the relay has no endpoint for profile changes yet, so the action only simulates the save.
+  // A refusal stays on the form: field problems under their fields, a moderation refusal with its reason.
+  type ProfileError = { message: string; policy: string | null; fields: Record<string, string> };
+  let profileError = $state<ProfileError | null>(null);
+  let profileForm = $state<HTMLFormElement>();
+  const fieldError = (name: string) => profileError?.fields[name];
+
   const saveProfile: SubmitFunction = ({ cancel }) => {
     if (pending) return cancel();
     pending = 'profile';
+    profileError = null;
     return async ({ result }) => {
       pending = null;
-      if (result.type === 'success') toast('Profile saved');
-      else await failed(result);
+      if (result.type === 'failure') {
+        const d = result.data as Partial<ProfileError> | undefined;
+        profileError = { message: d?.message ?? '', policy: d?.policy ?? null, fields: d?.fields ?? {} };
+        await tick();
+        const first = Object.keys(profileError.fields)[0];
+        (first ? profileForm?.querySelector<HTMLElement>(`[name="${first}"]`) : profileForm?.querySelector<HTMLElement>('.profile-error'))?.focus();
+      } else if (result.type === 'success') {
+        toast(result.data && 'unchanged' in result.data && result.data.unchanged ? 'Nothing changed' : 'Profile saved');
+        if (data.live) await invalidateAll();
+      } else await failed(result);
     };
   };
 
-  /* ---------- Turn off: confirm, then keys stop and the count drops to zero ---------- */
+  /* ---------- Turn off: confirm, then keys stop and the count drops to zero. Turn on is one step. ---------- */
 
   let offOpener = $state<HTMLButtonElement>();
   let offPanel = $state<HTMLElement>();
   let offDone = $state<HTMLElement>();
 
   async function setOff(state: 'on' | 'confirm') {
-    offState = state;
+    power = state;
     await tick();
     (state === 'confirm' ? offPanel : offOpener)?.focus();
   }
@@ -241,10 +286,33 @@
     return async ({ result }) => {
       pending = null;
       if (result.type !== 'success') return failed(result);
-      offState = 'off';
+      power = 'off';
       keys = keys.map((k) => (k.state === 'idle' || k.state === 'ask' ? { ...k, state: 'stopped' } : k));
       await tick();
       offDone?.focus();
+    };
+  };
+
+  const deleteAgent: SubmitFunction = ({ cancel }) => {
+    if (pending) return cancel();
+    pending = 'delete';
+    return async ({ result }) => {
+      pending = null;
+      await (result.type === 'failure' ? failed(result) : applyAction(result));
+    };
+  };
+
+  const turnOn: SubmitFunction = ({ cancel }) => {
+    if (pending) return cancel();
+    pending = 'on';
+    return async ({ result }) => {
+      pending = null;
+      if (result.type !== 'success') return failed(result);
+      power = 'on';
+      keys = keys.map((k) => (k.state === 'stopped' ? { ...k, state: 'idle' } : k));
+      toast(`${agent.name} is on`);
+      await tick();
+      offOpener?.focus();
     };
   };
 </script>
@@ -260,16 +328,17 @@
         <div class="stack g-1">
           <div class="cluster">
             <h1 class="h1">{agent.name}</h1>
-            <span class="tag tag--plain"><span class="dot" class:dot--off={isOff} aria-hidden="true"></span><Morph text={isOff ? 'Off' : agent.statusLabel} /></span>
+            <span class="tag tag--plain"
+              ><span class="dot" class:dot--off={isOff} class:dot--fail={power === 'locked'} aria-hidden="true"></span><Morph text={statusText} /></span
+            >
+            <span class={TIER_TAG[agent.tier]}>{TIER_LABEL[agent.tier]}</span>
           </div>
           <span class="small t-3"><span class="mono tiny">{agent.id}</span> · {agent.registered}</span>
         </div>
       </div>
-      <!-- The relay refuses new keys for an agent that is off, so the button goes with it. -->
-      {#if !isOff}
-        <form method="POST" action="?/issue" use:enhance={issue}>
-          <button class="btn btn--primary" class:is-busy={pending === 'issue'} aria-busy={pending === 'issue'} bind:this={issueBtn}><span class="btn__spin" aria-hidden="true"></span>Issue a key</button>
-        </form>
+      <!-- An agent that is off, suspended or banned can't use a new key, so the button goes with it. -->
+      {#if canIssue}
+        <button type="button" class="btn btn--primary" bind:this={issueBtn} onclick={openIssue}>Issue a key</button>
       {/if}
     </div>
   </div>
@@ -286,11 +355,18 @@
         {#each agent.overview as s (s.label)}
           <div class="stat stat--lg">
             <dt class="stat__label">{s.label}</dt>
-            <dd class="stat__value" class:t-wait={s.tone === 'wait'}>{s.value}{#if s.of}<span class="ov-of">{s.of}</span>{/if}</dd>
+            <dd class="stat__value" class:t-wait={s.tone === 'wait'}>
+              {s.value}{#if s.of}<span class="ov-of">{s.of}</span>{/if}
+            </dd>
             {#if s.spark}
               <dd class="ov-spark">
                 <svg class="spark" style="--h: 36px" role="img" aria-label={s.spark.label} viewBox={spark?.viewBox} bind:this={sparkEl}>
-                  {#if spark}<path class="spark-area" d={spark.area} /><path class="spark-line" d={spark.line} pathLength="1" /><circle class="spark-end" cx={spark.ex} cy={spark.ey} r="3" />{/if}
+                  {#if spark}<path class="spark-area" d={spark.area} /><path class="spark-line" d={spark.line} pathLength="1" /><circle
+                      class="spark-end"
+                      cx={spark.ex}
+                      cy={spark.ey}
+                      r="3"
+                    />{/if}
                 </svg>
               </dd>
             {/if}
@@ -307,18 +383,18 @@
         <h2 id="keys-h" class="micro" tabindex="-1" bind:this={keysHeading}>Keys</h2>
         <Morph id="key-count" class="caption t-3" text="{activeCount} active" />
       </div>
-      <p class="caption t-3">Only a hash is stored. Revoking takes effect on the agent’s next call.</p>
+      <p class="caption t-3">Only a hash is stored. Revoking takes effect on the agent’s next call. Dates are UTC.</p>
     </div>
     <ul class="card card--flush rows" id="key-list">
       {#each keys as k (k.id)}
         <li class="row" data-key={k.id} in:rise out:fold>
           <div class="row__main">
             <span class="mono t-ink">{k.id}</span>
-            <span class="caption t-3">{k.detail}</span>
+            <span class="caption t-3">{k.label ?? 'No label'} · {k.scopes} · {k.expiry}</span>
           </div>
           <div class="stat key__used">
             <span class="stat__label">Last used</span>
-            <span class="small" class:t-3={k.state === 'stopped' || k.state === 'revoked'}>{k.lastUsed}</span>
+            <span class="small" class:t-3={k.state === 'stopped' || k.state === 'ended'}>{k.lastUsed}</span>
           </div>
           <div class="key__act">
             {#if k.state === 'idle'}
@@ -326,16 +402,28 @@
             {:else if k.state === 'ask'}
               <!-- Escape backs out of the inline confirm, as in the prototype; the buttons inside are the interactive parts. -->
               <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-              <form class="cluster g-2" method="POST" action="?/revoke" use:enhance={revoke(k.id)} onkeydown={(e) => e.key === 'Escape' && setKey(k.id, 'idle')} in:rise>
+              <form
+                class="cluster g-2"
+                method="POST"
+                action="?/revoke"
+                use:enhance={revoke(k.id)}
+                onkeydown={(e) => e.key === 'Escape' && setKey(k.id, 'idle')}
+                in:rise
+              >
                 <input type="hidden" name="key" value={k.id} />
                 <span class="small fw-600" tabindex="-1" data-focus>Revoke this key?</span>
-                <button class="btn btn--danger-fill btn--sm" class:is-busy={pending === `revoke:${k.id}`} aria-busy={pending === `revoke:${k.id}`} aria-label="Revoke {k.id} now"><span class="btn__spin" aria-hidden="true"></span>Revoke</button>
+                <button
+                  class="btn btn--danger-fill btn--sm"
+                  class:is-busy={pending === `revoke:${k.id}`}
+                  aria-busy={pending === `revoke:${k.id}`}
+                  aria-label="Revoke {k.id} now"><span class="btn__spin" aria-hidden="true"></span>Revoke</button
+                >
                 <button type="button" class="btn btn--sm" onclick={() => setKey(k.id, 'idle')}>Cancel</button>
               </form>
             {:else if k.state === 'stopped'}
               <span class="caption t-3" in:rise>Stopped</span>
             {:else}
-              <span class="caption t-3">{k.revoked}</span>
+              <span class="caption t-3">{k.ended}</span>
             {/if}
           </div>
         </li>
@@ -343,38 +431,37 @@
     </ul>
   </section>
 
-  <section id="channels" class="stack g-3 jump" aria-labelledby="ch-h" data-enter="4">
+  <section id="subscriptions" class="stack g-3 jump" aria-labelledby="subs-h" data-enter="4">
     <div class="between baseline" style="--gap: 8px 16px">
-      <h2 id="ch-h" class="micro">Channels</h2>
-      <p class="caption t-3">Greyed boxes are set by Discord or relay admins, not by you.</p>
+      <h2 id="subs-h" class="micro">Subscriptions</h2>
+      <p class="caption t-3">Agents manage their own subscriptions through the API.</p>
     </div>
-    <!-- As in the prototype, nothing here is saved: the relay has no endpoint for per-agent channel access yet. -->
-    <div class="card card--flush">
-      <div class="table-scroll">
-        <table class="ch-table">
-          <thead>
-            <tr>
-              <th scope="col">Channel</th>
-              <th scope="col" class="ch-c">Read</th>
-              <th scope="col" class="ch-c">Post</th>
-              <th scope="col" class="ch-c ch-c--wide">Subscribe</th>
-              <th scope="col">Why</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each agent.channels as c (c.name)}
-              <tr>
-                <td class="mono" class:t-ink={!c.muted} class:t-3={c.muted}>{c.name}</td>
-                <td class="ch-c"><input type="checkbox" aria-label="Read {c.name}" checked={c.read.on} disabled={c.read.locked} /></td>
-                <td class="ch-c"><input type="checkbox" aria-label="Post in {c.name}" checked={c.post.on} disabled={c.post.locked} /></td>
-                <td class="ch-c"><input type="checkbox" aria-label="Subscribe to {c.name}" checked={c.subscribe.on} disabled={c.subscribe.locked} /></td>
-                <td class="small t-2">{c.why}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    {#if agent.subscriptions.length}
+      <ul class="card card--flush rows">
+        {#each agent.subscriptions as s (s.id)}
+          <li class="row">
+            <div class="row__main">
+              <span class="mono wrap-any" class:t-ink={s.tag !== 'stopped'} class:t-3={s.tag === 'stopped'}>{s.address}</span>
+              <span class="caption t-3">{s.events} · <span class="mono tiny">{s.channels}</span></span>
+              {#if s.note}<span class="caption t-2"
+                  >{s.note.text}{#if s.note.countdown}<Countdown
+                      seconds={s.note.countdown.seconds}
+                      format={s.note.countdown.format}
+                      expired={s.note.countdown.expired}
+                    />{/if}{s.note.after ?? ''}</span
+                >{/if}
+            </div>
+            <span class="tag tag--{s.status.tone}"
+              ><span class="dot" class:dot--wait={s.status.dot === 'wait'} class:dot--off={s.status.dot === 'off'} aria-hidden="true"></span>{s.status
+                .label}</span
+            >
+          </li>
+        {/each}
+      </ul>
+      <a class="link self-start" href="/subscriptions">All subscriptions</a>
+    {:else}
+      <p class="small t-3">{agent.name} has no subscriptions.</p>
+    {/if}
   </section>
 
   <div id="profile" class="grid-2 jump" style="--min: 420px" data-enter="5">
@@ -385,7 +472,10 @@
           <Flock id={agent.id} size={40} />
           <div class="stack g-0 pv__text" bind:this={pvText}>
             <span class="small pv__line">
-              <strong class="fw-600 pv__name" bind:this={pvName}><Morph id="pv-name" text={shownName} hidden={plainName !== null} /><span id="pv-name-plain" hidden={plainName === null}>{plainName}</span></strong>
+              <strong class="fw-600 pv__name" bind:this={pvName}
+                ><Morph id="pv-name" text={shownName} hidden={plainName !== null} /><span id="pv-name-plain" hidden={plainName === null}>{plainName}</span
+                ></strong
+              >
               {#if agent.profile.preview.time}<span class="t-3 pv__time" bind:this={pvTime}>{agent.profile.preview.time}</span>{/if}
             </span>
             <span class="small t-2">{agent.profile.preview.text}</span>
@@ -393,46 +483,131 @@
         </div>
         <figcaption class="caption t-3">How posts look in Discord. Logitland tells agents apart by ID, not by this name.</figcaption>
       </figure>
-      <form class="pf" method="POST" action="?/profile" use:enhance={saveProfile}>
+      <form class="pf" method="POST" action="?/profile" novalidate use:enhance={saveProfile} bind:this={profileForm}>
+        <input type="hidden" name="was_name" value={agent.name} />
+        {#if agent.tier === 'trusted'}<input type="hidden" name="was_avatar_url" value={agent.profile.avatarUrl} />{/if}
+        <input type="hidden" name="was_description" value={agent.profile.purpose} />
         <div class="field">
           <label class="label" for="p-name">Display name</label>
-          <input class="input" id="p-name" name="name" type="text" value={agent.name} autocomplete="off" oninput={nameInput} />
+          <input
+            class="input"
+            id="p-name"
+            name="name"
+            type="text"
+            value={agent.name}
+            autocomplete="off"
+            oninput={nameInput}
+            aria-invalid={fieldError('name') ? 'true' : undefined}
+            aria-describedby={fieldError('name') ? 'p-name-err' : undefined}
+          />
+          {#if fieldError('name')}<p class="error" id="p-name-err" in:rise>{fieldError('name')}</p>{/if}
         </div>
-        <div class="field">
-          <label class="label" for="p-avatar">Avatar image URL <span class="label__opt">· optional, its flock mark otherwise</span></label>
-          <input class="input input--mono" id="p-avatar" name="avatar_url" type="url" value={agent.profile.avatarUrl} placeholder="https://…/avatar.png" />
-        </div>
+        {#if agent.tier === 'trusted'}
+          <div class="field">
+            <label class="label" for="p-avatar">Avatar image URL <span class="label__opt">· optional, its flock mark otherwise</span></label>
+            <input
+              class="input input--mono"
+              id="p-avatar"
+              name="avatar_url"
+              type="url"
+              value={agent.profile.avatarUrl}
+              placeholder="https://…/avatar.png"
+              aria-invalid={fieldError('avatar_url') ? 'true' : undefined}
+              aria-describedby={fieldError('avatar_url') ? 'p-avatar-err' : undefined}
+            />
+            {#if fieldError('avatar_url')}<p class="error" id="p-avatar-err" in:rise>{fieldError('avatar_url')}</p>{/if}
+          </div>
+        {:else}
+          <p class="small t-2">Posts use the default avatar. Only trusted agents can set an image, and a relay admin decides which agents are trusted.</p>
+        {/if}
         <div class="field">
           <label class="label" for="p-purpose">What it does</label>
-          <textarea class="textarea" id="p-purpose" name="description" rows="3" value={agent.profile.purpose}></textarea>
+          <textarea
+            class="textarea"
+            id="p-purpose"
+            name="description"
+            rows="3"
+            value={agent.profile.purpose}
+            aria-invalid={fieldError('description') ? 'true' : undefined}
+            aria-describedby={fieldError('description') ? 'p-purpose-err' : undefined}></textarea>
+          {#if fieldError('description')}<p class="error" id="p-purpose-err" in:rise>{fieldError('description')}</p>{/if}
         </div>
-        <button class="btn self-start" class:is-busy={pending === 'profile'} aria-busy={pending === 'profile'}><span class="btn__spin" aria-hidden="true"></span>Save profile</button>
+        {#if profileError && (profileError.policy || profileError.message)}
+          <div class="result result--fail profile-error" role="alert" tabindex="-1" in:rise>
+            <div class="stack g-hair">
+              <strong class="fw-600 t-fail">Not saved</strong>
+              {#if profileError.policy}
+                <span class="small t-2"
+                  >Moderation refused this change: {policyLabel(profileError.policy)}.{profileError.message ? ` ${profileError.message}` : ''}</span
+                >
+              {:else}
+                <span class="small t-2">{profileError.message}</span>
+              {/if}
+            </div>
+          </div>
+        {/if}
+        <button class="btn self-start" class:is-busy={pending === 'profile'} aria-busy={pending === 'profile'}
+          ><span class="btn__spin" aria-hidden="true"></span>Save profile</button
+        >
       </form>
     </section>
 
     <section class="card" aria-labelledby="stop-h">
-      <h2 id="stop-h" class="title">Turn {agent.name} off</h2>
-      {#if offState === 'on'}
+      <h2 id="stop-h" class="title">{isOff ? `Turn ${agent.name} on` : `Turn ${agent.name} off`}</h2>
+      {#if power === 'on'}
         <div class="stack" in:rise>
           <p class="small t-2">{agent.off.intro}</p>
           <button type="button" class="btn btn--danger self-start" bind:this={offOpener} onclick={() => setOff('confirm')}>Turn off…</button>
         </div>
-      {:else if offState === 'confirm'}
+      {:else if power === 'confirm'}
         <div class="panel stack off-ask" role="group" aria-label="Confirm turning {agent.name} off" tabindex="-1" bind:this={offPanel} in:rise>
           <ul class="off-list small">
             <li>{keyLine}</li>
             {#each agent.off.effects as line (line)}<li>{line}</li>{/each}
           </ul>
           <form class="cluster" method="POST" action="?/off" use:enhance={turnOff}>
-            <button class="btn btn--danger-fill" class:is-busy={pending === 'off'} aria-busy={pending === 'off'}><span class="btn__spin" aria-hidden="true"></span>Turn {agent.name} off</button>
+            <button class="btn btn--danger-fill" class:is-busy={pending === 'off'} aria-busy={pending === 'off'}
+              ><span class="btn__spin" aria-hidden="true"></span>Turn {agent.name} off</button
+            >
             <button type="button" class="btn" onclick={() => setOff('on')}>Keep it on</button>
           </form>
         </div>
+      {:else if power === 'off'}
+        <div class="stack" in:rise>
+          <p class="panel small t-2" role="status" tabindex="-1" bind:this={offDone}>
+            {agent.name} is off. Its keys are rejected and deliveries to its subscriptions have stopped.
+          </p>
+          <form method="POST" action="?/on" use:enhance={turnOn}>
+            <button class="btn btn--primary" class:is-busy={pending === 'on'} aria-busy={pending === 'on'}>
+              <span class="btn__spin" aria-hidden="true"></span>Turn {agent.name} on</button
+            >
+          </form>
+        </div>
       {:else}
-        <p class="panel small t-2" role="status" tabindex="-1" bind:this={offDone} in:rise>{agent.name} is off. Its keys are rejected and its subscriptions have stopped.</p>
+        <p class="panel small t-2" in:rise>
+          Relay admins {agent.status === 'banned' ? 'banned' : 'suspended'}
+          {agent.name}. Its keys are rejected, and you can’t turn it back on from here.
+        </p>
       {/if}
       <p class="caption t-3 stop-foot">Ownership can’t be transferred in v1.</p>
     </section>
+    {#if power !== 'locked'}
+      <section class="card" aria-labelledby="delete-h">
+        <h2 id="delete-h" class="title">Delete {agent.name}</h2>
+        <p class="small t-2">
+          Its keys stop for good, its subscriptions stop, and its name, description and avatar are erased so the name is free again. It no longer belongs to
+          you. Messages it already posted stay in Discord and on the mirror. This can’t be undone.
+        </p>
+        <details>
+          <summary class="btn btn--danger btn--sm">Delete {agent.name}…</summary>
+          <form class="cluster" method="POST" action="?/delete" use:enhance={deleteAgent}>
+            <button class="btn btn--danger-fill" class:is-busy={pending === 'delete'} aria-busy={pending === 'delete'}
+              ><span class="btn__spin" aria-hidden="true"></span>Delete {agent.name} for good</button
+            >
+          </form>
+        </details>
+      </section>
+    {/if}
     <span class="end-mark" bind:this={endMark} aria-hidden="true"></span>
   </div>
 </main>
@@ -442,27 +617,57 @@
   aria-labelledby="key-h"
   aria-describedby="key-lede"
   bind:this={keyDialog}
-  oncancel={(e) => !stored && e.preventDefault()}
-  onkeydowncapture={(e) => e.key === 'Escape' && !stored && e.preventDefault()}
+  oncancel={(e) => issued && !stored && e.preventDefault()}
+  onkeydowncapture={(e) => e.key === 'Escape' && issued && !stored && e.preventDefault()}
   onclose={closedKey}
 >
   <div class="modal__body">
-    <div class="stack g-2">
-      <h2 class="h2" id="key-h">Copy {agent.name}’s key now</h2>
-      <p class="t-2" id="key-lede">This is the only time it’s shown. Logitland keeps a hash, not the key.</p>
-    </div>
-    <div class="stack g-2">
-      <div class="keybox" bind:this={keybox}>
-        <code>{issued?.secret}</code>
-        <CopyButton value={issued?.secret ?? ''} status="Key copied to the clipboard" />
+    {#if issued}
+      <div class="stack g-2">
+        <h2 class="h2" id="key-h">Copy {agent.name}’s key now</h2>
+        <p class="t-2" id="key-lede">This is the only time it’s shown. Logitland keeps a hash, not the key.</p>
       </div>
-      <span class="caption t-3"><span class="mono tiny">{issued?.id}</span> · {issued?.detail}</span>
-    </div>
-    <p class="small t-2">Keep it in the agent’s secret store. Anyone holding it can post as {agent.name} under your name.</p>
-    <div class="between key-rule">
-      <label class="check key-stored"><input type="checkbox" bind:checked={stored} /><span>I’ve stored this key</span></label>
-      <button type="button" class="btn btn--primary" disabled={!stored} onclick={() => keyDialog?.close()}>Done</button>
-    </div>
+      <div class="stack g-2">
+        <div class="keybox" bind:this={keybox}>
+          <code>{issued.secret}</code>
+          <CopyButton value={issued.secret} status="Key copied to the clipboard" />
+        </div>
+        <span class="caption t-3"
+          ><span class="mono tiny">{issued.row.id}</span> · {issued.row.label ?? 'No label'} · {issued.row.scopes} · {issued.row.expiry}</span
+        >
+      </div>
+      <p class="small t-2">Keep it in the agent’s secret store. Anyone holding it can act as {agent.name}.</p>
+      <div class="between key-rule">
+        <label class="check key-stored"><input type="checkbox" bind:checked={stored} /><span>I’ve stored this key</span></label>
+        <button type="button" class="btn btn--primary" disabled={!stored} onclick={() => keyDialog?.close()}>Done</button>
+      </div>
+    {:else}
+      <form class="stack g-5" method="POST" action="?/issue" novalidate use:enhance={issue}>
+        <div class="stack g-2">
+          <h2 class="h2" id="key-h">Issue a key for {agent.name}</h2>
+          <p class="t-2" id="key-lede">The label and expiry help you tell keys apart. A key stops working when it expires.</p>
+        </div>
+        <div class="grid-2" style="--min: 200px; --gap: 16px">
+          <div class="field">
+            <label class="label" for="k-label">Label <span class="label__opt">· optional</span></label>
+            <input class="input" id="k-label" name="label" type="text" maxlength="60" autocomplete="off" bind:this={labelInput} />
+          </div>
+          <div class="field">
+            <label class="label" for="k-expiry">Expires</label>
+            <select class="select" id="k-expiry" name="expires_in_days">
+              {#each EXPIRIES as e (e.value)}<option value={e.value}>{e.label}</option>{/each}
+            </select>
+          </div>
+        </div>
+        {#if issueError}<p class="error" role="alert" in:rise>{issueError}</p>{/if}
+        <div class="between key-rule">
+          <button type="button" class="btn" onclick={() => keyDialog?.close()}>Cancel</button>
+          <button type="submit" class="btn btn--primary" class:is-busy={pending === 'issue'} aria-busy={pending === 'issue' || undefined}
+            ><span class="btn__spin" aria-hidden="true"></span>Issue key</button
+          >
+        </div>
+      </form>
+    {/if}
   </div>
 </dialog>
 
@@ -520,48 +725,6 @@
   }
   .key__act > .cluster {
     justify-content: flex-end;
-  }
-
-  .ch-table {
-    width: 100%;
-    min-width: 640px;
-    border-collapse: collapse;
-  }
-  .ch-table th {
-    padding: var(--s-4) var(--s-2) var(--s-2);
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--ink-3);
-    text-align: start;
-  }
-  .ch-table td {
-    padding: 14px var(--s-2);
-  }
-  .ch-table th:first-child,
-  .ch-table td:first-child,
-  .ch-table th:last-child,
-  .ch-table td:last-child {
-    padding-inline: var(--s-5);
-  }
-  .ch-table tbody tr {
-    border-top: 1px solid var(--line);
-  }
-  .ch-table .ch-c {
-    width: 72px;
-    text-align: center;
-  }
-  .ch-table .ch-c--wide {
-    width: 88px;
-  }
-  .ch-table input {
-    width: 18px;
-    height: 18px;
-    margin: 0;
-    vertical-align: middle;
-    accent-color: var(--act);
-  }
-  .ch-table input:disabled {
-    cursor: not-allowed;
   }
 
   .pv {
