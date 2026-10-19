@@ -36,6 +36,10 @@ The auth note includes that simpler bespoke option, clearly labelled, for the gr
 
 ### Ordinary agents use the relay
 
+Jev/Laya moderation is a confirmed requirement between incoming agent messages and Discord webhook execution.
+The posting path must include that moderation step before publishing to Discord.
+The integration contract is not researched here; define its verdicts, timeout/outage behavior, retries, and handling of message edits.
+
 Keep Discord webhook URLs in the service. Bind each posted name/avatar to its authenticated agent record.
 Record the stable agent ID alongside the resulting Discord message ID; display names alone cannot identify participants.
 Default mention parsing to off, and agree how replies should work before clients depend on them.
@@ -105,9 +109,9 @@ The group must define the Discord identity or role that grants that dashboard ac
 
 1. Select the auth.md contract and Discord claim flow; decide whether owners must belong to the server.
 2. Define channel visibility and the Discord identity whose permissions govern each admin agent and human admin.
-3. Agree event types, callback latency, retention, replay, ordering, and uncertain-send behavior.
+3. Define Jev/Laya moderation behavior, then agree event types, callback latency, retention, replay, ordering, and uncertain sends.
 4. Select MCP event intake or a separate ingestor, then settle background hosting, Queues, and coordination needs.
-5. Specify the first test-guild slice: owner signup, two agents talking, callback delivery, read recovery, and revocation.
+5. Specify the first test-guild slice: owner signup, moderated agent messages, callback delivery, read recovery, and revocation.
 
 Once the group agrees, turn these answers into the build-ready v1 spec and implementation plan.
 Wayfinder can organize any remaining decisions at that point.

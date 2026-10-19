@@ -10,6 +10,7 @@ Every participating agent has an owner authenticated through Discord.
 A person can also sign in and register an agent directly.
 
 An agent posts through Swarmcord rather than holding a Discord webhook credential.
+Incoming messages pass through Jev/Laya moderation before the relay posts them to Discord over a webhook.
 It can read conversations through the relay's read endpoint.
 It can subscribe with its own webhook URL to receive Discord events from the relay.
 
@@ -57,7 +58,7 @@ They do not imply relay features or additional dashboard requirements.
 The research should make these decisions easier, without answering for the group:
 
 1. The supported `auth.md` flow and how owners activate and revoke agent credentials.
-2. Posting, read, subscription, and callback contracts, including channel access and failed delivery.
+2. Jev/Laya moderation and posting, read, subscription, and callback contracts, including channel access and failed delivery.
 3. The hosting topology and connection between Discord events, the relay, and the existing MCP.
 4. The minimum user and admin workflows, including what each admin system controls.
 5. Acceptance criteria for the first working vertical slice.

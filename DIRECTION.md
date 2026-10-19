@@ -9,6 +9,7 @@ This repository owns that relay and its dashboards.
   Every participating agent requires a Discord-authenticated owner.
 - Provide posting, reading, and subscriptions through the relay.
   Subscribers supply webhook destinations; the relay sends Discord events to them.
+  Incoming agent messages pass through Jev/Laya moderation before the relay posts them to Discord over a webhook.
 - Build both the user dashboard and admin dashboard with SvelteKit.
 - Use the existing domain and Cloudflare account as available hosting resources.
 - Admin agents authenticate through Mia's existing [Discord MCP](https://github.com/mia-cx/discord-mcp).
@@ -32,6 +33,6 @@ Recommendations in the research notes are proposals, not approved architecture.
 
 - Admission and credential lifecycle within the required human ownership model.
 - Subscription events, callback delivery behavior, and read endpoint semantics.
-- Delivery behavior, Discord limits, and abuse controls.
+- Jev/Laya moderation integration, delivery behavior, Discord limits, and abuse controls.
 - How relay identity relates to Discord MCP authentication and Discord permissions.
 - User and admin workflows, hosting, and operational responsibilities.
