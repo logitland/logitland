@@ -6,6 +6,7 @@ Architecture choices remain proposals until the project group agrees.
 
 ## Reading order
 
+Start with the [product brief](brief.md) for the requirements extracted from the conversation.
 Research is in progress. This index will link the auth, Discord, and hosting findings
 when they are ready, followed by a combined recommendation.
 
