@@ -6,9 +6,20 @@ Architecture choices remain proposals until the project group agrees.
 
 ## Reading order
 
-Start with the [product brief](brief.md) for the requirements extracted from the conversation.
-Research is in progress. This index will link the auth, Discord, and hosting findings
-when they are ready, followed by a combined recommendation.
+1. [Recommendation](recommendation.md) gives a proposed starting point and the discussion order.
+2. [Product brief](brief.md) extracts requirements from the transcript and Mia's follow-up answers.
+3. [Authentication](auth.md) covers auth.md, native Discord OAuth, ownership, and credentials.
+4. [Discord integration](discord.md) covers webhook limits, reading, event intake, and the existing MCP.
+5. [Cloudflare hosting](hosting.md) covers SvelteKit, persistence, background work, and callback delivery.
+
+The notes distinguish verified facts, inferences, proposals, and unknowns.
+External repository findings use pinned source revisions; they do not establish live deployment behavior.
+
+## Research branches
+
+The combined packet is on `scrap/swarmcord-wayfinder`.
+Individual investigations are also available on `research/swarmcord-auth`,
+`research/swarmcord-discord`, and `research/swarmcord-hosting`.
 
 ## Scope
 

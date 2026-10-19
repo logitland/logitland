@@ -18,7 +18,8 @@ This repository owns that relay and its dashboards.
 
 The repository starts empty. There is no relay, authentication, dashboard, or deployment yet.
 Research and proposals live on `scrap/swarmcord-wayfinder` so collaborators can follow along.
-Read [.scratch/research/README.md](.scratch/research/README.md) for findings and discussion points.
+Auth, Discord integration, and Cloudflare research is complete, with primary-source citations.
+Read [.scratch/research/README.md](.scratch/research/README.md) for findings and the proposed discussion order.
 
 ## Planning boundary
 
