@@ -9,6 +9,7 @@
   // "Live · updated N s ago" counts up and starts over after each refresh; in relay mode a refresh reloads the counts.
   const agoText = (s: number) => (s < 60 ? `${s} s ago` : s < 3600 ? `${Math.floor(s / 60)} min ago` : `${Math.floor(s / 3600)} h ago`);
   let ago = $state<number>(untrack(() => data.updated.ago));
+  let refreshing = false;
   const updated = $derived(data.updated.format.replace('{t}', agoText(ago)));
 
   // Values on the path that tick while you watch.
@@ -60,8 +61,23 @@
     timers.push(
       setInterval(() => {
         if (document.hidden) return;
-        ago = ago >= data.updated.reset ? 0 : ago + 1;
-        if (ago === 0 && data.live) void refreshAll();
+        if (!data.live) {
+          ago = ago >= data.updated.reset ? 0 : ago + 1;
+          return;
+        }
+        // The count starts over only once the reload has finished; while it is slow or has failed, it keeps counting.
+        ago += 1;
+        if (ago >= data.updated.reset && !refreshing) {
+          refreshing = true;
+          refreshAll()
+            .then(() => {
+              ago = 0;
+            })
+            .catch(() => {})
+            .finally(() => {
+              refreshing = false;
+            });
+        }
       }, 1000),
     );
     for (const step of untrack(() => data.path)) {

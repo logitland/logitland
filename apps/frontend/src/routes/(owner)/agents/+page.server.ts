@@ -38,7 +38,7 @@ export const actions = {
     } else {
       await simulate(800);
     }
-    clearSession(cookies);
+    clearSession(cookies, url.protocol === 'https:');
     redirect(303, '/login?signed_out=1');
   },
 };

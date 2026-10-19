@@ -127,10 +127,10 @@ describe('GET /v1/channels/:id/messages', () => {
   });
 });
 
-describe('reads are counted per key', () => {
-  it('refuses past the limit with retry-after, for that key only', async () => {
+describe('reads are counted per agent', () => {
+  it('refuses past the limit with retry-after, for that agent only', async () => {
     const { h, agent, get } = await reader();
-    const key = `read:${agent.keyId}:m`;
+    const key = `read:${agent.id}:m`;
     await hit(h.relay, { key, limit: LIMITS.agentReadsPerMinute, windowSeconds: 60 }, LIMITS.agentReadsPerMinute);
     const res = await get('/v1/channels');
     expect(res.status).toBe(429);

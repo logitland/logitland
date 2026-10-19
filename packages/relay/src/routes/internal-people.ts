@@ -33,7 +33,7 @@ export const register: RegisterRoutes = (app, relay) => {
     let removed: number;
     let roleRemoved: boolean | null = null;
     if (mode === 'leave') {
-      await revokeConsent(relay, discordUserId, actor);
+      await revokeConsent(relay, discordUserId, actor, { method: 'dashboard' });
       const r = await removePerson(relay, { discordUserId, guildId: relay.config.discord.guildId, actor });
       removed = r.messages;
       roleRemoved = r.roleRemoved;

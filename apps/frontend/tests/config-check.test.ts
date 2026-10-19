@@ -21,6 +21,13 @@ describe('configProblems', () => {
     expect(configProblems({ PUBLIC_URL: 'http://dashboard.test' })).toEqual([]);
   });
 
+  it('refuses a local configuration reached on a real hostname', () => {
+    const dev = { PUBLIC_URL: 'http://localhost:5173', DATA_SOURCE: 'fixtures' };
+    expect(configProblems(dev, 'localhost')).toEqual([]);
+    expect(configProblems(dev, 'dashboard.test')).toEqual([]);
+    expect(configProblems(dev, 'logitland.net')).toEqual(['PUBLIC_URL is local but the request is not']);
+  });
+
   it('names each problem and no value', () => {
     expect(configProblems({ ...ready, SESSION_SECRET: 'short' })).toEqual(['SESSION_SECRET must be at least 32 characters']);
     expect(configProblems({ ...ready, INTERNAL_TOKEN: '' })).toEqual(['INTERNAL_TOKEN is missing']);

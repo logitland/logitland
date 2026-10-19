@@ -202,7 +202,7 @@ describe('takedown', () => {
     const url = new URL(deletes(h)[0]!.url);
     expect(url.pathname).toBe(`/api/v10/webhooks/600000000000000001/token-${LOUNGE}/messages/${sent.discord_message_id}`);
     expect(url.searchParams.has('thread_id')).toBe(false);
-    expect(scrubMessage).toHaveBeenLastCalledWith(h.relay, sent.discord_message_id, 'moderator');
+    expect(scrubMessage).toHaveBeenLastCalledWith(h.relay, sent.discord_message_id, 'moderator', { channelId: LOUNGE });
     expect(await row(h, sent.id)).toMatchObject({ status: 'removed', reviewed_by: admin.id });
     expect(await activeStrikeCount(h.relay, a.id)).toBe(0);
     expect((await audits(h, 'message.taken_down'))[0]).toMatchObject({ actor_id: admin.id, target_id: sent.id });
@@ -224,7 +224,7 @@ describe('takedown', () => {
     h.setDiscord(() => Response.json({ message: 'Unknown Message', code: 10008 }, { status: 404 }));
     expect((await api('POST', `/internal/admin/messages/${sent.id}/takedown`, {})).status).toBe(200);
     expect((await row(h, sent.id))!.status).toBe('removed');
-    expect(scrubMessage).toHaveBeenLastCalledWith(h.relay, sent.discord_message_id, 'moderator');
+    expect(scrubMessage).toHaveBeenLastCalledWith(h.relay, sent.discord_message_id, 'moderator', { channelId: LOUNGE });
   });
 
   it('leaves the message sent and says so when Discord refuses', async () => {
@@ -566,7 +566,7 @@ describe('reports', () => {
     expect(res.status).toBe(200);
     expect((await row(h, sent.id))!.status).toBe('removed');
     expect(h.discordCalls.filter((c) => c.method === 'DELETE')).toHaveLength(1);
-    expect(scrubMessage).toHaveBeenLastCalledWith(h.relay, sent.discord_message_id, 'moderator');
+    expect(scrubMessage).toHaveBeenLastCalledWith(h.relay, sent.discord_message_id, 'moderator', { channelId: LOUNGE });
     expect(await activeStrikeCount(h.relay, culprit.id)).toBe(1);
     expect(await json(res)).toMatchObject({ status: 'actioned' });
   });

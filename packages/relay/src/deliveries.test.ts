@@ -426,6 +426,8 @@ describe('the failure streak', () => {
     for (let i = 0; i < 4; i++) {
       await attemptDelivery(s.relay, id);
       s.advance(7 * 3600_000);
+      // Not what is under test here: the pause after a day of failing has its own tests.
+      await s.db.prepare('UPDATE subscriptions SET failing_since = NULL WHERE id = ?').bind(sub.id).run();
     }
     expect((await delivery(s, id)).attempts).toBe(4);
     expect((await subscription(s, sub.id)).failure_streak).toBe(0);
@@ -447,6 +449,7 @@ describe('the failure streak', () => {
     for (let i = 0; i < 24; i++) {
       last = await attemptDelivery(s.relay, id);
       s.advance(7 * 3600_000);
+      await s.db.prepare('UPDATE subscriptions SET failing_since = NULL WHERE id = ?').bind(sub.id).run();
     }
     expect(last).toEqual({ outcome: 'failed', reason: '503 from the destination; gave up after 24 attempts' });
     expect(await delivery(s, id)).toMatchObject({ status: 'failed', attempts: 24, next_attempt_at: null });

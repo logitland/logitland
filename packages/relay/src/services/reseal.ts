@@ -98,7 +98,7 @@ export async function resealJob(relay: Relay, ctx: { deadline?: number } = {}): 
       if (results.length < PAGE) {
         state.finished = true;
         if (state.unreadable) state.retryAt = iso(new Date(relay.now().getTime() + RETRY_UNREADABLE_MS));
-        relay.log.info('reseal.walked', { table: col.table, column: col.column, unreadable: state.unreadable });
+        relay.log.info('reseal.walked', { table: col.table, column: col.column, key_id: keyId, unreadable: state.unreadable });
       }
     }
     await relay.db

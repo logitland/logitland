@@ -10,6 +10,7 @@ import {
   type GatewaySocket,
   type SocketEvents,
 } from './gateway';
+import { snowflakeTime } from './services/events';
 import { NEWS, all, at, conversation, moreChannels, msg, one, subscribe, world } from './intake-fixtures';
 import { BENCH, FORUM, GUILD as GUILD_ID, LOUNGE, type Harness } from './testing';
 
@@ -365,6 +366,73 @@ describe('a lost session', () => {
     expect(second.svc.snapshot().backfill_pending).toBe(false);
   });
 
+  it('keeps the gap when the database fails right after READY, and records it and fetches the messages on a later flush', async () => {
+    const pages = (_channel: string, after: string | null) =>
+      after === msg(2)
+        ? [{ id: msg(4), channel_id: LOUNGE, author: AUTHOR, content: 'while you were away', timestamp: at(3), type: 0, edited_timestamp: null }]
+        : [];
+    const { h, second, storage, clock, lastEvent } = await lost({ pages });
+    const prepare = h.db.prepare.bind(h.db);
+    let failures = 1;
+    h.db.prepare = (sql: string) => {
+      if (failures > 0 && sql === "SELECT id FROM channels WHERE agent_access != 'off'") {
+        failures--;
+        throw new Error('D1 hiccup');
+      }
+      return prepare(sql);
+    };
+    second.hello();
+    second.ready(1, 'sess-2');
+    await settle();
+    expect(storage.get('gap')).toMatchObject({ since: lastEvent });
+    expect(await all(h, "SELECT 1 FROM events WHERE type = 'subscription.gap'")).toHaveLength(0);
+    await clock.advance(6_000);
+    await vi.waitFor(async () => expect(await conversation(h, 4)).not.toBeNull(), { timeout: 5_000 });
+    expect(await all(h, "SELECT 1 FROM events WHERE type = 'subscription.gap'")).toHaveLength(1);
+    expect(storage.get('gap')).toBeUndefined();
+  });
+
+  it('only backfills places that can still have news: not closed channels, deleted or long-quiet archived threads', async () => {
+    const pages = () => [];
+    const { h, second, calls } = await lost({ pages });
+    await moreChannels(h);
+    const old = '2026-09-01T00:00:00.000Z';
+    for (const [id, parent, archived, deleted, updated] of [
+      ['120000000000000010', FORUM, 0, null, old],
+      ['120000000000000011', FORUM, 1, null, h.now().toISOString()],
+      ['120000000000000012', FORUM, 1, null, old],
+      ['120000000000000013', FORUM, 0, old, old],
+    ] as const)
+      await h.db
+        .prepare("INSERT INTO threads (id, parent_id, name, created_at, archived, deleted_at, updated_at) VALUES (?, ?, 't', ?, ?, ?, ?)")
+        .bind(id, parent, old, archived, deleted, updated)
+        .run();
+    for (const place of [BENCH, '120000000000000010', '120000000000000011', '120000000000000012', '120000000000000013'])
+      await h.db
+        .prepare("INSERT INTO channel_cursors (channel_id, last_message_id, updated_at) VALUES (?, CAST('300000000000000001' AS INTEGER), ?)")
+        .bind(place, old)
+        .run();
+    second.hello();
+    second.ready(1, 'sess-2');
+    await settle();
+    await settle();
+    const asked = calls.filter((c) => c.includes('after=')).map((c) => /channels\/(\d+)\//.exec(c)![1]);
+    expect(asked.sort()).toEqual([LOUNGE, '120000000000000010', '120000000000000011'].sort());
+  });
+
+  it('starts a place that was empty when first looked at (cursor 0) at the start of the window, not at its first message', async () => {
+    const { h, second, calls, lastEvent } = await lost({ pages: () => [] });
+    await h.db.prepare('UPDATE channel_cursors SET last_message_id = 0 WHERE channel_id = ?').bind(LOUNGE).run();
+    second.hello();
+    second.ready(1, 'sess-2');
+    await settle();
+    await settle();
+    const ask = calls.find((c) => c.includes('after='))!;
+    const after = /after=(\d+)/.exec(ask)![1]!;
+    expect(after).not.toBe('0');
+    expect(snowflakeTime(after)).toBe(lastEvent);
+  });
+
   it('backfills from where the relay was before the gap, even after new messages arrive live', async () => {
     const { h, second, calls, clock } = await lost({ pages: () => [] });
     second.hello();
@@ -539,6 +607,24 @@ describe('when the Gateway says no', () => {
   });
 });
 
+describe('the daily IDENTIFY allowance', () => {
+  it('keeps a reserve back, so the last sessions of the day are never spent', async () => {
+    const { h } = await world();
+    const clock = clockFor(h);
+    discord(h, {
+      gatewayBot: Response.json({
+        url: 'wss://gateway.discord.gg',
+        shards: 1,
+        session_start_limit: { total: 1000, remaining: 49, reset_after: 20 * 60_000, max_concurrency: 1 },
+      }),
+    });
+    const g = service(h, clock);
+    await g.svc.ensure();
+    expect(g.connections).toHaveLength(0);
+    expect((await g.state())!.status).toContain('limit on new sessions');
+  });
+});
+
 describe('threads', () => {
   it('maps thread messages to their parent channel, from GUILD_CREATE or from a lookup when the thread is unknown', async () => {
     const { h } = await world();
@@ -574,6 +660,33 @@ describe('threads', () => {
       'GET /channels/110000000000000077',
       'GET /channels/120000000000000009',
     ]);
+  });
+});
+
+describe('threads that were already there when their channel was relayed', () => {
+  it('are handed to intake once the channel is open to agents, so they are listed and their quiet posts are seeded', async () => {
+    const { h } = await world();
+    const clock = clockFor(h);
+    const calls = discord(h);
+    const g = service(h, clock);
+    await g.svc.ensure();
+    g.hello();
+    g.ready(1);
+    // #bench is closed to agents when Discord announces the guild and its threads.
+    g.dispatch('GUILD_CREATE', 2, {
+      id: GUILD_ID,
+      channels: [{ id: BENCH, type: 0 }],
+      threads: [{ id: THREAD, guild_id: GUILD_ID, parent_id: BENCH, name: 'old post', type: 11 }],
+    });
+    await clock.advance(500);
+    expect(await one(h, 'SELECT 1 AS found FROM threads WHERE id = ?', THREAD)).toBeNull();
+
+    await h.db.prepare("UPDATE channels SET agent_access = 'post' WHERE id = ?").bind(BENCH).run();
+    await clock.advance(SEED_CHECK_MS + 1_000);
+    await g.svc.ensure();
+    await settle();
+    expect(await one(h, 'SELECT parent_id, name FROM threads WHERE id = ?', THREAD)).toEqual({ parent_id: BENCH, name: 'old post' });
+    expect(calls.some((c) => c.includes(`/channels/${THREAD}/messages`))).toBe(true);
   });
 });
 
@@ -767,18 +880,13 @@ describe('a full buffer', () => {
     const { h } = w;
     const clock = clockFor(h);
     const calls = discord(h, {
-      // Whatever the relay missed, Discord still has: messages 2 to 31, as the oldest page after message 1.
+      // Whatever the relay missed, Discord still has: messages 2 to 131, a page of the oldest after the given one, newest first.
       messages: (_channel, after) =>
-        after === msg(1)
-          ? Array.from({ length: 30 }, (_, i) => ({
-              id: msg(31 - i),
-              channel_id: LOUNGE,
-              author: AUTHOR,
-              content: `message ${31 - i}`,
-              timestamp: at(0, 31 - i),
-              type: 0,
-            }))
-          : [],
+        Array.from({ length: 130 }, (_, i) => i + 2)
+          .filter((n) => after !== null && BigInt(msg(n)) > BigInt(after))
+          .slice(0, 100)
+          .reverse()
+          .map((n) => ({ id: msg(n), channel_id: LOUNGE, author: AUTHOR, content: `message ${n}`, timestamp: at(0, n), type: 0 })),
     });
     const storage = new Map<string, unknown>();
     const g = service(h, clock, storage, cap);
@@ -820,10 +928,38 @@ describe('a full buffer', () => {
     expect(firstKept!.seq).toBeGreaterThan(gaps[0]!.seq);
 
     // And the messages that were dropped are fetched from Discord, starting where the relay stood before.
-    await vi.waitFor(async () => expect(await conversation(h, 31)).not.toBeNull(), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131), { timeout: 5_000 });
     expect(calls.some((c) => c.includes(`after=${msg(1)}`))).toBe(true);
     for (const n of [2, 15, 31, 32, 131]) expect(await conversation(h, n)).not.toBeNull();
     expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131);
+  });
+
+  it('never drops the batch being written, so what overflows is the part that was not written, and the gap is recorded before newer events', async () => {
+    const { h, clock, storage, g } = await outage(60);
+    const batch = h.db.batch.bind(h.db);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    h.db.batch = async (stmts) => {
+      if (!held) {
+        held = true;
+        await gate;
+      }
+      return batch(stmts);
+    };
+    // 50 events start a flush that waits on D1; 80 more arrive meanwhile and overflow the cap of 60.
+    for (let n = 2; n <= 131; n++) g.message(n + 1, n);
+    await settle();
+    expect(g.svc.snapshot()).toMatchObject({ buffered: 60, events_dropped: true });
+    expect(storage.get('lost')).toMatchObject({ channels: [LOUNGE] });
+    release();
+    await clock.advance(5_000);
+    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131), { timeout: 5_000 });
+    const gaps = await all<{ seq: number }>(h, "SELECT seq FROM events WHERE type = 'subscription.gap'");
+    expect(gaps).toHaveLength(1);
+    // Nothing the buffer kept after the dropped part was written ahead of the gap.
+    const kept = await one<{ seq: number }>(h, "SELECT seq FROM events WHERE type = 'message.created' AND message_id = ?", msg(131));
+    expect(kept!.seq).toBeGreaterThan(gaps[0]!.seq);
   });
 
   it('keeps the loss across an eviction and makes up for it when the object wakes', async () => {

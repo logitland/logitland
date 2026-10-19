@@ -458,6 +458,7 @@
                     id="pace-{sel.id}"
                     name="pace"
                     type="number"
+                    required
                     min="0"
                     max="120"
                     inputmode="numeric"

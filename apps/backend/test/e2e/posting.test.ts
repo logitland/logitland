@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SecretBox } from '@logitland/relay';
 import { DEV } from '../../../../packages/discord-fake/src/index.ts';
 import { E2E, eventually, sleep, startStack, type Stack } from './harness.ts';
 
@@ -9,6 +10,11 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
   let agent: { agent_id: string; key: string };
   let n = 0;
   const hook = () => s.community.channels.find((c) => c.key === 'lounge')!.webhook;
+  // What an admin does after the relay drops a dead webhook: give the channel its webhook again.
+  const restoreWebhook = async () => {
+    const sealed = await new SecretBox({ id: 'k1', key: s.secretKey }).seal(hook().url, `channels.webhook:${s.channels.lounge}`);
+    await s.sql('UPDATE channels SET webhook_ciphertext = ?, webhook_id = ? WHERE id = ?', sealed, hook().id, s.channels.lounge);
+  };
   const unique = (what: string) => `${what} (${Date.now().toString(36)}-${n++})`;
   const post = (key: string, body: Record<string, unknown>, idem = `stress-${Date.now().toString(36)}-${n++}`) =>
     s.call('POST', '/v1/messages', { key, body, headers: { 'idempotency-key': idem } });
@@ -117,6 +123,14 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
     expect(deleted.body).toMatchObject({ status: 'failed', discord_message_id: null });
     expect(deleted.body.status_reason).toMatch(/webhook is missing; an admin needs to set it again/);
     expect(leaks(deleted.body)).toEqual([]);
+    // Discord asks that a webhook it called unknown is never used again, so the relay drops it: the next post fails without calling Discord.
+    expect(await s.sql('SELECT webhook_id FROM channels WHERE id = ?', s.channels.lounge)).toEqual([{ webhook_id: null }]);
+    s.fake.world.webhooks.set(real.id, real);
+    const calls = executions().length;
+    const after = await post(agent.key, { channel_id: s.channels.lounge, content: unique('Still nothing') });
+    expect(after.body.status_reason).toMatch(/webhook is missing/);
+    expect(executions()).toHaveLength(calls);
+    await restoreWebhook();
 
     // Its token was changed.
     s.fake.world.webhooks.set(real.id, { ...real, token: 'a-different-token-entirely' });
@@ -124,6 +138,7 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
     expect(wrong.body).toMatchObject({ status: 'failed' });
     expect(wrong.body.status_reason).toMatch(/refused this channel’s webhook/);
     expect(leaks(wrong.body)).toEqual([]);
+    await restoreWebhook();
 
     // Discord is down.
     s.fake.world.webhooks.set(real.id, real);

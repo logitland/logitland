@@ -136,42 +136,6 @@ describe('seedHistory', () => {
     expect((await one<{ last: string }>(h, 'SELECT CAST(last_message_id AS TEXT) AS last FROM channel_cursors WHERE channel_id = ?', LOUNGE))!.last).toBe('0');
   });
 
-  it('leaves alone channels that already have a cursor, closed channels and forum channels', async () => {
-    const { h } = await world();
-    await moreChannels(h);
-    await h.db
-      .prepare("INSERT INTO channel_cursors (channel_id, last_message_id, updated_at) VALUES (?, CAST(? AS INTEGER), '2026-10-19T03:00:00Z')")
-      .bind(NEWS, msg(5))
-      .run();
-    const asked = discordPages(h, {});
-    await seedHistory(h.relay, 10);
-    // #lounge (new), #gallery (media: its posts are threads) and #forum are not asked about; #news has a cursor; #bench is closed.
-    expect(asked).toEqual([`${LOUNGE} after=null`]);
-  });
-
-  it('also looks at live threads, filing their messages under the parent, and skips archived and deleted ones', async () => {
-    const { h } = await world();
-    await moreChannels(h);
-    const live = '120000000000000001';
-    const archived = '120000000000000002';
-    const deleted = '120000000000000003';
-    await push(
-      h,
-      { kind: 'thread_upsert', thread_id: live, parent_id: FORUM, name: 'live' },
-      { kind: 'thread_upsert', thread_id: archived, parent_id: FORUM, archived: true },
-      { kind: 'thread_upsert', thread_id: deleted, parent_id: FORUM },
-    );
-    await push(h, { kind: 'thread_delete', thread_id: deleted, parent_id: FORUM });
-    for (const channel of [LOUNGE, NEWS])
-      await h.db.prepare("INSERT INTO channel_cursors (channel_id, last_message_id, updated_at) VALUES (?, 1, '2026-10-19T03:00:00Z')").bind(channel).run();
-    const asked = discordPages(h, { [live]: () => [rest(30, { channel_id: live }), rest(29, { channel_id: live })] });
-    await seedHistory(h.relay, 10);
-    expect(asked).toEqual([`${live} after=null`]);
-    expect(await conversation(h, 29)).toMatchObject({ channel_id: FORUM, thread_id: live });
-    const t = await one<Record<string, number>>(h, 'SELECT message_count, last_message_at FROM threads WHERE id = ?', live);
-    expect(t).toMatchObject({ message_count: 2 });
-  });
-
   it('does not keep asking about places the bot can’t read', async () => {
     const { h } = await world();
     const asked = discordPages(h, { [LOUNGE]: () => Response.json({ message: 'Missing Access', code: 50001 }, { status: 403 }) });

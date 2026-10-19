@@ -1,5 +1,5 @@
 import type { ConsentMethod, ConsentStatus } from '@logitland/contracts';
-import { DiscordError } from '@logitland/discord';
+import { DiscordError, RateLimitedError } from '@logitland/discord';
 import { iso, type Relay } from '../context';
 import { audit } from './audit';
 import { auditIf } from './identity';
@@ -62,17 +62,31 @@ export async function consentStatus(relay: Relay, discordUserId: string): Promis
     method: row?.method ?? null,
     granted_at: row?.granted_at ?? null,
     revoked_at: row?.revoked_at ?? null,
-    mirrored_messages: await messageCount(relay, discordUserId, 'mirrored'),
+    // Everything the relay holds of theirs, in any channel: that is what leaving deletes, and what agents may have read.
+    mirrored_messages: await messageCount(relay, discordUserId, 'all'),
   };
 }
+
+/** The longest Discord rate limit on a role change that is waited out. */
+const ROLE_RETRY_MAX_SECONDS = 5;
 
 /** Grants or removes the chat role. Returns false when Discord refused; a person who isn't in the server has no role to remove. */
 async function setRole(relay: Relay, guildId: string | null, discordUserId: string, grant: boolean): Promise<boolean> {
   const roleId = relay.config.discord.consentRoleId;
   if (!guildId || !roleId) return true;
+  const call = () =>
+    grant
+      ? relay.discord.addMemberRole(guildId, discordUserId, roleId, 'Agreed to the Logitland public mirror')
+      : relay.discord.removeMemberRole(guildId, discordUserId, roleId, 'Left the Logitland public mirror');
   try {
-    if (grant) await relay.discord.addMemberRole(guildId, discordUserId, roleId, 'Agreed to the Logitland public mirror');
-    else await relay.discord.removeMemberRole(guildId, discordUserId, roleId, 'Left the Logitland public mirror');
+    try {
+      await call();
+    } catch (err) {
+      // A short rate limit is waited out once, so a busy moment doesn't leave someone without the role (or with it, after leaving).
+      if (!(err instanceof RateLimitedError) || err.retryAfterSeconds > ROLE_RETRY_MAX_SECONDS) throw err;
+      await new Promise((resolve) => setTimeout(resolve, err.retryAfterSeconds * 1000));
+      await call();
+    }
     return true;
   } catch (err) {
     if (!grant && err instanceof DiscordError && err.status === 404) return true;
@@ -144,7 +158,12 @@ export async function grantConsent(
  * Ends the agreement at once, so readers lose the person's text from here on. The consents row, a consent_history row
  * (with how they left) and the audit entry go in one batch. Returns whether one was in force.
  */
-export async function revokeConsent(relay: Relay, discordUserId: string, actor: ConsentActor, opts: { interactionId?: string | null } = {}): Promise<boolean> {
+export async function revokeConsent(
+  relay: Relay,
+  discordUserId: string,
+  actor: ConsentActor,
+  opts: { interactionId?: string | null; method?: 'command' | 'dashboard' } = {},
+): Promise<boolean> {
   const at = iso(relay.now());
   const results = await relay.db.batch([
     auditIf(
@@ -158,7 +177,7 @@ export async function revokeConsent(relay: Relay, discordUserId: string, actor: 
         `INSERT INTO consent_history (discord_user_id, guild_id, action, method, notice_version, interaction_id, at)
          SELECT discord_user_id, guild_id, 'revoked', ?, notice_version, ?, ? FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL`,
       )
-      .bind(actor.type === 'owner' ? 'dashboard' : 'command', opts.interactionId ?? null, at, discordUserId),
+      .bind(opts.method ?? (actor.type === 'owner' ? 'dashboard' : 'command'), opts.interactionId ?? null, at, discordUserId),
     relay.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ? AND revoked_at IS NULL').bind(at, discordUserId),
   ]);
   if (results[2]!.meta.changes === 0) return false;
@@ -191,11 +210,53 @@ export async function removeMessages(relay: Relay, discordUserId: string, actor:
   return messages;
 }
 
-/** The second half of leaving: take the role away first so nothing new arrives, then delete what is there. Revoke consent before calling: the role follows the agreement. */
+/**
+ * The second half of leaving: delete what is held first (it is what must not outlive a request that gets cut off), then take the role away.
+ * Revoke consent before calling: nothing new of theirs is kept once it has ended, and the role follows the agreement.
+ */
 export async function removePerson(
   relay: Relay,
   input: { discordUserId: string; guildId: string | null; actor: ConsentActor },
 ): Promise<{ messages: number; roleRemoved: boolean }> {
-  const roleRemoved = await syncRole(relay, input.guildId, input.discordUserId);
-  return { messages: await removeMessages(relay, input.discordUserId, input.actor), roleRemoved };
+  const messages = await removeMessages(relay, input.discordUserId, input.actor);
+  return { messages, roleRemoved: await syncRole(relay, input.guildId, input.discordUserId) };
+}
+
+/** People looked at per run of the sweep below. */
+const SWEEP_PEOPLE = 20;
+
+/**
+ * Cron: finishes the clean-up for people who left but still have messages with their Discord ID (the scrub failed, was cut off
+ * when the request ended, or lost a race with a message in flight). Safe to repeat.
+ */
+export async function consentSweepJob(relay: Relay, ctx: { deadline?: number } = {}): Promise<number> {
+  const { results } = await relay.db
+    .prepare(
+      `SELECT k.discord_user_id AS id FROM consents k
+       WHERE k.revoked_at IS NOT NULL AND EXISTS (SELECT 1 FROM conversation c WHERE c.discord_user_id = k.discord_user_id)
+       ORDER BY k.revoked_at LIMIT ?`,
+    )
+    .bind(SWEEP_PEOPLE)
+    .all<{ id: string }>();
+  let people = 0;
+  for (const { id } of results) {
+    if (ctx.deadline !== undefined && Date.now() > ctx.deadline) break;
+    let messages = 0;
+    for (let round = 0; round < MAX_SCRUB_ROUNDS; round++) {
+      const r = await scrubPerson(relay, id);
+      messages += r.messages;
+      if (!r.more) break;
+    }
+    await audit(relay, {
+      actor_type: 'system',
+      actor_id: 'consent-sweep',
+      action: 'person.messages_removed',
+      target_type: 'person',
+      target_id: id,
+      diff: { mirrored_messages: { from: messages, to: 0 } },
+    });
+    people++;
+  }
+  if (people) relay.log.info('consent.swept', { people });
+  return people;
 }

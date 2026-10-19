@@ -55,7 +55,12 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     secrets: new SecretBox({ id: env.RELAY_SECRET_KEY_ID ?? 'k1', key: env.RELAY_SECRET_KEY }, parseOldKeys(env.RELAY_SECRET_KEYS_OLD)),
     discord,
     moderator,
-    fallbackModerator: overrides.fallbackModerator !== undefined ? overrides.fallbackModerator : env.AI ? workersAiModerator(env.AI) : null,
+    fallbackModerator:
+      overrides.fallbackModerator !== undefined
+        ? overrides.fallbackModerator
+        : env.AI
+          ? workersAiModerator(env.AI, undefined, overrides.log ?? consoleLogger({ service: 'relay' }))
+          : null,
     resolver: overrides.resolver ?? dohResolver(f),
     queue: env.DELIVERIES ?? null,
     sender: overrides.sender ?? null,

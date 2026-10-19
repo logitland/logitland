@@ -21,12 +21,16 @@ interface State {
   queue: string[];
   /** Epoch ms before which nothing is sent: Discord's rate-limit window, or a short pause after an error. */
   notBefore: number;
+  /** The message at the head of the line and how many times in a row processing it has crashed. Kept here, not in memory, so it survives eviction. */
+  head?: { id: string; tries: number };
 }
 
 const log = consoleLogger({ service: 'relay', component: 'sender' });
 
 /** After this many consecutive crashes on one message it leaves the queue; D1 still holds it and the stuck-message sweep deals with it. */
 const MAX_TRIES = 5;
+/** The line is stored as one value (2 MB at most), so it is kept far below that. */
+const MAX_QUEUE = 1000;
 /** One alarm works for at most this long, then hands over to the next. */
 const ALARM_BUDGET_MS = 20_000;
 
@@ -34,7 +38,6 @@ export class SendQueue {
   private state: State = { queue: [], notBefore: 0 };
   private loading: Promise<void> | null = null;
   private busy = false;
-  private readonly tries = new Map<string, number>();
 
   constructor(
     private readonly storage: QueueStorage,
@@ -56,12 +59,14 @@ export class SendQueue {
   }
 
   private save(): Promise<void> {
-    return this.storage.put('state', { queue: [...this.state.queue], notBefore: this.state.notBefore });
+    return this.storage.put('state', { queue: [...this.state.queue], notBefore: this.state.notBefore, head: this.state.head });
   }
 
   async enqueue(messageId: string): Promise<void> {
     await this.load();
     if (!this.state.queue.includes(messageId)) {
+      // A line this long means Discord is far behind; the message stays queued in D1 and the stuck-message sweep offers it again.
+      if (this.state.queue.length >= MAX_QUEUE) throw new Error('send queue is full');
       // Decided before the first await below, so two requests can't both think the queue is idle.
       const idle = !this.busy && this.state.queue.length === 0 && this.now() >= this.state.notBefore;
       this.state.queue.push(messageId);
@@ -101,17 +106,17 @@ export class SendQueue {
     let result: Awaited<ReturnType<typeof processSend>>;
     try {
       result = await processSend(this.relay(), id);
-      this.tries.delete(id);
+      this.state.head = undefined;
     } catch (error) {
-      const n = (this.tries.get(id) ?? 0) + 1;
-      this.tries.set(id, n);
+      const n = (this.state.head?.id === id ? this.state.head.tries : 0) + 1;
+      this.state.head = { id, tries: n };
       log.error('sender.crashed', { message_id: id, attempt: n, error });
       if (n < MAX_TRIES) {
         this.state.notBefore = this.now() + 5_000 * n;
         await this.save();
         return;
       }
-      this.tries.delete(id);
+      this.state.head = undefined;
       result = {};
     }
     if (result.retry) {

@@ -3,6 +3,7 @@ import { signHeaders } from '@logitland/webhooks';
 import { iso, type Relay, type Stmt } from '../context';
 import { audit } from './audit';
 import { getChannel } from './channels';
+import { consentedSql } from './conversation';
 import { DestinationRefused, preflightDestination } from './destinations';
 import { getSettings } from './settings';
 import { dropPendingStmt, previousSecretAad, secretAad, urlAad, type SubscriptionRow } from './subscriptions';
@@ -43,6 +44,10 @@ const QUEUE_MAX_DELAY_SECONDS = 86_400;
 const RETRY_AFTER_MAX_SECONDS = 86_400;
 const FAILED_MESSAGE_RETRY_SECONDS = 60;
 const REPLAY_EXTRA_ATTEMPTS = 3;
+/** A subscription that has had no successful delivery for this long, while deliveries keep failing, is paused. */
+const FAILING_PAUSE_HOURS = 24;
+/** Attempts of one Queue batch that run at the same time. */
+const BATCH_CONCURRENCY = 10;
 const GENERIC_ERROR = 'Internal error while delivering';
 const PAUSED = 'Deliveries are switched off by an admin (deliveries_paused). They are sent when it is switched back on.';
 
@@ -52,7 +57,8 @@ export function backoffSeconds(attempt: number, random: () => number = Math.rand
   return Math.max(5, Math.round(ceiling * (0.5 + random() / 2)));
 }
 
-const chunk = <T>(items: T[], size: number): T[][] => Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
+const chunk = <T>(items: readonly T[], size: number): T[][] =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
 
 /* ---------- Fan-out and enqueue ---------- */
 
@@ -87,6 +93,8 @@ function observedAt(event: EventRow): string {
  * The event types whose subscribers must hear this one. A removal goes to everyone who gets message text
  * (message.created or message.updated), whether or not they asked for it, so receivers can delete what they stored.
  */
+export const isRemoval = (type: string) => type === 'message.deleted' || type === 'message.bulk_deleted';
+
 export function audienceOf(type: string): string[] {
   return type === 'message.deleted' || type === 'message.bulk_deleted' ? [type, 'message.created', 'message.updated'] : [type];
 }
@@ -101,15 +109,16 @@ const FANOUT_SQL = `INSERT OR IGNORE INTO deliveries (id, subscription_id, event
   JOIN subscriptions s ON s.id = sc.subscription_id
   JOIN agents a ON a.id = s.agent_id
   WHERE sc.channel_id = ? AND sc.subscription_id > ?
-    AND s.status = 'active' AND a.status = 'active' AND s.created_at <= ?
+    AND (s.status = 'active' OR (s.status = 'paused' AND ? = 1)) AND a.status = 'active' AND s.created_at <= ?
     AND (? = 1 OR EXISTS (SELECT 1 FROM json_each(s.events) WHERE value IN (SELECT value FROM json_each(?))))
     AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.subscription_id = sc.subscription_id AND d.event_id = ?)
+    AND NOT EXISTS (SELECT 1 FROM events t WHERE t.id = ? AND t.subscription_id IS NOT NULL AND t.subscription_id != sc.subscription_id)
   ORDER BY sc.subscription_id LIMIT ?
   RETURNING id, subscription_id`;
 
 /**
  * Creates the event's deliveries a round of FANOUT_ROWS at a time and hands each round's IDs to `sink`.
- * `subscription.gap` goes to every active subscription of the channel. A subscription only hears about events
+ * `subscription.gap` goes to every active subscription of the channel, or to the one subscription it is addressed to. A subscription only hears about events
  * from after it existed, even when an event is fanned out late (refanJob). False when the budget ran out first.
  */
 export async function fanOutEvent(relay: Relay, event: EventRow, budget: FanOutBudget, sink: (ids: string[]) => Promise<void>): Promise<boolean> {
@@ -118,6 +127,8 @@ export async function fanOutEvent(relay: Relay, event: EventRow, budget: FanOutB
   const prefix = `${ID_PREFIXES.delivery}_${ulid(now.getTime()).slice(0, 10)}`;
   const observed = observedAt(event);
   const audience = JSON.stringify(audienceOf(event.type));
+  // Removals also go to paused subscriptions, whose receivers still hold the text they are about.
+  const removal = isRemoval(event.type) ? 1 : 0;
   let after = '';
   for (;;) {
     if (spent(budget)) {
@@ -127,7 +138,22 @@ export async function fanOutEvent(relay: Relay, event: EventRow, budget: FanOutB
     budget.queries--;
     const { results } = await relay.db
       .prepare(FANOUT_SQL)
-      .bind(prefix, event.id, event.type, at, at, event.channel_id, after, observed, event.type === 'subscription.gap' ? 1 : 0, audience, event.id, FANOUT_ROWS)
+      .bind(
+        prefix,
+        event.id,
+        event.type,
+        at,
+        at,
+        event.channel_id,
+        after,
+        removal,
+        observed,
+        event.type === 'subscription.gap' ? 1 : 0,
+        audience,
+        event.id,
+        event.id,
+        FANOUT_ROWS,
+      )
       .all<{ id: string; subscription_id: string }>();
     if (results.length) await sink(results.map((r) => r.id));
     if (results.length < FANOUT_ROWS) return true;
@@ -222,6 +248,8 @@ interface Attempt {
   /** Attempts allowed in all; an admin replay of an exhausted delivery raises it. */
   limit: number;
   startedAt: Date;
+  /** When the subscription's current run of unsuccessful attempts began, as read at the start of this attempt. */
+  failingSince: string | null;
 }
 
 type Settlement =
@@ -232,7 +260,8 @@ type Settlement =
 
 function retryOrFail(a: Attempt, code: number | null, reason: string, afterSeconds?: number): Settlement {
   if (a.n >= a.limit) return { status: 'failed', code, error: `${reason}; gave up after ${a.n} attempts` };
-  return { status: 'retrying', code, error: reason, afterSeconds: afterSeconds ?? backoffSeconds(a.n) };
+  // A receiver can ask for more time, never for less than the backoff.
+  return { status: 'retrying', code, error: reason, afterSeconds: Math.max(afterSeconds ?? 0, backoffSeconds(a.n)) };
 }
 
 /** Retry-After as seconds (or an HTTP date), capped at 24 hours. Undefined when absent or unusable. */
@@ -268,6 +297,7 @@ export async function attemptDelivery(relay: Relay, deliveryId: string, opts: { 
     n: claim.attempts,
     limit: claim.attempt_limit ?? LIMITS.deliveryMaxAttempts,
     startedAt: now,
+    failingSince: null,
   };
   try {
     return await deliver(relay, attempt, claim.event_id);
@@ -283,18 +313,32 @@ async function deliver(relay: Relay, a: Attempt, eventId: string): Promise<Attem
     ? await relay.db.prepare('SELECT status, scopes FROM agents WHERE id = ?').bind(sub.agent_id).first<{ status: string; scopes: string }>()
     : null;
   const event = await relay.db
-    .prepare('SELECT seq, channel_id, payload FROM events WHERE id = ?')
+    .prepare('SELECT seq, type, channel_id, payload FROM events WHERE id = ?')
     .bind(eventId)
-    .first<{ seq: number; channel_id: string; payload: string }>();
+    .first<{ seq: number; type: string; channel_id: string; payload: string }>();
   const channel = event ? await getChannel(relay, event.channel_id) : null;
 
-  // Re-check before sending: what was true at fan-out may not be now.
+  // Re-check before sending: what was true at fan-out may not be now. A removal tells the receiver to delete what it
+  // stored, so it still goes out when the channel has closed, the scope was taken away or the subscription is paused.
+  const removal = event ? isRemoval(event.type) : false;
   const drop = (error: string) => settle(relay, a, { status: 'dropped', error });
-  if (!sub || sub.status !== 'active') return drop('The subscription is no longer active');
+  if (sub) a.failingSince = sub.failing_since;
+  if (!sub || sub.status === 'disabled' || (sub.status === 'paused' && !removal)) return drop('The subscription is no longer active');
   if (agent?.status !== 'active') return drop('The agent is no longer active');
-  if (!(JSON.parse(agent.scopes) as string[]).includes('messages:read')) return drop('The agent no longer has messages:read');
+  if (!removal && !(JSON.parse(agent.scopes) as string[]).includes('messages:read')) return drop('The agent no longer has messages:read');
   if (!event) return drop('The event is no longer available');
-  if (!channel || channel.agent_access === 'off') return drop('The channel is no longer open to agents');
+  if (!removal && (!channel || channel.agent_access === 'off')) return drop('The channel is no longer open to agents');
+  // A person who left takes their words back, even if the clean-up hasn't reached this event yet.
+  if (
+    (event.type === 'message.created' || event.type === 'message.updated') &&
+    (await relay.db
+      .prepare(
+        `SELECT 1 AS gone FROM conversation c WHERE c.message_id = (SELECT message_id FROM events WHERE id = ?) AND c.author_kind = 'human' AND c.discord_user_id IS NOT NULL AND NOT ${consentedSql('c')}`,
+      )
+      .bind(eventId)
+      .first())
+  )
+    return drop('The person who wrote this message has since left the mirror');
 
   const target = await relay.secrets.open(sub.url_ciphertext, urlAad(sub.id));
   let url: URL;
@@ -362,7 +406,10 @@ function auditWhen(relay: Relay, entry: { action: string; subscriptionId: string
 /**
  * Record an attempt's outcome: the delivery row, the attempt row and whatever it means for the
  * subscription, in one batch. Only deliveries that end `failed` count toward the failure streak; retries
- * don't, and neither do drops. A pause or a disable is audited once, by the batch that makes it.
+ * don't, and neither do drops, but any unsuccessful attempt starts (or continues) the run that pauses the
+ * subscription after FAILING_PAUSE_HOURS without a success. A pause or a disable is audited once, by the batch
+ * that makes it. A delivery that was dropped, scrubbed or finished while its attempt ran keeps that state, and
+ * the attempt changes nothing about the subscription.
  */
 async function settle(relay: Relay, a: Attempt, s: Settlement): Promise<AttemptResult> {
   const finished = relay.now();
@@ -370,10 +417,14 @@ async function settle(relay: Relay, a: Attempt, s: Settlement): Promise<AttemptR
   const code = 'code' in s ? s.code : null;
   const error = 'error' in s ? s.error : null;
   const next = s.status === 'retrying' ? iso(new Date(finished.getTime() + s.afterSeconds * 1000)) : null;
+  // True while the delivery is in the state this settlement gave it, which is only so if nothing else changed it first.
+  const live = 'EXISTS (SELECT 1 FROM deliveries WHERE id = ? AND status = ?)';
+  const liveArgs = [a.deliveryId, s.status];
   const stmts: Stmt[] = [
     relay.db
       .prepare(
-        'UPDATE deliveries SET status = ?, last_status_code = ?, last_error = ?, next_attempt_at = ?, delivered_at = COALESCE(?, delivered_at) WHERE id = ?',
+        `UPDATE deliveries SET status = ?, last_status_code = ?, last_error = ?, next_attempt_at = ?, delivered_at = COALESCE(?, delivered_at)
+         WHERE id = ? AND status IN ('pending', 'retrying')`,
       )
       .bind(s.status, code, error, next, s.status === 'delivered' ? at : null, a.deliveryId),
     relay.db
@@ -385,7 +436,13 @@ async function settle(relay: Relay, a: Attempt, s: Settlement): Promise<AttemptR
   let movedAction = '';
 
   if (s.status === 'delivered') {
-    stmts.push(relay.db.prepare('UPDATE subscriptions SET failure_streak = 0 WHERE id = ? AND failure_streak != 0').bind(a.subscriptionId));
+    stmts.push(
+      relay.db
+        .prepare(
+          `UPDATE subscriptions SET failure_streak = 0, failing_since = NULL WHERE id = ? AND (failure_streak != 0 OR failing_since IS NOT NULL) AND ${live}`,
+        )
+        .bind(a.subscriptionId, ...liveArgs),
+    );
   } else if (s.status === 'failed' && s.disable) {
     moved = stmts.length;
     movedAction = 'subscription.disabled';
@@ -393,43 +450,58 @@ async function settle(relay: Relay, a: Attempt, s: Settlement): Promise<AttemptR
       auditWhen(
         relay,
         { action: movedAction, subscriptionId: a.subscriptionId, reason: s.disable },
-        "EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status != 'disabled')",
+        `EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status != 'disabled') AND ${live}`,
         a.subscriptionId,
+        ...liveArgs,
       ),
       relay.db
-        .prepare("UPDATE subscriptions SET status = 'disabled', paused_reason = ? WHERE id = ? AND status != 'disabled'")
-        .bind(s.disable, a.subscriptionId),
-      dropPendingStmt(relay, a.subscriptionId, 'The subscription was disabled'),
-      relay.db.prepare('DELETE FROM subscription_channels WHERE subscription_id = ?').bind(a.subscriptionId),
+        .prepare(`UPDATE subscriptions SET status = 'disabled', paused_reason = ? WHERE id = ? AND status != 'disabled' AND ${live}`)
+        .bind(s.disable, a.subscriptionId, ...liveArgs),
+      dropPendingStmt(relay, a.subscriptionId, 'The subscription was disabled', 'disabled'),
+      relay.db
+        .prepare("DELETE FROM subscription_channels WHERE subscription_id = ? AND EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status = 'disabled')")
+        .bind(a.subscriptionId, a.subscriptionId),
     );
-  } else if (s.status === 'failed') {
+  } else if (s.status === 'failed' || s.status === 'retrying') {
     const limit = LIMITS.pauseAfterFailedDeliveries;
-    const reason = `Paused after ${limit} failed deliveries in a row. Fix the destination, then resume it.`;
+    const bump = s.status === 'failed' ? 1 : 0;
+    const cutoff = iso(new Date(finished.getTime() - FAILING_PAUSE_HOURS * 3_600_000));
+    const byCount = `Paused after ${limit} failed deliveries in a row. Fix the destination, then resume it.`;
+    const byTime = `Paused because nothing was delivered for ${FAILING_PAUSE_HOURS} hours. Fix the destination, then resume it.`;
+    const reasonSql = 'CASE WHEN failure_streak + ? >= ? THEN ? ELSE ? END';
+    const reasonArgs = [bump, limit, byCount, byTime];
+    const dueSql = "status = 'active' AND (failure_streak + ? >= ? OR (failing_since IS NOT NULL AND failing_since <= ?))";
+    const dueArgs = [bump, limit, cutoff];
     moved = stmts.length;
     movedAction = 'subscription.paused';
     stmts.push(
-      auditWhen(
-        relay,
-        { action: movedAction, subscriptionId: a.subscriptionId, reason },
-        "EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status = 'active' AND failure_streak + 1 >= ?)",
-        a.subscriptionId,
-        limit,
-      ),
       relay.db
         .prepare(
-          `UPDATE subscriptions SET failure_streak = failure_streak + 1,
-             status = CASE WHEN status = 'active' AND failure_streak + 1 >= ? THEN 'paused' ELSE status END,
-             paused_reason = CASE WHEN status = 'active' AND failure_streak + 1 >= ? THEN ? ELSE paused_reason END,
-             paused_at = CASE WHEN status = 'active' AND failure_streak + 1 >= ? THEN ? ELSE paused_at END
-           WHERE id = ?`,
+          `INSERT INTO audit_log (id, actor_type, actor_id, action, target_type, target_id, reason, diff, created_at)
+           SELECT ?, 'system', 'relay', ?, 'subscription', id, ${reasonSql}, NULL, ? FROM subscriptions WHERE id = ? AND ${dueSql} AND ${live}`,
         )
-        .bind(limit, limit, reason, limit, at, a.subscriptionId),
-      // Only a subscription that is paused now (by this batch or an earlier one) loses what was waiting.
-      dropPendingStmt(relay, a.subscriptionId, 'The subscription was paused', 'paused'),
+        .bind(newId('audit'), movedAction, ...reasonArgs, at, a.subscriptionId, ...dueArgs, ...liveArgs),
+      relay.db
+        .prepare(
+          `UPDATE subscriptions SET failure_streak = failure_streak + ?, failing_since = COALESCE(failing_since, ?),
+             status = CASE WHEN ${dueSql} THEN 'paused' ELSE status END,
+             paused_reason = CASE WHEN ${dueSql} THEN ${reasonSql} ELSE paused_reason END,
+             paused_at = CASE WHEN ${dueSql} THEN ? ELSE paused_at END
+           WHERE id = ? AND ${live}`,
+        )
+        .bind(bump, at, ...dueArgs, ...dueArgs, ...reasonArgs, ...dueArgs, at, a.subscriptionId, ...liveArgs),
     );
+    // Only a subscription that is paused now (by this batch or an earlier one) loses what was waiting, and not the removals.
+    // A retry only needs the check when a pause by time is possible.
+    if (bump || (a.failingSince !== null && a.failingSince <= cutoff))
+      stmts.push(dropPendingStmt(relay, a.subscriptionId, 'The subscription was paused', 'paused', true));
   }
 
   const results = await relay.db.batch(stmts);
+  if (results[0]!.meta.changes !== 1) {
+    // The delivery was settled by someone else while this attempt ran (dropped by a scrub, a pause or a removal).
+    return { outcome: 'skipped', reason: 'The delivery was dropped or finished while it was being attempted' };
+  }
   if (moved >= 0 && results[moved]!.meta.changes === 1) relay.log.warn(movedAction, { subscription_id: a.subscriptionId, delivery_id: a.deliveryId });
   switch (s.status) {
     case 'delivered':
@@ -460,15 +532,21 @@ export async function drainDue(relay: Relay, ctx: { deadline?: number } = {}): P
   let total = 0;
   for (let round = 0; round < (queued ? DRAIN_ROUNDS : 1); round++) {
     const now = relay.now();
-    const { results } = await relay.db
-      .prepare(
-        `SELECT id FROM deliveries
-         WHERE status IN ('pending', 'retrying') AND next_attempt_at <= ? ${queued ? 'AND (enqueued_at IS NULL OR enqueued_at < ?)' : ''}
-         ORDER BY next_attempt_at LIMIT ?`,
-      )
-      .bind(...(queued ? [iso(now), iso(new Date(now.getTime() - REENQUEUE_AFTER_MS)), limit] : [iso(now), limit]))
-      .all<{ id: string }>();
-    const ids = results.map((r) => r.id);
+    // One status at a time, so deliveries_due serves the order and only `limit` rows are read, not the whole backlog.
+    const due: { id: string; next_attempt_at: string }[] = [];
+    for (const status of ['pending', 'retrying']) {
+      const { results } = await relay.db
+        .prepare(
+          `SELECT id, next_attempt_at FROM deliveries
+           WHERE status = ? AND next_attempt_at <= ? ${queued ? 'AND (enqueued_at IS NULL OR enqueued_at < ?)' : ''}
+           ORDER BY next_attempt_at LIMIT ?`,
+        )
+        .bind(status, ...(queued ? [iso(now), iso(new Date(now.getTime() - REENQUEUE_AFTER_MS)), limit] : [iso(now), limit]))
+        .all<{ id: string; next_attempt_at: string }>();
+      due.push(...results);
+    }
+    due.sort((x, y) => (x.next_attempt_at < y.next_attempt_at ? -1 : x.next_attempt_at > y.next_attempt_at ? 1 : 0));
+    const ids = due.slice(0, limit).map((r) => r.id);
     total += ids.length;
     if (queued) {
       // Rows the Queue refused stay due, so another round would only ask again.
@@ -542,28 +620,34 @@ export async function handleDeliveryBatch(
     }
     return out;
   }
-  for (const m of messages) {
-    try {
-      const id = (m.body as { delivery_id?: unknown } | null)?.delivery_id;
-      if (typeof id !== 'string') {
-        m.ack();
-        continue;
-      }
-      const result = await attemptDelivery(relay, id, { paused: false });
-      out.push(result);
-      if (result.outcome === 'retry') {
-        const delaySeconds = Math.min(result.afterSeconds, QUEUE_MAX_DELAY_SECONDS);
-        // The Queue now holds this retry, so the cron scan should leave the row alone until well after it is due.
-        await markEnqueued(relay, [id], new Date(relay.now().getTime() + delaySeconds * 1000));
-        m.retry({ delaySeconds });
-      } else {
-        m.ack();
-      }
-    } catch (error) {
-      relay.log.error('deliveries.message_failed', { error });
-      out.push({ outcome: 'skipped', reason: 'Unexpected error; retrying in 60 s' });
-      m.retry({ delaySeconds: FAILED_MESSAGE_RETRY_SECONDS });
-    }
+  // A slow receiver holds up only its own delivery, not the rest of the batch.
+  for (const part of chunk(messages, BATCH_CONCURRENCY)) {
+    const results = await Promise.all(
+      part.map(async (m): Promise<AttemptResult | null> => {
+        try {
+          const id = (m.body as { delivery_id?: unknown } | null)?.delivery_id;
+          if (typeof id !== 'string') {
+            m.ack();
+            return null;
+          }
+          const result = await attemptDelivery(relay, id, { paused: false });
+          if (result.outcome === 'retry') {
+            const delaySeconds = Math.min(result.afterSeconds, QUEUE_MAX_DELAY_SECONDS);
+            // The Queue now holds this retry, so the cron scan should leave the row alone until well after it is due.
+            await markEnqueued(relay, [id], new Date(relay.now().getTime() + delaySeconds * 1000));
+            m.retry({ delaySeconds });
+          } else {
+            m.ack();
+          }
+          return result;
+        } catch (error) {
+          relay.log.error('deliveries.message_failed', { error });
+          m.retry({ delaySeconds: FAILED_MESSAGE_RETRY_SECONDS });
+          return { outcome: 'skipped', reason: 'Unexpected error; retrying in 60 s' };
+        }
+      }),
+    );
+    for (const r of results) if (r) out.push(r);
   }
   return out;
 }

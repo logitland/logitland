@@ -28,6 +28,7 @@ export interface MessageRow {
   idempotency_key: string;
   payload_digest: string;
   content_hash: string;
+  text_hash: string | null;
   created_at: string;
   sent_at: string | null;
   updated_at: string;

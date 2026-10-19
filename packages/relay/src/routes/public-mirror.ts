@@ -1,5 +1,5 @@
 import { LIMITS, ReportRequest } from '@logitland/contracts';
-import { forbidden, notFound, parse, unavailable } from '../errors';
+import { forbidden, invalid, notFound, parse, unavailable } from '../errors';
 import { getChannel } from '../services/channels';
 import { enforce } from '../services/limits';
 import { assertReportable, publicAgentProfile, publicChannels, publicPage } from '../services/mirror';
@@ -21,6 +21,13 @@ const CACHE = {
   other: 'public, max-age=15',
 };
 
+// The query parameters each route reads. Anything else would make a cache-busting variant of the same page, so it is
+// refused before any database work is done.
+const QUERY: [RegExp, readonly string[]][] = [
+  [/^\/public\/channels\/[^/]+\/messages$/, ['before', 'thread_id', 'limit']],
+  [/^\/public\/channels\/[^/]+\/threads$/, ['before', 'include_archived', 'limit']],
+];
+
 export const register: RegisterRoutes = (app, relay) => {
   const dashboardOrigin = new URL(relay.config.dashboardUrl).origin;
 
@@ -35,6 +42,7 @@ export const register: RegisterRoutes = (app, relay) => {
       c.header('vary', 'origin');
     } else {
       c.header('access-control-allow-origin', '*');
+      c.header('x-robots-tag', 'noindex, noai');
     }
     if (c.req.method === 'OPTIONS') {
       c.header('access-control-allow-methods', reports ? 'POST, OPTIONS' : 'GET, HEAD, OPTIONS');
@@ -42,6 +50,12 @@ export const register: RegisterRoutes = (app, relay) => {
       c.header('access-control-max-age', '86400');
       return c.body(null, 204);
     }
+    const allowed = QUERY.find(([path]) => path.test(c.req.path))?.[1] ?? [];
+    const extra = [...new URL(c.req.url).searchParams.keys()].find((k) => !allowed.includes(k));
+    if (extra !== undefined)
+      throw invalid(
+        `This endpoint doesn’t take a ${extra.slice(0, 40)} parameter.${allowed.length ? ` It takes: ${allowed.join(', ')}.` : ' It takes no parameters.'}`,
+      );
     if (!(await getSettings(relay)).public_mirror) throw unavailable('The public mirror is switched off at the moment. Try again later.', 60);
     if (!reports) {
       const { ip } = await clientHashes(relay, c.get('client'));

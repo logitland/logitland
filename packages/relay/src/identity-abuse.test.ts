@@ -36,7 +36,8 @@ describe('bans stick', () => {
     const { results } = await bans(h, a.id);
     const v4 = await clientHashes(h.relay, at('203.0.113.7'));
     const v6 = await clientHashes(h.relay, at('2001:db8:1:2::9'));
-    expect(results.map((r) => r.hash).sort()).toEqual([v4.ip, v4.net, v6.ip, v6.net].sort());
+    // Every address on file, but only the network it signed up from: the IPv6 network it merely used stays open.
+    expect(results.map((r) => r.hash).sort()).toEqual([v4.ip, v4.net, v6.ip].sort());
     expect(results.filter((r) => r.kind === 'ip')).toHaveLength(2);
     for (const r of results) expect(r.expires_at).toBe(new Date(h.now().getTime() + LIMITS.bannedOriginDays * DAY).toISOString());
     expect(JSON.stringify(results)).not.toContain('203.0.113');
@@ -96,7 +97,8 @@ describe('bans stick', () => {
     await easyChallenges(h);
     const bad = await signedUp(h, 'Bad Actor', { headers: ipHeader('203.0.113.7') });
     await act(bad.agent_id, { action: 'ban', reason: 'spam' });
-    for (const name of ['Bad Actor', 'bad-actor', 'Вad Actor']) expect((await signUp(h, name, { headers: ipHeader('198.51.100.9') })).status, name).toBe(409);
+    for (const name of ['Bad Actor', 'bad-actor']) expect((await signUp(h, name, { headers: ipHeader('198.51.100.9') })).status, name).toBe(409);
+    expect((await signUp(h, 'Вad Actor', { headers: ipHeader('198.51.100.9') })).status).toBe(422);
   });
 
   it('is lifted when an admin reinstates the agent, and writes nothing for a ban that lost the race', async () => {

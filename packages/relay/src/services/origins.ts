@@ -72,11 +72,28 @@ function parseIp(raw: string): ParsedIp {
 }
 
 /**
+ * Workers calling from another zone all reach us from this address (developers.cloudflare.com/fundamentals/reference/http-headers,
+ * "CF-Connecting-IP"), with the zone that owns the Worker in CF-Worker. Limits and bans for them follow that zone, not the address
+ * every Worker shares.
+ */
+export const isWorkerAddress = (ip: string): boolean =>
+  parseIpv6(
+    ip
+      .trim()
+      .replace(/^\[|\]$/g, '')
+      .toLowerCase(),
+  )?.join(':') === '10758:39104:13824:0:0:0:0:259';
+
+/**
  * HMACs of the caller's address (IPv4, or the /64 of an IPv6 address) and of its network (IPv4 /24, IPv6 /48), for rate-limit
  * keys and bans. A person can move around inside their own /64 for free, so nothing is limited more finely than that. Null without an IP.
  */
 export async function clientHashes(relay: Relay, client: ClientInfo): Promise<{ ip: string | null; net: string | null }> {
   if (!client.ip) return { ip: null, net: null };
+  if (client.worker) {
+    const zone = await hmac(relay.config.hashKey, `worker:${client.worker}`);
+    return { ip: zone, net: zone };
+  }
   const { address, network } = parseIp(client.ip);
   return { ip: await hmac(relay.config.hashKey, `ip:${address}`), net: await hmac(relay.config.hashKey, `net:${network}`) };
 }
@@ -168,8 +185,9 @@ export async function assertOriginNotBanned(relay: Relay, client: ClientInfo): P
 }
 
 /**
- * The statements that record where a banned agent connected from (every address and network on file), for the batch that bans it.
- * `guard` is the batch's precondition, so a ban that loses a race leaves no record.
+ * The statements that record where a banned agent connected from, for the batch that bans it: every address on file, but only
+ * the network it signed up from, so a ban doesn't close the public VPN or cloud ranges it later used. `guard` is the batch's
+ * precondition, so a ban that loses a race leaves no record.
  */
 export function banOriginStmts(relay: Relay, agentId: string, guard: string, ...guardBinds: unknown[]): Stmt[] {
   const now = relay.now();
@@ -178,10 +196,33 @@ export function banOriginStmts(relay: Relay, agentId: string, guard: string, ...
   return (['ip', 'net'] as const).map((kind) =>
     relay.db
       .prepare(
-        `INSERT INTO banned_origins (hash, kind, agent_id, created_at, expires_at) SELECT DISTINCT ${kind}_hmac, '${kind}', agent_id, ?, ? FROM agent_origins WHERE agent_id = ? AND ${guard} ON CONFLICT (hash, agent_id) DO UPDATE SET expires_at = excluded.expires_at`,
+        `INSERT INTO banned_origins (hash, kind, agent_id, created_at, expires_at) SELECT DISTINCT ${kind}_hmac, '${kind}', agent_id, ?, ? FROM agent_origins WHERE agent_id = ?${kind === 'net' ? " AND kind = 'signup'" : ''} AND ${guard} ON CONFLICT (hash, agent_id) DO UPDATE SET expires_at = excluded.expires_at`,
       )
       .bind(created, expires, agentId, ...guardBinds),
   );
+}
+
+const ownerBanHash = async (relay: Relay, discordUserId: string) => hmac(relay.config.hashKey, `owner:${discordUserId}`);
+
+/** The record that bars a banned agent's owner (by Discord account) from claiming or registering agents while the ban runs. */
+export async function banOwnerStmt(relay: Relay, agentId: string, discordUserId: string, guard: string, ...guardBinds: unknown[]): Promise<Stmt> {
+  const now = relay.now();
+  return relay.db
+    .prepare(
+      `INSERT INTO banned_origins (hash, kind, agent_id, created_at, expires_at) SELECT ?, 'owner', ?, ?, ? WHERE ${guard} ON CONFLICT (hash, agent_id) DO UPDATE SET expires_at = excluded.expires_at`,
+    )
+    .bind(await ownerBanHash(relay, discordUserId), agentId, iso(now), iso(new Date(now.getTime() + LIMITS.bannedOriginDays * DAY_MS)), ...guardBinds);
+}
+
+export async function assertOwnerNotBarred(relay: Relay, discordUserId: string): Promise<void> {
+  const barred = await relay.db
+    .prepare("SELECT 1 AS x FROM banned_origins WHERE hash = ? AND kind = 'owner' AND expires_at > ? LIMIT 1")
+    .bind(await ownerBanHash(relay, discordUserId), iso(relay.now()))
+    .first();
+  if (barred)
+    throw forbidden(
+      'An agent you own was banned, so this account can’t claim or register agents for now. Contact the relay admins if you think that is a mistake.',
+    );
 }
 
 /** Reinstating an agent lifts the ban record on its addresses. */

@@ -1,4 +1,4 @@
-// What a signed-in person can see and do about their own words on the mirror. These two calls go to the
+// What a signed-in person can see and do about their own messages. These two calls go to the
 // dashboard API (the InternalApi entrypoint) through the BACKEND service binding, as the signed-in person:
 // the relay checks that x-logitland-person (the Discord user the dashboard verified at sign-in) is the one in the path
 // (401 when the header is missing, 403 when it belongs to someone else). No owner account is needed: a person who signs

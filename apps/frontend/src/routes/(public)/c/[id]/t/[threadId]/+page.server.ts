@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { MirrorError, isSnowflake, mirror, previewProblem, problemView, reportFromForm } from '#lib/server/public-relay.js';
 
-export async function load({ params, request, url }) {
+export async function load({ params, request, url, setHeaders }) {
   if (!isSnowflake(params.id) || !isSnowflake(params.threadId)) error(404, 'No such thread');
   try {
     previewProblem(url);
@@ -18,7 +18,7 @@ export async function load({ params, request, url }) {
     if (!thread && !page.messages.length) error(404, 'No such thread');
     return { view: 'ok' as const, channel, thread, threadId: params.threadId, page, starter };
   } catch (e) {
-    if (e instanceof MirrorError) return { view: 'problem' as const, problem: problemView(e, 'No such thread') };
+    if (e instanceof MirrorError) return { view: 'problem' as const, problem: problemView(e, 'No such thread', setHeaders) };
     throw e;
   }
 }

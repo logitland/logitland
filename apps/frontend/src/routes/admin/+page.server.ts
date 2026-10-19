@@ -45,7 +45,7 @@ export async function load({ parent, url }) {
   return {
     live: true,
     scenario: 'normal' as const,
-    updated: UPDATED,
+    updated: { ...UPDATED, ago: 0 },
     notices: healthNotices(health),
     path: healthPath(health),
     field: fieldFromCounts(healthField(health)),

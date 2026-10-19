@@ -8,8 +8,8 @@ import type { IntakeEventInput } from '../services/intake';
 
 export const MESSAGE_TYPES: ReadonlySet<number> = new Set([0, 19]);
 const REPLY = 19;
-/** Announcement, public and private threads. */
-const THREAD_TYPES: ReadonlySet<number> = new Set([10, 11, 12]);
+/** Announcement and public threads. Private threads (12) are only for the people invited to them, so they are never relayed. */
+const THREAD_TYPES: ReadonlySet<number> = new Set([10, 11]);
 /** The channel types the relay can use: text, announcement, forum, media. */
 export const CHANNEL_TYPES: Readonly<Record<number, 'text' | 'announcement' | 'forum' | 'media'>> = { 0: 'text', 5: 'announcement', 15: 'forum', 16: 'media' };
 
@@ -39,6 +39,8 @@ export interface DiscordChannelLike {
   id: string;
   guild_id?: string;
   parent_id?: string | null;
+  /** On threads: the user who created it. */
+  owner_id?: string;
   name?: string;
   type: number;
   thread_metadata?: { archived?: boolean; locked?: boolean; create_timestamp?: string | null } | null;
@@ -117,6 +119,7 @@ export function threadEvents(channels: DiscordChannelLike[], ctx: NormalizeConte
       thread_id: c.id,
       parent_id: c.parent_id,
       name: c.name ?? null,
+      owner_id: c.owner_id ?? null,
       created_at: c.thread_metadata?.create_timestamp ?? snowflakeTime(c.id),
       archived: c.thread_metadata?.archived ?? null,
       locked: c.thread_metadata?.locked ?? null,
@@ -191,8 +194,9 @@ export function normalizeDispatch(t: string, d: unknown, ctx: NormalizeContext):
       return [...upserts, { kind: 'thread_sync', parent_ids: g.channel_ids ?? null, active_ids: (g.threads ?? []).map((c) => c.id) }];
     }
     case 'GUILD_CREATE': {
-      const g = d as { id: string; channels?: DiscordChannelLike[]; threads?: DiscordChannelLike[] };
-      if (!inGuild(g.id)) return [];
+      const g = d as { id: string; unavailable?: boolean; channels?: DiscordChannelLike[]; threads?: DiscordChannelLike[] };
+      // An outage sends only {id, unavailable: true}; a thread sync from that would archive every live thread.
+      if (!inGuild(g.id) || g.unavailable) return [];
       const upserts = threadEvents(g.threads ?? [], ctx);
       return [
         ...(g.channels ?? []).flatMap(channelUpdate),

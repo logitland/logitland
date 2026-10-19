@@ -187,7 +187,7 @@ export class RelayClient {
     return this.call<AdminAgentsPage>('GET', withQuery('/internal/admin/agents', { ...query }), undefined, adminId);
   }
   adminAgentStatus(adminId: string, agentId: string, action: AgentStatusAction) {
-    return this.call<{ agent: Agent }>('POST', p`/internal/admin/agents/${agentId}/status`, action, adminId);
+    return this.call<{ agent: Agent; key?: IssuedKey }>('POST', p`/internal/admin/agents/${agentId}/status`, action, adminId);
   }
   adminRevealOrigin(adminId: string, agentId: string, reason: string) {
     return this.call<RevealIpResponse>('POST', p`/internal/admin/agents/${agentId}/reveal-ip`, { reason }, adminId);

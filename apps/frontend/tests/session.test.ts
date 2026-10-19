@@ -26,33 +26,36 @@ describe('the person session', () => {
   it('carries a Discord ID and name, and nothing that could pass for an owner', async () => {
     const cookies = jar();
     await writePerson(cookies, SECRET, { discord_user_id: '700000000000000001', username: 'pat' }, true);
-    expect(await readPerson(cookies, SECRET)).toMatchObject({ kind: 'person', discord_user_id: '700000000000000001', username: 'pat' });
+    expect(await readPerson(cookies, SECRET, true)).toMatchObject({ kind: 'person', discord_user_id: '700000000000000001', username: 'pat' });
     // Copied into the owner session's cookie, it is not an owner session.
     const copy = jar();
-    copy.set('ll_session', cookies.get('ll_person')!);
-    expect(await readSession(copy, SECRET)).toBeNull();
+    copy.set('__Host-ll_session', cookies.get('__Host-ll_person')!);
+    expect(await readSession(copy, SECRET, true)).toBeNull();
   });
 
   it('is refused when it is expired, forged or signed for something else', async () => {
     const cookies = jar();
     cookies.set(
-      'll_person',
+      '__Host-ll_person',
       await sign(SECRET, 'person', { kind: 'person', discord_user_id: '700000000000000001', username: 'pat', exp: Math.floor(Date.now() / 1000) - 1 }),
     );
-    expect(await readPerson(cookies, SECRET)).toBeNull();
-    cookies.set('ll_person', await sign(SECRET, 'person', { discord_user_id: '700000000000000001', username: 'pat', exp: Math.floor(Date.now() / 1000) + 60 }));
-    expect(await readPerson(cookies, SECRET)).toBeNull();
+    expect(await readPerson(cookies, SECRET, true)).toBeNull();
+    cookies.set(
+      '__Host-ll_person',
+      await sign(SECRET, 'person', { discord_user_id: '700000000000000001', username: 'pat', exp: Math.floor(Date.now() / 1000) + 60 }),
+    );
+    expect(await readPerson(cookies, SECRET, true)).toBeNull();
     await writePerson(cookies, SECRET, { discord_user_id: '700000000000000001', username: 'pat' }, true);
-    expect(await readPerson(cookies, 'another-secret-another-secret-another-secret')).toBeNull();
+    expect(await readPerson(cookies, 'another-secret-another-secret-another-secret', true)).toBeNull();
   });
 
   it('is not an owner session, and an owner session is not a person session', async () => {
     const cookies = jar();
     await writeSession(cookies, SECRET, { owner_id: 'own_01JA0TESSELLATE0', discord_user_id: '700000000000000001', username: 'pat', is_admin: false }, true);
-    expect(await readSession(cookies, SECRET)).toMatchObject({ owner_id: 'own_01JA0TESSELLATE0' });
+    expect(await readSession(cookies, SECRET, true)).toMatchObject({ owner_id: 'own_01JA0TESSELLATE0' });
     const copy = jar();
-    copy.set('ll_person', cookies.get('ll_session')!);
-    expect(await readPerson(copy, SECRET)).toBeNull();
+    copy.set('__Host-ll_person', cookies.get('__Host-ll_session')!);
+    expect(await readPerson(copy, SECRET, true)).toBeNull();
   });
 
   it('only accepts a value signed for its own cookie, even with the same fields', async () => {
@@ -64,17 +67,31 @@ describe('the person session', () => {
       is_admin: true,
       exp: Math.floor(Date.now() / 1000) + 60,
     };
-    cookies.set('ll_session', await sign(SECRET, 'oauth', fields));
-    expect(await readSession(cookies, SECRET)).toBeNull();
-    cookies.set('ll_session', await sign(SECRET, 'session', fields));
-    expect(await readSession(cookies, SECRET)).toMatchObject({ owner_id: 'own_01JA0TESSELLATE0' });
+    cookies.set('__Host-ll_session', await sign(SECRET, 'oauth', fields));
+    expect(await readSession(cookies, SECRET, true)).toBeNull();
+    cookies.set('__Host-ll_session', await sign(SECRET, 'session', fields));
+    expect(await readSession(cookies, SECRET, true)).toMatchObject({ owner_id: 'own_01JA0TESSELLATE0' });
   });
 
   it('ends together with the owner session', async () => {
     const cookies = jar();
     await writePerson(cookies, SECRET, { discord_user_id: '700000000000000001', username: 'pat' }, true);
     await writeSession(cookies, SECRET, { owner_id: 'own_01JA0TESSELLATE0', discord_user_id: '700000000000000001', username: 'pat', is_admin: false }, true);
-    clearSession(cookies);
+    clearSession(cookies, true);
     expect(cookies.store.size).toBe(0);
+  });
+
+  it('uses __Host- cookies over https, ignores a planted bare cookie, and keeps bare names on plain http', async () => {
+    const secure = jar();
+    const v = { owner_id: 'own_01JA0TESSELLATE0', discord_user_id: '700000000000000001', username: 'pat', is_admin: false };
+    await writeSession(secure, SECRET, v, true);
+    expect([...secure.store.keys()]).toEqual(['__Host-ll_session']);
+    const planted = jar();
+    planted.set('ll_session', secure.get('__Host-ll_session')!);
+    expect(await readSession(planted, SECRET, true)).toBeNull();
+    const plain = jar();
+    await writeSession(plain, SECRET, v, false);
+    expect([...plain.store.keys()]).toEqual(['ll_session']);
+    expect(await readSession(plain, SECRET, false)).toMatchObject({ owner_id: v.owner_id });
   });
 });

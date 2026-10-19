@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "logitland-frontend",
+  // The top level is local development and gets its own name, so a deploy without --env production can't replace the live Worker.
+  "name": "logitland-frontend-dev",
   // Not later than the workerd bundled with the pinned wrangler (1.20261001.1).
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_als"],
@@ -15,8 +16,8 @@
   // BACKEND: the relay's internal API, a named entrypoint reachable only through this binding.
   // RELAY: the relay's public app (the mirror's /public API), reached without the public internet.
   "services": [
-    { "binding": "BACKEND", "service": "logitland-backend", "entrypoint": "InternalApi" },
-    { "binding": "RELAY", "service": "logitland-backend" },
+    { "binding": "BACKEND", "service": "logitland-backend-dev", "entrypoint": "InternalApi" },
+    { "binding": "RELAY", "service": "logitland-backend-dev" },
   ],
 
   "vars": {

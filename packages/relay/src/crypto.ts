@@ -69,8 +69,9 @@ function unb64(text: string): Uint8Array<ArrayBuffer> {
  * raw IPs). Ciphertext: `v2.<key id>.<iv>.<ciphertext>`. The associated data names where the value lives
  * (for example `channels.webhook:<channel id>`), so a ciphertext copied to another row won't open.
  *
- * Rotation: set RELAY_SECRET_KEY to the new key with a new RELAY_SECRET_KEY_ID, list the old ones in
- * RELAY_SECRET_KEYS_OLD as `id:base64,id:base64`, run the re-seal job, then drop the old keys.
+ * Rotation: set RELAY_SECRET_KEY to the new key with a new RELAY_SECRET_KEY_ID (the first key's ID is k1 unless set),
+ * list the old ones in RELAY_SECRET_KEYS_OLD as `id:base64,id:base64` under the IDs they were sealed with, run the
+ * re-seal job, then drop the old keys.
  */
 export class SecretBox {
   private readonly keys = new Map<string, Promise<CryptoKey>>();
@@ -78,6 +79,8 @@ export class SecretBox {
   constructor(current: { id: string; key: string }, old: { id: string; key: string }[] = []) {
     for (const k of [current, ...old]) {
       if (!/^[A-Za-z0-9_-]{1,16}$/.test(k.id)) throw new Error('Secret key IDs are 1 to 16 letters, digits, - or _');
+      // A second key under an ID already in use would silently replace the first (and seal with the wrong one).
+      if (this.keys.has(k.id)) throw new Error(`Secret key ID ${k.id} is used twice; give the new key an ID of its own`);
       const raw = unb64(k.key);
       if (raw.length !== 32) throw new Error(`Secret key ${k.id} must be 32 bytes, base64-encoded`);
       this.keys.set(k.id, crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']));

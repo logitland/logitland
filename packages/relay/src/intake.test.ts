@@ -12,6 +12,7 @@ import {
   HUMAN,
   msg,
   one,
+  poll,
   push,
   relayMessage,
   remove,
@@ -174,7 +175,8 @@ describe('idempotency', () => {
     const keys = (await all<{ source_key: string }>(h, 'SELECT source_key FROM events ORDER BY seq')).map((r) =>
       r.source_key.replace(/[0-9a-f]{64}/, '<hash>'),
     );
-    expect(keys).toEqual([`create:${msg(1)}`, `update:${msg(1)}:${at(5)}`, `delete:${msg(1)}`, 'bulk:<hash>']);
+    // A bulk delete leaves a tombstone for each message the relay didn't hold.
+    expect(keys).toEqual([`create:${msg(1)}`, `update:${msg(1)}:${at(5)}`, `delete:${msg(1)}`, 'bulk:<hash>', `delete:${msg(9)}`, `delete:${msg(8)}`]);
   });
 
   it('fans out only events that are new, to subscriptions that asked for the type', async () => {
@@ -284,7 +286,8 @@ describe('deletes', () => {
     await subscribe(h, agent.id);
     await push(h, human(1), human(2), human(3));
     const bulk = { kind: 'message_delete_bulk' as const, channel_id: LOUNGE, message_ids: [msg(2), msg(1), msg(99)] };
-    expect(await push(h, bulk)).toMatchObject({ recorded: 1, deliveries: 1 });
+    // The removal event, and a tombstone for the one message the relay doesn't hold (not announced).
+    expect(await push(h, bulk)).toMatchObject({ recorded: 2, deliveries: 1 });
     expect(await push(h, { ...bulk, message_ids: [msg(99), msg(1), msg(2)] })).toMatchObject({ recorded: 0 });
     expect((await conversation(h, 1))!.content).toBeNull();
     expect((await conversation(h, 2))!.content).toBeNull();
@@ -292,6 +295,25 @@ describe('deletes', () => {
     expect(JSON.parse((await one<{ payload: string }>(h, "SELECT payload FROM events WHERE type = 'message.bulk_deleted'"))!.payload).data.message_ids).toEqual(
       [msg(1), msg(2), msg(99)],
     );
+  });
+});
+
+describe('a bulk delete before the messages are written', () => {
+  it('keeps a message that arrives late (a backfill page, a seed) from bringing its text back or being announced', async () => {
+    const { h, agent } = await world();
+    await subscribe(h, agent.id);
+    await push(h, { kind: 'message_delete_bulk', channel_id: LOUNGE, message_ids: [msg(7), msg(8)] });
+    const before = await deliveryCount(h);
+    await push(h, human(7, { content: 'doxx: address' }), human(8, { content: 'more' }), human(9));
+    for (const n of [7, 8]) expect(await conversation(h, n)).toMatchObject({ content: null, removed_by: 'discord' });
+    expect((await conversation(h, 7))!.deleted_at).not.toBeNull();
+    expect(await conversation(h, 9)).toMatchObject({ content: 'message 9' });
+    expect(await deliveryCount(h)).toBe(before + 1);
+    expect(
+      (await all<{ message_id: string }>(h, "SELECT CAST(message_id AS TEXT) AS message_id FROM events WHERE type = 'message.created'")).map(
+        (e) => e.message_id,
+      ),
+    ).toEqual([msg(9)]);
   });
 });
 
@@ -353,6 +375,42 @@ describe('telling agents’ posts from other webhooks', () => {
       discord_message_id: null,
     });
     expect((await one<{ status: string }>(h, 'SELECT status FROM relay_messages WHERE id = ?', stale))!.status).toBe('sending');
+  });
+
+  it('matches a send attempted just now even though the message was written long ago (released from review)', async () => {
+    const { h, agent } = await world();
+    const old = new Date(h.now().getTime() - 15 * 60_000).toISOString();
+    const id = await relayMessage(h, agent.id, { content: 'Held for a while', hash: await contentHash('Held for a while'), createdAt: old });
+    await h.db.prepare('UPDATE relay_messages SET updated_at = ? WHERE id = ?').bind(h.now().toISOString(), id).run();
+    await push(h, fromWebhook(5, 'Moth-9', 'Held for a while'));
+    expect(await conversation(h, 5)).toMatchObject({ author_kind: 'agent', agent_id: agent.id, relay_message_id: id });
+    expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', id)).toEqual({ status: 'sent', discord_message_id: msg(5) });
+  });
+
+  it('prefers the send in flight to an older uncertain one, and tells polls apart by their question', async () => {
+    const { h, agent } = await world();
+    const hash = await contentHash('');
+    const a = await relayMessage(h, agent.id, { content: '', status: 'uncertain', hash });
+    h.advance(1_000);
+    const b = await relayMessage(h, agent.id, { content: '', status: 'sending', hash });
+    await h.db
+      .prepare('UPDATE relay_messages SET poll = ? WHERE id = ?')
+      .bind(JSON.stringify({ question: 'Soup?' }), a)
+      .run();
+    await h.db
+      .prepare('UPDATE relay_messages SET poll = ? WHERE id = ?')
+      .bind(JSON.stringify({ question: 'Noodles?' }), b)
+      .run();
+    await push(h, fromWebhook(5, 'Moth-9', '', { poll: poll({ question: 'Noodles?' }) }));
+    expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', b)).toEqual({ status: 'sent', discord_message_id: msg(5) });
+    expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', a)).toEqual({ status: 'uncertain', discord_message_id: null });
+    // Without a poll question to go on, the one still in flight goes first.
+    const c = await relayMessage(h, agent.id, { content: 'plain', status: 'uncertain', hash: await contentHash('plain') });
+    h.advance(1_000);
+    const d = await relayMessage(h, agent.id, { content: 'plain', status: 'sending', hash: await contentHash('plain') });
+    await push(h, fromWebhook(6, 'Moth-9', 'plain'));
+    expect((await one<{ status: string }>(h, 'SELECT status FROM relay_messages WHERE id = ?', d))!.status).toBe('sent');
+    expect((await one<{ status: string }>(h, 'SELECT status FROM relay_messages WHERE id = ?', c))!.status).toBe('uncertain');
   });
 
   it('only claims a send once: identical texts settle one message each, oldest first', async () => {
@@ -487,6 +545,23 @@ describe('gaps', () => {
     expect(await recordGap(h.relay, gap)).toBe(1);
     expect(await recordGap(h.relay, gap)).toBe(0);
     expect(await recordGap(h.relay, { ...gap, channelIds: [] })).toBe(0);
+  });
+
+  it('for a resumed subscription resumes after the last event from before the window, so the events it missed are not skipped', async () => {
+    const { h } = await world();
+    await push(h, human(1));
+    h.advance(60_000);
+    const windowStart = h.now().toISOString();
+    h.advance(1_000);
+    await push(h, human(2), human(3));
+    h.advance(60_000);
+    const before = (await one<{ seq: number }>(h, "SELECT seq FROM events WHERE message_id = ? AND type = 'message.created'", msg(1)))!.seq;
+    expect(
+      await recordGap(h.relay, { channelIds: [LOUNGE], windowStart, windowEnd: h.now().toISOString(), reason: 'paused', subscriptionId: 'sub_01JB7Q2M8R' }),
+    ).toBe(1);
+    const gap = await one<{ seq: number; payload: string }>(h, "SELECT seq, payload FROM events WHERE type = 'subscription.gap'");
+    expect(JSON.parse(gap!.payload).data.resume_cursor).toBe(String(before));
+    expect(gap!.seq).toBeGreaterThan(before + 2);
   });
 });
 

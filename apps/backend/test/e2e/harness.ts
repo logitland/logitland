@@ -157,7 +157,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
   for (const [name, value] of Object.entries(options.env ?? {})) (name in secret ? secret : plain)[name] = value;
   const bindings: Record<string, Record<string, unknown>> = {
     // The dashboard's API is a named entrypoint nobody can reach from outside; a binding to the Worker itself lets the suite play the dashboard.
-    DASHBOARD: { type: 'service', service: 'logitland-backend', entrypoint: 'InternalApi' },
+    DASHBOARD: { type: 'service', service: 'logitland-backend-dev', entrypoint: 'InternalApi' },
   };
   for (const [name, value] of Object.entries(secret)) if (value !== null) bindings[name] = { type: 'secret_text', value };
   for (const [name, value] of Object.entries(plain)) if (value !== null) bindings[name] = { type: 'plain_text', value };

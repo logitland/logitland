@@ -10,6 +10,8 @@ export async function GET({ cookies, url }) {
   const saved = await unsign<{ state: string; verifier: string; next: string }>(env.SESSION_SECRET, 'oauth', cookies.get('ll_oauth'));
   cookies.delete('ll_oauth', { path: '/auth' });
   const code = url.searchParams.get('code');
+  // Declining at Discord's consent screen comes back without a code (RFC 6749 sends `error=access_denied`; Discord's docs don't say).
+  if (saved && (url.searchParams.has('error') || !code)) redirect(303, `/login?cancelled=1&next=${encodeURIComponent(safeNext(saved.next))}`);
   if (!saved || !code || url.searchParams.get('state') !== saved.state) error(400, 'The sign-in link expired or was already used. Start again.');
 
   const user = await finishAuthorization({

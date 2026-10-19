@@ -2,7 +2,8 @@ import { LIMITS, type ConsentMethod } from '@logitland/contracts';
 import { z } from 'zod';
 import { RelayError, parse, unauthorized } from '../errors';
 import type { Relay } from '../context';
-import { consentNotice, consentStatus, grantConsent, removePerson, revokeConsent, syncRole, type ConsentActor } from './consent';
+import { hit } from './limits';
+import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, removePerson, revokeConsent, syncRole, type ConsentActor } from './consent';
 
 // Discord interactions: the /mirror command and the agree buttons. Only a button click agrees: /mirror agree shows the
 // notice with a button, and so does the welcome message.
@@ -13,9 +14,13 @@ const InteractionType = { PING: 1, APPLICATION_COMMAND: 2, MESSAGE_COMPONENT: 3 
 const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5 } as const;
 const EPHEMERAL = 64;
 
-/** The button on the welcome message (consent method `button`), and the one in the reply to /mirror agree (method `command`). */
-export const AGREE_BUTTON = 'mirror_agree';
-export const AGREE_COMMAND_BUTTON = 'mirror_agree_cmd';
+/**
+ * The button on the welcome message (consent method `button`), and the one in the reply to /mirror agree (method `command`). The
+ * notice version is part of the id: a button posted under an older notice doesn't agree to the current one (it shows the current
+ * notice and a fresh button), so the record never says someone agreed to text they didn't see.
+ */
+export const AGREE_BUTTON = `mirror_agree:${CONSENT_NOTICE_VERSION}`;
+export const AGREE_COMMAND_BUTTON = `mirror_agree_cmd:${CONSENT_NOTICE_VERSION}`;
 
 /** An action row (type 1) holding a primary (style 1) button (type 2) whose custom_id the handler below answers. */
 export const agreeButton = (customId: string) => [{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: let me chat', custom_id: customId }] }];
@@ -99,6 +104,11 @@ const say = (content: string): InteractionResponse => ({
   data: { content, flags: EPHEMERAL, allowed_mentions: { parse: [] } },
 });
 
+/** Agreeing and leaving write history that is kept for good and make Discord role calls, so one person can only do so much of it. */
+const TOGGLES_PER_10_MIN = 6;
+const tooOften = (seconds: number) =>
+  `You’ve agreed and left a few times in a row. Wait about ${Math.ceil(seconds / 60)} ${seconds > 60 ? 'minutes' : 'minute'} and try again.`;
+
 const WRONG_PLACE = 'This only works in the Logitland server. Run it there.';
 const UNKNOWN = 'I don’t know that command. Try /mirror agree, /mirror leave or /mirror status.';
 const STUCK =
@@ -134,7 +144,12 @@ type Action = { kind: 'notice' | 'leave' | 'status' } | { kind: 'agree'; method:
 function actionOf(i: Interaction): Action | null {
   if (i.type === InteractionType.MESSAGE_COMPONENT) {
     const id = i.data?.custom_id;
-    return id === AGREE_BUTTON ? { kind: 'agree', method: 'button' } : id === AGREE_COMMAND_BUTTON ? { kind: 'agree', method: 'command' } : null;
+    if (id === AGREE_BUTTON) return { kind: 'agree', method: 'button' };
+    if (id === AGREE_COMMAND_BUTTON) return { kind: 'agree', method: 'command' };
+    // Ids from before the version was added, or from an older notice.
+    return id === 'mirror_agree' || id === 'mirror_agree_cmd' || id?.startsWith('mirror_agree:') || id?.startsWith('mirror_agree_cmd:')
+      ? { kind: 'notice' }
+      : null;
   }
   if (i.type !== InteractionType.APPLICATION_COMMAND || i.data?.name !== 'mirror') return null;
   const sub = i.data.options?.[0]?.name;
@@ -170,6 +185,8 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
   }
 
   if (action.kind === 'agree') {
+    const turn = await hit(relay, { key: `consent:${userId}:10m`, limit: TOGGLES_PER_10_MIN, windowSeconds: 600 }, 1, true);
+    if (!turn.ok) return say(tooOften(turn.retryAfterSeconds));
     const { changed } = await grantConsent(relay, { discordUserId: userId, guildId, method: action.method, actor, interactionId: i.id });
     defer(finishAgree(relay, i, userId, guildId, changed));
     return { type: Callback.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: { flags: EPHEMERAL } };
@@ -179,18 +196,24 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
     const s = await consentStatus(relay, userId);
     if (s.agreed) {
       return say(
-        `You agreed to the public mirror on ${s.granted_at!.slice(0, 10)} with ${VIA[s.method!]}. Only what you wrote after that is shown. ${s.mirrored_messages} of your messages in the mirrored channels are on the mirror.\n\n${LEAVE_NOTE}`,
+        `You agreed to the public mirror on ${s.granted_at!.slice(0, 10)} with ${VIA[s.method!]}. Only what you wrote after that is shown. Logitland holds ${s.mirrored_messages} of your messages (agents can read them, and those in mirrored channels are on the public mirror).\n\n${LEAVE_NOTE}`,
       );
     }
     const held = s.mirrored_messages;
     return say(
-      `You haven’t agreed to the public mirror, so what you write isn’t copied: Logitland keeps only that a message was sent, and when and where, not who wrote it or what it said. Run \`/mirror agree\` to see what you would agree to.${held > 0 ? `\n\nI still hold ${held} earlier ${held === 1 ? 'message' : 'messages'} of yours from mirrored channels. \`/mirror leave\` deletes them.` : ''}`,
+      `You haven’t agreed to the public mirror, so what you write isn’t copied: Logitland keeps only that a message was sent, and when and where, not who wrote it or what it said. Run \`/mirror agree\` to see what you would agree to.${held > 0 ? `\n\nI still hold ${held} earlier ${held === 1 ? 'message' : 'messages'} of yours. \`/mirror leave\` deletes them.` : ''}`,
     );
   }
 
   // The agreement ends before we answer, so readers lose this person at once even if the rest fails. Leaving always runs the
   // whole clean-up, even for someone with no agreement and no live messages: tombstones and reply lines may still name them.
-  await revokeConsent(relay, userId, actor, { interactionId: i.id });
+  await revokeConsent(relay, userId, actor, { interactionId: i.id, method: 'command' });
+  // The agreement has ended either way. The clean-up (Discord calls and a scrub) is what's limited; the person can run it again.
+  const turn = await hit(relay, { key: `consent:${userId}:10m`, limit: TOGGLES_PER_10_MIN * 2, windowSeconds: 600 }, 1, true);
+  if (!turn.ok)
+    return say(
+      `Your agreement has ended, so nothing you write is shown publicly now. You’ve run this a lot just now, so I haven’t repeated the clean-up. Wait about ${Math.ceil(turn.retryAfterSeconds / 60)} min and run /mirror leave again to finish.`,
+    );
   defer(finishLeave(relay, i, userId, guildId, actor));
   return { type: Callback.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: { flags: EPHEMERAL } };
 }

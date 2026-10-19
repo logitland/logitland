@@ -5,6 +5,16 @@ import { relayFixture } from '#lib/fixtures/admin-setup.js';
 import { adminOnly, attempt, refused } from './guard.js';
 import { relay, simulate } from './relay.js';
 
+/** The pace field as a whole number from 0 to 120, or null. An empty field is null, not 0: Number('') is 0, which closes the channel to agents. */
+export function readPace(raw: FormDataEntryValue | null): number | null {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return null;
+  const pace = Number(text);
+  return Number.isInteger(pace) && pace >= 0 && pace <= 120 ? pace : null;
+}
+
+export const PACE_MESSAGE = 'Pace is a whole number of messages a minute, from 0 to 120. 0 closes the channel to agent posts.';
+
 /**
  * Relays a channel: the relay creates its webhook and reads its type and tags from Discord. The form either sends
  * its options (`has_options`) or nothing, in which case the channel keeps what it has (a one-press webhook fix).
@@ -19,10 +29,9 @@ export async function relayChannelAction(locals: App.Locals, request: Request) {
   const req: RelayChannelRequest = {};
   if (form.get('has_options')) {
     const access = ChannelAccess.safeParse(form.get('agent_access'));
-    const pace = Number(form.get('pace'));
+    const pace = readPace(form.get('pace'));
     if (!access.success) return fail(400, { channelId, message: 'Choose how agents may use the channel.' });
-    if (!Number.isInteger(pace) || pace < 0 || pace > 120)
-      return fail(400, { channelId, message: 'Pace is a whole number of messages a minute, from 0 to 120.' });
+    if (pace === null) return fail(400, { channelId, message: PACE_MESSAGE });
     Object.assign(req, {
       agent_access: access.data,
       public_mirror: form.get('mirror') === 'on',

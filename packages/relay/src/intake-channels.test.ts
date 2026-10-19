@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { all, moreChannels, one, push, world } from './intake-fixtures';
+import { all, conversation, human, moreChannels, msg, one, push, remove, subscribe, thread, world } from './intake-fixtures';
 import { BENCH, FORUM, LOUNGE } from './testing';
 
 const rename = (channel_id: string, name: string, type: 'text' | 'announcement' | 'forum' | 'media', tags?: unknown[]) => ({
@@ -49,6 +49,19 @@ describe('a relayed channel that changes in Discord', () => {
     await push(h, rename(BENCH, 'renamed', 'forum'));
     expect(await channel(h, BENCH)).toMatchObject({ name: 'bench', type: 'text' });
     expect(await audit(h)).toHaveLength(0);
+  });
+
+  it('keeps a threads-only text channel threads-only when it is renamed, and says when access does change', async () => {
+    const { h } = await world();
+    await h.db.prepare("UPDATE channels SET agent_access = 'post_new_threads' WHERE id = ?").bind(LOUNGE).run();
+    await push(h, rename(LOUNGE, 'lounge-2', 'text'));
+    expect(await channel(h, LOUNGE)).toMatchObject({ name: 'lounge-2', agent_access: 'post_new_threads' });
+    await moreChannels(h);
+    await push(h, rename(FORUM, 'forum', 'text'));
+    expect(await channel(h, FORUM)).toMatchObject({ type: 'text', agent_access: 'post' });
+    const entries = await audit(h);
+    expect(Object.keys(JSON.parse(entries.find((e) => e.target_id === LOUNGE)!.diff))).toEqual(['name', 'type']);
+    expect(JSON.parse(entries.find((e) => e.target_id === FORUM)!.diff).agent_access).toEqual({ from: 'post_new_threads', to: 'post' });
   });
 
   it('stops taking new-thread posts when it stops being a forum', async () => {
@@ -121,5 +134,33 @@ describe('forum tags', () => {
     await moreChannels(h);
     await push(h, rename(FORUM, 'forum', 'forum', tags), rename(FORUM, 'forum', 'forum', []));
     expect(JSON.parse((await one<{ tags: string }>(h, 'SELECT tags FROM channels WHERE id = ?', FORUM))!.tags)).toEqual([]);
+  });
+});
+
+describe('a channel switched off while people delete in Discord', () => {
+  it('applies the deletes quietly, so the text does not come back when the channel is switched on again', async () => {
+    const { h, agent } = await world();
+    await subscribe(h, agent.id);
+    await push(h, human(1), human(2), thread(msg(5)), human(6, { thread_id: msg(5) }));
+    const before = (await one<{ n: number }>(h, 'SELECT COUNT(*) AS n FROM deliveries'))!.n;
+    await h.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await push(
+      h,
+      remove(1),
+      { kind: 'message_delete_bulk', channel_id: LOUNGE, message_ids: [msg(2)] },
+      { kind: 'thread_delete', thread_id: msg(5), parent_id: LOUNGE },
+    );
+    await h.db.prepare("UPDATE channels SET agent_access = 'post' WHERE id = ?").bind(LOUNGE).run();
+    for (const n of [1, 2, 6]) expect(await conversation(h, n)).toMatchObject({ content: null, removed_by: 'discord' });
+    // Nobody was told while the channel was closed.
+    expect((await one<{ n: number }>(h, 'SELECT COUNT(*) AS n FROM deliveries'))!.n).toBe(before);
+    expect(await all(h, "SELECT 1 FROM events WHERE type LIKE '%deleted' AND fanned_out_at IS NULL")).toHaveLength(0);
+  });
+
+  it('still ignores everything else there', async () => {
+    const { h } = await world();
+    await h.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await push(h, human(1));
+    expect(await conversation(h, 1)).toBeNull();
   });
 });

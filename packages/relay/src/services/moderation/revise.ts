@@ -1,18 +1,19 @@
 import type { RelayMessage } from '@logitland/contracts';
 import { DiscordError, RateLimitedError } from '@logitland/discord';
 import { iso, type Relay } from '../../context';
-import { RelayError, conflict, invalid, notFound, rateLimited, unavailable } from '../../errors';
+import { RelayError, conflict, forbidden, invalid, notFound, rateLimited, unavailable } from '../../errors';
 import type { AgentPrincipal } from '../../types';
 import { audit } from '../audit';
-import { getChannel, openWebhook } from '../channels';
+import { getChannel, openWebhook, usableChannel } from '../channels';
+import { hit } from '../limits';
 import { scrubMessage } from '../scrub';
 import { getSettings } from '../settings';
 import { addStrike, escalateRuleBlocks } from '../strikes';
-import { assertMayPost, assertVerifiedFor, countAttempt } from './admission';
+import { assertMayPost, assertVerifiedFor, countAttempt, findDuplicate } from './admission';
 import { Trail, writeLog } from './log';
 import { decide } from './pipeline';
-import { EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
-import { contentHash, discordContent, getRow, parsePoll, toRelayMessage, webhookThread, type MessageRow } from './rows';
+import { EDITS_PER_MINUTE, EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
+import { contentHash, discordContent, getRow, normalise, parsePoll, toRelayMessage, webhookThread, type MessageRow } from './rows';
 import { evaluateRules, judge } from './rules';
 import { DISCORD_MESSAGE_CHARS } from './target';
 
@@ -39,6 +40,8 @@ async function reach(relay: Relay, row: MessageRow) {
 function discordFailure(err: unknown, verb: 'edit' | 'delete'): never {
   if (err instanceof RateLimitedError) throw rateLimited('Discord is rate limiting this channel. Try again shortly.', err.retryAfterSeconds);
   if (err instanceof DiscordError) {
+    if (err.code === 50083) throw conflict('The thread this message is in is archived, so it can’t be changed. Post a new message in the thread to reopen it.');
+    if (err.code === 160005) throw conflict('The thread this message is in is locked, so it can’t be changed.');
     if (err.status === 404) throw conflict(`Discord no longer has this message, so it can’t be ${verb === 'edit' ? 'edited' : 'deleted'}.`);
     throw unavailable(`Discord refused to ${verb} the message. Try again later; if it keeps happening, tell an admin.`, 30);
   }
@@ -62,9 +65,23 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     throw new RelayError(409, 'expired', `Messages can only be edited within ${EDIT_WINDOW_HOURS} hours of being posted. Send a new message instead.`);
   }
   if (!content.trim()) throw invalid('The new text is empty. To remove the message, delete it.');
-  // Editing would otherwise be a way round the rule: post while the channel was open to everyone, then rewrite.
-  const where = await getChannel(relay, row.channel_id);
-  if (where) assertVerifiedFor(agent, where);
+  // Editing would otherwise be a way round the closures: post while the channel was open, then rewrite.
+  const where = await usableChannel(relay, row.channel_id, 'send').catch(() => {
+    throw forbidden('Agents can’t post in this channel right now, so the message can’t be edited either.');
+  });
+  assertVerifiedFor(agent, where);
+  if (where.pace_per_agent_per_minute === 0) throw forbidden('Agents can’t post in this channel right now, so the message can’t be edited either.');
+  const inThread = webhookThread(row, where.type);
+  if (inThread) {
+    const thread = await relay.db
+      .prepare('SELECT archived, locked, deleted_at FROM threads WHERE id = ?')
+      .bind(inThread)
+      .first<{ archived: number; locked: number; deleted_at: string | null }>();
+    if (thread?.deleted_at) throw conflict('The thread this message is in was deleted, so it can’t be edited.');
+    if (thread?.locked) throw conflict('The thread this message is in is locked, so it can’t be edited.');
+    if (thread?.archived)
+      throw conflict('The thread this message is in is archived, so it can’t be edited. Post a new message in the thread to reopen it, then edit.');
+  }
   if (content === row.content) return toRelayMessage(row);
   const text = discordContent({ reply_prefix: row.reply_prefix, content });
   if (text.length > DISCORD_MESSAGE_CHARS) {
@@ -73,6 +90,16 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     );
   }
 
+  const budget = await hit(relay, { key: `edit:${agent.id}:m`, limit: EDITS_PER_MINUTE, windowSeconds: 60 }, 1, true);
+  if (!budget.ok) {
+    throw new PolicyError(
+      429,
+      'rate_limited',
+      'rate_limit',
+      `You can edit ${EDITS_PER_MINUTE} messages a minute. Try again in ${budget.retryAfterSeconds} seconds.`,
+      { retryAfterSeconds: budget.retryAfterSeconds },
+    );
+  }
   await countAttempt(relay, agent.id, agent.tier);
   const trail = new Trail();
   const refuse = async (policy: PolicyError['policy'], reason: string, fixedRule = false): Promise<never> => {
@@ -90,6 +117,20 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   const ruling = judge(evaluateRules({ content, threadName: null }, { probation }), 'edit');
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason ? `Edit: ${ruling.reason}` : 'Edit', 'rules');
   if (ruling.verdict !== 'pass') await refuse(ruling.policy!, ruling.reason!, true);
+
+  const textHash = await contentHash(content);
+  const dup = await findDuplicate(relay, {
+    agentId: agent.id,
+    channelId: row.channel_id,
+    textHash,
+    excludeId: row.id,
+    length: normalise(content).length,
+    poll: null,
+  });
+  if (dup) {
+    trail.add('limits', dup.verdict, dup.policy, `Edit: ${dup.reason}`, 'limits');
+    await refuse(dup.policy, 'This text is the same as another recent message in this channel, so the edit is refused.');
+  }
 
   const decision = await decide(relay, { ...row, content, poll: null, thread_name: null }, agent, { probation });
   if (decision.kind === 'unavailable') {
@@ -122,8 +163,8 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     discordFailure(err, 'edit');
   }
   const changed = await relay.db
-    .prepare("UPDATE relay_messages SET content = ?, content_hash = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
-    .bind(content, await contentHash(text), iso(relay.now()), row.id)
+    .prepare("UPDATE relay_messages SET content = ?, content_hash = ?, text_hash = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
+    .bind(content, await contentHash(text), textHash, iso(relay.now()), row.id)
     .run();
   if (changed.meta.changes !== 1) throw conflict('This message was removed while you were editing it.');
   await writeLog(relay, agent.id, row.id, trail.entries);

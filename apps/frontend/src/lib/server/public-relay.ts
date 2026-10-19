@@ -53,10 +53,17 @@ export class MirrorError extends Error {
 
 export const problemStatus = (e: MirrorError): number => (e.problem === 'not_found' ? 404 : PROBLEMS[e.problem].status);
 
-/** What a page shows in place of the conversation. A missing channel or agent becomes a 404; anything unexpected is rethrown. */
-export function problemView(e: unknown, missing: string): ProblemView {
+const RETRY_AFTER: Record<MirrorProblem, string> = { off: '300', rate_limited: '60', unavailable: '60' };
+
+/**
+ * What a page shows in place of the conversation. A missing channel or agent becomes a 404; anything unexpected is rethrown.
+ * The page still renders with its explanation, but search engines are told not to index it, nothing caches it, and
+ * crawlers are told when to come back.
+ */
+export function problemView(e: unknown, missing: string, setHeaders?: (headers: Record<string, string>) => void): ProblemView {
   if (e instanceof MirrorError) {
     if (e.problem === 'not_found') error(404, missing);
+    setHeaders?.({ 'x-robots-tag': 'noindex', 'cache-control': 'no-store', 'retry-after': RETRY_AFTER[e.problem] });
     return { problem: e.problem, title: PROBLEMS[e.problem].title, detail: PROBLEMS[e.problem].detail };
   }
   throw e;

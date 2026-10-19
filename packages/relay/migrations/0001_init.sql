@@ -64,10 +64,10 @@ CREATE INDEX agent_origins_net ON agent_origins(net_hmac, kind, seen_at);
 CREATE INDEX agent_origins_purge ON agent_origins(ip_purge_after);
 CREATE INDEX agent_origins_seen ON agent_origins(seen_at);
 
--- Addresses and networks of banned agents, so the same operator can't sign up again at once. Hashes only; each record expires.
+-- Addresses and networks of banned agents (and the Discord account that owned one), so the same operator can't sign up again at once. Hashes only; each record expires.
 CREATE TABLE banned_origins (
   hash TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('ip', 'net')),
+  kind TEXT NOT NULL CHECK (kind IN ('ip', 'net', 'owner')),
   agent_id TEXT NOT NULL REFERENCES agents(id),
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
@@ -149,11 +149,15 @@ CREATE TABLE threads (
   last_message_at TEXT,
   -- Set when the starter message is an agent's.
   creator_agent_id TEXT,
+  -- The Discord user who made the thread, kept only for a person who had agreed before it existed (the name is theirs). Cleared when they leave.
+  owner_id TEXT,
   -- Forum and media tags applied to the post: a JSON array of tag IDs (the names are in channels.tags).
   applied_tags TEXT NOT NULL DEFAULT '[]',
   updated_at TEXT NOT NULL
 );
 CREATE INDEX threads_parent ON threads(parent_id, id);
+-- A forum's open threads, without walking the archived ones that pile up behind them.
+CREATE INDEX threads_open ON threads(parent_id, id) WHERE archived = 0 AND deleted_at IS NULL;
 
 /* ---------- Posting ---------- */
 
@@ -189,6 +193,8 @@ CREATE TABLE relay_messages (
   payload_digest TEXT NOT NULL,
   -- sha256 of the normalised text, for duplicate detection across agents.
   content_hash TEXT NOT NULL,
+  -- sha256 of the normalised text the agent wrote, without the reply line: what the duplicate check compares.
+  text_hash TEXT,
   created_at TEXT NOT NULL,
   -- When Discord confirmed the post. Edits are allowed for 24 hours from here.
   sent_at TEXT,
@@ -199,6 +205,7 @@ CREATE INDEX relay_messages_agent ON relay_messages(agent_id, created_at);
 CREATE INDEX relay_messages_status ON relay_messages(status, next_review_at);
 CREATE INDEX relay_messages_discord ON relay_messages(discord_message_id);
 CREATE INDEX relay_messages_hash ON relay_messages(content_hash, created_at);
+CREATE INDEX relay_messages_text_hash ON relay_messages(text_hash, created_at);
 CREATE INDEX relay_messages_channel ON relay_messages(channel_id, created_at);
 -- The admin health counts by status over the last hour (routes/internal-admin-ops.ts); covering, so no row lookups.
 CREATE INDEX relay_messages_created ON relay_messages(created_at, status);
@@ -279,7 +286,9 @@ CREATE TABLE events (
   payload TEXT NOT NULL,
   observed_at TEXT NOT NULL,
   -- When subscribers were told. Null until fan-out succeeds; the refan job retries those.
-  fanned_out_at TEXT
+  fanned_out_at TEXT,
+  -- Set on an event meant for one subscription (the gap after it is resumed): other subscriptions and GET /v1/events never see it.
+  subscription_id TEXT
 );
 CREATE INDEX events_channel ON events(channel_id, seq);
 CREATE INDEX events_message ON events(message_id);
@@ -413,6 +422,8 @@ CREATE TABLE subscriptions (
   paused_at TEXT,
   -- Consecutive failed deliveries (not attempts).
   failure_streak INTEGER NOT NULL DEFAULT 0,
+  -- When the current run of unsuccessful attempts began (cleared by a success); 24 hours of it pauses the subscription.
+  failing_since TEXT,
   -- The Idempotency-Key of the request that created it and a digest of what that request asked for, so a retried create returns this subscription.
   idempotency_key TEXT,
   payload_digest TEXT,

@@ -12,11 +12,19 @@ const age = (iso: string, now: number) => {
   return s < 90 ? `${s} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
 };
 
+/** The Gateway heartbeats about every 41 s and the relay records it at most every 15 s, so three silent minutes mean it is dead whatever the status says. */
+export const HEARTBEAT_STALE_MS = 3 * 60_000;
+
+const heartbeatSilent = (h: AdminHealth['intake'], generatedAt: string) =>
+  h.last_heartbeat_at !== null && Date.parse(generatedAt) - Date.parse(h.last_heartbeat_at) > HEARTBEAT_STALE_MS;
+
 type Intake = 'ok' | 'wait' | 'fail';
 /** The relay reports the intake status as free text; read it conservatively. */
-function intakeTone(h: AdminHealth['intake']): Intake {
+function intakeTone(h: AdminHealth['intake'], generatedAt: string): Intake {
   if (/not connected|disconnected|closed|failed|error|down|stopped/i.test(h.status)) return 'fail';
-  if (/connected|ready|running|ok|live/i.test(h.status) && !h.last_error) return 'ok';
+  if (/connected|ready|running|ok|live/i.test(h.status) && !h.last_error) {
+    return heartbeatSilent(h, generatedAt) ? 'fail' : 'ok';
+  }
   return 'wait';
 }
 
@@ -26,7 +34,7 @@ export function healthPath(h: AdminHealth, now = Date.now()): PathStep[] {
   const asked = sum(h.messages_last_hour);
   const msgs = h.messages_last_hour;
   const trouble = (msgs.uncertain ?? 0) + (msgs.failed ?? 0);
-  const intake = intakeTone(h.intake);
+  const intake = intakeTone(h.intake, h.generated_at);
   const last = h.deliveries.last_hour;
   return [
     { name: 'Asked to post', knot: 'quiet', value: n(asked), note: `in the last hour · ${n(h.agents.signups_last_day)} signed up in the last day` },
@@ -68,13 +76,20 @@ export function healthPath(h: AdminHealth, now = Date.now()): PathStep[] {
 
 export function healthNotices(h: AdminHealth, now = Date.now()): HealthNotice[] {
   const out: HealthNotice[] = [];
-  const intake = intakeTone(h.intake);
+  const intake = intakeTone(h.intake, h.generated_at);
   if (intake !== 'ok') {
     out.push({
       tone: intake === 'fail' ? 'fail' : 'wait',
-      title: intake === 'fail' ? 'Event intake isn’t connected' : 'Event intake is catching up',
+      title: heartbeatSilent(h.intake, h.generated_at)
+        ? 'Event intake has gone quiet'
+        : intake === 'fail'
+          ? 'Event intake isn’t connected'
+          : 'Event intake is catching up',
       detail:
-        h.intake.last_error ?? `Status: ${h.intake.status}. The last event was ${since(h.intake.last_event_at, now)}. Subscriptions are told about any gap.`,
+        h.intake.last_error ??
+        (heartbeatSilent(h.intake, h.generated_at)
+          ? `The Gateway says “${h.intake.status}” but its last heartbeat was ${age(h.intake.last_heartbeat_at!, now)} ago, so it may be stuck. Setup shows what the relay sees.`
+          : `Status: ${h.intake.status}. The last event was ${since(h.intake.last_event_at, now)}. Subscriptions are told about any gap.`),
       action: { label: 'Affected subscriptions', href: '/admin/deliveries' },
     });
   }

@@ -1,7 +1,7 @@
 import { newId, type MessageStatus, type OwnerMessage, type PolicyCode, type RelayMessage, type SendMessageRequest, type Verdict } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { sha256 } from '../crypto';
-import { RelayError, conflict, notFound } from '../errors';
+import { RelayError, conflict, invalid, notFound } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
 import { usableChannel, type ChannelRow } from './channels';
@@ -16,10 +16,11 @@ import {
   holdCapError,
   pendingHolds,
 } from './moderation/admission';
+import { hit } from './limits';
 import { Trail, writeLog } from './moderation/log';
 import { checkLoop } from './moderation/loops';
 import { decide, settle } from './moderation/pipeline';
-import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PolicyError, isOnProbation } from './moderation/policy';
+import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PolicyError, UNVERIFIED_MAX_AUTO_ARCHIVE_MINUTES, isOnProbation, isVerified } from './moderation/policy';
 import { contentHash, discordContent, getRow, normalise, toRelayMessage, type MessageRow } from './moderation/rows';
 import { evaluateRules, judge } from './moderation/rules';
 import { checkLive, checkShape, isForum, replyLine, type Target } from './moderation/target';
@@ -68,6 +69,8 @@ interface Draft {
   digest: string;
   /** The hash of what Discord will show, reply line included. */
   hash: string;
+  /** The hash of the agent's own text alone, which the duplicate check compares. */
+  textHash: string;
   /** A failed message being tried again: it is already `moderating` (we won the compare-and-set). */
   existing: MessageRow | null;
 }
@@ -92,8 +95,8 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
   const id = newId('message');
   const r = await relay.db
     .prepare(
-      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, poll, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
+      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, poll, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
     )
     .bind(
       id,
@@ -115,6 +118,7 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
       d.idempotencyKey,
       d.digest,
       d.hash,
+      d.textHash,
       at,
       at,
     )
@@ -146,6 +150,9 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
   const channel = await usableChannel(relay, req.channel_id, 'send');
   assertVerifiedFor(agent, channel);
   const shape = checkShape(channel, req);
+  if ((req.auto_archive_minutes ?? 0) > UNVERIFIED_MAX_AUTO_ARCHIVE_MINUTES && !isVerified(agent.tier)) {
+    throw invalid('Unverified agents can keep a thread open for at most 1440 minutes (a day). Use 60 or 1440, or verify your agent for longer.');
+  }
 
   const digest = await sha256(
     JSON.stringify([
@@ -179,6 +186,7 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
     net: opts.net,
     digest,
     hash: await contentHash(discordContent({ reply_prefix: replyPrefix, content: shape.text })),
+    textHash: await contentHash(shape.text ?? ''),
     existing: null,
   };
   if (!found) return run(relay, principal, channel, settings, draft, null);
@@ -212,7 +220,9 @@ async function run(
     } catch (err) {
       if (err instanceof PolicyError) {
         trail.add('admission', 'block', err.policy, err.detail ?? null, 'limits');
-        await writeLog(relay, agent.id, draft.existing?.id ?? null, trail.entries);
+        // A flood of limit refusals is logged once a minute, so refused requests can't fill the log.
+        const flood = err.status === 429 && !(await hit(relay, { key: `refusedlog:${agent.id}:m`, limit: 1, windowSeconds: 60 }, 1, true)).ok;
+        if (!flood) await writeLog(relay, agent.id, draft.existing?.id ?? null, trail.entries);
       }
       if (failed) {
         await relay.db
@@ -257,9 +267,9 @@ async function run(
   const dup = await findDuplicate(relay, {
     agentId: agent.id,
     channelId: channel.id,
-    contentHash: draft.hash,
+    textHash: draft.textHash,
     excludeId: draft.existing?.id ?? null,
-    length: normalise(discordContent({ reply_prefix: draft.target.replyPrefix, content: draft.target.text })).length,
+    length: normalise(draft.target.text ?? '').length,
     poll: req.poll ? JSON.stringify(req.poll) : null,
   });
   trail.add('limits', dup?.verdict ?? 'pass', dup?.policy ?? null, dup?.reason ?? null, 'limits');
@@ -269,7 +279,9 @@ async function run(
   const conversation: ConversationRow[] = await refusing(() =>
     checkLoop(relay, { agentId: agent.id, channelId: channel.id, threadId: req.thread_id ?? null, startsThread: Boolean(req.thread_name) && isForum(channel) }),
   );
-  await refusing(() => enforceRates(relay, { agentId: agent.id, tier: agent.tier, probation, channel, net: draft.net }));
+  await refusing(() =>
+    enforceRates(relay, { agentId: agent.id, tier: agent.tier, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }),
+  );
   trail.add('admission', 'pass', null, null, 'limits');
 
   const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null });

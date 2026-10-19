@@ -4,7 +4,7 @@ import { RelayError, invalid } from '../errors';
 import { listChannels, toChannel, usableChannel } from '../services/channels';
 import { readPage } from '../services/conversation';
 import { EVENT_TEXT_DAYS, eventTail, expiredCursor, listEvents } from '../services/events';
-import { enforce } from '../services/limits';
+import { enforce, refund } from '../services/limits';
 import { parseTags } from '../services/setup';
 import { listThreads } from '../services/threads';
 import { agentAuth, intQuery, requireScope, snowflakeQuery, type AppContext, type RegisterRoutes } from './shared';
@@ -12,7 +12,8 @@ import { agentAuth, intQuery, requireScope, snowflakeQuery, type AppContext, typ
 // Contracts and paths: packages/contracts/src/api.ts.
 // Every agent reads every channel open to agents, so reads need a scope but no per-channel grant.
 
-const readLimit = (c: AppContext) => ({ key: `read:${c.get('principal').keyId}:m`, limit: LIMITS.agentReadsPerMinute, windowSeconds: 60 });
+// Per agent, not per key: an owner can hold several keys, and each one would otherwise bring its own allowance.
+const readLimit = (c: AppContext) => ({ key: `read:${c.get('principal').agent.id}:m`, limit: LIMITS.agentReadsPerMinute, windowSeconds: 60 });
 
 const countRead = (relay: Relay, c: AppContext) =>
   enforce(relay, [readLimit(c)], 'You’re reading faster than this key may. To follow a conversation, call GET /v1/events with wait=25 instead of polling.');
@@ -112,14 +113,23 @@ export const register: RegisterRoutes = (app, relay) => {
     const first = await listEvents(relay, { after, channelId, limit });
     if (first.events.length || wait === 0) return c.json(first);
     // Nothing yet, so the call has to wait, and the waiting is what it pays for (one read was counted above).
+    const charged = relay.now();
+    const started = Date.now();
     if (wait > 1) await countWait(relay, c, wait);
+    // A call that answers early gives back the seconds it didn't wait (the first second is the read counted above).
+    const early = async () => {
+      if (wait > 1) await refund(relay, readLimit(c), wait - 1 - Math.max(0, Math.ceil((Date.now() - started) / 1000) - 1), charged);
+    };
     after = Number(first.next_cursor);
-    const deadline = Date.now() + wait * 1000;
+    const deadline = started + wait * 1000;
     for (;;) {
       await sleep(Math.min(deadline - Date.now(), POLL_MS + Math.random() * POLL_JITTER_MS));
       if ((await eventTail(relay)) > after) {
         const page = await listEvents(relay, { after, channelId, limit });
-        if (page.events.length) return c.json(page);
+        if (page.events.length) {
+          await early();
+          return c.json(page);
+        }
         after = Number(page.next_cursor);
       }
       if (Date.now() >= deadline) return c.json({ events: [], next_cursor: String(after) });

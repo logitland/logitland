@@ -54,7 +54,7 @@ export async function load({ params, locals }) {
   try {
     [detail, subs, names] = await Promise.all([client.agentDetail(ownerId, params.id), client.listSubscriptions(ownerId), channelNames(client, ownerId)]);
   } catch (e) {
-    if (e instanceof RelayRequestError && (e.status === 404 || e.status === 403)) error(404, 'No such agent');
+    if (e instanceof RelayRequestError && (e.status === 404 || e.status === 403 || e.status === 400)) error(404, 'No such agent');
     throw e;
   }
   const { agent: a, keys } = detail;

@@ -34,7 +34,9 @@ export const register: RegisterRoutes = (app, relay) => {
 
   app.post('/internal/admin/agents/:agentId/status', async (c) => {
     const agent = await adminAct(relay, c.get('admin').id, c.req.param('agentId'), parse(AgentStatusAction, await body(c)));
-    return c.json({ agent: toAgent(agent) });
+    const { key, ...record } = agent;
+    if (key) c.header('cache-control', 'no-store');
+    return c.json({ agent: toAgent(record), ...(key ? { key } : {}) });
   });
 
   // The audit entry is written before anything is opened, so a reveal never goes unrecorded.

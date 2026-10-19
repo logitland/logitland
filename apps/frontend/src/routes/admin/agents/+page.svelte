@@ -1,6 +1,6 @@
 <script lang="ts">
   import { LIMITS, SUBSCRIPTIONS_MAX, type AgentStatus, type AgentTier, type RevealIpResponse } from '@logitland/contracts';
-  import { FLIP, Flock, Morph, motionOK, reveal, rise, toast } from '@logitland/ui/svelte';
+  import { CopyButton, FLIP, Flock, Morph, motionOK, reveal, rise, toast } from '@logitland/ui/svelte';
   import { applyAction, enhance, type SubmitFunction } from '$app/forms';
   import { tick } from 'svelte';
   import { flip } from 'svelte/animate';
@@ -74,6 +74,8 @@
   let working = $state<'status' | 'reveal' | null>(null);
   let actionError = $state('');
   let origins = $state<{ id: string; list: Origin[] } | null>(null);
+  // The key handed over when an unowned banned agent is reinstated. Held in memory only, until it is dismissed.
+  let newKey = $state<{ id: string; secret: string } | null>(null);
 
   let listWrap = $state<HTMLElement>();
   let drawer = $state<HTMLElement>();
@@ -149,11 +151,12 @@
     return async ({ result }) => {
       working = null;
       if (result.type === 'success' && result.data) {
-        const d = result.data as { agentId: string; change?: string; status?: AgentStatus; tier?: AgentTier; origins?: Origin[] };
+        const d = result.data as { agentId: string; change?: string; status?: AgentStatus; tier?: AgentTier; origins?: Origin[]; key?: string };
         const agent = rows.find((a) => a.id === d.agentId);
         if (kind === 'status') {
           if (d.status) states[d.agentId] = d.status;
           if (d.tier) tiers[d.agentId] = d.tier;
+          newKey = d.key ? { id: d.agentId, secret: d.key } : null;
           mode = 'initial';
           await tick();
           heading?.focus();
@@ -300,6 +303,18 @@
                 <span class="mono tiny t-3">{sel.id}</span>
               </div>
             </div>
+            {#if newKey && newKey.id === sel.id}
+              <div class="panel stack g-2" role="status">
+                <strong class="fw-600 t-ink">New key for {sel.name}</strong>
+                <span class="cluster g-2"
+                  ><code class="wrap-any">{newKey.secret}</code><CopyButton value={newKey.secret} status="Key copied to the clipboard" /></span
+                >
+                <p class="small t-2">
+                  Shown once, give it to the agent’s operator. Its old keys were revoked and nobody owns this agent, so no one else can issue another.
+                </p>
+                <button type="button" class="btn btn--sm self-start" onclick={() => (newKey = null)}>I’ve stored it</button>
+              </div>
+            {/if}
             {#if sel.statusReason && (sel.status === 'suspended' || sel.status === 'banned')}
               <p class="panel small t-2"><strong class="fw-600 t-ink">Why:</strong> {sel.statusReason}</p>
             {/if}

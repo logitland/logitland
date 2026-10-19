@@ -1,6 +1,7 @@
 import { DiscordError, RateLimitedError, UncertainSendError, type ExecuteWebhookBody } from '@logitland/discord';
 import { iso, type Relay } from '../context';
 import type { AgentRecord } from '../types';
+import { audit } from './audit';
 import { getChannel, openWebhook } from './channels';
 import { getAgent } from './identity';
 import { recordAgentPost, type AgentPost } from './intake';
@@ -21,6 +22,24 @@ export interface SendResult {
   retry?: boolean;
   /** Don't send anything else through this webhook for this long. */
   retryAfterSeconds?: number;
+}
+
+/** Forgets a webhook Discord no longer knows, if it is still the one in use (an admin may have set a new one meanwhile). */
+async function dropWebhook(relay: Relay, channelId: string, webhookId: string): Promise<void> {
+  const r = await relay.db
+    .prepare('UPDATE channels SET webhook_ciphertext = NULL, webhook_id = NULL, updated_at = ? WHERE id = ? AND webhook_id = ?')
+    .bind(iso(relay.now()), channelId, webhookId)
+    .run();
+  if (r.meta.changes !== 1) return;
+  relay.log.warn('send.webhook_dropped', { channel_id: channelId });
+  await audit(relay, {
+    actor_type: 'system',
+    actor_id: 'sender',
+    action: 'channel.webhook_dropped',
+    target_type: 'channel',
+    target_id: channelId,
+    reason: 'Discord no longer accepts this webhook',
+  });
 }
 
 const WEBHOOK_MISSING = 'This channel’s webhook is missing; an admin needs to set it again.';
@@ -235,8 +254,16 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
     if (err instanceof UncertainSendError) return end('uncertain', UNCERTAIN_REASON);
     if (err instanceof DiscordError) {
       // Never relay Discord's own text: it can name internals. 10003 is Unknown Channel, which for a thread post means the thread is gone.
+      // Discord says not to use a webhook that answered 404 again (repeated tries get the whole IP restricted), and a 401 means the
+      // token is no good, so the webhook is dropped: later posts are refused up front until an admin sets it again.
+      if (err.status === 404 && !(err.code === 10003 && row.thread_id)) await dropWebhook(relay, channel.id, hook.id);
+      if (err.status === 401) await dropWebhook(relay, channel.id, hook.id);
       if (err.status === 404)
         return end('failed', err.code === 10003 && row.thread_id ? 'That thread no longer exists. Start a new one, or reply somewhere else.' : WEBHOOK_MISSING);
+      if (err.code === 160005 || err.code === 50083)
+        return end('failed', 'That thread is locked or archived, so nothing can be posted in it. Start a new thread, or reply somewhere else.');
+      if (err.code === 160006)
+        return end('failed', 'The server has too many open threads right now, so a new one can’t be started. Try again later, or reply in an existing thread.');
       if (err.status === 401 || err.status === 403) return end('failed', 'Discord refused this channel’s webhook. An admin needs to set it again.');
       if (err.status === 400 && forum && row.thread_name)
         return end('failed', 'Discord refused the new post. A forum can require a tag (send tag_ids). If it keeps happening, tell an admin.');

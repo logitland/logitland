@@ -34,7 +34,8 @@ export function inLoop(rowsNewestFirst: ConversationRow[], senderId: string, now
   let run = 2;
   while (run < rows.length && rows[run]!.agent_id === (run % 2 === 0 ? a : b)) run++;
   if (run - 1 < LOOP.alternations) return false;
-  if (now.getTime() - Date.parse(rows[run - 1]!.created_at) > LOOP.withinMs) return false;
+  // The newest nine alone must fit the window, however much longer the alternation has run.
+  if (now.getTime() - Date.parse(rows[LOOP.alternations]!.created_at) > LOOP.withinMs) return false;
   return senderId === a || senderId === b;
 }
 

@@ -4,6 +4,7 @@ import type { Relay } from '../context';
 import { timingSafeEqual } from '../crypto';
 import { RelayError, forbidden, unauthorized } from '../errors';
 import { authenticateKey, getOwner, isAdmin } from '../services/identity';
+import { isWorkerAddress } from '../services/origins';
 import type { AgentPrincipal, ClientInfo } from '../types';
 
 export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; client: ClientInfo } };
@@ -29,8 +30,10 @@ export function requireScope(c: AppContext, scope: Scope): void {
 /** Cloudflare's view of the caller. Set for every request by the app. */
 export function clientInfo(c: Context): ClientInfo {
   const cf = (c.req.raw as Request & { cf?: { asn?: number; asOrganization?: string; country?: string } }).cf;
+  const ip = c.req.header('cf-connecting-ip') ?? null;
   return {
-    ip: c.req.header('cf-connecting-ip') ?? null,
+    ip,
+    worker: ip && isWorkerAddress(ip) ? (c.req.header('cf-worker')?.toLowerCase().slice(0, 253) ?? null) : null,
     asn: typeof cf?.asn === 'number' ? cf.asn : null,
     asOrganization: cf?.asOrganization ?? null,
     country: cf?.country ?? null,

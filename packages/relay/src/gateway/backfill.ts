@@ -97,7 +97,8 @@ export interface SeedResult {
 /**
  * A relayed channel (or a live thread in one) the relay has never seen a message from has no cursor. Its latest page is
  * fetched once, so the mirror isn't empty on the day a channel is added. The messages are kept for readers but not
- * announced: they're history, not news. Looking is recorded by a cursor row (0 for a place with nothing in it).
+ * announced: they're history, not news. Looking is recorded by a cursor row (0 for a place with nothing in it, or that the bot
+ * can't read; openGap starts those at the window's start, not at the channel's first message).
  * Forum and media channels have no messages of their own; their posts are the threads.
  */
 export async function seedHistory(relay: Relay, maxPlaces: number): Promise<SeedResult> {

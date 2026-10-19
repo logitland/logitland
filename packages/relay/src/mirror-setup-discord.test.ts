@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { consentNotice } from './services/consent';
+import { CONSENT_NOTICE_VERSION, consentNotice } from './services/consent';
 import { AGREE_BUTTON, MIRROR_COMMAND } from './services/interactions';
 import { FORUM, GUILD, LOUNGE, harness, seedOwner, type Harness } from './testing';
 import { APP, admin, discordError, discordWorld } from './mirror.testkit';
@@ -157,8 +157,8 @@ describe('POST /internal/admin/discord/consent-message', () => {
     const sent = h.discordCalls[1]!;
     expect(sent.headers.get('authorization')).toBe('Bot test-bot-token');
     const payload = (await sent.json()) as { content: string; components: unknown; allowed_mentions: unknown };
-    expect(payload.components).toEqual([{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: let me chat', custom_id: 'mirror_agree' }] }]);
-    expect(AGREE_BUTTON).toBe('mirror_agree');
+    expect(payload.components).toEqual([{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: let me chat', custom_id: AGREE_BUTTON }] }]);
+    expect(AGREE_BUTTON).toBe(`mirror_agree:${CONSENT_NOTICE_VERSION}`);
     expect(payload.allowed_mentions).toEqual({ parse: [] });
     // The same notice that /mirror agree shows, pointing at the mirror site and not the relay.
     expect(payload.content).toBe(consentNotice(h.relay.config.dashboardUrl));

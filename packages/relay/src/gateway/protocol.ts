@@ -341,10 +341,7 @@ export class GatewayConnection {
     }
     // An established session that Discord says may be resumed is resumed on a fresh connection.
     if (!(resumable && this.phase === 'ready') && this.session.sessionId) this.loseSession();
-    if (this.readyAt !== null && this.deps.now() - this.readyAt > STABLE_MS) this.invalidStreak = 0;
-    this.readyAt = null;
-    const streak = this.invalidStreak++;
-    const more = streak === 0 ? 0 : Math.min(INVALID_BACKOFF_MAX_MS, 5_000 * 2 ** (streak - 1)) * (0.5 + this.deps.random() / 2);
+    const more = this.freshSessionDelay() ?? 0;
     this.timers.invalid = this.deps.setTimer(() => this.retryLater('Discord rejected the session', more), wait);
   }
 
@@ -354,8 +351,19 @@ export class GatewayConnection {
     const c = classifyClose(code);
     this.deps.log?.('gateway.closed', { code, action: c.action });
     if (c.action === 'stop') return this.stop(c.status, `Discord closed the connection with code ${code}`);
-    if (c.action === 'identify' && this.session.sessionId) this.loseSession();
-    this.retryLater(`Discord closed the connection with code ${code}${reason ? ` (${reason.slice(0, 80)})` : ''}`);
+    const why = `Discord closed the connection with code ${code}${reason ? ` (${reason.slice(0, 80)})` : ''}`;
+    if (c.action !== 'identify') return this.retryLater(why);
+    if (this.session.sessionId) this.loseSession();
+    // A session Discord READYs and then closes for good costs an IDENTIFY each time, so it backs off like a rejected one.
+    this.retryLater(why, this.freshSessionDelay());
+  }
+
+  /** The wait before a new session after a rejected or closed one: none at first, then 5 s doubling to the cap, reset once a connection held. */
+  private freshSessionDelay(): number | undefined {
+    if (this.readyAt !== null && this.deps.now() - this.readyAt > STABLE_MS) this.invalidStreak = 0;
+    this.readyAt = null;
+    const streak = this.invalidStreak++;
+    return streak === 0 ? undefined : Math.min(INVALID_BACKOFF_MAX_MS, 5_000 * 2 ** (streak - 1)) * (0.5 + this.deps.random() / 2);
   }
 
   private loseSession(): void {

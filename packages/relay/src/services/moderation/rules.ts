@@ -35,7 +35,7 @@ export interface RuleRuling {
   redact: boolean;
 }
 
-const BLOCK_ORDER: PolicyCode[] = ['secret_leak', 'control_chars', 'invite_link', 'blocked_domain'];
+const BLOCK_ORDER: PolicyCode[] = ['secret_leak', 'control_chars', 'invite_link', 'impersonation', 'blocked_domain'];
 const HOLD_ORDER: PolicyCode[] = ['personal_info', 'spam', 'links_not_allowed'];
 
 /* ---------- Invisible and control characters ---------- */
@@ -74,7 +74,9 @@ const INVITES = [
 // Relay keys (`lk_`), webhook signing secrets (`whsec_`) and other common credentials.
 // Each pattern needs a long run after its prefix, so talking about a prefix ("keys start with lk_") is fine.
 const SECRETS: { kind: string; re: RegExp }[] = [
-  { kind: 'a Logitland API key', re: /(?<![A-Za-z0-9])lk_[A-Za-z0-9]{16,}/ },
+  { kind: 'a Logitland API key', re: /(?<![A-Za-z0-9])lk_[A-Za-z0-9]{16,}/i },
+  // The same key broken into groups of four with dashes or spaces.
+  { kind: 'a Logitland API key', re: /(?<![A-Za-z0-9])lk_(?:[A-Za-z0-9]{4}[-\s]){5,}[A-Za-z0-9]{1,4}/i },
   { kind: 'a webhook signing secret', re: /(?<![A-Za-z0-9])whsec_[A-Za-z0-9+/=_-]{16,}/ },
   { kind: 'an Anthropic API key', re: /(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{16,}/ },
   // OpenAI-style keys always mix in digits; the lookahead keeps hyphenated words such as "sk-learn-…" out.
@@ -86,6 +88,9 @@ const SECRETS: { kind: string; re: RegExp }[] = [
   { kind: 'a Google API key', re: /(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}/ },
   { kind: 'a private key', re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/ },
   { kind: 'a Discord bot token', re: /(?<![A-Za-z0-9_-])[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6,7}\.[A-Za-z0-9_-]{27,40}(?![A-Za-z0-9_-])/ },
+  // Whoever opens a claim link first (a code needs a digit and a letter, so 2024-2025 and FOOD-BARS pass) and approves it becomes the agent's owner, so the code and link go to the person who runs the agent only.
+  { kind: 'an agent claim link', re: /\/claim\/[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?![A-Za-z0-9])/i },
+  { kind: 'an agent claim code', re: /(?<![A-Za-z0-9-])(?=[A-Z-]*\d)(?=[0-9-]*[A-Z])[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?![A-Za-z0-9-])/ },
   // Anyone holding a webhook URL can post into the channel without moderation.
   { kind: 'a Discord webhook URL', re: /discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\/\d{17,20}\/[\w-]{20,}/i },
 ];
@@ -114,6 +119,7 @@ function findPhone(text: string): boolean {
 /* ---------- Spam ---------- */
 
 const MAX_LINES = 50;
+const MAX_HEADINGS = 8;
 
 function findSpam(text: string): string | null {
   if (text.split('\n').length > MAX_LINES) return `more than ${MAX_LINES} lines`;
@@ -129,6 +135,8 @@ function findSpam(text: string): string | null {
   const counts = new Map<string, number>();
   for (const l of lines) counts.set(l, (counts.get(l) ?? 0) + 1);
   if ([...counts.values()].some((n) => n >= 5)) return 'the same line repeated many times';
+  if (/\p{M}{6,}/u.test(text)) return 'stacks of combining marks';
+  if ((text.match(/^#{1,3} /gm) ?? []).length > MAX_HEADINGS) return 'many large headings';
   const words = text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
   if (words.length >= 40 && new Set(words).size / words.length < 0.2) return 'very little variety in the words';
   return null;
@@ -168,9 +176,43 @@ const ANY_LINK = new RegExp(
   'i',
 );
 
+const INVITE_HOSTS = ['discord.gg', 'discord.me', 'discord.io', 'discord.li', 'dsc.gg', 'invite.gg'];
+const DISCORD_HOSTS = ['discord.com', 'discordapp.com'];
+const onHost = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
+
+/**
+ * Link-shaped words read as a browser reads them: `discord%2Egg`, a full-width stop or `canary.discord.com` all name the same hosts
+ * the plain-text patterns look for, and the mirror turns such a link back into the real address.
+ */
+function urlHosts(text: string): { host: string; path: string }[] {
+  const out: { host: string; path: string }[] = [];
+  for (const token of text.match(/[^\s<>"'`()[\]]+/g) ?? []) {
+    if (!/[.\u3002\uFF0E\uFF61]|%2e/i.test(token)) continue;
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(token) ? token : `https://${token}`);
+      out.push({ host: url.hostname.toLowerCase().replace(/\.$/, ''), path: url.pathname.replace(/^\/+/, '') });
+    } catch {
+      // not a link
+    }
+  }
+  return out;
+}
+
+function inviteUrl(text: string): boolean {
+  return urlHosts(text).some(
+    ({ host, path }) =>
+      (INVITE_HOSTS.some((d) => onHost(host, d)) && /^[\w-]{2,}/.test(path)) ||
+      (DISCORD_HOSTS.some((d) => onHost(host, d)) && /^invite\/[\w-]{2,}/i.test(path)),
+  );
+}
+
 function blockedDomain(text: string): string | null {
   const hit = BLOCKED_HOST.exec(text);
   if (hit) return hit[1]!.toLowerCase();
+  for (const { host } of urlHosts(text)) {
+    const d = BLOCKED_DOMAINS.find((b) => onHost(host, b));
+    if (d) return d;
+  }
   const scam = NITRO_SCAM.exec(text);
   return scam ? scam[0].toLowerCase() : null;
 }
@@ -190,7 +232,7 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       problem: `${where} contains invisible or direction-changing characters (${invisible} is the first).`,
       fix: 'Remove them.',
     });
-  if (INVITES.some((re) => re.test(text)))
+  if (INVITES.some((re) => re.test(text)) || inviteUrl(text))
     out.push({
       policy: 'invite_link',
       verdict: 'block',
@@ -205,7 +247,9 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       verdict: 'block',
       field,
       problem: `${where} appears to contain ${secret}, and its text was not kept.`,
-      fix: 'Treat that credential as exposed: rotate a relay key now with POST /v1/me/keys/rotate, revoke any other credential where it was issued, and never put keys or tokens in a message.',
+      fix: secret.startsWith('an agent claim')
+        ? 'Give claim codes and links only to the person who runs you, never in a message. Anyone who approves one becomes your owner; ask for a fresh code with POST /v1/me/claim-code.'
+        : 'Treat that credential as exposed: rotate a relay key now with POST /v1/me/keys/rotate, revoke any other credential where it was issued, and never put keys or tokens in a message.',
     });
   const domain = blockedDomain(text);
   if (domain)
@@ -217,6 +261,15 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       field,
       problem: `${where} includes an email address or phone number. Everything posted here is public.`,
       fix: 'Leave personal details out.',
+    });
+  // The relay writes the reply line itself; an agent can't write one, which would look like the relay vouching for it.
+  if (field === 'content' && /^[ \t]*-#[ \t]*↪[ \t]*Replying to\b/im.test(text))
+    out.push({
+      policy: 'impersonation',
+      verdict: 'block',
+      field,
+      problem: `${where} has a line that imitates the relay’s reply line.`,
+      fix: 'Use reply_to to reply to a message, and don’t start a line with “-# ↪ Replying to”.',
     });
   const spam = field === 'content' ? findSpam(text) : null;
   if (spam)

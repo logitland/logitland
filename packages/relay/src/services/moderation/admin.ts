@@ -172,7 +172,7 @@ export async function takedown(relay: Relay, adminId: string, messageId: string,
     )
     .bind(body.policy_code, `Removed by a moderator. ${reason}`, adminId, iso(relay.now()), messageId)
     .run();
-  await scrubMessage(relay, row.discord_message_id, 'moderator');
+  await scrubMessage(relay, row.discord_message_id, 'moderator', { channelId: row.channel_id });
   if (r.meta.changes === 1) {
     await logOne(relay, row.agent_id, row.id, 'enforcement', 'block', body.policy_code, reason, `admin:${adminId}`);
     await auditStmt(relay, {
@@ -405,7 +405,7 @@ async function undo(relay: Relay, adminId: string, appeal: AppealRow, response: 
       .all<{ id: string }>();
     for (const s of linked) await removeStrike(relay, s.id, by, 'Appeal overturned');
     const m = await getRow(relay, appeal.target_id);
-    if (m && m.content !== null && (m.status === 'blocked' || m.status === 'held')) {
+    if (m && (m.content !== null || m.poll !== null) && (m.status === 'blocked' || m.status === 'held')) {
       const q = await relay.db
         .prepare(
           "UPDATE relay_messages SET status = 'queued', verdict = 'pass', policy_code = NULL, status_reason = 'Approved on appeal', held_kind = NULL, next_review_at = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status IN ('blocked', 'held')",
@@ -418,11 +418,20 @@ async function undo(relay: Relay, adminId: string, appeal: AppealRow, response: 
   }
   // An appeal against a suspension that is overturned puts the agent back; a pause is simply lifted.
   if ((await getAgent(relay, appeal.target_id)).status === 'suspended') {
-    // The strike that tipped it into suspension goes too; otherwise the next strike would ban it at once.
-    const latest = await relay.db
-      .prepare('SELECT id FROM strikes WHERE agent_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1')
-      .bind(appeal.target_id, iso(relay.now()))
-      .first<{ id: string }>();
+    // The strike that tipped it into suspension goes too; otherwise the next strike would ban it at once. A suspension an admin
+    // made by hand (its audit entry carries no strike count) has no such strike, so nothing unrelated is removed.
+    const byLadder = await relay.db
+      .prepare(
+        "SELECT 1 AS x FROM audit_log WHERE target_type = 'agent' AND target_id = ? AND action = 'agent.suspended' AND diff LIKE '%active_strikes%' AND id = (SELECT id FROM audit_log WHERE target_type = 'agent' AND target_id = ? AND action = 'agent.suspended' ORDER BY created_at DESC, id DESC LIMIT 1)",
+      )
+      .bind(appeal.target_id, appeal.target_id)
+      .first();
+    const latest = byLadder
+      ? await relay.db
+          .prepare('SELECT id FROM strikes WHERE agent_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1')
+          .bind(appeal.target_id, iso(relay.now()))
+          .first<{ id: string }>()
+      : null;
     if (latest) await removeStrike(relay, latest.id, by, `Suspension overturned on appeal: ${response}`);
     await adminAct(relay, adminId, appeal.target_id, { action: 'reinstate', reason: response });
   }

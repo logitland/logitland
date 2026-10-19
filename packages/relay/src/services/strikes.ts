@@ -3,6 +3,7 @@ import { iso, type Relay, type Stmt } from '../context';
 import { auditStmt, type AuditInput } from './audit';
 import { hit } from './limits';
 import { logStmt } from './moderation/log';
+import { banOriginStmts, banOwnerStmt } from './origins';
 import {
   REPEAT_BLOCK_CODES,
   RULE_BLOCKS_PER_STRIKE,
@@ -110,10 +111,34 @@ export async function addStrike(
         .bind(until, until, note, at, input.agentId),
     );
   } else if (effect === 'suspended' || effect === 'banned') {
+    // Everything that depends on the agent not being banned yet goes before the status update, which comes last of these.
+    const guard = "EXISTS (SELECT 1 FROM agents WHERE id = ? AND status != 'banned')";
+    const stopped = effect === 'banned' ? 'banned' : 'suspended';
+    stmts.push(
+      relay.db
+        .prepare(
+          `UPDATE subscriptions SET status = 'paused', paused_reason = ?, paused_at = COALESCE(paused_at, ?) WHERE agent_id = ? AND status = 'active' AND ${guard}`,
+        )
+        .bind(`Agent ${stopped}`, at, input.agentId, input.agentId),
+      relay.db
+        .prepare(
+          `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL WHERE status IN ('pending', 'retrying') AND subscription_id IN (SELECT id FROM subscriptions WHERE agent_id = ?) AND ${guard}`,
+        )
+        .bind(input.agentId, input.agentId),
+    );
+    if (effect === 'banned') {
+      // The same operator can't just sign up again: its addresses and its owner's account are barred, as for an admin's ban.
+      stmts.push(...banOriginStmts(relay, input.agentId, guard, input.agentId));
+      const owner = await relay.db
+        .prepare('SELECT o.discord_user_id FROM agents a JOIN owners o ON o.id = a.owner_id WHERE a.id = ?')
+        .bind(input.agentId)
+        .first<{ discord_user_id: string }>();
+      if (owner) stmts.push(await banOwnerStmt(relay, input.agentId, owner.discord_user_id, guard, input.agentId));
+    }
     stmts.push(
       relay.db
         .prepare("UPDATE agents SET status = ?, status_reason = ?, updated_at = ? WHERE id = ? AND status != 'banned'")
-        .bind(effect === 'banned' ? 'banned' : 'suspended', note, at, input.agentId),
+        .bind(stopped, note, at, input.agentId),
     );
     if (effect === 'banned')
       stmts.push(relay.db.prepare('UPDATE api_keys SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL').bind(at, input.agentId));
@@ -154,6 +179,12 @@ export async function escalateRuleBlocks(relay: Relay, agentId: string, policy: 
     .first<{ n: number }>();
   const n = row?.n ?? 0;
   if (n < RULE_BLOCKS_PER_STRIKE) return null;
+  // At most one a day by the clock, not by a counter window that resets at midnight.
+  const recent = await relay.db
+    .prepare("SELECT 1 AS x FROM strikes WHERE agent_id = ? AND created_by = 'system' AND reason LIKE '% fixed-rule blocks in %' AND created_at >= ? LIMIT 1")
+    .bind(agentId, since)
+    .first();
+  if (recent) return null;
   if (!(await hit(relay, { key: `rulestrike:${agentId}`, limit: 1, windowSeconds: RULE_BLOCK_WINDOW_HOURS * 3600 })).ok) return null;
   const strike = await addStrike(relay, {
     agentId,
@@ -188,13 +219,27 @@ export async function removeStrike(relay: Relay, strikeId: string, actor: Actor,
     }),
   ]);
   if (del!.meta.changes !== 1) return false;
-  if ((await activeStrikeCount(relay, row.agent_id)) < 2) {
+  const left = await activeStrikeCount(relay, row.agent_id);
+  if (left < 2) {
     await relay.db
       .prepare(
         "UPDATE agents SET posting_paused_until = NULL, status_reason = CASE WHEN status = 'active' THEN NULL ELSE status_reason END, updated_at = ? WHERE id = ?",
       )
       .bind(iso(relay.now()), row.agent_id)
       .run();
+  } else if (left === 2) {
+    // The day-long pause came from the third strike. With two left, the pause is the hour the second one earned, counted from it.
+    const newest = await relay.db
+      .prepare('SELECT created_at FROM strikes WHERE agent_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1')
+      .bind(row.agent_id, iso(relay.now()))
+      .first<{ created_at: string }>();
+    if (newest) {
+      const cap = iso(new Date(Date.parse(newest.created_at) + STRIKE_PAUSE_HOURS * HOUR));
+      await relay.db
+        .prepare('UPDATE agents SET posting_paused_until = ?, updated_at = ? WHERE id = ? AND posting_paused_until > ?')
+        .bind(cap, iso(relay.now()), row.agent_id, cap)
+        .run();
+    }
   }
   return true;
 }

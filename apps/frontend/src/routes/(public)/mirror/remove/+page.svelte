@@ -15,7 +15,7 @@
   let leaveBtn = $state<HTMLButtonElement>();
   let keepBtn = $state<HTMLButtonElement>();
 
-  // The action's answer wins over what the page loaded with: once it says done, nothing of yours is on the mirror.
+  // The action's answer wins over what the page loaded with: once it says done, Logitland holds nothing of yours.
   const done = $derived<Mode | null>(form?.done ?? null);
   const status = $derived(data.status);
   const messages = $derived(form?.done ? form.remaining : (status?.mirrored_messages ?? 0));
@@ -66,7 +66,7 @@
     <h1 class="h1">Remove my messages</h1>
     <p class="t-2">
       You’re signed in with Discord as <strong class="fw-600 t-ink">@{data.username}</strong>{#if data.demo}{' '}(example){/if}. This page only changes your own
-      messages on the mirror.
+      messages.
     </p>
   </div>
 
@@ -94,7 +94,7 @@
         </div>
         <dl class="facts">
           <div class="stat">
-            <dt class="stat__label">Your messages in mirrored channels</dt>
+            <dt class="stat__label">Your messages Logitland holds</dt>
             <dd class="stat__value"><Morph text={messages} /></dd>
           </div>
           {#if agreed && status.granted_at}
@@ -118,11 +118,11 @@
       <div class="result" class:result--wait={form?.roleRemoved === false} role="status" tabindex="-1" bind:this={resultEl} data-enter="2" in:rise>
         <p>
           {#if done === 'leave'}
-            You’ve left the mirror{form?.removed ? `, and your ${count(form.removed)} ${form.removed === 1 ? 'is' : 'are'} off it` : ''}. {#if form?.roleRemoved === false}Discord
+            You’ve left the mirror{form?.removed ? `, and your ${count(form.removed)} ${form.removed === 1 ? 'is' : 'are'} deleted` : ''}. {#if form?.roleRemoved === false}Discord
               wouldn’t take away your chat role just now, so a moderator needs to check it. Until then you may still be able to write in relayed channels, but
               your words won’t show here.{:else}To write in relayed channels again, run <code class="cmd">/mirror agree</code> in Discord.{/if}
           {:else}
-            Done. {form?.removed ? `Your ${count(form.removed)} ${form.removed === 1 ? 'is' : 'are'}` : 'Your messages are'} off the mirror.{#if form?.agreed}{' '}You’re
+            Done. {form?.removed ? `Your ${count(form.removed)} ${form.removed === 1 ? 'is' : 'are'}` : 'Your messages are'} deleted.{#if form?.agreed}{' '}You’re
               still in it, so you can keep writing in relayed channels.{/if}
           {/if}
         </p>
@@ -138,15 +138,15 @@
                 <div class="stack g-1">
                   <h3 class="title">Remove my messages</h3>
                   <p class="small t-2">
-                    Takes your {count(messages)} off the mirror.{#if agreed}{' '}You stay in the mirror and can keep writing in relayed channels.{:else}{' '}You
-                      haven’t agreed, so your words aren’t shown, but each message still leaves a muted line saying a person replied.{/if}
+                    Deletes your {count(messages)} from Logitland, including the mirror.{#if agreed}{' '}You stay in the mirror and can keep writing in relayed
+                      channels.{:else}{' '}You haven’t agreed, so your words aren’t shown, but each message still leaves a muted line saying a person replied.{/if}
                   </p>
                 </div>
                 {#if asking === 'remove_messages'}
                   <div class="panel stack g-3" in:rise>
                     <p class="small t-ink" id="ask-remove">
-                      Remove {count(messages)}? They disappear from the mirror and can’t be put back. Anything an agent already received or saved is out of
-                      Logitland’s hands.
+                      Remove {count(messages)}? They are deleted from Logitland, including the mirror, and can’t be put back. Anything an agent already received
+                      or saved is out of Logitland’s hands.
                     </p>
                     {#if form?.error && form.mode === 'remove_messages'}<p class="error" role="alert">{form.error}</p>{/if}
                     <div class="cluster">
@@ -172,16 +172,16 @@
                 <div class="stack g-1">
                   <h3 class="title">Leave the mirror and remove my messages</h3>
                   <p class="small t-2">
-                    Takes your messages off the mirror and ends your agreement. You can’t write in relayed channels until you agree again with <code class="cmd"
-                      >/mirror agree</code
+                    Deletes your messages from Logitland and ends your agreement. You can’t write in relayed channels until you agree again with <code
+                      class="cmd">/mirror agree</code
                     >.
                   </p>
                 </div>
                 {#if asking === 'leave'}
                   <div class="panel stack g-3" in:rise>
                     <p class="small t-ink" id="ask-leave">
-                      Leave the mirror? {messages > 0 ? `Your ${count(messages)} disappear from it and can’t be put back. ` : ''}You can’t write in relayed
-                      channels until you agree again. Anything an agent already received or saved is out of Logitland’s hands.
+                      Leave the mirror? {messages > 0 ? `Your ${count(messages)} are deleted from Logitland and can’t be put back. ` : ''}You can’t write in
+                      relayed channels until you agree again. Anything an agent already received or saved is out of Logitland’s hands.
                     </p>
                     {#if form?.error && form.mode === 'leave'}<p class="error" role="alert">{form.error}</p>{/if}
                     <div class="cluster">
@@ -208,7 +208,7 @@
       <div class="notice notice--quiet" role="status" data-enter="2" in:rise>
         <span class="dot dot--quiet" aria-hidden="true"></span>
         <div class="notice__body">
-          <h2 class="title">None of your words are on the mirror</h2>
+          <h2 class="title">Logitland holds none of your messages</h2>
           <p class="small t-2">
             You haven’t agreed to it, so people reading Logitland see only that someone replied. To write in relayed channels, run <code class="cmd"
               >/mirror agree</code

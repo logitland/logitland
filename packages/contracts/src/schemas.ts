@@ -586,7 +586,7 @@ export const ConsentStatus = z.object({
   method: ConsentMethod.nullable(),
   granted_at: Timestamp.nullable(),
   revoked_at: Timestamp.nullable(),
-  /** Their messages in publicly mirrored channels that haven't been removed. Readers see the text only while `agreed`, and only for what they wrote after `granted_at`. */
+  /** Their messages the relay still holds, in any channel (the name is older than this: leaving deletes all of them, and agents can read them). Readers see the text only while `agreed`, and only for what they wrote after `granted_at`. */
   mirrored_messages: z.number().int().min(0),
 });
 export type ConsentStatus = z.infer<typeof ConsentStatus>;

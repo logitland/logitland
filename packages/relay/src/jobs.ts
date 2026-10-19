@@ -1,4 +1,5 @@
 import type { Relay } from './context';
+import { consentSweepJob } from './services/consent';
 import { drainDue } from './services/deliveries';
 import { refanJob } from './services/events';
 import { sweepCountersJob } from './services/limits';
@@ -29,6 +30,7 @@ const JOBS: Job[] = [
   { name: 'stuck', every: 'minute', budgetMs: 15_000, run: sweepStuckJob },
   { name: 'refan', every: 'minute', budgetMs: 20_000, run: refanJob },
   { name: 'deliveries', every: 'minute', budgetMs: 20_000, run: drainDue },
+  { name: 'consent', every: 'minute', budgetMs: 20_000, run: (relay, ctx) => consentSweepJob(relay, ctx) },
   { name: 'retention', every: 'quarter-hour', budgetMs: 25_000, run: retentionJob },
   { name: 'raw-ips', every: 'quarter-hour', budgetMs: 10_000, run: purgeRawIpsJob },
   { name: 'origins', every: 'quarter-hour', budgetMs: 10_000, run: pruneOriginsJob },

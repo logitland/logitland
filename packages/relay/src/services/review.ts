@@ -71,19 +71,31 @@ async function recheck(relay: Relay, id: string, dueAt: string): Promise<boolean
 export async function reviewHeldJob(relay: Relay, budgetMs: number = RECHECK_BUDGET_MS): Promise<number> {
   const now = relay.now();
   const started = Date.now();
-  const { results: due } = await relay.db
-    .prepare(
-      "SELECT id, next_review_at FROM relay_messages WHERE status = 'held' AND held_kind = 'outage' AND next_review_at <= ? ORDER BY next_review_at LIMIT ?",
-    )
-    .bind(iso(now), BATCH)
-    .all<{ id: string; next_review_at: string }>();
   let handled = 0;
-  for (const m of due) {
-    if (Date.now() - started >= budgetMs) {
-      relay.log.warn('review.budget_spent', { rechecked: handled, left: due.length - handled });
-      break;
+  let spent = false;
+  // Batch after batch until nothing is due or the time is up: a backlog after an outage drains at the classifier's pace, not 20 a minute.
+  // A re-check moves its row's due time on (or ends it), so a row never comes back in the same run.
+  while (!spent) {
+    const { results: due } = await relay.db
+      .prepare(
+        "SELECT id, next_review_at FROM relay_messages WHERE status = 'held' AND held_kind = 'outage' AND next_review_at <= ? ORDER BY next_review_at LIMIT ?",
+      )
+      .bind(iso(now), BATCH)
+      .all<{ id: string; next_review_at: string }>();
+    if (!due.length) break;
+    let claimed = 0;
+    for (const m of due) {
+      if (Date.now() - started >= budgetMs) {
+        relay.log.warn('review.budget_spent', { rechecked: handled, left: due.length - claimed });
+        spent = true;
+        break;
+      }
+      if (await recheck(relay, m.id, m.next_review_at)) {
+        handled++;
+        claimed++;
+      }
     }
-    if (await recheck(relay, m.id, m.next_review_at)) handled++;
+    if (!claimed) break;
   }
 
   const cutoff = iso(new Date(now.getTime() - LIMITS.heldReviewHours * 60 * MINUTE));
@@ -99,6 +111,6 @@ export async function reviewHeldJob(relay: Relay, budgetMs: number = RECHECK_BUD
         logStmt(relay, m.agent_id, m.id, { layer: 'review', verdict: 'block', policy: 'manual', reason: NOT_REVIEWED, source: 'expiry', latencyMs: null }),
       ),
     );
-  if (due.length || expired.length) relay.log.info('review.done', { rechecked: handled, expired: expired.length });
+  if (handled || expired.length) relay.log.info('review.done', { rechecked: handled, expired: expired.length });
   return handled + expired.length;
 }

@@ -9,7 +9,7 @@ import { readSession } from '#lib/server/session.js';
 let reported = false;
 
 export const handle: Handle = async ({ event, resolve }) => {
-  const problems = configProblems(env);
+  const problems = configProblems(env, event.url.hostname);
   if (problems.length) {
     if (!reported) {
       reported = true;
@@ -17,7 +17,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
     return unavailable();
   }
-  const session = env.SESSION_SECRET ? await readSession(event.cookies, env.SESSION_SECRET) : null;
+  const session = env.SESSION_SECRET ? await readSession(event.cookies, env.SESSION_SECRET, event.url.protocol === 'https:') : null;
   if (session) {
     event.locals.viewer = {
       owner_id: session.owner_id,

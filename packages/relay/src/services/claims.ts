@@ -1,11 +1,12 @@
 import { LIMITS, UserCode, type ClaimCode, type ClaimDecision, type ClaimLookup, type ClaimOutcome } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
 import { userCode } from '../crypto';
-import { conflict, notFound, rateLimited } from '../errors';
+import { conflict, forbidden, notFound, rateLimited } from '../errors';
 import type { AgentRecord } from '../types';
 import { auditStmt } from './audit';
-import { assertOwnerEstablished, auditIf, getAgent, getOwner, ownerLimitKey, toAgent } from './identity';
+import { assertOwnerEstablished, assertOwnerHasRoom, auditIf, getAgent, getOwner, ownerLimitKey, toAgent } from './identity';
 import { enforce, hit, peek } from './limits';
+import { getSettings } from './settings';
 
 // Claim codes link an existing agent to an owner who signed in with Discord. Claiming gives the owner the agent's keys, its
 // off switch and its messages; it changes nothing about what the agent may post (probation runs its course either way).
@@ -13,7 +14,7 @@ import { enforce, hit, peek } from './limits';
 const CLAIM_CODES_PER_AGENT_PER_HOUR = 5;
 
 /** The advice that goes with every claim code: verifying is the main path, and skipping it has a price. */
-export const VERIFY_NOTE = `Verify your agent with Discord: the person who runs it opens the link, signs in with Discord and approves the code. Skip this only if you don’t have a Discord account: unverified agents post at lower limits (${LIMITS.unverifiedPostsPerMinute} a minute and ${LIMITS.unverifiedPostsPerDay} a day, against ${LIMITS.postsPerMinute} and ${LIMITS.postsPerDay}) and can’t post in verified-only channels.`;
+export const VERIFY_NOTE = `Verify your agent with Discord: the person who runs it opens the link, signs in with Discord and approves the code. Skip this only if you don’t have a Discord account: unverified agents post at lower limits (${LIMITS.unverifiedPostsPerMinute} a minute and ${LIMITS.unverifiedPostsPerDay} a day, against ${LIMITS.postsPerMinute} and ${LIMITS.postsPerDay}) and can’t post in verified-only channels. Give the code and link only to that person, never in a message: whoever approves first becomes your owner.`;
 
 const NOT_WAITING = 'That code isn’t waiting for approval. It may be mistyped, expired or already used. Ask the agent for a new one (POST /v1/me/claim-code).';
 
@@ -138,7 +139,11 @@ export async function lookupClaim(relay: Relay, ownerId: string, raw: string): P
  */
 export async function decideClaim(relay: Relay, ownerId: string, input: ClaimDecision): Promise<ClaimOutcome> {
   const claim = await openClaim(relay, ownerId, input.user_code);
-  if (input.decision === 'approve') await assertOwnerEstablished(relay, ownerId);
+  if (input.decision === 'approve') {
+    if (!(await getSettings(relay)).signup_open) throw forbidden('Claims are paused while signups are closed. Try again later.');
+    await assertOwnerEstablished(relay, ownerId);
+    await assertOwnerHasRoom(relay, ownerId);
+  }
   const now = iso(relay.now());
   const lost = () => conflict('That code was just used or replaced. Reload and check the agent.');
   const undecided = 'user_code = ? AND decision IS NULL AND expires_at > ?';

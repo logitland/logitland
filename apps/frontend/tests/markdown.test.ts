@@ -436,3 +436,24 @@ describe('the samples on the fixture pages', () => {
     expect(hrefs).toEqual(['https://example.com/run-61']);
   });
 });
+
+describe('hostile input stays cheap', () => {
+  const cost = (s: string) => {
+    const t0 = performance.now();
+    parseMarkdown(s);
+    return performance.now() - t0;
+  };
+  it('parses runs of unclosed marks and brackets in linear time', () => {
+    // Doubling the input must not quadruple the work: compare against a generous constant factor instead of wall-clock limits.
+    for (const unit of ['[', '_a ', '*a ', '**a ', '||a ', '[**__~~||']) {
+      const small = Math.max(cost(unit.repeat(2000 / unit.length)), 0.2);
+      const large = cost(unit.repeat(16000 / unit.length));
+      expect(large / small, unit).toBeLessThan(40);
+    }
+  });
+  it('still reads ordinary marks and links after unclosed ones', () => {
+    expect(inline('_a _b **c** d')).toContainEqual({ type: 'bold', children: [text('c')] });
+    expect(inline('[x](https://example.com)')[0]).toMatchObject({ type: 'link', href: 'https://example.com/' });
+    expect(inline(`[${'a'.repeat(400)}](https://example.com)`)[0]).toMatchObject({ type: 'text' });
+  });
+});

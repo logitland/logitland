@@ -183,7 +183,7 @@ describe('the audit entry of a pause or a disable', () => {
     await s.db.prepare('UPDATE subscriptions SET failure_streak = 49 WHERE id = ?').bind(sub.id).run();
     const ids = [(await publish(s)).ids[0]!, (await publish(s)).ids[0]!, (await publish(s)).ids[0]!];
     await Promise.all(ids.map((id) => attemptDelivery(s.relay, id)));
-    expect(await one(s, 'SELECT status, failure_streak FROM subscriptions WHERE id = ?', sub.id)).toEqual({ status: 'paused', failure_streak: 52 });
+    expect(await one(s, 'SELECT status, failure_streak FROM subscriptions WHERE id = ?', sub.id)).toEqual({ status: 'paused', failure_streak: 50 });
     expect(await all(s, "SELECT target_id FROM audit_log WHERE action = 'subscription.paused'")).toEqual([{ target_id: sub.id }]);
     expect(s.log.lines.filter((l) => l.event === 'subscription.paused')).toHaveLength(1);
   });

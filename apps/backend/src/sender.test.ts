@@ -220,6 +220,32 @@ describe('a message the queue cannot send', () => {
   });
 });
 
+describe('the queue’s memory', () => {
+  it('counts crashes across evictions, so a poison message still leaves the line', async () => {
+    const { h, clock, mem, queue, queued } = await setup();
+    const [bad, good] = [await queued('poison'), await queued('innocent bystander')];
+    const broken = () => {
+      throw new Error('database unreachable');
+    };
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await queue(mem.storage, broken).enqueue(bad);
+    await queue(mem.storage, broken).enqueue(good);
+    for (let i = 0; i < 4; i++) {
+      clock.t += 120_000;
+      await queue(mem.storage, broken).alarm();
+    }
+    expect((mem.data.get('state') as { queue: string[] }).queue).toEqual([good]);
+    error.mockRestore();
+    void h;
+  });
+
+  it('refuses to hold more than a thousand messages, leaving the rest queued in D1', async () => {
+    const { mem, queue } = await setup();
+    mem.data.set('state', { queue: Array.from({ length: 1000 }, (_, i) => `msg_${i}`), notBefore: 0 });
+    await expect(queue().enqueue('msg_overflow')).rejects.toThrow('full');
+  });
+});
+
 const migrations = fileURLToPath(new URL('../../../packages/relay/migrations', import.meta.url).href);
 
 describe('the Durable Object', () => {

@@ -125,7 +125,8 @@ export const actions = {
     }
     const r = await attempt(() => client.adminAgentStatus(viewer.owner_id, agentId, body));
     if (!r.ok) return refused(r.refusal, { agentId });
-    return { agentId, change, status: r.value.agent.status, tier: r.value.agent.tier };
+    // Only a reinstated agent that nobody owns gets a key: its old ones were revoked and no owner can issue another.
+    return { agentId, change, status: r.value.agent.status, tier: r.value.agent.tier, ...(r.value.key ? { key: r.value.key.secret } : {}) };
   },
 
   // Reveal where an agent connected from. The relay audits it with the reason; the result is shown once and never stored here.

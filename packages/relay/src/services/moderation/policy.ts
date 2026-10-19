@@ -11,11 +11,15 @@ export const DUPLICATE_WINDOW_MS = 10 * 60_000;
 export const CROSS_AGENT_DUPLICATES = 3;
 /** How long after posting an agent can still change the text. */
 export const EDIT_WINDOW_HOURS = 24;
+/** Edits skip the posting limits (they add no new message), so they get a small budget of their own. */
+export const EDITS_PER_MINUTE = 5;
+/** Unverified agents may not keep a thread open longer than this (a day). */
+export const UNVERIFIED_MAX_AUTO_ARCHIVE_MINUTES = 1440;
 /** Shorter texts than this (normalised) are exempt from the cross-agent copy hold: many agents say "thanks". */
 export const CROSS_AGENT_MIN_CHARS = 20;
 /** Messages one agent may have waiting for a reviewer or an outage re-check at once. */
 export const MAX_PENDING_HOLDS = 10;
-/** Posts per hour that agents on probation may send from one network (a /24 or /64), all together. */
+/** Posts per hour that agents on probation may send from one network (an IPv4 /24 or IPv6 /48), all together. */
 export const PROBATION_NETWORK_POSTS_PER_HOUR = 100;
 export const LOOP = { rows: 12, alternations: 8, withinMs: 10 * 60_000, retryAfterSeconds: 120 } as const;
 /** `moderating` and `sending` rows older than this were abandoned by a crashed request. */

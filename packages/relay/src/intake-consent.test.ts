@@ -139,7 +139,7 @@ describe('a message from someone who had not agreed', () => {
     let reads = 0;
     const prepare = h.db.prepare.bind(h.db);
     h.db.prepare = (sql: string) => {
-      if (/FROM consents/.test(sql)) reads++;
+      if (/^SELECT discord_user_id, granted_at FROM consents/.test(sql)) reads++;
       return prepare(sql);
     };
     await push(h, human(1), stranger(2), human(3), stranger(4), fromWebhook(5, 'Some Feed', 'news'));

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { relayApp } from './app';
 import type { RelayBindings } from './config';
 import { CONSENT_NOTICE_VERSION, consentNotice } from './services/consent';
+import { AGREE_BUTTON, AGREE_COMMAND_BUTTON } from './services/interactions';
 import { scrubPerson } from './services/scrub';
 import { GUILD, LOUNGE, harness, seedChannel, type Harness } from './testing';
 
@@ -48,9 +49,9 @@ const command = (sub: string, o: { guild?: string | null; user?: string; roles?:
   ...(o.guild === null ? { user: { id: o.user ?? PERSON } } : { guild_id: o.guild ?? GUILD, member: member(o.user, o.roles) }),
   data: { id: '810000000000000001', name: 'mirror', type: 1, options: [{ name: sub, type: 1 }] },
 });
-/** The welcome message's button is `mirror_agree`; the one in the reply to /mirror agree is `mirror_agree_cmd`. */
-const CMD_BUTTON = 'mirror_agree_cmd';
-const button = (customId = 'mirror_agree') => ({ ...base, type: 3, guild_id: GUILD, member: member(), data: { custom_id: customId, component_type: 2 } });
+/** The welcome message's button is `mirror_agree:<notice version>`; the one in the reply to /mirror agree is `mirror_agree_cmd:<notice version>`. */
+const CMD_BUTTON = AGREE_COMMAND_BUTTON;
+const button = (customId: string = AGREE_BUTTON) => ({ ...base, type: 3, guild_id: GUILD, member: member(), data: { custom_id: customId, component_type: 2 } });
 
 const jsonOf = async (res: Response) =>
   (await res.json()) as {
@@ -240,6 +241,19 @@ describe('/mirror agree', () => {
     expect(await lastFollowUp(h)).toContain('You agreed');
   });
 
+  it('does not record an agreement from a button posted under an older notice: it shows the current notice and a fresh button instead', async () => {
+    const { h, send } = await setup();
+    for (const id of ['mirror_agree', 'mirror_agree_cmd', 'mirror_agree:2020-01-01', 'mirror_agree_cmd:2020-01-01']) {
+      const out = await jsonOf(await send({ ...button(id), id: '800000000000000009' }));
+      expect(out.type).toBe(4);
+      expect(out.data!.content).toBe(consentNotice(h.relay.config.dashboardUrl));
+      expect(out.data!.flags).toBe(64);
+      expect(out.data!.components).toEqual([{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: let me chat', custom_id: CMD_BUTTON }] }]);
+    }
+    expect(await personRow(h)).toBeNull();
+    expect(await historyRows(h)).toEqual([]);
+  });
+
   it('answers before the role call, so a slow Discord can’t miss the three-second deadline', async () => {
     const { h, sign } = await setup();
     let release!: () => void;
@@ -295,6 +309,59 @@ describe('/mirror agree', () => {
     expect(await lastFollowUp(h)).toContain('couldn’t give you the chat role');
     expect(await personRow(h)).toMatchObject({ revoked_at: null });
     expect(h.log.lines.some((l) => l.event === 'consent.role_failed')).toBe(true);
+  });
+
+  it('waits out a short Discord rate limit on the role once, so a busy moment does not leave the person without it', async () => {
+    const { h, send } = await setup();
+    let puts = 0;
+    h.setDiscord(async (req) => {
+      if (req.method === 'PUT' && ++puts === 1) return Response.json({ retry_after: 0.01, global: false }, { status: 429 });
+      return Response.json({});
+    });
+    await send(button(CMD_BUTTON));
+    expect(puts).toBe(2);
+    expect(await lastFollowUp(h)).toContain('You have the chat role');
+  });
+
+  it('gives up on a long rate limit instead of holding the request, and says the role was not given', async () => {
+    const { h, send } = await setup();
+    let puts = 0;
+    h.setDiscord(async (req) => {
+      if (req.method === 'PUT') {
+        puts++;
+        return Response.json({ retry_after: 60, global: false }, { status: 429 });
+      }
+      return Response.json({});
+    });
+    await send(button(CMD_BUTTON));
+    expect(puts).toBe(1);
+    expect(await lastFollowUp(h)).toContain('couldn’t give you the chat role');
+  });
+
+  it('stops one person from agreeing over and over: the sixth try in ten minutes is refused, and writes nothing', async () => {
+    const { h, send } = await setup();
+    for (let n = 1; n <= 6; n++) await send({ ...button(CMD_BUTTON), id: `80000000000000010${n}` });
+    const rolePuts = discordPaths(h).filter((p) => p.startsWith('PUT')).length;
+    const out = await jsonOf(await send({ ...button(CMD_BUTTON), id: '800000000000000107' }));
+    expect(out.type).toBe(4);
+    expect(out.data!.content).toContain('Wait about');
+    expect(discordPaths(h).filter((p) => p.startsWith('PUT'))).toHaveLength(rolePuts);
+    // Another person is not held up by it, and the window passes.
+    expect((await jsonOf(await send({ ...button(CMD_BUTTON), id: '800000000000000108', member: member('700000000000000002') }))).type).toBe(5);
+    h.advance(11 * 60_000);
+    expect((await jsonOf(await send({ ...button(CMD_BUTTON), id: '800000000000000109' }))).type).toBe(5);
+  });
+
+  it('still ends the agreement when someone leaves too often, and leaves the clean-up for a later try', async () => {
+    const { h, send } = await setup();
+    await send(button(CMD_BUTTON));
+    for (let n = 1; n <= 12; n++) await send({ ...command('leave'), id: `80000000000000020${n}` });
+    vi.mocked(scrubPerson).mockClear();
+    const out = await jsonOf(await send({ ...command('leave'), id: '800000000000000299' }));
+    expect(out.type).toBe(4);
+    expect(out.data!.content).toContain('Your agreement has ended');
+    expect(vi.mocked(scrubPerson)).not.toHaveBeenCalled();
+    expect((await personRow(h))!.revoked_at).not.toBeNull();
   });
 
   it('ends consistent when an agree and a leave overlap: the role follows the agreement, whichever finishes last', async () => {
@@ -451,11 +518,11 @@ describe('/mirror status', () => {
     expect(out.data!.content).toContain('/mirror agree');
   });
 
-  it('shows when they agreed and how many of their messages are mirrored', async () => {
+  it('shows when they agreed and how many of their messages Logitland holds, in any channel', async () => {
     const { h, send } = await setup();
     await seedChannel(h.relay, { id: LOUNGE, publicMirror: true });
     await seedChannel(h.relay, { id: '110000000000000002', name: 'bench', publicMirror: false });
-    // Mirrored only counts channels that are also relayed: this one is switched on for the mirror but closed to agents.
+    // Everything held counts, whether or not the channel is mirrored or open to agents: leaving deletes all of it.
     await seedChannel(h.relay, { id: '110000000000000003', name: 'dark', publicMirror: true, access: 'off' });
     await send(button(CMD_BUTTON));
     await someone(h, '310000000000000001');
@@ -466,7 +533,7 @@ describe('/mirror status', () => {
     await someone(h, '310000000000000005', { person: '700000000000000002' });
     const out = await jsonOf(await send(command('status')));
     expect(out.data!.content).toContain('agreed to the public mirror on 2026-10-19 with the /mirror command');
-    expect(out.data!.content).toContain('2 of your messages');
+    expect(out.data!.content).toContain('Logitland holds 4 of your messages');
   });
 
   it('shows nothing mirrored after leaving', async () => {

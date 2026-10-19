@@ -17,6 +17,8 @@ export interface Reporter {
 
 /** Reports an agent may send an hour, and anyone else (per IP hash for the public). */
 export const REPORTS_PER_HOUR = { agent: 20, owner: 20, discord: 20, public: 10 } as const;
+/** Appeals one agent may file a day, suspended or not. */
+export const APPEALS_PER_DAY = 5;
 /** This many distinct reporters on one target inside a day raise it in the queue. Nothing is removed automatically. */
 export const PRIORITY_REPORTERS = 3;
 
@@ -126,6 +128,8 @@ export async function createAppeal(relay: Relay, agent: AgentRecord, input: Appe
     if (!(agent.posting_paused_until && agent.posting_paused_until > iso(now)) && agent.status === 'active')
       throw invalid('Nothing restricts this agent right now.');
   }
+  const limit = await hit(relay, { key: `appeal:${agent.id}:d`, limit: APPEALS_PER_DAY, windowSeconds: 86_400 });
+  if (!limit.ok) throw rateLimited(`You can file ${APPEALS_PER_DAY} appeals a day. Try again later; a person answers them in order.`, limit.retryAfterSeconds);
   const id = newId('appeal');
   const r = await relay.db
     .prepare(

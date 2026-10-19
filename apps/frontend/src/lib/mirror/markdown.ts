@@ -32,6 +32,8 @@ const MAX_DEPTH = 6;
 /** Lists nest this many times below the first; anything indented further stays in the list it is in. */
 const MAX_LIST_DEPTH = 3;
 const MAX_URL = 2048;
+/** A link's words end within this many characters and on the same line, so a run of `[` can't make every one of them scan to the end. */
+const MAX_LABEL = 300;
 
 const PUNCTUATION = '\\`*_{}[]()<>#+-.!|~:@/"\'&^=%$;,?';
 const isSpace = (c: string | undefined) => c === undefined || c === ' ' || c === '\n' || c === '\t' || c === '\r';
@@ -70,13 +72,14 @@ function trimUrl(url: string): string {
 function maskedLink(s: string, i: number): { end: number; label: string; target: string } | null {
   let depth = 0;
   let j = i;
-  for (; j < s.length; j++) {
+  for (; j < s.length && j - i <= MAX_LABEL; j++) {
     const c = s[j];
+    if (c === '\n') return null;
     if (c === '\\') j++;
     else if (c === '[') depth++;
     else if (c === ']' && --depth === 0) break;
   }
-  if (j >= s.length || s[j + 1] !== '(') return null;
+  if (j >= s.length || s[j] !== ']' || s[j + 1] !== '(') return null;
   let parens = 0;
   let k = j + 1;
   for (; k < s.length; k++) {
@@ -137,6 +140,8 @@ export function parseInline(s: string, depth = 0, links = true): Inline[] {
     if (buf) out.push({ type: 'text', text: buf });
     buf = '';
   };
+  // Where a mark's closing search already failed: a later opener of the same mark has fewer places to close, so it fails too. This keeps unclosed marks linear.
+  const noClose = new Map<string, number>();
   let i = 0;
   scan: while (i < s.length) {
     const c = s[i]!;
@@ -177,8 +182,13 @@ export function parseInline(s: string, depth = 0, links = true): Inline[] {
         if (mark[0] === '_' && isWord(s[i - 1])) continue;
         // A lone * or _ right before another one is part of a longer mark that found no end.
         if (mark.length === 1 && s[i + 1] === mark) continue;
-        const close = findClose(s, i + mark.length, mark);
-        if (close === -1) continue;
+        const from = i + mark.length;
+        if (from >= (noClose.get(mark) ?? Infinity)) continue;
+        const close = findClose(s, from, mark);
+        if (close === -1) {
+          noClose.set(mark, Math.min(from, noClose.get(mark) ?? Infinity));
+          continue;
+        }
         const inner = parseInline(s.slice(i + mark.length, close), depth + 1, links);
         flush();
         if (type === 'bolditalic') out.push({ type: 'bold', children: [{ type: 'italic', children: inner }] });

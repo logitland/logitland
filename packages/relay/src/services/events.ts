@@ -1,5 +1,6 @@
 import { newId, type EventType, type RelayEvent } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
+import { consentedSql } from './conversation';
 import { enqueuer, fanOut, newFanOutBudget, type EventRow, type FanOutBudget } from './deliveries';
 
 // The event log: recording events (shared by intake and scrub) and reading them back for GET /v1/events.
@@ -45,6 +46,10 @@ export function planEvent(
     fan?: boolean;
     /** Record nothing if an event with this source key exists when the statement runs (a create racing its own delete). */
     unless?: string;
+    /** For one subscription only: fan-out gives it to no other, and GET /v1/events leaves it out. */
+    subscriptionId?: string;
+    /** Record nothing unless this SQL condition holds when the statement runs (a person's words after they withdrew). */
+    when?: { sql: string; args: unknown[] };
   },
 ): PlannedEvent {
   const id = newId('event');
@@ -60,19 +65,21 @@ export function planEvent(
   });
   const fan = e.fan ?? true;
   // An event nobody needs telling about is born fanned out, so the refan job leaves it alone.
-  const values = [id, e.sourceKey, e.type, e.guildId, e.channelId, e.messageId, payload, at, fan ? null : at];
+  const values = [id, e.sourceKey, e.type, e.guildId, e.channelId, e.messageId, payload, at, fan ? null : at, e.subscriptionId ?? null];
   const stmt =
-    e.unless === undefined
+    e.unless === undefined && e.when === undefined
       ? relay.db
           .prepare(
-            'INSERT OR IGNORE INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at, fanned_out_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT OR IGNORE INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at, fanned_out_at, subscription_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           )
           .bind(...values)
       : relay.db
           .prepare(
-            'INSERT OR IGNORE INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at, fanned_out_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM events WHERE source_key = ?)',
+            `INSERT OR IGNORE INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at, fanned_out_at, subscription_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${
+              e.unless === undefined ? '1' : 'NOT EXISTS (SELECT 1 FROM events WHERE source_key = ?)'
+            }${e.when ? ` AND (${e.when.sql})` : ''}`,
           )
-          .bind(...values, e.unless);
+          .bind(...values, ...(e.unless === undefined ? [] : [e.unless]), ...(e.when?.args ?? []));
   return { row: { id, type: e.type, guild_id: e.guildId, channel_id: e.channelId, payload }, stmt, fan };
 }
 
@@ -204,7 +211,13 @@ export interface EventsQuery {
 export async function listEvents(relay: Relay, q: EventsQuery): Promise<{ events: RelayEvent[]; next_cursor: string }> {
   // Read the tail first: anything committed before this read is visible to the query below.
   const tail = await eventTail(relay);
-  const where = ['e.seq > ?', "e.channel_id IN (SELECT id FROM channels WHERE agent_access != 'off')"];
+  // A person's words go out only while they stand: if they left and the clean-up hasn't caught up, their events are skipped.
+  const where = [
+    'e.seq > ?',
+    'e.subscription_id IS NULL',
+    "e.channel_id IN (SELECT id FROM channels WHERE agent_access != 'off')",
+    `NOT (e.type IN ('message.created', 'message.updated') AND EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = e.message_id AND c.author_kind = 'human' AND c.discord_user_id IS NOT NULL AND NOT ${consentedSql('c')}))`,
+  ];
   const args: unknown[] = [q.after];
   if (q.channelId) {
     where.push('e.channel_id = ?');
@@ -229,6 +242,8 @@ export async function expiredCursor(relay: Relay, after: number): Promise<string
   const cutoff = iso(new Date(relay.now().getTime() - EVENT_TEXT_DAYS * 86_400_000));
   const first = await relay.db.prepare('SELECT observed_at FROM events WHERE seq > ? ORDER BY seq LIMIT 1').bind(after).first<{ observed_at: string }>();
   if (!first || first.observed_at >= cutoff) return null;
-  const oldest = await relay.db.prepare('SELECT MIN(seq) AS n FROM events WHERE observed_at >= ?').bind(cutoff).first<{ n: number | null }>();
-  return String(oldest?.n ? oldest.n - 1 : await eventTail(relay));
+  // The newest event older than the window, found through events_observed: reading from the oldest event in the window
+  // would walk every retained removal event before it.
+  const anchor = await relay.db.prepare('SELECT seq FROM events WHERE observed_at < ? ORDER BY observed_at DESC LIMIT 1').bind(cutoff).first<{ seq: number }>();
+  return String(anchor?.seq ?? (await eventTail(relay)));
 }

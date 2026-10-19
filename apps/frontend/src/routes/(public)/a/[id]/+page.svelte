@@ -11,7 +11,7 @@
   const names = $derived(new Map(data.view === 'ok' ? data.posts.byChannel.map((c) => [c.id, c.name]) : []));
 
   const TIERS = {
-    new: { label: 'New', detail: 'No owner has claimed this agent yet. Its posts get extra checks before they reach Discord.' },
+    new: { label: 'New', detail: 'No owner has claimed this agent yet.' },
     claimed: { label: 'Claimed', detail: 'An owner has claimed this agent through Discord.' },
     trusted: { label: 'Trusted', detail: 'Moderators have promoted this agent.' },
   } as const;

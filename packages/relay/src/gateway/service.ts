@@ -1,5 +1,6 @@
 import { DiscordError } from '@logitland/discord';
 import { iso, type Relay } from '../context';
+import { MAX_PARAMS, chunk, placeholders } from '../services/events';
 import { ingest, recordGap, saveIntakeState, type IntakeEventInput } from '../services/intake';
 import { backfill, seedHistory } from './backfill';
 import { metered } from './budget';
@@ -27,6 +28,10 @@ export const CONTINUE_MS = 1_000;
 /** Places new to the relay are looked for this often unless an event says there may be one (or the last look found many). */
 export const SEED_CHECK_MS = 5 * 60_000;
 const FLUSH_RETRY_MS = 5_000;
+/** Share of the day's IDENTIFY allowance kept back. */
+const IDENTIFY_RESERVE = 0.05;
+/** An archived thread is backfilled after a lost session only if it changed this recently. */
+const RECENT_THREAD_MS = 7 * 86_400_000;
 /** Past this many waiting events (the database is down, or far behind) the oldest are dropped and made up for later. */
 export const BUFFER_CAP = 5_000;
 /** Places (channels and threads with no cursor) looked at per run when a channel is new to the relay. */
@@ -69,6 +74,9 @@ interface Loss {
 /** The older of two message IDs (a snowflake doesn't fit a number); either may be missing. */
 const older = (a: string | undefined, b: string): string => (a !== undefined && BigInt(a) < BigInt(b) ? a : b);
 
+/** The first snowflake Discord could have made at this time (an ISO string). */
+const snowflakeAt = (when: string) => String(BigInt(Math.max(new Date(when).getTime() - 1_420_070_400_000, 0)) << 22n);
+
 const GAP_REASON =
   'The relay lost its Discord session. Messages sent in this window are being fetched again, but edits and deletions made during it can’t be recovered.';
 
@@ -104,8 +112,16 @@ export class GatewayService {
   /** Cursors openGap stored while a backfill run was away fetching, so the run's final write keeps them. */
   private readonly added = new Map<string, string>();
   private lost: Loss | null = null;
+  /** Entries at the front of the buffer being written right now; a full buffer must not drop these. */
+  private inFlight = 0;
+  /** A lost session whose gap isn't recorded and queued for backfill yet. Kept in storage until it is. */
+  private pendingGap: { since: string; until: string } | null = null;
 
   private readonly threads = new Map<string, string>();
+  /** The latest thread_upsert seen per thread, so the threads of a channel relayed later can be handed to intake then. */
+  private readonly threadEvents = new Map<string, Extract<IntakeEventInput, { kind: 'thread_upsert' }>>();
+  /** Threads already offered to intake since this instance started. */
+  private readonly offered = new Set<string>();
   /** Channels known not to be threads, so a message in an unknown channel is looked up once. */
   private readonly plain = new Set<string>();
 
@@ -150,7 +166,7 @@ export class GatewayService {
       this.conn.reconnect('The connection went quiet');
     await this.conn.start();
     await this.host.wakeAt(this.host.now() + WAKE_MS);
-    if (this.buffer.length || this.lost) void this.flush();
+    if (this.buffer.length || this.lost || this.pendingGap) void this.flush();
     if (this.pendingBackfill) void this.runBackfill();
     if (this.seedWanted || this.host.now() - this.lastSeedCheck >= SEED_CHECK_MS) void this.seed();
   }
@@ -212,6 +228,7 @@ export class GatewayService {
       }
       this.pendingBackfill = Boolean(await storage.get('backfill'));
       this.lost = (await storage.get<Loss>('lost')) ?? null;
+      this.pendingGap = (await storage.get<{ since: string; until: string }>('gap')) ?? null;
       const { results: channels } = await this.relay.db.prepare('SELECT id FROM channels').all<{ id: string }>();
       for (const c of channels) this.plain.add(c.id);
       const { results: threads } = await this.relay.db
@@ -232,7 +249,9 @@ export class GatewayService {
   private async gatewayUrl(): Promise<string> {
     try {
       const info = await this.relay.discord.getGatewayBot();
-      if (info.session_start_limit.remaining < 1) throw new IdentifyLimitError(info.session_start_limit.reset_after);
+      // Discord resets the bot token when the day's IDENTIFYs run out, so the last few are never spent.
+      const { remaining, total, reset_after } = info.session_start_limit;
+      if (remaining < Math.max(1, Math.ceil(total * IDENTIFY_RESERVE))) throw new IdentifyLimitError(reset_after);
       return info.url;
     } catch (err) {
       if (err instanceof DiscordError && err.status === 401) throw new GatewayStopError('stopped: Discord rejected the bot token. Check DISCORD_BOT_TOKEN');
@@ -290,7 +309,13 @@ export class GatewayService {
     const channelId = messageChannelId(t, d);
     if (channelId) await this.lookUp(channelId, s);
     for (const event of normalizeDispatch(t, d, { guildId: this.relay.config.discord.guildId, threads: this.threads })) {
-      if (event.kind === 'thread_upsert') this.seedWanted = true;
+      if (event.kind === 'thread_upsert') {
+        this.seedWanted = true;
+        this.threadEvents.set(event.thread_id, event);
+        this.offered.delete(event.thread_id);
+      } else if (event.kind === 'thread_delete') {
+        this.threadEvents.delete(event.thread_id);
+      }
       this.buffer.push({ event, seq: s, gen: this.gen, at });
     }
     this.handled = s;
@@ -307,7 +332,10 @@ export class GatewayService {
       const found = threadEvents([channel], { guildId: null, threads: this.threads });
       if (found.length) {
         this.seedWanted = true;
-        for (const event of found) this.buffer.push({ event, seq, gen: this.gen, at: iso(this.relay.now()) });
+        for (const event of found) {
+          if (event.kind === 'thread_upsert') this.threadEvents.set(event.thread_id, event);
+          this.buffer.push({ event, seq, gen: this.gen, at: iso(this.relay.now()) });
+        }
       } else this.plain.add(channelId);
     } catch (error) {
       this.relay.log.warn('gateway.channel_lookup_failed', { channel_id: channelId, error });
@@ -317,7 +345,9 @@ export class GatewayService {
   // The oldest waiting events go first, and the channels they were in are remembered (and kept, in case the
   // object is evicted) so that once the database answers again, a gap is recorded and the messages are fetched anew.
   private dropOldest(): void {
-    const dropped = this.buffer.splice(0, this.buffer.length - (this.host.bufferCap ?? BUFFER_CAP));
+    // The entries being written stay: the write removes exactly them when it succeeds.
+    const dropped = this.buffer.splice(this.inFlight, this.buffer.length - Math.max(this.host.bufferCap ?? BUFFER_CAP, this.inFlight));
+    if (!dropped.length) return;
     const channels = new Set(this.lost?.channels);
     for (const { event } of dropped) {
       if ('parent_id' in event) channels.add(event.parent_id);
@@ -370,9 +400,15 @@ export class GatewayService {
         this.forget('lost');
       }
     }
+    // A lost session's gap goes in before anything newer is written, so the gap event comes first in the log.
+    if (this.pendingGap) {
+      await this.settleGap();
+      if (this.pendingGap) return;
+    }
     const budget = metered(this.relay);
     while (this.buffer.length && budget.room()) {
       const part = this.buffer.slice(0, BATCH_EVENTS);
+      this.inFlight = part.length;
       try {
         await ingest(budget.relay, { source: 'gateway', events: part.map((b) => b.event) });
       } catch (error) {
@@ -381,8 +417,15 @@ export class GatewayService {
         this.lastError = 'Writing events to the database failed; retrying';
         this.flushSoon(FLUSH_RETRY_MS);
         return;
+      } finally {
+        this.inFlight = 0;
       }
       this.buffer.splice(0, part.length);
+      // Events were dropped while this batch was being written: the gap goes in before anything newer does.
+      if (this.lost) {
+        this.flushSoon(0);
+        break;
+      }
     }
     // Everything before the first entry still waiting (or everything handled) is stored; resume from there.
     const waiting = this.buffer.find((b) => b.gen === this.gen);
@@ -409,7 +452,29 @@ export class GatewayService {
     // Anything still buffered belongs to the old session and goes first, so the gap event follows it.
     await this.flush();
     if (!since) return;
-    await this.openGap(since, iso(this.relay.now()), null, false);
+    // Written down before D1 is touched, and kept until the gap is queued, so a database error now can't lose it.
+    const kept = this.pendingGap;
+    this.pendingGap = { since: kept && kept.since < since ? kept.since : since, until: iso(this.relay.now()) };
+    await this.host.storage.put('gap', this.pendingGap);
+    await this.settleGap();
+  }
+
+  /** Opens the gap of the lost session if it hasn't been; on failure it stays pending and a later flush tries again. */
+  private async settleGap(): Promise<void> {
+    const gap = this.pendingGap;
+    if (!gap) return;
+    try {
+      await this.openGap(gap.since, gap.until, null, false);
+    } catch (error) {
+      this.relay.log.error('gateway.gap_pending', { error });
+      this.lastError = 'A lost session’s gap could not be recorded yet; will try again';
+      this.flushSoon(FLUSH_RETRY_MS);
+      return;
+    }
+    if (this.pendingGap === gap) {
+      this.pendingGap = null;
+      this.forget('gap');
+    }
   }
 
   /**
@@ -420,16 +485,29 @@ export class GatewayService {
   private async openGap(since: string, until: string, channelIds: string[] | null, strict: boolean): Promise<void> {
     const { results: open } = await this.relay.db.prepare("SELECT id FROM channels WHERE agent_access != 'off'").all<{ id: string }>();
     // Taken before any live event of the new session is written, so the live events can't move the starting point past the gap.
+    // Only places that can still have news: relayed channels, and their threads that are live or were active lately. A forum with
+    // thousands of old posts would otherwise cost a Discord call per post after every lost session, with the real gap waiting behind.
     const { results: cursors } = await this.relay.db
-      .prepare('SELECT channel_id, CAST(last_message_id AS TEXT) AS last FROM channel_cursors')
+      .prepare(
+        `SELECT cc.channel_id, CAST(cc.last_message_id AS TEXT) AS last FROM channel_cursors cc
+         WHERE cc.channel_id IN (SELECT id FROM channels WHERE agent_access != 'off')
+            OR cc.channel_id IN (
+              SELECT CAST(t.id AS TEXT) FROM threads t JOIN channels c ON c.id = t.parent_id
+              WHERE c.agent_access != 'off' AND t.deleted_at IS NULL AND (t.archived = 0 OR t.updated_at >= ?))`,
+      )
+      .bind(iso(new Date(this.relay.now().getTime() - RECENT_THREAD_MS)))
       .all<{ channel_id: string; last: string }>();
     await this.withBackfillLock(async () => {
       const pending = (await this.host.storage.get<Record<string, string>>('backfill')) ?? {};
+      // A cursor of 0 is a place that was empty (or unreadable) when it was first looked at and has had no live message since:
+      // what is missing there was sent after the window opened, not after the channel's first message.
+      const opened = snowflakeAt(since);
       for (const c of cursors) {
-        pending[c.channel_id] = older(pending[c.channel_id], c.last);
+        const last = c.last === '0' ? opened : c.last;
+        pending[c.channel_id] = older(pending[c.channel_id], last);
         // A run in progress writes the key again when it ends, from what it read when it began. Telling it what was
         // added here keeps its write from undoing this one.
-        if (this.backfilling) this.added.set(c.channel_id, older(this.added.get(c.channel_id), c.last));
+        if (this.backfilling) this.added.set(c.channel_id, older(this.added.get(c.channel_id), last));
       }
       await this.host.storage.put('backfill', pending);
       this.pendingBackfill = true;
@@ -451,6 +529,7 @@ export class GatewayService {
     this.lastSeedCheck = this.host.now();
     let again: number | null = null;
     try {
+      if ([...this.threadEvents.keys()].some((id) => !this.offered.has(id))) await this.offerThreads();
       const r = await seedHistory(this.relay, SEED_PLACES);
       if (r.places) this.relay.log.info('gateway.seeded', { places: r.places, messages: r.messages });
       if (r.more) {
@@ -464,6 +543,35 @@ export class GatewayService {
       this.seeding = false;
     }
     if (again !== null) this.cancelSeed = this.host.setTimer(() => void this.seed(), again);
+  }
+
+  /**
+   * Intake drops a thread whose channel isn't relayed, and the thread is never announced again (it is already known here). So
+   * when a channel becomes relayed its threads are handed over, if intake has no row for them.
+   */
+  private async offerThreads(): Promise<void> {
+    const todo = [...this.threadEvents.values()].filter((e) => !this.offered.has(e.thread_id));
+    if (!todo.length) return;
+    const { results: open } = await this.relay.db.prepare("SELECT id FROM channels WHERE agent_access != 'off'").all<{ id: string }>();
+    const relayed = new Set(open.map((c) => c.id));
+    const ready = todo.filter((e) => relayed.has(e.parent_id));
+    const stored = new Set<string>();
+    for (const part of chunk(
+      ready.map((e) => e.thread_id),
+      MAX_PARAMS,
+    )) {
+      const { results } = await this.relay.db
+        .prepare(`SELECT CAST(id AS TEXT) AS id FROM threads WHERE id IN (${placeholders(part.length)})`)
+        .bind(...part)
+        .all<{ id: string }>();
+      for (const r of results) stored.add(r.id);
+    }
+    const missing = ready.filter((e) => !stored.has(e.thread_id));
+    if (missing.length) {
+      for (const part of chunk(missing, BATCH_EVENTS)) await ingest(this.relay, { source: 'gateway', events: part });
+      this.seedWanted = true;
+    }
+    for (const e of ready) this.offered.add(e.thread_id);
   }
 
   /** The 'backfill' key is read, changed and written here and in runBackfill, so those steps take turns. */

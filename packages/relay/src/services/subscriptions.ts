@@ -14,13 +14,14 @@ import {
 import { generateSecret, signHeaders } from '@logitland/webhooks';
 import { iso, type Relay, type Stmt } from '../context';
 import { randomToken, sha256 } from '../crypto';
-import { RelayError, conflict, notFound } from '../errors';
+import { RelayError, conflict, notFound, unavailable } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit, auditStmt } from './audit';
 import { usableChannel } from './channels';
 import { DestinationRefused, checkUrl, preflightDestination } from './destinations';
 import { recordGap } from './intake';
 import { enforce } from './limits';
+import { getSettings } from './settings';
 
 // Webhook subscriptions: an agent asks the relay to push channel events to an HTTPS endpoint. The
 // destination is untrusted input (see destinations.ts), so creating one costs a rate-limit token, a DNS
@@ -45,6 +46,7 @@ export interface SubscriptionRow {
   paused_reason: string | null;
   paused_at: string | null;
   failure_streak: number;
+  failing_since: string | null;
   idempotency_key: string | null;
   payload_digest: string | null;
   created_at: string;
@@ -60,6 +62,11 @@ const visible = (alias: string) => `(${alias}.status != 'disabled' OR COALESCE($
 
 const CREATES_PER_AGENT_PER_HOUR = 5;
 const CREATES_PER_HOST_PER_HOUR = 10;
+/** Active or paused subscriptions on one channel, and on the whole relay: each is a delivery row for every event. */
+const SUBSCRIPTIONS_PER_CHANNEL = 300;
+const SUBSCRIPTIONS_PER_RELAY = 2000;
+const RESUMES_PER_SUBSCRIPTION_PER_DAY = 6;
+const RESUMES_PER_AGENT_PER_DAY = 20;
 const CHALLENGE_MAX_BYTES = 4096;
 const PREVIOUS_SECRET_HOURS = 24;
 
@@ -85,14 +92,15 @@ export const toSubscription = (r: SubscriptionRow): Subscription => ({
 /**
  * Drops a subscription's undelivered deliveries, for use inside a batch with the change that stops them (served by
  * deliveries_open, so it never walks the subscription's history). With `onlyIfStatus` it drops them only if the
- * subscription has that status at that point in the batch.
+ * subscription has that status at that point in the batch. With `keepRemovals` the removal notices stay: the receiver
+ * still holds the text they are about, and gets them once it is back.
  */
-export function dropPendingStmt(relay: Relay, subscriptionId: string, reason: string, onlyIfStatus?: SubscriptionStatus): Stmt {
+export function dropPendingStmt(relay: Relay, subscriptionId: string, reason: string, onlyIfStatus?: SubscriptionStatus, keepRemovals = false): Stmt {
   return relay.db
     .prepare(
       `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL, last_error = ? WHERE subscription_id = ? AND status IN ('pending', 'retrying')${
-        onlyIfStatus ? ' AND EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status = ?)' : ''
-      }`,
+        keepRemovals ? " AND event_type NOT IN ('message.deleted', 'message.bulk_deleted')" : ''
+      }${onlyIfStatus ? ' AND EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND status = ?)' : ''}`,
     )
     .bind(reason, subscriptionId, ...(onlyIfStatus ? [subscriptionId, onlyIfStatus] : []));
 }
@@ -170,6 +178,26 @@ async function readableChannel(relay: Relay, channelId: string): Promise<void> {
   }
 }
 
+/** Every event in a channel makes a delivery for each subscription on it, so both the channel and the relay have a ceiling. */
+async function assertRoom(relay: Relay, channelIds: string[]): Promise<void> {
+  const total = await relay.db.prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE status IN ('active', 'paused')").first<{ n: number }>();
+  if ((total?.n ?? 0) >= SUBSCRIPTIONS_PER_RELAY)
+    throw unavailable('The relay has all the subscriptions it can serve right now. Poll GET /v1/events instead, or try again later.', 3600);
+  for (const channelId of channelIds) {
+    const row = await relay.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM subscription_channels sc JOIN subscriptions s ON s.id = sc.subscription_id WHERE sc.channel_id = ? AND s.status IN ('active', 'paused')",
+      )
+      .bind(channelId)
+      .first<{ n: number }>();
+    if ((row?.n ?? 0) >= SUBSCRIPTIONS_PER_CHANNEL)
+      throw unavailable(
+        `Channel ${channelId} already has ${SUBSCRIPTIONS_PER_CHANNEL} subscriptions, which is all it can serve. Poll GET /v1/events for it instead.`,
+        3600,
+      );
+  }
+}
+
 const capMessage = (max: number) => `Your agent can have ${max} subscriptions (active or paused). Delete one before adding another.`;
 
 const idempotencyConflict = () =>
@@ -210,6 +238,9 @@ export async function createSubscription(
     if (found) return replay(relay, found, digest!);
   }
   for (const channelId of channelIds) await readableChannel(relay, channelId);
+  // Creating one contacts the destination, which a switched-off delivery path should not do.
+  if ((await getSettings(relay)).deliveries_paused)
+    throw unavailable('Deliveries are switched off by an admin at the moment, so subscriptions can’t be added. Try again later.', 300);
 
   const max = SUBSCRIPTIONS_MAX[agent.tier];
   const held = await relay.db
@@ -217,6 +248,7 @@ export async function createSubscription(
     .bind(agent.id)
     .first<{ n: number }>();
   if ((held?.n ?? 0) >= max) throw conflict(capMessage(max));
+  await assertRoom(relay, channelIds);
 
   const host = (await refusing(() => checkUrl(req.url, relay.config.blockedHosts))).hostname;
   await enforce(
@@ -317,13 +349,23 @@ export async function deleteSubscription(relay: Relay, agentId: string, id: stri
 
 /**
  * Paused → active, with the failure streak reset. Events that arrived while it was paused were never
- * fanned out to it, so a gap event over the whole outage tells the agent to catch up from /v1/events.
+ * fanned out to it, so a gap event over the whole outage tells the agent to catch up from /v1/events. The gap is
+ * addressed to this subscription alone: other subscribers missed nothing. Resuming is limited per day, because every
+ * resume starts the failures (and the gap) again.
  */
 export async function resumeSubscription(relay: Relay, agentId: string, id: string): Promise<Subscription> {
   const sub = await ownSubscription(relay, agentId, id);
   if (sub.status === 'disabled') throw conflict('This subscription was disabled and can’t be resumed. Create a new one.');
   if (sub.status === 'active') return toSubscription(sub);
 
+  await enforce(
+    relay,
+    [
+      { key: `sub:resume:${id}:d`, limit: RESUMES_PER_SUBSCRIPTION_PER_DAY, windowSeconds: 86_400 },
+      { key: `sub:resume:${agentId}:d`, limit: RESUMES_PER_AGENT_PER_DAY, windowSeconds: 86_400 },
+    ],
+    'This subscription has been resumed several times today and keeps stopping. Fix the destination, then try again tomorrow, or poll GET /v1/events meanwhile.',
+  );
   const now = relay.now();
   // The outage began at the first delivery that failed or was dropped since the last success, if that is earlier than the pause itself.
   const earliest = await relay.db
@@ -340,7 +382,9 @@ export async function resumeSubscription(relay: Relay, agentId: string, id: stri
     .all<{ id: string }>();
 
   const resumed = await relay.db
-    .prepare("UPDATE subscriptions SET status = 'active', failure_streak = 0, paused_reason = NULL, paused_at = NULL WHERE id = ? AND status = 'paused'")
+    .prepare(
+      "UPDATE subscriptions SET status = 'active', failure_streak = 0, failing_since = NULL, paused_reason = NULL, paused_at = NULL WHERE id = ? AND status = 'paused'",
+    )
     .bind(id)
     .run();
   if (resumed.meta.changes === 1) {
@@ -359,6 +403,7 @@ export async function resumeSubscription(relay: Relay, agentId: string, id: stri
           windowStart,
           windowEnd: iso(now),
           reason: 'Deliveries to a subscription were paused. Events in this window may not have been delivered; read them from GET /v1/events.',
+          subscriptionId: id,
         });
       } catch (error) {
         // The subscription is already active again; a failed gap record shouldn't undo that.

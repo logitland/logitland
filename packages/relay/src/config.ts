@@ -56,6 +56,38 @@ function host(raw: string): string | null {
   }
 }
 
+const KEY_ID = /^[A-Za-z0-9_-]{1,16}$/;
+
+function keyBytes(key: string): number | null {
+  try {
+    return atob(key).length;
+  } catch {
+    return null;
+  }
+}
+
+/** The encryption keys and their IDs. Mistakes here would otherwise surface as a crash, or as a rotation that quietly does nothing. */
+function secretKeyProblems(env: RelayBindings): string[] {
+  const problems: string[] = [];
+  if (!env.RELAY_SECRET_KEY) problems.push('RELAY_SECRET_KEY is missing');
+  else if (keyBytes(env.RELAY_SECRET_KEY) !== 32) problems.push('RELAY_SECRET_KEY must be 32 random bytes, base64-encoded (openssl rand -base64 32)');
+  const currentId = env.RELAY_SECRET_KEY_ID ?? 'k1';
+  if (!KEY_ID.test(currentId)) problems.push('RELAY_SECRET_KEY_ID must be 1 to 16 letters, digits, - or _');
+  const seen = new Set([currentId]);
+  for (const pair of list(env.RELAY_SECRET_KEYS_OLD)) {
+    const i = pair.indexOf(':');
+    const id = pair.slice(0, i);
+    if (i < 1 || !KEY_ID.test(id) || keyBytes(pair.slice(i + 1)) !== 32) {
+      problems.push('RELAY_SECRET_KEYS_OLD must be id:base64 pairs separated by commas, each key 32 bytes');
+      continue;
+    }
+    if (seen.has(id))
+      problems.push(`RELAY_SECRET_KEYS_OLD lists the key ID ${id} twice, or the same ID as RELAY_SECRET_KEY_ID; the new key needs a new RELAY_SECRET_KEY_ID`);
+    seen.add(id);
+  }
+  return problems;
+}
+
 /** Every problem with the bindings, by name only (never values). Empty means the relay may start. */
 export function checkConfig(env: RelayBindings): string[] {
   const problems: string[] = [];
@@ -63,7 +95,7 @@ export function checkConfig(env: RelayBindings): string[] {
   const dashboardHost = host(env.DASHBOARD_URL ?? '');
   if (!publicHost) problems.push('PUBLIC_URL is not a URL');
   if (!dashboardHost) problems.push('DASHBOARD_URL is not a URL');
-  if (!env.RELAY_SECRET_KEY) problems.push('RELAY_SECRET_KEY is missing');
+  problems.push(...secretKeyProblems(env));
 
   const dev = env.RELAY_MODE === 'development';
   if (env.DISCORD_API_BASE && !dev) problems.push('DISCORD_API_BASE is only allowed in development');
@@ -90,6 +122,12 @@ export function checkConfig(env: RelayBindings): string[] {
   for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID', 'DISCORD_CONSENT_ROLE_ID'] as const)
     if (!env[name]) problems.push(`${name} is missing`);
   if (!(env.JEV_LAYA_URL && env.JEV_LAYA_TOKEN) && !env.AI) problems.push('No classifier: set JEV_LAYA_URL and JEV_LAYA_TOKEN, or bind AI');
+  // Every message the classifier checks, with its context, goes there along with the bearer token.
+  if (env.JEV_LAYA_URL) {
+    const h = host(env.JEV_LAYA_URL);
+    if (!h || !env.JEV_LAYA_URL.startsWith('https://') || LOCAL_HOST.test(h) || PLACEHOLDER_HOST.test(h))
+      problems.push('JEV_LAYA_URL must be an https URL on a public host');
+  }
   if (!list(env.ADMIN_DISCORD_IDS).length) problems.push('ADMIN_DISCORD_IDS is empty');
   // Without the queue the cron scan would attempt every delivery itself, inside its own query budget.
   if (!env.DELIVERIES) problems.push('The DELIVERIES queue binding is missing');

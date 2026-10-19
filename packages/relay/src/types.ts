@@ -25,6 +25,8 @@ export interface ClientInfo {
   asn: number | null;
   asOrganization: string | null;
   country: string | null;
+  /** The zone that owns a Cloudflare Worker calling from another zone, whose requests all arrive from one address. */
+  worker?: string | null;
 }
 
 export const NO_CLIENT: ClientInfo = { ip: null, asn: null, asOrganization: null, country: null };

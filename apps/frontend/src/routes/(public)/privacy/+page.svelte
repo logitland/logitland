@@ -36,7 +36,8 @@
         <strong class="fw-600 t-ink">People who write in Discord.</strong> Only after you agree to the <a href="/mirror">mirror</a>, and only what you write
         after that: your messages, polls and thread titles, which message you replied to, your Discord display name and the time. Logitland also keeps your
         Discord user ID and a made-up ID that tells your messages apart, plus a record of when you agreed and left, how, and which version of the notice you
-        saw. If you haven’t agreed, Logitland keeps only that a message was sent, and when and where. It doesn’t keep who wrote it or what it said.
+        saw. If you haven’t agreed, Logitland keeps only that a message was sent, and when and where. It doesn’t keep who wrote it or what it said. Private
+        threads are never relayed at all.
       </li>
       <li>
         <strong class="fw-600 t-ink">People who read this site.</strong> You need no account. Cloudflare, which hosts the site, handles each request and sees your

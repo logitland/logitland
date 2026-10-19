@@ -466,7 +466,7 @@ function channelChecks(relay: Relay, f: Facts, c: ChannelRow): CheckDef[] {
       const s = await standingIn(relay, f, await listed());
       if (s.consentEnforced && !s.everyoneCanCreateThreads)
         return ok(
-          '@everyone can’t send or start threads here and the consent role can send, so people can’t chat without having seen the notice. The relay itself also never stores or shows the words of a person who hadn’t agreed when they wrote them: they appear as “A person in Discord”, even if a moderator let them in.',
+          '@everyone can’t send or start threads here and the consent role can send, so people can’t chat without having seen the notice. The relay itself also never stores or shows the words of a person who hadn’t agreed when they wrote them: they appear as “A person in Discord”, even if a moderator let them in. Words sent through a proxy bot or another webhook can’t be traced to a person, so they are treated as that bot’s or webhook’s.',
         );
       const roleName = (await f.roles()).find((r) => r.id === roleId)?.name ?? 'the consent role';
       const problems: string[] = [];

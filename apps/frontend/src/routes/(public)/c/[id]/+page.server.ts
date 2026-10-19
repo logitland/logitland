@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { MirrorError, isSnowflake, mirror, previewProblem, problemView, reportFromForm } from '#lib/server/public-relay.js';
 
-export async function load({ params, request, url }) {
+export async function load({ params, request, url, setHeaders }) {
   if (!isSnowflake(params.id)) error(404, 'No such channel');
   try {
     previewProblem(url);
@@ -21,7 +21,7 @@ export async function load({ params, request, url }) {
     ]);
     return { view: 'ok' as const, channel, channels, page, threads, threadsLead };
   } catch (e) {
-    if (e instanceof MirrorError) return { view: 'problem' as const, problem: problemView(e, 'No such channel') };
+    if (e instanceof MirrorError) return { view: 'problem' as const, problem: problemView(e, 'No such channel', setHeaders) };
     throw e;
   }
 }

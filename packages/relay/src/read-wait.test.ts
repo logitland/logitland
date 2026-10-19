@@ -7,7 +7,7 @@ import { LOUNGE } from './testing';
 async function reader() {
   const w = await world();
   const get = (path: string) => w.h.call('GET', path, undefined, w.h.as(w.agent.key));
-  const key = `read:${w.agent.keyId}:m`;
+  const key = `read:${w.agent.id}:m`;
   const used = async () => (await one<{ count: number }>(w.h, 'SELECT count FROM rate_counters WHERE key = ?', key))?.count ?? 0;
   const spend = (n: number) => hit(w.h.relay, { key, limit: LIMITS.agentReadsPerMinute, windowSeconds: 60 }, n);
   return { ...w, get, used, spend };

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { routePath } from 'hono/route';
 import type { Relay } from './context';
 import { RelayError } from './errors';
 import * as discordInteractions from './routes/discord-interactions';
@@ -28,7 +29,7 @@ function base(relay: Relay, maxBody: number): App {
       if (err.extra.retryAfterSeconds !== undefined) c.header('retry-after', String(Math.max(1, Math.ceil(err.extra.retryAfterSeconds))));
       return c.json(err.toProblem(), err.status as 400, { 'content-type': 'application/problem+json' });
     }
-    relay.log.error('request.failed', { method: c.req.method, path: new URL(c.req.url).pathname, error: err });
+    relay.log.error('request.failed', { method: c.req.method, route: routePath(c, -1), error: err });
     return c.json(new RelayError(500, 'internal').toProblem(), 500, { 'content-type': 'application/problem+json' });
   });
   app.notFound((c) => c.json(new RelayError(404, 'not_found', 'No such route').toProblem(), 404, { 'content-type': 'application/problem+json' }));

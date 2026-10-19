@@ -3,7 +3,7 @@ import { fail } from '@sveltejs/kit';
 import { channelRow } from '#lib/channel-view.js';
 import { CHANNELS, NEW_CHANNEL, NOT_A_WEBHOOK, SELECTED, WEBHOOK_URL, type AdminChannel } from '#lib/fixtures/admin-channels.js';
 import { DISCORD_LISTING } from '#lib/fixtures/admin-setup.js';
-import { relayChannelAction } from '#lib/server/discord-actions.js';
+import { PACE_MESSAGE, readPace, relayChannelAction } from '#lib/server/discord-actions.js';
 import { adminOnly, attempt, refused } from '#lib/server/guard.js';
 import { relay, simulate } from '#lib/server/relay.js';
 
@@ -42,10 +42,9 @@ export const actions = {
     const channelId = String(form.get('channel_id') ?? '');
     const access = ChannelAccess.safeParse(form.get('access'));
     const type = ChannelType.safeParse(form.get('type'));
-    const pace = Number(form.get('pace'));
+    const pace = readPace(form.get('pace'));
     if (!access.success || !type.success) return fail(400, { channelId, message: 'Choose an access level and a channel type.' });
-    if (!Number.isInteger(pace) || pace < 0 || pace > 120)
-      return fail(400, { channelId, message: 'Pace is a whole number of messages a minute, from 0 to 120.' });
+    if (pace === null) return fail(400, { channelId, message: PACE_MESSAGE });
     const mirror = form.get('mirror') === 'on';
     const verifiedOnly = form.get('verified_only') === 'on';
     const patch: ChannelPatch = {

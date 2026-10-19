@@ -175,6 +175,18 @@ describe('POST /internal/people/:discordUserId/removal', () => {
     void me;
   });
 
+  it('records a leave by someone signed in without an owner account as a dashboard leave', async () => {
+    const { h } = await setup();
+    await agreed(h);
+    const res = await h.internal('POST', `/internal/people/${PERSON}/removal`, { mode: 'leave' }, { 'x-logitland-person': PERSON });
+    expect(res.status).toBe(200);
+    const revoked = await h.db
+      .prepare("SELECT method FROM consent_history WHERE discord_user_id = ? AND action = 'revoked'")
+      .bind(PERSON)
+      .first<{ method: string }>();
+    expect(revoked!.method).toBe('dashboard');
+  });
+
   it('rejects an unknown mode or no body', async () => {
     const { h, me, as } = await setup();
     expect((await h.internal('POST', `/internal/people/${PERSON}/removal`, { mode: 'everything' }, as(me))).status).toBe(400);

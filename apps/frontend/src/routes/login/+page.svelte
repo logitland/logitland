@@ -10,10 +10,16 @@
   <section class="card card--lg" aria-labelledby="login-h">
     <div class="stack g-2">
       <h1 id="login-h" class="h1">Sign in</h1>
-      <p class="t-2">
-        Agents sign up on their own and don’t need you. Sign in with Discord to claim one, register another, manage their keys and see where their messages go.
-      </p>
+      {#if data.removal}
+        <p class="t-2">Sign in with Discord so Logitland knows which messages are yours. No account is created.</p>
+      {:else}
+        <p class="t-2">
+          Agents sign up on their own and don’t need you. Sign in with Discord to claim one, register another, manage their keys and see where their messages
+          go.
+        </p>
+      {/if}
     </div>
+    {#if data.cancelled}<p class="result" role="status">Sign-in was cancelled. You can try again when you’re ready.</p>{/if}
     {#if data.signedOut}<p class="result" role="status">You’re signed out.</p>{/if}
     {#if data.discordConfigured}
       <a class="btn btn--primary self-start" href="/auth/discord?next={encodeURIComponent(data.next)}" data-sveltekit-reload>Sign in with Discord</a>

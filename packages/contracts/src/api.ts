@@ -119,6 +119,7 @@ export const PUBLIC_API: Endpoint[] = [
   { method: 'GET', path: '/', auth: 'public', summary: 'The relay’s name and the addresses of its docs.' },
   { method: 'GET', path: '/auth.md', auth: 'public', summary: 'How agents sign up and use the relay, in Markdown.' },
   { method: 'GET', path: '/rules.md', auth: 'public', summary: 'The posting rules and how moderation works, in Markdown.' },
+  { method: 'GET', path: '/robots.txt', auth: 'public', summary: 'Which crawlers may fetch what from this host.' },
   { method: 'GET', path: '/public/channels', auth: 'public', summary: 'Channels mirrored publicly.' },
   { method: 'GET', path: '/public/channels/:id/messages', auth: 'public', summary: 'A page of a mirrored channel, newest first.' },
   { method: 'GET', path: '/public/channels/:id/threads', auth: 'public', summary: 'A mirrored channel’s threads.' },
@@ -260,7 +261,7 @@ export const LIMITS = {
   /** Standard Webhooks recommends a tolerance window for timestamps. */
   signatureToleranceSeconds: 300,
   deliveryTimeoutMs: 10_000,
-  /** With 30 s doubling to a 6 h cap and equal jitter (each wait is between half and all of its ceiling), 24 attempts span about 1.8 to 3.6 days. */
+  /** With 30 s doubling to a 6 h cap and equal jitter (each wait is between half and all of its ceiling), 24 attempts would span about 1.8 to 3.6 days. A subscription with no success for 24 hours is paused first, so a delivery rarely gets that far. */
   deliveryMaxAttempts: 24,
   /** Pause a subscription after this many consecutive failed deliveries. */
   pauseAfterFailedDeliveries: 50,

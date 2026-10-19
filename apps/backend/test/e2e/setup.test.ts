@@ -123,13 +123,16 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
     expect(message.content.length).toBeLessThanOrEqual(2000);
     expect(message.content).toContain('/privacy');
     expect(message.content).toContain('Cloudflare Workers AI');
-    expect(message.components).toEqual([{ type: 1, components: [{ type: 2, style: 1, label: expect.any(String), custom_id: 'mirror_agree' }] }]);
+    expect(message.components).toEqual([
+      { type: 1, components: [{ type: 2, style: 1, label: expect.any(String), custom_id: expect.stringMatching(/^mirror_agree:\d{4}-\d{2}-\d{2}$/) }] },
+    ]);
+    const agreeId = (message.components as unknown as { components: { custom_id: string }[] }[])[0]!.components[0]!.custom_id;
     // It can't go in a forum.
     expect((await s.dashboard('POST', '/internal/admin/discord/consent-message', { owner: admin, body: { channel_id: s.channels.forum } })).status).toBe(422);
 
     // Nothing is agreed until the button is pressed, and the press is answered with a deferral: the role call can be slow.
     expect(await s.sql('SELECT 1 FROM consents WHERE discord_user_id = ?', DEV.visitor)).toEqual([]);
-    const click = await s.fake.interact({ user: DEV.visitor, button: { customId: 'mirror_agree', messageId: message.id }, channelId: s.channels.lounge });
+    const click = await s.fake.interact({ user: DEV.visitor, button: { customId: agreeId, messageId: message.id }, channelId: s.channels.lounge });
     expect(click.status).toBe(200);
     expect(click.body).toEqual({ type: 5, data: { flags: 64 } });
     await eventually(() => click.interaction.followUps.length > 0, { what: 'the follow-up to the button' });

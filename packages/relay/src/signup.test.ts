@@ -417,11 +417,13 @@ describe('signup names', () => {
     await signedUp(h, 'Logan Bot');
     const c = await getChallenge(h, ipHeader('198.51.100.1'));
     const nonce = solve(c.challenge, c.difficulty);
-    for (const name of ['Logan Bot', 'logan-bot', 'L0gan B0t', 'Lоgan Bоt']) {
+    for (const name of ['Logan Bot', 'logan-bot', 'L0gan B0t']) {
       const res = await h.call('POST', '/v1/agents', { name, challenge: c.challenge, nonce }, ipHeader('198.51.100.1'));
       expect(res.status).toBe(409);
       expect((await res.json()).detail).toContain('That name is taken');
     }
+    // Latin mixed with Cyrillic is refused outright.
+    expect((await h.call('POST', '/v1/agents', { name: 'Lоgan Bоt', challenge: c.challenge, nonce }, ipHeader('198.51.100.1'))).status).toBe(422);
     expect((await h.call('POST', '/v1/agents', { name: 'Logan Two', challenge: c.challenge, nonce }, ipHeader('198.51.100.1'))).status).toBe(201);
   });
 

@@ -1,8 +1,29 @@
 import { ThreadPage } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { MEDIA, NEWS, STRANGER, all, at, human, moreChannels, msg, one, push, remove, stranger, subscribe, thread, threadRow, world } from './intake-fixtures';
+import {
+  HUMAN,
+  MEDIA,
+  NEWS,
+  STRANGER,
+  WEBHOOK,
+  all,
+  conversation,
+  at,
+  human,
+  moreChannels,
+  msg,
+  one,
+  push,
+  remove,
+  stranger,
+  subscribe,
+  thread,
+  threadRow,
+  world,
+} from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
-import { scrubMessage } from './services/scrub';
+import { scrubMessage, scrubPerson } from './services/scrub';
+import { readPage } from './services/conversation';
 import { listThreads } from './services/threads';
 import { FORUM, LOUNGE } from './testing';
 import { agree } from './consent.testkit';
@@ -252,6 +273,54 @@ describe('forum tags on posts', () => {
   });
 });
 
+describe('who named a thread', () => {
+  const OTHER = '200000000000000009';
+
+  it('keeps the title of a thread a person who had agreed made, and takes it (and their ID) away when they leave', async () => {
+    const { h } = await world();
+    await push(h, human(10), thread(msg(10), LOUNGE, { name: 'my topic', owner_id: HUMAN }));
+    expect(await one(h, 'SELECT name, owner_id FROM threads WHERE id = ?', msg(10))).toEqual({ name: 'my topic', owner_id: HUMAN });
+    await h.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ?').bind(h.now().toISOString(), HUMAN).run();
+    await scrubPerson(h.relay, HUMAN);
+    expect(await one(h, 'SELECT name, owner_id FROM threads WHERE id = ?', msg(10))).toEqual({ name: null, owner_id: null });
+    // A later update from Discord (auto-archive, a tag) doesn't write the title or the ID back.
+    await push(h, thread(msg(10), LOUNGE, { name: 'my topic', owner_id: HUMAN, archived: true }));
+    expect(await one(h, 'SELECT name, owner_id, archived FROM threads WHERE id = ?', msg(10))).toEqual({ name: null, owner_id: null, archived: 1 });
+  });
+
+  it('keeps no title that someone who never agreed gave to a thread made from an agreed person’s message', async () => {
+    const { h } = await world();
+    await push(
+      h,
+      human(10, { content: 'an opening by someone who agreed' }),
+      thread(msg(10), LOUNGE, { name: 'what a stranger called it', owner_id: STRANGER }),
+    );
+    expect(await one(h, 'SELECT name, owner_id FROM threads WHERE id = ?', msg(10))).toEqual({ name: null, owner_id: null });
+    await push(h, thread(msg(10), LOUNGE, { name: 'renamed by a stranger', owner_id: STRANGER }));
+    expect((await threadRow(h, msg(10)))!.name).toBeNull();
+    // Agreeing afterwards doesn't bring back a title given before.
+    await agree(h, STRANGER, { at: '2026-10-19T03:30:00.000Z' });
+    await push(h, thread(msg(10), LOUNGE, { name: 'renamed again', owner_id: STRANGER }));
+    expect((await threadRow(h, msg(10)))!.name).toBeNull();
+  });
+
+  it('keeps titles of threads the bot or one of the channel’s webhooks made', async () => {
+    const { h } = await world();
+    await push(h, thread(msg(10), LOUNGE, { name: 'by the webhook', owner_id: WEBHOOK }));
+    expect((await threadRow(h, msg(10)))!.name).toBe('by the webhook');
+    expect(await one(h, 'SELECT owner_id FROM threads WHERE id = ?', msg(10))).toEqual({ owner_id: null });
+  });
+
+  it('writes no title back for a thread whose starter left, even from a later update', async () => {
+    const { h } = await world();
+    await push(h, human(10), thread(msg(10), LOUNGE, { name: 'Luna’s private title' }));
+    await scrubPerson(h.relay, HUMAN);
+    expect((await threadRow(h, msg(10)))!.name).toBeNull();
+    await push(h, thread(msg(10), LOUNGE, { name: 'Luna’s private title', archived: true }));
+    expect(await threadRow(h, msg(10))).toMatchObject({ name: null, archived: 1 });
+  });
+});
+
 describe('archiving, locking and deleting', () => {
   it('are followed from thread updates, and archived threads are left out of the list unless asked for', async () => {
     const { h } = await world();
@@ -271,14 +340,32 @@ describe('archiving, locking and deleting', () => {
     expect(await threadRow(h, msg(11))).toMatchObject({ name: 'reopened', archived: 0, locked: 1 });
   });
 
-  it('are kept but hidden when deleted, and their messages stay readable', async () => {
-    const { h } = await world();
-    await push(h, thread(msg(10)), human(11, { thread_id: msg(10) }));
+  it('are kept but hidden when deleted, and their messages are removed like any Discord delete', async () => {
+    const { h, agent } = await world();
+    await subscribe(h, agent.id);
+    await push(h, thread(msg(10)), human(11, { thread_id: msg(10) }), stranger(12, { thread_id: msg(10) }));
     await push(h, { kind: 'thread_delete', thread_id: msg(10), parent_id: LOUNGE });
     const row = await threadRow(h, msg(10));
     expect(row!.deleted_at).toBe(h.now().toISOString());
     expect((await list(h, LOUNGE, { view: 'agent', includeArchived: true })).threads).toEqual([]);
-    expect((await one<{ n: number }>(h, 'SELECT COUNT(*) AS n FROM conversation WHERE thread_id = ?', msg(10)))!.n).toBe(1);
+    expect(await all(h, 'SELECT content, deleted_at, removed_by FROM conversation WHERE thread_id = ?', msg(10))).toEqual([
+      { content: null, deleted_at: h.now().toISOString(), removed_by: 'discord' },
+      { content: null, deleted_at: h.now().toISOString(), removed_by: 'discord' },
+    ]);
+    expect(await readPage(h.relay, LOUNGE, { view: 'public', threadId: msg(10) })).toMatchObject({
+      messages: [
+        { deleted: true, content: null },
+        { deleted: true, content: null },
+      ],
+    });
+    const removal = await all<{ payload: string }>(h, "SELECT payload FROM events WHERE type = 'message.bulk_deleted'");
+    expect(removal).toHaveLength(1);
+    expect(JSON.parse(removal[0]!.payload).data.message_ids).toEqual([msg(11), msg(12)]);
+    // The withheld message was never announced, so only the removal of the held one and the creation are delivered.
+    expect(await one(h, 'SELECT COUNT(*) AS n FROM deliveries')).toEqual({ n: 2 });
+    // Messages that arrive in the same batch as the delete go too.
+    await push(h, thread(msg(20)), human(21, { thread_id: msg(20) }), { kind: 'thread_delete', thread_id: msg(20), parent_id: LOUNGE });
+    expect(await conversation(h, 21)).toMatchObject({ content: null, removed_by: 'discord' });
     // Deleting a thread nobody heard of does nothing.
     await push(h, { kind: 'thread_delete', thread_id: msg(99), parent_id: LOUNGE });
     expect(await threadRow(h, msg(99))).toBeNull();

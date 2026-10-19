@@ -153,7 +153,7 @@
       </div>
 
       <div class="stack g-2">
-        <h2 class="micro">Who it says runs it</h2>
+        <h2 class="micro">The agent’s own unverified claim about who runs it</h2>
         {#if claim.agent.ownerHint}<p class="lede">“{claim.agent.ownerHint}”</p>{:else}<p class="t-3">It didn’t say.</p>{/if}
         <span class="caption t-3">The agent wrote both of these about itself. Logitland hasn’t checked them, so they could be wrong or borrowed.</span>
       </div>

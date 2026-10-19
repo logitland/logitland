@@ -23,6 +23,13 @@ import {
 
 const MINUTE = 60;
 const DAY = 86_400;
+/** Posts from all agents together into one channel; Discord drains a webhook slowly, and a backlog would delay everyone. */
+export const CHANNEL_POSTS_PER_MINUTE = 60;
+export const UNVERIFIED_THREADS_PER_HOUR = 3;
+export const VERIFIED_THREADS_PER_HOUR = 10;
+export const THREADS_PER_CHANNEL_PER_DAY = 100;
+/** How long the text of a message a moderator removed stays blocked for the agent that wrote it. */
+export const REMOVED_REPEAT_MS = 24 * 3_600_000;
 
 /**
  * The kill switches and enforcement that stop an agent posting or changing what it posted, checked before anything else.
@@ -97,7 +104,7 @@ export async function countAttempt(relay: Relay, agentId: string, tier: AgentTie
     [`attempt:${agentId}:m`, limits.posts_per_minute * 2, MINUTE, 'posts_per_minute', 'a minute'],
     [`attempt:${agentId}:d`, limits.posts_per_day * 2, DAY, 'posts_per_day', 'a day'],
   ] as const) {
-    const r = await hit(relay, { key, limit, windowSeconds });
+    const r = await hit(relay, { key, limit, windowSeconds }, 1, true);
     if (!r.ok) {
       throw new PolicyError(
         429,
@@ -119,23 +126,25 @@ export interface Duplicate {
 }
 
 /**
- * The same agent saying the same thing in a channel again inside ten minutes is blocked. The same text from three different
- * agents inside ten minutes is held, in case it is copied or coordinated, but only when it is long enough (a short
- * "thanks" is what many agents say). Failed messages never count, and a message the same agent had blocked doesn't make
- * its resend a repeat. A poll is a repeat when the same agent sends the same poll to the channel; polls aren't compared across agents.
+ * The same agent saying the same thing in a channel again inside ten minutes is blocked, and so is saying again, inside a day,
+ * what a moderator took down. The same text from three different agents inside ten minutes is held, in case it is copied or
+ * coordinated, but only when it is long enough (a short "thanks" is what many agents say). Texts are compared without any reply
+ * line, so the same words answering different messages are still the same words. Failed messages never count, and a message the
+ * same agent had blocked doesn't make its resend a repeat. A message its author deleted is not a repeat either. A poll is a repeat
+ * when the same agent sends the same poll to the channel; polls aren't compared across agents.
  */
 export async function findDuplicate(
   relay: Relay,
-  input: { agentId: string; channelId: string; contentHash: string; excludeId: string | null; length: number; poll: string | null },
+  input: { agentId: string; channelId: string; textHash: string; excludeId: string | null; length: number; poll: string | null },
 ): Promise<Duplicate | null> {
   const since = iso(new Date(relay.now().getTime() - DUPLICATE_WINDOW_MS));
   const exclude = input.excludeId ?? '';
-  const sameAs = input.poll ? 'poll = ?' : 'content_hash = ? AND poll IS NULL';
+  const sameAs = input.poll ? 'poll = ?' : 'text_hash = ? AND poll IS NULL';
   const same = await relay.db
     .prepare(
       `SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND ${sameAs} AND created_at >= ? AND id != ? AND status IN ('moderating', 'held', 'queued', 'sending', 'sent', 'uncertain') LIMIT 1`,
     )
-    .bind(input.agentId, input.channelId, input.poll ?? input.contentHash, since, exclude)
+    .bind(input.agentId, input.channelId, input.poll ?? input.textHash, since, exclude)
     .first();
   if (same) {
     return {
@@ -144,12 +153,27 @@ export async function findDuplicate(
       reason: `You already sent this same ${input.poll ? 'poll' : 'message'} in this channel in the last 10 minutes. Don’t repeat yourself; wait, or say something new. It was not posted.`,
     };
   }
-  if (input.poll || input.length < CROSS_AGENT_MIN_CHARS) return null;
+  if (input.poll) return null;
+  const removedSince = iso(new Date(relay.now().getTime() - REMOVED_REPEAT_MS));
+  const removed = await relay.db
+    .prepare(
+      "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND status = 'removed' AND reviewed_by IS NOT NULL AND created_at >= ? AND id != ? LIMIT 1",
+    )
+    .bind(input.agentId, input.channelId, input.textHash, removedSince, exclude)
+    .first();
+  if (removed) {
+    return {
+      verdict: 'block',
+      policy: 'duplicate',
+      reason: 'A moderator removed this same message from this channel recently. Don’t post it again. It was not posted.',
+    };
+  }
+  if (input.length < CROSS_AGENT_MIN_CHARS) return null;
   const others = await relay.db
     .prepare(
-      "SELECT COUNT(DISTINCT agent_id) AS n FROM relay_messages WHERE content_hash = ? AND agent_id != ? AND created_at >= ? AND id != ? AND status != 'failed'",
+      "SELECT COUNT(DISTINCT agent_id) AS n FROM relay_messages WHERE text_hash = ? AND agent_id != ? AND created_at >= ? AND id != ? AND status != 'failed'",
     )
-    .bind(input.contentHash, input.agentId, since, exclude)
+    .bind(input.textHash, input.agentId, since, exclude)
     .first<{ n: number }>();
   if ((others?.n ?? 0) + 1 >= CROSS_AGENT_DUPLICATES) {
     return {
@@ -165,7 +189,7 @@ export async function findDuplicate(
 /** Per agent per minute and day (the numbers for its tier), the channel's own pace, and for agents on probation a budget shared by their network. */
 export async function enforceRates(
   relay: Relay,
-  input: { agentId: string; tier: AgentTier; probation: boolean; channel: ChannelRow; net: string | null },
+  input: { agentId: string; tier: AgentTier; probation: boolean; channel: ChannelRow; net: string | null; startsThread?: boolean },
 ): Promise<void> {
   const { channel, tier } = input;
   const limits = limitsFor(tier);
@@ -186,12 +210,36 @@ export async function enforceRates(
         `You can post ${limits.posts_per_day} messages a day${isVerified(tier) ? '' : ' while your agent is unverified'}. Try again in ${w} seconds.${verifyRaises(tier, 'posts_per_day', 'a day')}`,
     },
     {
+      key: `chan:${channel.id}:m`,
+      limit: CHANNEL_POSTS_PER_MINUTE,
+      windowSeconds: MINUTE,
+      message: (w) => `This channel is receiving as many agent posts as it allows a minute. Try again in ${w} seconds.`,
+    },
+    {
       key: `pace:${input.agentId}:${channel.id}:m`,
       limit: channel.pace_per_agent_per_minute,
       windowSeconds: MINUTE,
       message: (w) => `This channel allows each agent ${channel.pace_per_agent_per_minute} messages a minute. Try again in ${w} seconds.`,
     },
   ];
+  if (input.startsThread) {
+    // Discord caps a server's open threads; without limits a few agents could use them all up and stop everyone starting one.
+    checks.push(
+      {
+        key: `thread:${input.agentId}:h`,
+        limit: isVerified(tier) ? VERIFIED_THREADS_PER_HOUR : UNVERIFIED_THREADS_PER_HOUR,
+        windowSeconds: 3600,
+        message: (w) =>
+          `You can start ${isVerified(tier) ? VERIFIED_THREADS_PER_HOUR : UNVERIFIED_THREADS_PER_HOUR} threads or posts an hour. Reply in an existing thread, or try again in ${w} seconds.${isVerified(tier) ? '' : ` Verifying your agent with Discord raises this to ${VERIFIED_THREADS_PER_HOUR}. ${VERIFY_HOW}`}`,
+      },
+      {
+        key: `thread:chan:${channel.id}:d`,
+        limit: THREADS_PER_CHANNEL_PER_DAY,
+        windowSeconds: DAY,
+        message: (w) => `Agents have started as many threads in this channel today as are allowed. Reply in an existing thread, or try again in ${w} seconds.`,
+      },
+    );
+  }
   if (input.probation && input.net) {
     checks.push({
       key: `post:net:${input.net}:h`,

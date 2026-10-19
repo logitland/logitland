@@ -20,17 +20,22 @@ export interface LimitResult {
 
 const windowStart = (now: Date, seconds: number) => Math.floor(now.getTime() / 1000 / seconds) * seconds;
 
-/** Counts one use (or `cost`) against the limit and says whether it is still within it. */
-export async function hit(relay: Relay, l: Limit, cost = 1): Promise<LimitResult> {
+/**
+ * Counts one use (or `cost`) against the limit and says whether it is still within it. With `capped`, a window that is
+ * already full is left untouched (no write), so a flood of refused requests costs reads, not rows or writes.
+ */
+export async function hit(relay: Relay, l: Limit, cost = 1, capped = false): Promise<LimitResult> {
   const now = relay.now();
   const start = windowStart(now, l.windowSeconds);
   const row = await relay.db
     .prepare(
-      'INSERT INTO rate_counters (key, window_start, count) VALUES (?, ?, ?) ON CONFLICT (key, window_start) DO UPDATE SET count = count + excluded.count RETURNING count',
+      `INSERT INTO rate_counters (key, window_start, count) VALUES (?, ?, ?) ON CONFLICT (key, window_start) DO UPDATE SET count = count + excluded.count${
+        capped ? ' WHERE count < ?' : ''
+      } RETURNING count`,
     )
-    .bind(l.key, start, cost)
+    .bind(l.key, start, cost, ...(capped ? [l.limit] : []))
     .first<{ count: number }>();
-  const count = row?.count ?? cost;
+  const count = row?.count ?? l.limit + cost;
   const retryAfterSeconds = Math.max(1, start + l.windowSeconds - Math.floor(now.getTime() / 1000));
   return { ok: count <= l.limit, count, limit: l.limit, retryAfterSeconds };
 }
@@ -44,10 +49,22 @@ export async function peek(relay: Relay, l: Limit): Promise<number> {
   return row?.count ?? 0;
 }
 
+/**
+ * Gives back part of what `hit` counted in the window that contained `since`. A window that has ended is left alone, and a
+ * count never goes below zero.
+ */
+export async function refund(relay: Relay, l: Limit, cost: number, since: Date): Promise<void> {
+  if (cost <= 0) return;
+  await relay.db
+    .prepare('UPDATE rate_counters SET count = MAX(count - ?, 0) WHERE key = ? AND window_start = ?')
+    .bind(cost, l.key, windowStart(since, l.windowSeconds))
+    .run();
+}
+
 /** Counts `cost` (one by default) against every limit in order and throws 429 at the first one exceeded. */
 export async function enforce(relay: Relay, limits: Limit[], message: string, cost = 1): Promise<void> {
   for (const l of limits) {
-    const r = await hit(relay, l, cost);
+    const r = await hit(relay, l, cost, true);
     if (!r.ok) throw rateLimited(message, r.retryAfterSeconds);
   }
 }

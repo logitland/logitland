@@ -20,7 +20,7 @@ import { iso, type Relay } from '../context';
 import { RelayError, conflict, forbidden, unavailable } from '../errors';
 import { NO_CLIENT, type AgentPrincipal, type AgentRecord, type ClientInfo } from '../types';
 import { auditStmt } from './audit';
-import { assertOwnerEstablished, getAgent, newKey, ownerLimitKey, toAgent } from './identity';
+import { assertOwnerEstablished, assertOwnerHasRoom, getAgent, newKey, ownerLimitKey, toAgent } from './identity';
 import { enforce } from './limits';
 import type { ModerationRequest } from './moderation/classifier';
 import { isOnProbation } from './moderation/policy';
@@ -143,6 +143,7 @@ export async function signup(relay: Relay, req: SignupRequest, client: ClientInf
   const name = canonicalName(req.name);
   must(checkName(name));
   if (req.description) must(checkDescription(req.description));
+  if (req.owner_hint) must(checkDescription(req.owner_hint, 'owner hint'));
   await assertNameFree(relay, name);
 
   const net = h.net ?? 'unknown';
@@ -153,12 +154,19 @@ export async function signup(relay: Relay, req: SignupRequest, client: ClientInf
       { key: `signup:ip:${h.ip ?? 'unknown'}:h`, limit: SIGNUPS_PER_IP_PER_HOUR, windowSeconds: 3600 },
       { key: `signup:net:${net}:h`, limit: LIMITS.signupsPerNetworkPerHour, windowSeconds: 3600 },
       { key: `signup:net:${net}:d`, limit: LIMITS.signupsPerNetworkPerDay, windowSeconds: 86_400 },
-      ...(client.asn === null ? [] : [{ key: `signup:asn:${client.asn}:h`, limit: LIMITS.signupsPerAsnPerHour, windowSeconds: 3600 }]),
-      { key: 'signup:all:h', limit: LIMITS.signupsPerHour, windowSeconds: 3600 },
     ],
     'Too many signups from your network. Try again later.',
   );
   await consumeChallenge(relay, req.challenge, h.net);
+  // The shared caps count only signups that spent a challenge, so one challenge sent several times at once uses one place.
+  await enforce(
+    relay,
+    [
+      ...(client.asn === null ? [] : [{ key: `signup:asn:${client.asn}:h`, limit: LIMITS.signupsPerAsnPerHour, windowSeconds: 3600 }]),
+      { key: 'signup:all:h', limit: LIMITS.signupsPerHour, windowSeconds: 3600 },
+    ],
+    'Signups are busy right now across the relay or your hosting provider, not just your network. The challenge is spent: get a new one from GET /v1/signup/challenge and try again in a while.',
+  );
 
   const agentId = newId('agent');
   try {
@@ -240,6 +248,9 @@ export async function updateProfile(
   patch: ProfileUpdate,
   actor: { type: 'agent' | 'owner'; id: string },
 ): Promise<AgentRecord> {
+  if (actor.type === 'owner' && (agent.status === 'suspended' || agent.status === 'banned')) {
+    throw forbidden(`This agent is ${agent.status}. Only a relay admin can change that.`);
+  }
   if (patch.avatar_url && agent.tier !== 'trusted') {
     throw forbidden(
       'Only trusted agents can set an avatar. A relay admin marks an agent trusted; until then it shows the default avatar. You can still clear one with avatar_url null.',
@@ -314,6 +325,7 @@ export async function createOwnedAgent(
     [{ key: 'agent-create:all:h', limit: LIMITS.dashboardAgentsPerHour, windowSeconds: 3600 }],
     'Registering agents is busy right now. Try again in a while.',
   );
+  await assertOwnerHasRoom(relay, ownerId);
 
   const agentId = newId('agent');
   await moderateProfile(relay, agentId, 'claimed', { name, description: req.description });

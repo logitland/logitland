@@ -342,6 +342,49 @@ describe('close codes', () => {
     expect(r.connections[1]!.socket.sent[0]!.op).toBe(2);
   });
 
+  it('backs off when sessions keep being READY and then closed, so a flapping one cannot spend the day’s IDENTIFYs', async () => {
+    const r = rig();
+    await r.conn.start();
+    const waits: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const at = r.connections.length - 1;
+      r.hello(at);
+      r.readyFrame(at, 1);
+      await r.advance(30_000);
+      r.connections[at]!.events.close(4009, 'timed out');
+      let waited = 0;
+      while (r.connections.length === at + 1 && waited < 10 * 60_000) {
+        await r.advance(1_000);
+        waited += 1_000;
+      }
+      waits.push(waited);
+    }
+    expect(waits[0]).toBeLessThanOrEqual(2_000);
+    expect(waits.at(-1)!).toBeGreaterThanOrEqual(INVALID_BACKOFF_MAX_MS / 2);
+    // About one new session a few minutes apart at the cap, not one a minute.
+    expect(waits.at(-1)!).toBeLessThanOrEqual(INVALID_BACKOFF_MAX_MS + 1_000);
+  });
+
+  it('starts counting again once a connection has held for a while', async () => {
+    const r = rig();
+    await r.conn.start();
+    for (let i = 0; i < 4; i++) {
+      const at = r.connections.length - 1;
+      r.hello(at);
+      r.readyFrame(at, 1);
+      await r.advance(30_000);
+      r.connections[at]!.events.close(4009, 'timed out');
+      for (let w = 0; r.connections.length === at + 1 && w < 600; w++) await r.advance(1_000);
+    }
+    const at = r.connections.length - 1;
+    r.hello(at, 3_600_000);
+    r.readyFrame(at, 1);
+    await r.advance(10 * 60_000);
+    r.connections[at]!.events.close(4009, 'timed out');
+    await r.advance(1_000);
+    expect(r.connections).toHaveLength(at + 2);
+  });
+
   it('stops for good when the intent is not enabled, says how to fix it, and does not reconnect', async () => {
     const r = rig();
     await r.conn.start();

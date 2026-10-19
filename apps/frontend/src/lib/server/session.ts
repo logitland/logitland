@@ -13,9 +13,10 @@ export interface Session {
 }
 
 const encoder = new TextEncoder();
-const COOKIE = 'll_session';
 const MAX_AGE = 60 * 60 * 24 * 7;
-const PERSON_COOKIE = 'll_person';
+// Over https the cookies are __Host- cookies: the browser refuses one set from a sibling subdomain (which could plant someone
+// else's genuine session in a signed-out visitor's browser). It also requires Secure, so plain http (local development) keeps the bare name.
+const cookieName = (base: 'll_session' | 'll_person', secure: boolean) => (secure ? `__Host-${base}` : base);
 const PERSON_MAX_AGE = 60 * 30;
 
 const b64url = (bytes: Uint8Array) =>
@@ -50,19 +51,18 @@ export async function unsign<T>(secret: string, purpose: Purpose, token: string 
   }
 }
 
-export async function readSession(cookies: Cookies, secret: string): Promise<Session | null> {
-  const s = await unsign<Session>(secret, 'session', cookies.get(COOKIE));
+export async function readSession(cookies: Cookies, secret: string, secure: boolean): Promise<Session | null> {
+  const s = await unsign<Session>(secret, 'session', cookies.get(cookieName('ll_session', secure)));
   return s && typeof s.owner_id === 'string' && s.exp > Date.now() / 1000 ? s : null;
 }
 
 export async function writeSession(cookies: Cookies, secret: string, s: Omit<Session, 'exp'>, secure: boolean): Promise<void> {
   const value = await sign(secret, 'session', { ...s, exp: Math.floor(Date.now() / 1000) + MAX_AGE });
-  cookies.set(COOKIE, value, { path: '/', httpOnly: true, sameSite: 'lax', secure, maxAge: MAX_AGE });
+  cookies.set(cookieName('ll_session', secure), value, { path: '/', httpOnly: true, sameSite: 'lax', secure, maxAge: MAX_AGE });
 }
 
-export function clearSession(cookies: Cookies): void {
-  cookies.delete(COOKIE, { path: '/' });
-  cookies.delete(PERSON_COOKIE, { path: '/' });
+export function clearSession(cookies: Cookies, secure: boolean): void {
+  for (const base of ['ll_session', 'll_person'] as const) cookies.delete(cookieName(base, secure), { path: '/', secure });
 }
 
 /**
@@ -77,14 +77,14 @@ export interface PersonSession {
   exp: number;
 }
 
-export async function readPerson(cookies: Cookies, secret: string): Promise<PersonSession | null> {
-  const s = await unsign<PersonSession>(secret, 'person', cookies.get(PERSON_COOKIE));
+export async function readPerson(cookies: Cookies, secret: string, secure: boolean): Promise<PersonSession | null> {
+  const s = await unsign<PersonSession>(secret, 'person', cookies.get(cookieName('ll_person', secure)));
   return s && s.kind === 'person' && s.exp > Date.now() / 1000 ? s : null;
 }
 
 export async function writePerson(cookies: Cookies, secret: string, p: Pick<PersonSession, 'discord_user_id' | 'username'>, secure: boolean): Promise<void> {
   const value = await sign(secret, 'person', { kind: 'person', ...p, exp: Math.floor(Date.now() / 1000) + PERSON_MAX_AGE });
-  cookies.set(PERSON_COOKIE, value, { path: '/', httpOnly: true, sameSite: 'lax', secure, maxAge: PERSON_MAX_AGE });
+  cookies.set(cookieName('ll_person', secure), value, { path: '/', httpOnly: true, sameSite: 'lax', secure, maxAge: PERSON_MAX_AGE });
 }
 
 /** Signing in from the message-removal page needs no owner account; every other page does. */

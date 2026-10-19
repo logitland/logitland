@@ -111,6 +111,7 @@ describe('threads', () => {
       thread_id: THREAD,
       parent_id: LOUNGE,
       name: 'a thread',
+      owner_id: null,
       created_at: '2026-10-19T02:00:00+00:00',
       archived: false,
       locked: false,
@@ -126,6 +127,11 @@ describe('threads', () => {
       expect(normalizeDispatch(t, d, c)).toContainEqual(upsert);
       expect(c.threads.get(THREAD)).toBe(LOUNGE);
     }
+  });
+
+  it('carry the user who made them', () => {
+    const [e] = normalizeDispatch('THREAD_CREATE', thread({ owner_id: '200000000000000001' }), ctx());
+    expect(IntakeEvent.parse(e)).toMatchObject({ owner_id: '200000000000000001' });
   });
 
   it('carry Discord’s archived, locked and creation time, and fall back to the ID’s time', () => {
@@ -170,9 +176,15 @@ describe('threads', () => {
     expect(guild).toEqual({ kind: 'thread_sync', parent_ids: null, active_ids: [] });
   });
 
-  it('cover announcement and private threads but not plain channels', () => {
+  it('are not synced from an unavailable guild, which would archive every live thread', () => {
+    expect(normalizeDispatch('GUILD_CREATE', { id: GUILD, unavailable: true }, ctx())).toEqual([]);
+  });
+
+  it('cover announcement and public threads but not private ones or plain channels', () => {
     expect(normalizeDispatch('THREAD_CREATE', thread({ type: 10 }), ctx())).toHaveLength(1);
-    expect(normalizeDispatch('THREAD_CREATE', thread({ type: 12 }), ctx())).toHaveLength(1);
+    const c = ctx();
+    expect(normalizeDispatch('THREAD_CREATE', thread({ type: 12 }), c)).toEqual([]);
+    expect(c.threads.size).toBe(0);
     expect(normalizeDispatch('THREAD_CREATE', thread({ type: 0 }), ctx())).toEqual([]);
   });
 

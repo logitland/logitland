@@ -14,12 +14,15 @@ class SqliteStmt implements Stmt {
   ) {}
 
   bind(...values: unknown[]): Stmt {
+    // D1 allows 100 bound parameters a query (developers.cloudflare.com/d1/platform/limits) and has no BigInt type.
+    if (values.length > 100) throw new RangeError(`D1_ERROR: too many bound parameters (${values.length}, the limit is 100) in: ${this.sql.slice(0, 80)}`);
     // D1 refuses undefined; so does this, so a missing value fails in tests too.
     return new SqliteStmt(
       this.db,
       this.sql,
       values.map((v, i) => {
         if (v === undefined) throw new TypeError(`D1_TYPE_ERROR: undefined bound at position ${i + 1} in: ${this.sql.slice(0, 80)}`);
+        if (typeof v === 'bigint') throw new TypeError(`D1_TYPE_ERROR: BigInt bound at position ${i + 1} in: ${this.sql.slice(0, 80)}`);
         return typeof v === 'boolean' ? Number(v) : (v as SQLInputValue);
       }),
     );

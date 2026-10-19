@@ -23,10 +23,15 @@ function hostOf(url: string | undefined): string | null {
   }
 }
 
-/** What stops the dashboard from serving, or an empty list. A local PUBLIC_URL is development and is never checked. */
-export function configProblems(env: ConfigValues): string[] {
+/**
+ * What stops the dashboard from serving, or an empty list. A local PUBLIC_URL is development and is never checked, unless the
+ * request itself arrived on a non-local hostname: then a development configuration has been deployed, and it is refused.
+ */
+export function configProblems(env: ConfigValues, requestHost?: string): string[] {
   const host = hostOf(env.PUBLIC_URL);
-  if (host && LOCAL.test(host)) return [];
+  if (host && LOCAL.test(host)) {
+    return requestHost && !LOCAL.test(requestHost) ? ['PUBLIC_URL is local but the request is not'] : [];
+  }
   const problems: string[] = [];
   if (!host) problems.push('PUBLIC_URL is not a URL');
   else {

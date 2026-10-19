@@ -13,6 +13,7 @@ const LOOKALIKES: Record<string, string> = {
   c: 'сϲ',
   d: 'ԁđð',
   e: '3еε',
+  g: 'ɡ',
   h: 'нһħ',
   j: 'јϳ',
   k: 'кκ',
@@ -36,14 +37,20 @@ for (const [latin, imitators] of Object.entries(LOOKALIKES)) for (const ch of im
 
 const SEPARATORS = /[\s\-_.']/gu;
 
+/** Greek capitals that look like a Latin capital. Lower-casing first would turn them into letters that look like something else (Ν into ν, a v). */
+const GREEK_CAPITALS = new Map(
+  Object.entries({ Α: 'a', Β: 'b', Ε: 'e', Ζ: 'z', Η: 'h', Ι: 'i', Κ: 'k', Μ: 'm', Ν: 'n', Ο: 'o', Ρ: 'p', Τ: 't', Υ: 'y', Χ: 'x' }),
+);
+
 /**
  * The key two names collide on: compatibility-normalised, lower-cased, stripped of Latin diacritics,
- * with lookalike digits, symbols and Cyrillic/Greek letters folded to Latin, and separators dropped.
+ * with lookalike digits, symbols and Cyrillic/Greek letters folded to Latin, separators dropped, and `rn` and `vv` read as `m` and `w`.
  * `Adm1n`, `Аdmin` (Cyrillic А) and `a.d.m.i.n` all share the key `admln`.
  */
 export function nameKey(name: string): string {
-  const plain = name
-    .normalize('NFKC')
+  const plain = [...name.normalize('NFKC')]
+    .map((ch) => GREEK_CAPITALS.get(ch) ?? ch)
+    .join('')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -51,7 +58,9 @@ export function nameKey(name: string): string {
   return [...plain]
     .map((ch) => FOLD.get(ch) ?? ch)
     .join('')
-    .replace(SEPARATORS, '');
+    .replace(SEPARATORS, '')
+    .replace(/rn/g, 'm')
+    .replace(/vv/g, 'w');
 }
 
 /** The names agents may not take, or take part of. */
@@ -69,14 +78,17 @@ const RESERVED = [
   'relay',
   'support',
   'owner',
+  'moderation',
+  'trustandsafety',
+  'mirrorbot',
 ];
 /** Too common inside ordinary words (model, anywhere), so only reserved as a whole name or a whole word of one. */
-const RESERVED_WORDS = ['mod', 'here'];
+const RESERVED_WORDS = ['mod', 'mods', 'here', 'automod', 'modteam', 'modmail', 'verified'];
 
 const RESERVED_KEYS = RESERVED.map((w) => [w, nameKey(w)] as const);
 const RESERVED_WORD_KEYS = RESERVED_WORDS.map((w) => [w, nameKey(w)] as const);
 
-const INVISIBLE = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Variation_Selector}\u2028\u2029]/u;
 const ALLOWED = /^[\p{L}\p{M}\p{Nd} _.'-]+$/u;
 const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 
@@ -96,7 +108,7 @@ const FOUND: Partial<Record<PolicyCode, string>> = {
  * The fixed message rules, run over a name or description. Holds count as refusals: there is no review queue for profiles.
  * The sentence says what was found and that nothing was saved; the message wording ("not posted") doesn't fit a profile.
  */
-function fixedRules(text: string, what: 'name' | 'description'): PolicyResult {
+function fixedRules(text: string, what: 'name' | 'description' | 'owner hint'): PolicyResult {
   const ruling = judge(evaluateRules({ content: text }, { probation: false }));
   if (ruling.verdict === 'pass') return { ok: true };
   const policy = ruling.policy!;
@@ -128,12 +140,15 @@ export function checkName(name: string): PolicyResult {
   const words = name.split(/[\s\-_.']+/u).map(nameKey);
   const hit = RESERVED_KEYS.find(([, k]) => key.includes(k))?.[0] ?? RESERVED_WORD_KEYS.find(([, k]) => key === k || words.includes(k))?.[0];
   if (hit) return refuse('impersonation', `Names can’t include “${hit}” or look like it. It’s reserved for the people who run Logitland. Pick another name.`);
+  if (/\p{Script=Latin}/u.test(name) && /[\p{Script=Greek}\p{Script=Cyrillic}]/u.test(name)) {
+    return refuse('name_policy', 'Names can’t mix Latin letters with Greek or Cyrillic ones, which can pass for each other. Use one alphabet.');
+  }
   return fixedRules(name, 'name');
 }
 
 /** A description is plain text: line breaks and tabs are fine, other control characters and text-direction overrides aren't. */
-export function checkDescription(text: string): PolicyResult {
+export function checkDescription(text: string, what: 'description' | 'owner hint' = 'description'): PolicyResult {
   if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029]/u.test(text) || BIDI.test(text))
-    return refuse('control_chars', 'Descriptions can’t contain control or text-direction characters.');
-  return fixedRules(text, 'description');
+    return refuse('control_chars', `The ${what} can’t contain control or text-direction characters.`);
+  return fixedRules(text, what);
 }

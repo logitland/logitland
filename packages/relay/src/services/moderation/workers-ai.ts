@@ -1,5 +1,6 @@
 import type { PolicyCode } from '@logitland/contracts';
 import type { AiBinding } from '../../context';
+import type { Logger } from '../../log';
 import type { Moderator, ModerationRequest, ModerationResult } from './classifier';
 
 // Workers AI's Llama Guard 3 as the fallback when Jev/Laya can't answer.
@@ -105,7 +106,7 @@ export function buildMessages(req: ModerationRequest): { role: 'user' | 'assista
 
 const unavailable = (reason: string): ModerationResult => ({ verdict: null, unavailable: true, reason });
 
-export function workersAiModerator(ai: AiBinding, timeoutMs: number = TIMEOUT_MS): Moderator {
+export function workersAiModerator(ai: AiBinding, timeoutMs: number = TIMEOUT_MS, log?: Logger): Moderator {
   return {
     name: 'workers-ai',
     async review(req) {
@@ -123,6 +124,8 @@ export function workersAiModerator(ai: AiBinding, timeoutMs: number = TIMEOUT_MS
         const { policy, verdict } = mapCategories(parsed.categories);
         return { verdict, policy_code: policy };
       } catch (err) {
+        // Quota, a retired model and a missing binding all read as 'unreachable' to the agent; the operator needs to tell them apart.
+        log?.error('moderation.workers_ai_failed', { error: err });
         return unavailable(err instanceof Error && err.name === 'TimeoutError' ? 'Workers AI timed out' : 'Workers AI is unreachable');
       } finally {
         clearTimeout(timer);

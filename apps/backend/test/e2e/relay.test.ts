@@ -26,8 +26,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   const idem = () => `e2e-${Date.now().toString(36)}-${counter++}`;
   const post = (who: Agent, body: Record<string, unknown>) => s.call('POST', '/v1/messages', { key: who.key, body, headers: { 'idempotency-key': idem() } });
   const channelPage = (who: Agent, channel: string, query = '') => s.call('GET', `/v1/channels/${channel}/messages${query}`, { key: who.key });
-  /** The public mirror may be cached at the edge, so every read asks for a page nobody has asked for before. */
-  const publicPage = (channel: string, query = '') => s.call('GET', `/public/channels/${channel}/messages?_=${counter++}${query}`);
+  /** The public mirror may be cached at the edge, so every read asks for a page nobody has asked for before (the mirror takes no other parameters, so the page size varies). */
+  const publicPage = (channel: string, query = '') => s.call('GET', `/public/channels/${channel}/messages?limit=${100 - (counter++ % 50)}${query}`);
   const find = (res: Reply, messageId: string) => res.body.messages.find((m: { message_id: string }) => m.message_id === messageId);
   const seen = (who: Agent, channel: string, messageId: string) => async () => find(await channelPage(who, channel), messageId);
   const executions = () => s.fake.requestsTo('webhook.execute');
@@ -271,7 +271,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       data: {
         flags: 64,
         content: expect.stringContaining('The Logitland public mirror'),
-        components: [{ type: 1, components: [{ type: 2, style: 1, custom_id: 'mirror_agree_cmd' }] }],
+        components: [{ type: 1, components: [{ type: 2, style: 1, custom_id: expect.stringMatching(/^mirror_agree_cmd:\d{4}-\d{2}-\d{2}$/) }] }],
       },
     });
     expect((notice.body as { data: { content: string } }).data.content.length).toBeLessThanOrEqual(2000);
@@ -279,7 +279,11 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(await s.sql('SELECT 1 FROM consents WHERE discord_user_id = ?', visitor)).toEqual([]);
 
     // Pressing the button agrees. The answer is a deferral; the role follows.
-    const press = await s.fake.interact({ user: visitor, button: { customId: 'mirror_agree_cmd' }, channelId: s.channels.lounge });
+    const press = await s.fake.interact({
+      user: visitor,
+      button: { customId: (notice.body as { data: { components: { components: { custom_id: string }[] }[] } }).data.components[0]!.components[0]!.custom_id },
+      channelId: s.channels.lounge,
+    });
     expect(press.status).toBe(200);
     expect(press.body).toEqual({ type: 5, data: { flags: 64 } });
     await eventually(() => s.fake.requestsTo('guild.member.role.add').length === 1, { what: 'the role to be given' });
@@ -802,7 +806,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(limited.body).toMatchObject({ code: 'rate_limited' });
 
     const rows = await s.sql<{ key: string; count: number }>("SELECT key, count FROM rate_counters WHERE key LIKE 'pow:net:%' ORDER BY count DESC LIMIT 1");
-    expect(rows[0]!.count).toBeGreaterThanOrEqual(62);
+    // A full window is left alone, so refused requests cost no writes: the count stops at the limit.
+    expect(rows[0]!.count).toBe(60);
 
     // The statements themselves, straight on the database.
     await s.db.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('probe', '1', ?)").bind('x').run();

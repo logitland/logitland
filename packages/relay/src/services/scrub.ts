@@ -76,10 +76,14 @@ export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedB
       relay.db
         .prepare(`UPDATE relay_messages SET content = NULL, thread_name = NULL, poll = NULL, reply_prefix = NULL WHERE discord_message_id IN (${marks})`)
         .bind(...part),
+      // The title of a thread an agent started is its starter's words (the thread's ID is the starter's ID).
+      relay.db.prepare(`UPDATE threads SET name = NULL WHERE creator_agent_id IS NOT NULL AND name IS NOT NULL AND id IN (${marks})`).bind(...part),
       relay.db
         .prepare(
           `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL, last_error = 'The message was removed before it was delivered'
-           WHERE status IN ('pending', 'retrying') AND event_id IN (SELECT id FROM events WHERE message_id IN (${marks}) AND type IN ('message.created', 'message.updated'))`,
+           WHERE id IN (
+             SELECT d.id FROM events e JOIN deliveries d INDEXED BY deliveries_event ON d.event_id = e.id
+             WHERE e.message_id IN (${marks}) AND e.type IN ('message.created', 'message.updated') AND d.status IN ('pending', 'retrying'))`,
         )
         .bind(...part),
     );
@@ -182,7 +186,7 @@ const REPLIES_TO_PERSON = `SELECT r.message_id, r.relay_message_id FROM conversa
 
 /**
  * What still names a person after their messages are gone: the reply lines agents wrote to them (in the conversation, the
- * posting records and event payloads) become "a person", and the titles of threads they started are dropped. Run before
+ * posting records and event payloads) become "a person", and the titles of threads they started or named are dropped. Run before
  * the messages are anonymised, while they can still be found by the person's ID. Safe to repeat.
  */
 function unnameStatements(relay: Relay, discordUserId: string): Stmt[] {
@@ -199,7 +203,7 @@ function unnameStatements(relay: Relay, discordUserId: string): Stmt[] {
       .prepare(
         `UPDATE relay_messages SET reply_prefix = ${unnamed('reply_prefix')} WHERE reply_prefix IS NOT NULL AND ${isReplyLine('reply_prefix')}
            AND (id IN (SELECT relay_message_id FROM (${REPLIES_TO_PERSON}) WHERE relay_message_id IS NOT NULL)
-             OR (status IN ('moderating', 'held', 'queued', 'sending', 'uncertain') AND reply_to IN (SELECT CAST(p.message_id AS TEXT) FROM conversation p WHERE p.discord_user_id = ?)))`,
+             OR (status IN ('moderating', 'held', 'queued', 'sending', 'uncertain', 'blocked', 'failed') AND reply_to IN (SELECT CAST(p.message_id AS TEXT) FROM conversation p WHERE p.discord_user_id = ?)))`,
       )
       .bind(discordUserId, discordUserId),
     relay.db
@@ -212,6 +216,8 @@ function unnameStatements(relay: Relay, discordUserId: string): Stmt[] {
     relay.db
       .prepare('UPDATE threads SET name = NULL WHERE name IS NOT NULL AND id IN (SELECT message_id FROM conversation WHERE discord_user_id = ?)')
       .bind(discordUserId),
+    // And the ones they named without starting (a thread made from someone else's message).
+    relay.db.prepare('UPDATE threads SET name = NULL, owner_id = NULL WHERE owner_id = ?').bind(discordUserId),
   ];
 }
 
