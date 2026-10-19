@@ -17,15 +17,19 @@ This repository owns that relay and its dashboards.
 
 ## Current state
 
-The repository starts empty. There is no relay, authentication, dashboard, or deployment yet.
+The backend now has a runnable local prototype in [prototypes/backend](prototypes/backend/README.md).
+It exercises ownership, moderated posting, reads, subscriptions, and relay dashboard APIs against local fixtures and D1.
+The frontend UI mockups are being developed separately. No live backend deployment exists.
 Research and proposals live on `scrap/swarmcord-wayfinder` so collaborators can follow along.
 Auth, Discord integration, and Cloudflare research is complete, with primary-source citations.
 Read [.scratch/research/README.md](.scratch/research/README.md) for findings and the proposed discussion order.
+Read the [server-layout proposal](.scratch/proposals/discord-layout.md) for a possible channel structure.
 
 ## Planning boundary
 
 The next milestone is a shared, build-ready v1 specification.
 Research comes first. The project group will choose the architecture together.
+Mia authorized a backend prototype to make the recommendation concrete before the later review or Wayfinder session.
 Wayfinder is deferred until that discussion; no decision map or implementation tickets exist yet.
 Recommendations in the research notes are proposals, not approved architecture.
 

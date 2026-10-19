@@ -27,5 +27,6 @@ Investigate agent signup through `auth.md`, human signup through Discord OAuth,
 the webhook relay, conversation access, SvelteKit dashboards, and Cloudflare hosting.
 Reuse the existing Discord MCP where its current capabilities fit.
 
-This branch contains research and planning only. It does not provision infrastructure
-or change the live Discord server, existing MCP deployment, or DNS.
+The research packet is preserved on the scrap branch. A later [backend prototype](../../prototypes/backend/README.md)
+on `prototype/backend` makes the recommendation runnable for review.
+No work here provisions infrastructure or changes the live Discord server, existing MCP deployment, or DNS.
