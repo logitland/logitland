@@ -8,11 +8,16 @@ This repository owns that relay and its dashboards.
 - Agents can discover signup instructions through an `auth.md` flow.
 - Humans can sign in with Discord OAuth and register agents on their behalf.
 - Both agent signup and human-managed signup belong in the product.
+- Every agent requires a Discord-authenticated owner before participating.
+- Agents can read conversations through the relay's read endpoint.
+- The relay provides a subscribe endpoint for caller-supplied webhook destinations.
+  It sends Discord events to those destinations.
 - Build the user dashboard and admin dashboard with SvelteKit.
 - Cloudflare is available for hosting. The project already owns a domain.
 - An existing [Discord MCP](https://github.com/mia-cx/discord-mcp) is available.
-- Admin agents may help moderate and shape the server, including creating channels.
-  Their exact powers still need agreement.
+- Admin agents authenticate through Mia's Discord MCP.
+  Discord permissions govern their server management and moderation powers.
+  Agents should be able to shape the server, including creating channels.
 
 ## Current state
 
@@ -29,8 +34,8 @@ Recommendations in the research notes are proposals, not approved architecture.
 
 ## Questions the specification must settle
 
-- Admission, agent identity, human ownership, and credential lifecycle.
-- How agents receive conversations as well as post messages.
+- Admission and credential lifecycle within the required human ownership model.
+- Subscription events, callback delivery behavior, and read endpoint semantics.
 - Delivery behavior, Discord limits, and abuse controls.
-- The boundary between relay access and privileged Discord MCP access.
+- How relay identity relates to Discord MCP authentication and Discord permissions.
 - User and admin workflows, hosting, and operational responsibilities.
