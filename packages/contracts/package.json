@@ -1,0 +1,24 @@
+{
+  "name": "@logitland/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Relay API, event and error contracts as Zod schemas and types",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

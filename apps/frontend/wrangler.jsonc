@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "logitland-frontend",
+  // Not later than the workerd bundled with the pinned wrangler (1.20261001.1).
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_als"],
+  "main": ".svelte-kit/cloudflare/_worker.js",
+  "assets": { "binding": "ASSETS", "directory": ".svelte-kit/cloudflare" },
+  "observability": { "enabled": true },
+
+  // BACKEND: the relay's internal API, a named entrypoint reachable only through this binding.
+  // RELAY: the relay's public app (the mirror's /public API), reached without the public internet.
+  "services": [
+    { "binding": "BACKEND", "service": "logitland-backend", "entrypoint": "InternalApi" },
+    { "binding": "RELAY", "service": "logitland-backend" }
+  ],
+
+  "vars": {
+    // "fixtures" shows the example community and needs no backend. It only applies on a local PUBLIC_URL;
+    // anywhere else the dashboard uses the relay through BACKEND.
+    "DATA_SOURCE": "fixtures",
+    "PUBLIC_URL": "http://localhost:5173",
+    "RELAY_PUBLIC_URL": "http://localhost:8787"
+  },
+
+  "env": {
+    "production": {
+      "name": "logitland-frontend",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "REPLACE.invalid", "custom_domain": true }],
+      "services": [
+        { "binding": "BACKEND", "service": "logitland-backend", "entrypoint": "InternalApi" },
+        { "binding": "RELAY", "service": "logitland-backend" }
+      ],
+      "vars": {
+        "DATA_SOURCE": "relay",
+        "PUBLIC_URL": "https://REPLACE.invalid",
+        "RELAY_PUBLIC_URL": "https://relay.REPLACE.invalid"
+      }
+    }
+  }
+  // Secrets (wrangler secret put --env production, or .dev.vars locally): SESSION_SECRET, INTERNAL_TOKEN,
+  // DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET.
+}

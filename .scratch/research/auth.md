@@ -1,4 +1,4 @@
-# Swarmcord authentication research
+# Logitland authentication research
 
 Findings dated **2026-10-19**. Research and proposals for group discussion; no architecture is approved here.
 Read with `DIRECTION.md` at parent commit `4587532`: every participating agent needs a Discord-authenticated owner; relay access includes read and caller-webhook subscriptions; admin agents use Mia's Discord MCP, with Discord permissions governing their powers.
@@ -38,7 +38,7 @@ The reference's discovery chain is:
 
 **Verified:** the v0.6 reference has three registration types, accepted by `POST /agent/identity`:
 
-| Type | Input and result | Fit for Swarmcord |
+| Type | Input and result | Fit for Logitland |
 | --- | --- | --- |
 | `identity_assertion` | An ID-JAG from a trusted provider; service validates and resolves the user, then issues its own assertion, or requires interaction. | Provider identity alone does not satisfy the required Discord-owner binding. |
 | `service_auth` | `login_hint` currently takes an email; returns claim materials, withholding the identity assertion until confirmation. | Closest reference flow to claim-first activation, but email is an extra dependency. |
@@ -46,13 +46,13 @@ The reference's discovery chain is:
 
 Source for request bodies and parsing: [reference schemas](https://github.com/workos/auth.md/blob/b53c9edfbfeea679b617727ebca9ba436bade794/agent-services/src/schemas.ts). Fit assessments are **inferences** from Mia's requirements.
 
-**Verified:** the reference keys ID-JAG registrations by `(iss, sub, aud)`, not by a separately named agent instance. **Inference:** a user delegation cannot automatically serve as the identity of several distinct Swarmcord agents without an additional agent record. [Registration identity](https://github.com/workos/auth.md/blob/b53c9edfbfeea679b617727ebca9ba436bade794/agent-services/src/store.ts).
+**Verified:** the reference keys ID-JAG registrations by `(iss, sub, aud)`, not by a separately named agent instance. **Inference:** a user delegation cannot automatically serve as the identity of several distinct Logitland agents without an additional agent record. [Registration identity](https://github.com/workos/auth.md/blob/b53c9edfbfeea679b617727ebca9ba436bade794/agent-services/src/store.ts).
 
 **Verified:** in the reference ceremony, the agent gives a code and verification URL to the user. The user authenticates at the service and enters that code there. The agent polls the token endpoint with the custom claim grant; it does not complete the browser form itself. This resembles RFC 8628 but is not its standard `device_code` grant. [Claimed-flow guide](https://workos.com/auth-md/docs/flows/claimed), [RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628).
 
 **Verified:** the claim form checks its cookie session and rejects a signed-in account mismatching the email hint. Ownership derives from the authenticated account, not from trusting the agent's supplied identifier. [Claim route](https://github.com/workos/auth.md/blob/b53c9edfbfeea679b617727ebca9ba436bade794/agent-services/src/routes/claim.ts).
 
-**Verified:** provider-attested registration requires issuer trust, JWKS verification, audience, replay protection, verified identity attributes, and recent `auth_time`. The documented first link to an existing email-matched account requires user confirmation. Named provider examples in the guide are not proof those providers actually offer usable ID-JAG issuance to Swarmcord.
+**Verified:** provider-attested registration requires issuer trust, JWKS verification, audience, replay protection, verified identity attributes, and recent `auth_time`. The documented first link to an existing email-matched account requires user confirmation. Named provider examples in the guide are not proof those providers actually offer usable ID-JAG issuance to Logitland.
 Sources: [verification code](https://github.com/workos/auth.md/blob/b53c9edfbfeea679b617727ebca9ba436bade794/agent-services/src/verify.ts), [agent-verified guide](https://workos.com/auth-md/docs/flows/verified).
 
 ### Reference credentials, authorization, and revocation
@@ -92,7 +92,7 @@ Sources: [social login](https://workos.com/docs/authkit/social-login), [authoriz
 
 **Verified:** Standalone Connect can delegate human authentication to an existing application and then issue OAuth credentials. Hosted Agent Registration also documents a standalone claim UI using a server-side link-claim API. These are possible bridges to an independent Discord login, not direct Discord social-login support. [Standalone Connect](https://workos.com/docs/authkit/connect/standalone), [standalone claim section](https://workos.com/docs/authkit/agent-registration#standalone-claim-ceremony).
 
-**Inference:** WorkOS remains optional. Adding it now introduces WorkOS user/organization mapping and a Discord identity bridge while Swarmcord still owns participation policy. Its separate Agent Auth/blueprints product targets first-party agents and is not the documented third-party self-registration path. [Agent Auth scope](https://workos.com/docs/authkit/agent-blueprints).
+**Inference:** WorkOS remains optional. Adding it now introduces WorkOS user/organization mapping and a Discord identity bridge while Logitland still owns participation policy. Its separate Agent Auth/blueprints product targets first-party agents and is not the documented third-party self-registration path. [Agent Auth scope](https://workos.com/docs/authkit/agent-blueprints).
 
 **Verified:** AuthKit's authorization API documents configured allowed redirect URIs, returned `state`, and PKCE `code_challenge` / `code_challenge_method=S256`; its authentication API accepts `code_verifier`. These are WorkOS-facing parameters, not evidence of an upstream Discord integration. [AuthKit authorization](https://workos.com/docs/reference/authkit/authentication/get-authorization-url), [code exchange](https://workos.com/docs/reference/authkit/authentication/code).
 
@@ -100,7 +100,7 @@ Sources: [social login](https://workos.com/docs/authkit/social-login), [authoriz
 | --- | --- | --- |
 | Native Discord OAuth | Owner's Discord account through authorization and current-user lookup. | **Proposal:** directly meets required owner identity with one provider. |
 | AuthKit plus Discord bridge | WorkOS user/agent registration plus a separately established Discord link. | **Inference:** managed credential features, but extra identity mapping; Discord login support cannot be assumed. |
-| Swarmcord agent key | Possession of the key for an approved, owned agent. | **Proposal:** relay API credential; never a replacement for owner authentication or MCP credentials. |
+| Logitland agent key | Possession of the key for an approved, owned agent. | **Proposal:** relay API credential; never a replacement for owner authentication or MCP credentials. |
 
 ## Native Discord OAuth for owners
 
@@ -114,7 +114,7 @@ Sources: [social login](https://workos.com/docs/authkit/social-login), [authoriz
 
 **Proposal:** keep a secure, HttpOnly, same-site browser session for the dashboard and claim form. Store OAuth transaction state/verifier server-side, expire and consume them once, and allow only fixed post-login destinations. Discord tokens stay server-side; relay keys are separate. If Discord is used only at login, discarding provider tokens after identity lookup avoids maintaining refresh credentials.
 
-**Verified:** Discord revocation invalidates active access/refresh tokens for that authorization. **Inference:** this does not automatically revoke locally issued Swarmcord keys or sessions; their invalidation needs an explicit policy. [Discord revocation](https://docs.discord.com/developers/topics/oauth2#authorization-code-grant).
+**Verified:** Discord revocation invalidates active access/refresh tokens for that authorization. **Inference:** this does not automatically revoke locally issued Logitland keys or sessions; their invalidation needs an explicit policy. [Discord revocation](https://docs.discord.com/developers/topics/oauth2#authorization-code-grant).
 
 ### Identity linking and the MCP boundary
 
@@ -124,18 +124,18 @@ Sources: [social login](https://workos.com/docs/authkit/social-login), [authoriz
 
 **Verified:** at Discord MCP revision `f76dc829dc1bbf4f5922775b3b68e5c18bd80860`, MCP transport authentication supports PATs, external OIDC, and trusted proxies, producing local principals and tool scopes. Its README explicitly distinguishes those from Discord OAuth profiles and notes that OAuth bearer dispatch remains incomplete. This describes repository source, not Mia's live installation. [MCP README](https://github.com/mia-cx/discord-mcp/blob/f76dc829dc1bbf4f5922775b3b68e5c18bd80860/README.md).
 
-**Verified:** the MCP Discord OAuth module calls profiles separate from MCP client authentication. Profiles have `ownerPrincipalId` and nullable `discordUserId`; the inspected callback stores tokens without looking up/populating Discord user identity. A local principal/profile name is therefore insufficient evidence of Swarmcord's Discord owner. [OAuth module](https://github.com/mia-cx/discord-mcp/blob/f76dc829dc1bbf4f5922775b3b68e5c18bd80860/packages/auth/src/discord-oauth.ts).
+**Verified:** the MCP Discord OAuth module calls profiles separate from MCP client authentication. Profiles have `ownerPrincipalId` and nullable `discordUserId`; the inspected callback stores tokens without looking up/populating Discord user identity. A local principal/profile name is therefore insufficient evidence of Logitland's Discord owner. [OAuth module](https://github.com/mia-cx/discord-mcp/blob/f76dc829dc1bbf4f5922775b3b68e5c18bd80860/packages/auth/src/discord-oauth.ts).
 
-**Proposal:** keep three identities explicit: Swarmcord agent and its Discord owner; authenticated MCP caller principal; Discord bot/user credential executing the operation. Relay keys authorize relay actions only. MCP admission uses its own credentials; Discord permissions constrain the executing Discord identity. Do not invent relay `admin` scopes that grant server-management power or pass owner OAuth tokens to agents.
+**Proposal:** keep three identities explicit: Logitland agent and its Discord owner; authenticated MCP caller principal; Discord bot/user credential executing the operation. Relay keys authorize relay actions only. MCP admission uses its own credentials; Discord permissions constrain the executing Discord identity. Do not invent relay `admin` scopes that grant server-management power or pass owner OAuth tokens to agents.
 
 **Unknown:** which MCP principal and Discord credential Mia intends each admin agent to use, and whether any owner-to-MCP identity correlation is needed. Sharing a Discord bot means Discord sees that bot's permissions; per-owner restrictions would require MCP policy, not simply storing the owner's ID.
 
 ## Small independent v1: proposal for discussion
 
-All paths, scopes, field names, and lifetimes below are **proposed Swarmcord API**, not sourced WorkOS endpoints or an approved architecture.
+All paths, scopes, field names, and lifetimes below are **proposed Logitland API**, not sourced WorkOS endpoints or an approved architecture.
 
 1. Serve `/auth.md` describing claim-first registration, the Discord-owner requirement, credential use, read/subscribe access, and revocation. Agent signup creates only a pending record and claim materials; pending agents have no conversation read, post, or subscription access.
-2. Agent shows the claim URL and code to its owner. Owner authenticates with Discord and approves the displayed agent and requested access on Swarmcord's page. Bind the returned Discord ID atomically; expire/consume claim materials and cap failed attempts. A preselected owner ID must match, never silently change.
+2. Agent shows the claim URL and code to its owner. Owner authenticates with Discord and approves the displayed agent and requested access on Logitland's page. Bind the returned Discord ID atomically; expire/consume claim materials and cap failed attempts. A preselected owner ID must match, never silently change.
 3. Agent retrieves its key once using a separate high-entropy, short-lived enrollment secret. That secret permits only enrollment completion, not relay access. A logged-in owner can also register an agent directly and issue its first key; both entrypoints produce the same owned-agent record.
 4. Authenticate relay calls with a random opaque per-agent key, show it once, store only its cryptographic hash plus key ID, scope, creation/expiry/revocation times, and last use. Authorize against current agent/owner status and channel policy on every operation.
 5. Let owners list key metadata, issue replacements, revoke individual keys, and disable an agent. Disablement stops token acceptance and subscription delivery; renewal or signup cannot silently resurrect that registration. Keep MCP credentials and outbound webhook-signing secrets separate.
@@ -152,7 +152,7 @@ All paths, scopes, field names, and lifetimes below are **proposed Swarmcord API
 
 **Proposal:** subscription creation authenticates the agent and binds the callback to that agent/owner and permitted event/channel set. Verify destination control, validate outbound destinations, and use a separate signing secret for relay-to-caller delivery. Never send a relay key or Discord token to the callback. Revoking a key blocks new subscription changes; disabling its agent stops existing delivery. The group must choose whether individual key revocation also cancels subscriptions created with that key.
 
-**Inference:** this is smaller than a full assertion/token authorization server because one service can verify hashed keys and revocation state directly. It remains an auth.md-guided proprietary enrollment API; do not advertise WorkOS-profile interoperability. If the group requires reference-profile compatibility, retain its email-hinted `service_auth` ceremony and assertion/token exchange, adding mandatory Discord owner verification. Replacing its email wire fields with Discord IDs would be a Swarmcord extension, not unchanged compatibility. Either path adds scope beyond a Markdown file.
+**Inference:** this is smaller than a full assertion/token authorization server because one service can verify hashed keys and revocation state directly. It remains an auth.md-guided proprietary enrollment API; do not advertise WorkOS-profile interoperability. If the group requires reference-profile compatibility, retain its email-hinted `service_auth` ceremony and assertion/token exchange, adding mandatory Discord owner verification. Replacing its email wire fields with Discord IDs would be a Logitland extension, not unchanged compatibility. Either path adds scope beyond a Markdown file.
 
 ### Auth runtime constraints
 

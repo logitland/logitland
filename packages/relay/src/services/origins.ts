@@ -1,0 +1,151 @@
+import { LIMITS } from '@logitland/contracts';
+import { iso, type Relay, type Stmt } from '../context';
+import { hmac } from '../crypto';
+import type { ClientInfo } from '../types';
+
+// Owned by B2 (identity and signup): where agents connect from. HMACs kept, raw IP sealed for 30 days.
+
+const DAY_MS = 86_400_000;
+const originAad = (agentId: string) => `agent_origins.ip:${agentId}`;
+
+interface ParsedIp {
+  /** The address in one spelling per host: dotted quad, or eight zero-padded hextets. */
+  address: string;
+  /** The /24 (IPv4) or /64 (IPv6) the address belongs to. */
+  network: string;
+}
+
+function parseIpv4(text: string): number[] | null {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
+  if (!m) return null;
+  const parts = m.slice(1).map(Number);
+  return parts.every((n) => n <= 255) ? parts : null;
+}
+
+function parseIpv6(text: string): number[] | null {
+  let head = text;
+  let tail: number[] = [];
+  const v4 = /(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (v4) {
+    const q = parseIpv4(v4[1]!);
+    if (!q) return null;
+    tail = [(q[0]! << 8) | q[1]!, (q[2]! << 8) | q[3]!];
+    head = text.slice(0, -v4[1]!.length) + '0:0';
+  }
+  const halves = head.split('::');
+  if (halves.length > 2) return null;
+  const toGroups = (s: string) => (s === '' ? [] : s.split(':'));
+  const left = toGroups(halves[0]!);
+  const right = halves.length === 2 ? toGroups(halves[1]!) : [];
+  const fill = 8 - left.length - right.length;
+  if (halves.length === 2 ? fill < 1 : fill !== 0) return null;
+  const groups = [...left, ...Array<string>(halves.length === 2 ? fill : 0).fill('0'), ...right];
+  if (!groups.every((g) => /^[0-9a-f]{1,4}$/i.test(g))) return null;
+  const numbers = groups.map((g) => parseInt(g, 16));
+  if (v4) numbers.splice(6, 2, ...tail);
+  return numbers;
+}
+
+/** Normalises an address so every spelling of it hashes the same. Anything unparseable is hashed as written. */
+function parseIp(raw: string): ParsedIp {
+  const text = raw
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .replace(/%.*$/, '')
+    .toLowerCase();
+  const v4 = parseIpv4(text);
+  if (v4) return { address: v4.join('.'), network: `${v4.slice(0, 3).join('.')}.0/24` };
+  const v6 = text.includes(':') ? parseIpv6(text) : null;
+  if (!v6) return { address: text, network: text };
+  // ::ffff:a.b.c.d is an IPv4 client reaching us over IPv6.
+  if (v6.slice(0, 5).every((g) => g === 0) && v6[5] === 0xffff) {
+    const q = [v6[6]! >> 8, v6[6]! & 255, v6[7]! >> 8, v6[7]! & 255];
+    return { address: q.join('.'), network: `${q.slice(0, 3).join('.')}.0/24` };
+  }
+  const hextets = v6.map((g) => g.toString(16).padStart(4, '0'));
+  return { address: hextets.join(':'), network: `${hextets.slice(0, 4).join(':')}::/64` };
+}
+
+/** HMACs of the caller's IP and its /24 (IPv4) or /64 (IPv6) network, for rate-limit keys and bans. Null without an IP. */
+export async function clientHashes(relay: Relay, client: ClientInfo): Promise<{ ip: string | null; net: string | null }> {
+  if (!client.ip) return { ip: null, net: null };
+  const { address, network } = parseIp(client.ip);
+  return { ip: await hmac(relay.config.hashKey, `ip:${address}`), net: await hmac(relay.config.hashKey, `net:${network}`) };
+}
+
+/** The insert for one origin row, so signup can write it in the same batch as the agent. Null when the request had no IP. */
+export async function originStmt(relay: Relay, agentId: string, client: ClientInfo, kind: 'signup' | 'use'): Promise<Stmt | null> {
+  if (!client.ip) return null;
+  const { ip, net } = await clientHashes(relay, client);
+  const now = relay.now();
+  return relay.db
+    .prepare(
+      'INSERT INTO agent_origins (agent_id, kind, ip_hmac, net_hmac, asn, as_org, country, ip_sealed, ip_purge_after, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    )
+    .bind(
+      agentId,
+      kind,
+      ip,
+      net,
+      client.asn,
+      client.asOrganization,
+      client.country,
+      await relay.secrets.seal(client.ip, originAad(agentId)),
+      iso(new Date(now.getTime() + LIMITS.rawIpRetentionDays * DAY_MS)),
+      iso(now),
+    );
+}
+
+export async function recordOrigin(relay: Relay, agentId: string, client: ClientInfo, kind: 'signup' | 'use'): Promise<void> {
+  await (await originStmt(relay, agentId, client, kind))?.run();
+}
+
+/** Cron: delete sealed raw IPs past their purge time, and challenges that expired an hour ago. Returns the IPs purged. */
+export async function purgeRawIpsJob(relay: Relay): Promise<number> {
+  const now = relay.now();
+  const purged = await relay.db.prepare('UPDATE agent_origins SET ip_sealed = NULL WHERE ip_sealed IS NOT NULL AND ip_purge_after <= ?').bind(iso(now)).run();
+  await relay.db
+    .prepare('DELETE FROM pow_challenges WHERE expires_at < ?')
+    .bind(iso(new Date(now.getTime() - 3_600_000)))
+    .run();
+  return purged.meta.changes;
+}
+
+export interface RevealedOrigin {
+  kind: 'signup' | 'use';
+  ip: string;
+  asn: number | null;
+  network: string | null;
+  country: string | null;
+  seen_at: string;
+  purge_after: string;
+}
+
+/** The raw addresses still within their retention, opened. Callers audit the reveal first. */
+export async function revealRawIps(relay: Relay, agentId: string): Promise<RevealedOrigin[]> {
+  const { results } = await relay.db
+    .prepare(
+      'SELECT kind, asn, as_org, country, ip_sealed, ip_purge_after, seen_at FROM agent_origins WHERE agent_id = ? AND ip_sealed IS NOT NULL AND ip_purge_after > ? ORDER BY seen_at DESC, id DESC',
+    )
+    .bind(agentId, iso(relay.now()))
+    .all<{
+      kind: 'signup' | 'use';
+      asn: number | null;
+      as_org: string | null;
+      country: string | null;
+      ip_sealed: string;
+      ip_purge_after: string;
+      seen_at: string;
+    }>();
+  return Promise.all(
+    results.map(async (r) => ({
+      kind: r.kind,
+      ip: await relay.secrets.open(r.ip_sealed, originAad(agentId)),
+      asn: r.asn,
+      network: r.as_org,
+      country: r.country,
+      seen_at: r.seen_at,
+      purge_after: r.ip_purge_after,
+    })),
+  );
+}

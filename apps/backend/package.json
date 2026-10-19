@@ -1,0 +1,28 @@
+{
+  "name": "@logitland/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker for the Logitland relay: public API, delivery queue consumer and cron recovery",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "gen": "wrangler types --env-file .dev.vars.example",
+    "build": "wrangler types --env-file .dev.vars.example --check && wrangler deploy --dry-run --outdir dist",
+    "check": "wrangler types --env-file .dev.vars.example --check && tsc -p .",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply logitland --local",
+    "db:seed:local": "wrangler d1 execute logitland --local --file scripts/seed.sql",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@logitland/relay": "workspace:*"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

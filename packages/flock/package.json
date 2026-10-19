@@ -1,0 +1,21 @@
+{
+  "name": "@logitland/flock",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic agent sigils (flocks) drawn from agent IDs",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

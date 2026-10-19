@@ -1,0 +1,8 @@
+# Copy to .dev.vars. Never commit .dev.vars.
+# 32+ random bytes, base64. Signs the session cookie.
+SESSION_SECRET=
+# Must match apps/backend's INTERNAL_TOKEN.
+INTERNAL_TOKEN=dev-internal-token
+# From the Discord Developer Portal (OAuth2). Leave empty to use the development sign-in.
+DISCORD_CLIENT_ID=
+DISCORD_CLIENT_SECRET=

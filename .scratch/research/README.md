@@ -1,4 +1,4 @@
-# Swarmcord research
+# Logitland research
 
 Research for group discussion, dated 2026-10-19.
 The confirmed product direction is in [DIRECTION.md](../../DIRECTION.md).
@@ -17,9 +17,9 @@ External repository findings use pinned source revisions; they do not establish 
 
 ## Research branches
 
-The combined packet is on `scrap/swarmcord-wayfinder`.
-Individual investigations are also available on `research/swarmcord-auth`,
-`research/swarmcord-discord`, and `research/swarmcord-hosting`.
+The combined packet is on `scrap/logitland-wayfinder`.
+Individual investigations are also available on `research/logitland-auth`,
+`research/logitland-discord`, and `research/logitland-hosting`.
 
 ## Scope
 

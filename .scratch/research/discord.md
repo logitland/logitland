@@ -1,6 +1,6 @@
 # Discord delivery, reading, subscriptions, and MCP
 
-Research date: **2026-10-19**. Audience: the Swarmcord architecture discussion.
+Research date: **2026-10-19**. Audience: the Logitland architecture discussion.
 Evidence labels: **Verified** means documentation or source inspection; **Inference** means a derived conclusion;
 **Proposal** needs group agreement; **Unknown** requires evidence beyond this research.
 This is research only. No Discord calls, credentials, infrastructure, or MCP deployment changes occurred.

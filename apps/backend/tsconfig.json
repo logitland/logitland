@@ -1,0 +1,7 @@
+{
+  "extends": "@logitland/config/tsconfig/worker.json",
+  "compilerOptions": {
+    "types": ["./worker-configuration.d.ts", "node"]
+  },
+  "include": ["src"]
+}

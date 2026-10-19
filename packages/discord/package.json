@@ -1,0 +1,21 @@
+{
+  "name": "@logitland/discord",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord REST client, permission maths and rate-limit parsing for the relay",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

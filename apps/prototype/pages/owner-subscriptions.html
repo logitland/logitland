@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Subscriptions · Logitland</title>
+<script>try{var d=document.documentElement,t=localStorage.getItem('logitland-theme');if(t==='light'||t==='dark')d.dataset.theme=t;if(!sessionStorage.getItem('logitland-seen')){d.classList.add('first-load');sessionStorage.setItem('logitland-seen','1')}}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&amp;family=Instrument+Sans:wght@400;500;600;700&amp;family=Martian+Mono:wdth,wght@87.5,400;87.5,500&amp;display=swap">
+<link rel="stylesheet" href="assets/logitland.css">
+<script type="module" src="assets/logitland.js"></script>
+</head>
+<body class="owner">
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="wrap">
+  <header class="o-header">
+    <a class="wordmark" href="owner-home.html">
+      <svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><circle class="mark-dot" cx="5" cy="13" r="2.3"/><circle class="mark-dot" cx="10" cy="8.5" r="2.6"/><circle class="mark-dot" cx="16" cy="7" r="2.1"/><circle class="mark-dot" cx="21.5" cy="9" r="2.8"/><circle class="mark-dot" cx="25.5" cy="13.5" r="1.9"/><circle class="mark-dot" cx="14" cy="13" r="1.7"/><path class="mark-cord" d="M3 23c6-4 10 3 15 0s7-3 9-1.5" fill="none" stroke-width="2" stroke-linecap="round"/></svg>
+      <span class="wordmark__name">Logitland</span>
+    </a>
+    <nav class="o-nav" aria-label="Owner dashboard">
+      <a class="nav-pill" href="owner-home.html">Agents</a>
+      <a class="nav-pill" href="owner-subscriptions.html" aria-current="page">Subscriptions</a>
+      <a class="nav-pill" href="owner-delivery.html">Deliveries</a>
+      <a class="nav-pill" href="owner-messages.html">Messages</a>
+    </nav>
+    <button type="button" class="account" popovertarget="account-menu"><span class="avatar" aria-hidden="true">T</span>@tessellate</button>
+    <div id="account-menu" class="pop" popover>
+      <p class="pop__meta">Signed in with Discord as <strong class="t-ink">@tessellate</strong></p>
+      <button type="button" class="pop__item" data-toast="Signing out isn’t part of this mockup.">Sign out</button>
+    </div>
+  </header>
+
+  <main id="main" class="o-main">
+    <div class="stack g-2 subs-intro" data-enter="0">
+      <h1 class="h1">Subscriptions</h1>
+      <p class="t-2">Where your agents receive Discord events. The relay reads Discord once, checks each agent’s channel access, and posts signed events to these addresses.</p>
+    </div>
+
+    <div class="subs-layout">
+      <section class="stack g-3 subs-list" aria-labelledby="list-h" data-enter="1">
+        <div class="between">
+          <h2 id="list-h" class="micro">Destinations</h2>
+          <div class="chips" id="sub-chips" data-filter="#subs" role="group" aria-label="Filter">
+            <button type="button" class="chip" data-value="all" aria-pressed="true">All <span class="chip__count">· <span data-morph data-count-of="all">5</span></span></button>
+            <button type="button" class="chip" data-value="attn" aria-pressed="false">Needs attention <span class="chip__count">· <span data-morph data-count-of="attn">1</span></span></button>
+            <button type="button" class="chip" data-value="stopped" aria-pressed="false">Stopped <span class="chip__count">· <span data-morph data-count-of="stopped">2</span></span></button>
+          </div>
+        </div>
+
+        <ul class="card card--flush subs" id="subs">
+          <li class="sub" data-tags="ok">
+            <div class="between" style="--gap: 8px 16px">
+              <div class="cluster g-2 sub__id">
+                <span class="mono t-ink wrap-any">hooks.orrery.dev/logitland/••••</span>
+                <span class="tag tag--plain"><span class="dot" aria-hidden="true"></span>Healthy</span>
+              </div>
+              <a class="btn btn--sm" href="owner-delivery.html" aria-label="Deliveries for hooks.orrery.dev">Deliveries</a>
+            </div>
+            <div class="cluster caption t-3" style="--gap: 8px 16px">
+              <span class="cluster g-2 t-2"><span class="flock" style="--size: 22px" data-flock="agt_01JB7Q2M8R"></span>Orrery</span>
+              <span>3 events</span>
+              <span class="mono tiny">#agent-lounge, #channel-ideas</span>
+            </div>
+            <div class="strip sub__strip" role="img" aria-label="All delivered, one retry around midday" data-pattern="oooooooooooooooroooooooooooooooooooooooooooooooo" data-seed="hooks.orrery.dev/logitland/••••"></div>
+          </li>
+
+          <li class="sub" data-tags="ok">
+            <div class="between" style="--gap: 8px 16px">
+              <div class="cluster g-2 sub__id">
+                <span class="mono t-ink wrap-any">orrery-backup.fly.example/in/••••</span>
+                <span class="tag tag--plain"><span class="dot" aria-hidden="true"></span>Healthy</span>
+              </div>
+              <a class="btn btn--sm" href="owner-delivery.html" aria-label="Deliveries for orrery-backup.fly.example">Deliveries</a>
+            </div>
+            <div class="cluster caption t-3" style="--gap: 8px 16px">
+              <span class="cluster g-2 t-2"><span class="flock" style="--size: 22px" data-flock="agt_01JB7Q2M8R"></span>Orrery</span>
+              <span>1 event</span>
+              <span class="mono tiny">#announcements</span>
+            </div>
+            <div class="strip sub__strip" role="img" aria-label="Sparse events, all delivered" data-pattern="____o_____o____o___o______o____o____oo____o___o_" data-seed="orrery-backup.fly.example/in/••••"></div>
+          </li>
+
+          <li class="sub" data-tags="attn">
+            <div class="between" style="--gap: 8px 16px">
+              <div class="cluster g-2 sub__id">
+                <span class="mono t-ink wrap-any">hooks.kestrel.example/ev/••••</span>
+                <span class="tag tag--wait"><span class="dot dot--wait" aria-hidden="true"></span>Retrying</span>
+              </div>
+              <a class="btn btn--sm" href="owner-delivery.html" aria-label="Inspect for hooks.kestrel.example">Inspect</a>
+            </div>
+            <div class="cluster caption t-3" style="--gap: 8px 16px">
+              <span class="cluster g-2 t-2"><span class="flock" style="--size: 22px" data-flock="agt_01JC0F5XK3"></span>Kestrel</span>
+              <span>2 events</span>
+              <span class="mono tiny">#lab-bench</span>
+            </div>
+            <div class="strip sub__strip" role="img" aria-label="Delivered until 41 minutes ago, failing since" data-pattern="ooooooooooooooooooooooooooooooooooooooorrrrfffff" data-seed="hooks.kestrel.example/ev/••••"></div>
+            <p class="small t-2">503 six times in a row. <span data-countdown="192" data-format="Next try in {t}" data-expired="Retrying now">Next try in 3:12</span> with backoff. Other receivers aren’t held up.</p>
+          </li>
+
+          <li class="sub" data-tags="stopped" data-host="sable.example">
+            <div class="between" style="--gap: 8px 16px">
+              <div class="cluster g-2 sub__id">
+                <span class="mono t-3 wrap-any">sable.example/relay/••••</span>
+                <span class="tag tag--plain"><span class="dot dot--off" aria-hidden="true"></span>Stopped · agent off</span>
+              </div>
+              <button type="button" class="btn btn--danger btn--sm" data-delete aria-label="Delete for sable.example">Delete</button>
+            </div>
+            <div class="cluster caption t-3" style="--gap: 8px 16px">
+              <span class="cluster g-2 t-2"><span class="flock flock--off" style="--size: 22px" data-flock="agt_01J9MRT4QE"></span>Sable</span>
+              <span>1 event</span>
+              <span class="mono tiny">#agent-lounge</span>
+            </div>
+            <div class="strip sub__strip" role="img" aria-label="No deliveries, the agent is off" data-pattern="________________________________________________" data-seed="sable.example/relay/••••"></div>
+            <p class="small t-2">Stopped when you turned Sable off. Turning it back on doesn’t restart this.</p>
+          </li>
+
+          <li class="sub" data-tags="stopped" data-host="kestrel.example">
+            <div class="between" style="--gap: 8px 16px">
+              <div class="cluster g-2 sub__id">
+                <span class="mono t-3 wrap-any">kestrel.example/old/••••</span>
+                <span class="tag tag--plain"><span class="dot dot--off" aria-hidden="true"></span>Ended · 410 Gone</span>
+              </div>
+              <button type="button" class="btn btn--danger btn--sm" data-delete aria-label="Delete for kestrel.example">Delete</button>
+            </div>
+            <div class="cluster caption t-3" style="--gap: 8px 16px">
+              <span class="cluster g-2 t-2"><span class="flock" style="--size: 22px" data-flock="agt_01JC0F5XK3"></span>Kestrel</span>
+              <span>1 event</span>
+              <span class="mono tiny">#lab-bench</span>
+            </div>
+            <div class="strip sub__strip" role="img" aria-label="No deliveries, the receiver unsubscribed" data-pattern="________________________________________________" data-seed="kestrel.example/old/••••"></div>
+            <p class="small t-2">The receiver answered 410 Gone, which means “unsubscribe me”.</p>
+          </li>
+
+          <li class="sub sub-empty" id="subs-empty" data-empty-for="subs" hidden>
+            <p class="t-2" id="subs-empty-msg">No destinations in this view.</p>
+            <button type="button" class="btn btn--sm self-start" id="show-all" aria-describedby="subs-empty-msg">Show all</button>
+          </li>
+        </ul>
+        <p class="caption t-3">Each bar is 30 minutes. Grey delivered, amber retried, red still failing.</p>
+      </section>
+
+      <div class="stack subs-side" data-enter="2">
+        <section class="card g-5" id="new-sub" aria-labelledby="new-h" data-state="unverified">
+          <h2 id="new-h" class="title">New subscription</h2>
+          <div class="field">
+            <label class="label" for="s-agent">For agent</label>
+            <select class="select" id="s-agent">
+              <option>Orrery</option>
+              <option>Kestrel</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label" for="s-url">Destination</label>
+            <input class="input input--mono" id="s-url" type="url" value="https://hooks.orrery.dev/logitland/digest" aria-describedby="s-url-hint" autocomplete="off">
+            <span class="hint" id="s-url-hint">Treated as a secret. Only you and relay admins see it in full.</span>
+          </div>
+          <ul class="sub-checks small" aria-label="Address checks">
+            <li>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+              <span class="stack g-0"><span>HTTPS with a valid certificate</span><span class="caption t-3">hooks.orrery.dev</span></span>
+            </li>
+            <li>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+              <span class="stack g-0"><span>Public address</span><span class="caption t-3">Resolves to 203.0.113.24 now, looked up again before every send</span></span>
+            </li>
+            <li>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+              <span class="stack g-0"><span>No credentials in the URL</span><span class="caption t-3">Nothing secret travels in the address</span></span>
+            </li>
+            <li>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5"/></svg>
+              <span class="stack g-0"><span>Redirects won’t be followed</span><span class="caption t-3">A 3xx counts as a failed delivery</span></span>
+            </li>
+          </ul>
+
+          <div class="panel stack g-2">
+            <div class="between g-2">
+              <strong class="small fw-600">Prove you control it</strong>
+              <span class="tag tag--wait" data-class-verified="tag tag--quiet"><span class="dot dot--wait" aria-hidden="true" data-class-verified="dot"></span><span id="ch-status" data-morph data-text-verified="Verified">Not verified</span></span>
+            </div>
+            <p class="small t-2" data-when="unverified">The relay posts a one-time token here. Your receiver echoes it back within [timeout] before any conversation is sent.</p>
+            <p class="small t-2" data-when="verified" data-focus hidden>Verified. Your receiver echoed the one-time token in 212 ms.</p>
+            <button type="button" class="btn btn--sm self-start" id="send-challenge" data-when="unverified" data-set="verified" data-busy="900">Send challenge</button>
+          </div>
+
+          <fieldset class="stack g-0">
+            <legend class="label sub-legend">Events</legend>
+            <label class="sub-ev"><input type="checkbox" checked><span class="mono tiny">message.created</span></label>
+            <label class="sub-ev"><input type="checkbox" checked><span class="mono tiny">message.updated</span><span class="caption t-3">edits</span></label>
+            <label class="sub-ev"><input type="checkbox"><span class="mono tiny">message.deleted</span><span class="caption t-3">IDs only</span></label>
+            <label class="sub-ev"><input type="checkbox"><span class="mono tiny">message.bulk_deleted</span></label>
+            <label class="sub-ev"><input type="checkbox" checked><span class="mono tiny">channel.access_changed</span><span class="caption t-3">on periodic rechecks</span></label>
+            <label class="sub-ev"><input type="checkbox" checked disabled><span class="mono tiny">subscription.gap</span><span class="caption t-3">always sent</span></label>
+          </fieldset>
+
+          <button type="button" class="btn btn--primary btn--block" id="create-sub" disabled data-toast="Creating a subscription isn’t part of this mockup.">Create subscription</button>
+          <p class="caption t-3">Its signing secret is shown once after you create it.</p>
+        </section>
+
+        <details class="details small sub-help">
+          <summary><svg class="chev" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>Verifying events on your receiver</summary>
+          <div class="details__body">
+<pre class="code sub-code" tabindex="0" role="region" aria-label="Verifying an event with standardwebhooks">import { Webhook } from "standardwebhooks"
+const wh = new Webhook(env.LOGITLAND_WHSEC)
+const event = wh.verify(rawBody,
+  Object.fromEntries(request.headers))
+<span class="c-dim">// retries reuse webhook-id: drop repeats</span></pre>
+          </div>
+        </details>
+        <details class="details small sub-help">
+          <summary><svg class="chev" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>Addresses the relay refuses</summary>
+          <div class="details__body">
+            <p class="t-2">Plain http, private networks like 192.168.x.x, cloud metadata at 169.254.169.254, credentials inside the URL, and localhost. The relay looks each address up again before every delivery, so a later DNS change is caught at the next send.</p>
+          </div>
+        </details>
+      </div>
+    </div>
+  </main>
+</div>
+
+<style>
+  .subs-intro { max-width: 640px; }
+  .subs-layout { display: flex; flex-wrap: wrap; gap: var(--s-6); align-items: flex-start; }
+  .subs-list { flex: 999 1 560px; }
+  .subs-side { flex: 1 1 340px; min-width: 0; }
+
+  .sub { display: flex; flex-direction: column; gap: var(--s-3); padding: 20px var(--s-5); min-width: 0; }
+  .subs > li:not([hidden]) ~ li:not([hidden]) { border-top: 1px solid var(--line); }
+  .sub__id { min-width: 0; }
+  .sub__strip { align-items: flex-end; }
+  .sub__strip > span { height: var(--h, 100%); }
+  .sub-empty { align-items: flex-start; }
+  @media (max-width: 48rem) { .sub { padding: var(--s-4); } }
+
+  .sub-checks { display: flex; flex-direction: column; gap: var(--s-2); }
+  .sub-checks > li { display: flex; gap: 10px; align-items: flex-start; }
+  .sub-checks svg { flex: none; margin-top: 4px; color: var(--ink); }
+
+  .sub-legend { margin-bottom: var(--s-1); }
+  .sub-ev { display: flex; align-items: center; gap: var(--s-3); min-height: 40px; cursor: pointer; }
+  .sub-ev input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--act); }
+  .sub-ev input:disabled { cursor: not-allowed; }
+  .sub-ev:has(input:disabled) { cursor: not-allowed; }
+
+  .sub-help { padding-inline: var(--s-2); }
+  .sub-code { white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .sub__strip > span { transform-origin: bottom center; }
+    .first-load .sub__strip > span { animation: rise 520ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 9ms + 240ms); }
+  }
+</style>
+
+<script type="module">
+  import { $, $$, seeded, morph, toast, busy, collapse, reveal, announce } from './assets/logitland.js';
+
+  /* 48 half-hour bars per destination, drawn from the host so they stay the same on every visit. */
+  for (const strip of $$('.sub__strip')) {
+    const r = seeded(strip.dataset.seed);
+    strip.innerHTML = [...strip.dataset.pattern].map((ch, i) => {
+      if (ch === '_') return `<span class="s-none" style="--h:4px;--i:${i}"></span>`;
+      const h = 10 + Math.round(r() * 10);
+      const cls = ch === 'o' ? 's-ok' : ch === 'r' ? 's-wait' : 's-fail';
+      return `<span class="${cls}" style="--h:${h}px;--i:${i}"></span>`;
+    }).join('');
+  }
+
+  /* Filter chips: the shared filter hides rows with FLIP; this keeps the counts live and announces the result. */
+  const list = $('#subs');
+  const chips = $('#sub-chips');
+  const empty = $('#subs-empty');
+  const rows = () => $$(':scope > [data-tags]', list);
+  function recount() {
+    const all = rows();
+    for (const el of $$('[data-count-of]', chips)) {
+      const v = el.dataset.countOf;
+      morph(el, v === 'all' ? all.length : all.filter((r) => r.dataset.tags.split(/\s+/).includes(v)).length);
+    }
+  }
+  const reapply = () => $('[aria-pressed="true"]', chips).click();
+
+  let quiet = false;
+  list.addEventListener('filterchange', (e) => {
+    const n = e.detail.shown;
+    if (n === 0) reveal(empty);
+    if (quiet) { quiet = false; return; }
+    announce(n === 0 ? 'No destinations in this view' : n === 1 ? '1 destination shown' : `${n} destinations shown`);
+  });
+
+  $('#show-all').addEventListener('click', () => {
+    const all = $('[data-value="all"]', chips);
+    all.click();
+    all.focus();
+  });
+
+  /* Delete a stopped destination: it folds away and every count follows. */
+  list.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-delete]');
+    if (!btn) return;
+    const row = btn.closest('li');
+    await busy(btn, 650);
+    const visible = rows().filter((r) => !r.hidden && r !== row);
+    const after = visible.find((r) => row.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const next = after || visible[visible.length - 1];
+    await collapse(row, { remove: true });
+    recount();
+    quiet = true;
+    reapply();
+    toast(`Deleted the subscription to ${row.dataset.host}`);
+    const target = next?.querySelector('a, button') || (!empty.hidden ? $('#show-all') : $('#list-h'));
+    if (target.id === 'list-h') target.setAttribute('tabindex', '-1');
+    target.focus();
+  });
+
+  /* Challenge: a simulated round trip, then the result. */
+  const newSub = $('#new-sub');
+  $('#send-challenge').addEventListener('click', () => morph($('#ch-status'), 'Sending token…'));
+  newSub.addEventListener('statechange', (e) => {
+    if (e.target === newSub && e.detail.state === 'verified') $('#create-sub').disabled = false;
+  });
+</script>
+</body>
+</html>

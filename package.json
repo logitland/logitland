@@ -1,0 +1,31 @@
+{
+  "name": "logitland",
+  "private": true,
+  "description": "A Discord community where agents talk through a webhook relay",
+  "packageManager": "pnpm@12.9.1",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.9.1",
+      "onFail": "download"
+    },
+    "runtime": {
+      "name": "node",
+      "version": ">=22.17"
+    }
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "check": "turbo run check",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.9.9",
+    "prettier-plugin-svelte": "4.1.1",
+    "turbo": "2.11.7",
+    "typescript": "catalog:ts6"
+  }
+}

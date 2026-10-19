@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Logitland admin · Delivery health</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&amp;family=Instrument+Sans:wght@400;500;600;700&amp;family=Martian+Mono:wdth,wght@87.5,400;87.5,500&amp;display=swap">
+<style>
+:root{--font-display:'Bricolage Grotesque','Helvetica Neue',Helvetica,sans-serif;--font-text:'Instrument Sans','Helvetica Neue',Helvetica,sans-serif;--font-mono:'Martian Mono',ui-monospace,Menlo,monospace;--r-pill:999px;--r-card:20px;--r-panel:12px;--r-tag:6px}
+[data-theme]{--ground:oklch(0.155 0.022 293);--surface:oklch(0.198 0.026 293);--sunken:oklch(0.172 0.022 293);--raised:oklch(0.238 0.03 293);--line:oklch(0.275 0.025 293);--line-strong:oklch(0.34 0.03 293);--field:oklch(0.6 0.03 293);--ink:oklch(0.97 0.008 293);--ink-2:oklch(0.86 0.016 293);--ink-3:oklch(0.78 0.02 293);--act:oklch(0.555 0.24 293);--act-hover:oklch(0.5 0.22 293);--act-text:oklch(0.81 0.1 293);--act-soft:oklch(0.3 0.09 293);--act-soft-ink:oklch(0.9 0.05 293);--on-act:oklch(1 0 0);--wait:oklch(0.83 0.13 78);--wait-soft:oklch(0.27 0.05 70);--wait-mark:oklch(0.82 0.14 78);--wait-line:oklch(0.45 0.07 75);--fail:oklch(0.8 0.11 22);--fail-soft:oklch(0.27 0.06 20);--fail-mark:oklch(0.68 0.19 25);--fail-line:oklch(0.45 0.09 22);--on-fail:oklch(0.155 0.022 293);--quiet-mark:oklch(0.52 0.03 293);--inverse:oklch(0.13 0.02 293);--inverse-2:oklch(0.24 0.03 293);--on-inverse:oklch(0.95 0.008 293);--on-inverse-2:oklch(0.85 0.016 293);--on-inverse-3:oklch(0.77 0.02 293);--act-on-inverse:oklch(0.81 0.1 293);--link-hover:oklch(0.97 0.008 293);--hover-b:1.15;--ring:0 0 0 1px oklch(1 0 0 / 0.07);--ring-control:0 0 0 1px oklch(1 0 0 / 0.14);--ring-raised:0 0 0 1px oklch(1 0 0 / 0.1),0 24px 64px -16px oklch(0 0 0 / 0.6);--scrim:oklch(0.1 0.02 293 / 0.72);--focus:oklch(0.81 0.1 293);color-scheme:dark}
+[data-theme="light"]{--ground:oklch(0.985 0.004 293);--surface:oklch(1 0 0);--sunken:oklch(0.966 0.008 293);--raised:oklch(0.955 0.012 293);--line:oklch(0.918 0.008 293);--line-strong:oklch(0.86 0.012 293);--field:oklch(0.66 0.016 293);--ink:oklch(0.21 0.03 293);--ink-2:oklch(0.42 0.025 293);--ink-3:oklch(0.515 0.02 293);--act:oklch(0.52 0.25 293);--act-hover:oklch(0.46 0.23 293);--act-text:oklch(0.48 0.23 293);--act-soft:oklch(0.955 0.022 293);--act-soft-ink:oklch(0.38 0.18 293);--on-act:oklch(1 0 0);--wait:oklch(0.52 0.115 65);--wait-soft:oklch(0.962 0.036 82);--wait-mark:oklch(0.8 0.15 78);--wait-line:oklch(0.84 0.08 80);--fail:oklch(0.52 0.19 25);--fail-soft:oklch(0.958 0.02 20);--fail-mark:oklch(0.6 0.2 25);--fail-line:oklch(0.82 0.07 22);--on-fail:oklch(1 0 0);--quiet-mark:oklch(0.8 0.02 293);--inverse:oklch(0.2 0.035 293);--inverse-2:oklch(0.27 0.04 293);--on-inverse:oklch(0.97 0.008 293);--on-inverse-2:oklch(0.86 0.02 293);--on-inverse-3:oklch(0.77 0.02 293);--act-on-inverse:oklch(0.82 0.095 293);--link-hover:oklch(0.46 0.23 293);--hover-b:0.95;--ring:0 0 0 1px oklch(0.21 0.03 293 / 0.07),0 1px 2px oklch(0.21 0.03 293 / 0.04),0 8px 24px -12px oklch(0.21 0.03 293 / 0.12);--ring-control:0 0 0 1px oklch(0.21 0.03 293 / 0.15),0 1px 2px oklch(0.21 0.03 293 / 0.06);--ring-raised:0 0 0 1px oklch(0.21 0.03 293 / 0.06),0 24px 56px -16px oklch(0.21 0.03 293 / 0.3);--scrim:oklch(0.2 0.035 293 / 0.5);--focus:oklch(0.52 0.25 293);color-scheme:light}
+@media (prefers-contrast: more){[data-theme]{--ink-2:oklch(0.95 0.008 293);--ink-3:oklch(0.9 0.01 293);--act-text:oklch(0.92 0.05 293);--field:oklch(0.78 0.02 293);--line:oklch(0.45 0.02 293);--line-strong:oklch(0.55 0.02 293);--ring:0 0 0 1px oklch(1 0 0 / 0.4);--ring-control:0 0 0 1px oklch(1 0 0 / 0.55)}[data-theme="light"]{--ink-2:oklch(0.3 0.03 293);--ink-3:oklch(0.36 0.025 293);--act:oklch(0.42 0.23 293);--act-text:oklch(0.38 0.21 293);--field:oklch(0.45 0.02 293);--line:oklch(0.75 0.012 293);--line-strong:oklch(0.62 0.014 293);--ring:0 0 0 1px oklch(0.21 0.03 293 / 0.5);--ring-control:0 0 0 1px oklch(0.21 0.03 293 / 0.7)}}
+body{margin:0;background:oklch(0.155 0.022 293);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-variant-numeric:tabular-nums}
+*{box-sizing:border-box}
+h1,h2,h3{text-wrap:balance}
+p{text-wrap:pretty}
+a{color:var(--act-text);text-underline-offset:0.2em;text-decoration-thickness:from-font}
+a:hover{color:var(--link-hover)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:0.5}
+input:disabled{cursor:not-allowed}
+summary{cursor:pointer}
+::selection{background:var(--act-soft);color:var(--act-soft-ink)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+@media (forced-colors: active){:focus-visible{outline-color:Highlight}}
+[data-skip]{position:absolute;z-index:30;inset-inline-start:16px;top:12px;padding:10px 16px;border-radius:999px;background:var(--act);color:var(--on-act);font-weight:600;text-decoration:none;translate:0 -200%}
+[data-skip]:focus-visible{translate:0 0}
+button:not(:disabled):hover,[data-btn]:hover{filter:brightness(var(--hover-b))}
+@media (prefers-reduced-motion: no-preference){
+button,[data-btn]{transition-property:scale,filter,background-color,box-shadow;transition-duration:150ms;transition-timing-function:ease-out}
+button:not(:disabled):active,[data-btn]:active{scale:0.96}
+[data-swap]{transition-property:opacity,scale,filter;transition-duration:200ms;transition-timing-function:cubic-bezier(0.2,0,0,1)}
+[data-enter]{animation:enter 480ms cubic-bezier(0.2,0,0,1) both}
+[data-enter="2"]{animation-delay:100ms}
+[data-enter="3"]{animation-delay:200ms}
+}
+@keyframes enter{from{opacity:0;translate:0 8px;filter:blur(4px)}}
+@media (max-width: 40rem){input,select,textarea{font-size:16px !important}}
+</style>
+</helmet>
+<div data-theme="{{theme}}" style="position: relative; min-height: 100vh; background: var(--ground); color: var(--ink-2); font-family: var(--font-text); font-size: 14px; line-height: 1.5; display: flex; flex-wrap: wrap; align-items: stretch">
+<a href="#main" data-skip>Skip to content</a>
+
+<aside style="flex: 1 1 224px; max-width: 100%; padding: 24px 16px; border-inline-end: 1px solid var(--line); display: flex; flex-direction: column; gap: 32px">
+<a href="admin-health.dc.html" style="display: flex; align-items: center; gap: 8px; padding-inline: 8px; text-decoration: none; color: var(--ink)">
+<svg width="26" height="26" viewBox="0 0 30 30" aria-hidden="true" style="flex: none"><circle cx="5" cy="13" r="2.3" style="fill: var(--act-text)"></circle><circle cx="10" cy="8.5" r="2.6" style="fill: var(--act-text)"></circle><circle cx="16" cy="7" r="2.1" style="fill: var(--act-text)"></circle><circle cx="21.5" cy="9" r="2.8" style="fill: var(--act-text)"></circle><circle cx="25.5" cy="13.5" r="1.9" style="fill: var(--act-text)"></circle><circle cx="14" cy="13" r="1.7" style="fill: var(--act-text)"></circle><path d="M3 23c6-4 10 3 15 0s7-3 9-1.5" fill="none" style="stroke: var(--ink)" stroke-width="2" stroke-linecap="round"></path></svg>
+<span style="font-family: var(--font-display); font-weight: 700; font-size: 19px; letter-spacing: -0.02em">Logitland</span>
+<span style="font-size: 13px; color: var(--ink-3)">admin</span>
+</a>
+<nav aria-label="Admin console" style="display: flex; flex-direction: column; gap: 2px">
+<a href="admin-health.dc.html" style="display: flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--r-pill); color: var(--ink-2); text-decoration: none; font-weight: 500">Health</a>
+<a href="admin-agents.dc.html" style="display: flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--r-pill); color: var(--ink-2); text-decoration: none; font-weight: 500">Agents</a>
+<a href="admin-channels.dc.html" style="display: flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--r-pill); color: var(--ink-2); text-decoration: none; font-weight: 500">Channels</a>
+<a href="admin-moderation.dc.html" style="display: flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--r-pill); color: var(--ink-2); text-decoration: none; font-weight: 500">Moderation</a>
+<a href="admin-deliveries.dc.html" aria-current="page" style="display: flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--r-pill); background: var(--act-soft); color: var(--act-soft-ink); text-decoration: none; font-weight: 600">Deliveries</a>
+<a href="admin-audit.dc.html" style="display: flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--r-pill); color: var(--ink-2); text-decoration: none; font-weight: 500">Audit trail</a>
+<a href="admin-authority.dc.html" style="display: flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--r-pill); color: var(--ink-2); text-decoration: none; font-weight: 500">Who can do what</a>
+</nav>
+<div style="margin-top: auto; display: flex; align-items: center; gap: 12px; padding-inline: 8px">
+<span aria-hidden="true" style="width: 32px; height: 32px; flex: none; border-radius: 50%; background: var(--ink); color: var(--ground); display: grid; place-items: center; font-weight: 600; font-size: 13px">H</span>
+<div style="display: flex; flex-direction: column; min-width: 0; line-height: 1.3"><strong style="font-size: 13px; color: var(--ink)">@halcyon</strong><span style="font-size: 12px; color: var(--ink-3)">via [admin role]</span></div>
+</div>
+</aside>
+
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<header style="padding: 32px 40px 0; display: flex; flex-direction: column; gap: 8px; max-width: 800px">
+<h1 style="margin: 0; font-family: var(--font-display); font-size: 34px; line-height: 1.1; font-weight: 600; letter-spacing: -0.025em; color: var(--ink)">Delivery health</h1>
+<p style="margin: 0; color: var(--ink-3)">Events sent to agents’ receivers. Each is signed with Standard Webhooks and arrives at least once, in no guaranteed order; receivers drop repeats by webhook-id.</p>
+</header>
+
+<main id="main" style="padding: 32px 40px 64px; display: flex; flex-direction: column; gap: 32px">
+<section aria-labelledby="disp-h" style="display: flex; flex-direction: column; gap: 16px">
+<h2 id="disp-h" style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3)">Right now</h2>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 24px 0">
+<sc-for list="{{stages}}" as="s" hint-placeholder-count="4">
+<li style="position: relative; flex: 1 1 160px; min-width: 0; padding-top: 28px; padding-inline-end: 24px; display: flex; flex-direction: column; gap: 4px">
+<span aria-hidden="true" style="position: absolute; top: 7px; inset-inline-start: 0; inset-inline-end: 0; height: 2px; background: {{s.cord}}"></span>
+<span aria-hidden="true" style="position: absolute; top: 0; inset-inline-start: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--ground); box-shadow: inset 0 0 0 4px {{s.knot}}"></span>
+<span style="font-weight: 600; color: var(--ink)">{{s.label}}</span>
+<span style="font-family: var(--font-display); font-size: 26px; line-height: 1.2; font-weight: 500; letter-spacing: -0.02em; {{s.style}}">{{s.value}}</span>
+<span style="font-size: 13px; color: var(--ink-3)">{{s.note}}</span>
+</li>
+</sc-for>
+</ol>
+<p style="margin: 0; font-size: 13px; color: var(--ink-3)">38,412 acknowledged in 24 hours · receiver p95 480 ms · dispatcher: [Cloudflare Queues or a D1 outbox, to decide]</p>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
+<section aria-labelledby="subs-h" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<h2 id="subs-h" style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3)">Subscriptions, most troubled first</h2>
+<ul style="list-style: none; margin: 0; padding: 0; background: var(--surface); box-shadow: var(--ring); border-radius: var(--r-card); overflow: hidden">
+<sc-for list="{{subs}}" as="r" hint-placeholder-count="6">
+<li style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 16px 24px; {{r.divider}}">
+<div style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column">
+<span style="font-family: var(--font-mono); font-size: 13px; color: var(--ink); overflow-wrap: anywhere">{{r.host}}</span>
+<span style="font-size: 13px; color: var(--ink-3)">{{r.agent}} · {{r.owner}}</span>
+</div>
+<div style="flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-start">
+<span style="display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: var(--r-tag); font-size: 12px; font-weight: 600; white-space: nowrap; {{r.tag}}"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; {{r.dot}}"></span>{{r.state}}</span>
+<span style="font-size: 13px; color: var(--ink-3)">{{r.detail}}</span>
+</div>
+<span style="flex: 0 0 104px; font-size: 13px; text-align: end; {{r.rateStyle}}">{{r.rate}}</span>
+<span style="flex: 0 0 88px; display: flex; justify-content: flex-end"><sc-if value="{{r.hasAction}}" hint-placeholder-val="{{ true }}"><button type="button" aria-label="{{r.actionAria}}" style="min-height: 36px; padding: 0 14px; border: 0; border-radius: var(--r-pill); background: var(--surface); box-shadow: var(--ring-control); color: var(--ink); font-weight: 600; font-size: 13px">{{r.action}}</button></sc-if></span>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<aside style="flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+<section aria-labelledby="ssrf-h" style="background: var(--surface); box-shadow: var(--ring); border-radius: var(--r-card); padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 id="ssrf-h" style="margin: 0; font-size: 16px; font-weight: 600; color: var(--ink)">Refused at send time</h2>
+<div style="display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; border-bottom: 1px solid var(--line)">
+<span style="font-family: var(--font-mono); font-size: 13px; color: var(--ink)">relay-in.vesper.example</span>
+<span>Now resolves to <span style="font-family: var(--font-mono); font-size: 12px; color: var(--fail)">10.0.4.12</span>, a private address. At signup it was 198.51.100.7. Refused and paused; the owner was told.</span>
+<span style="font-size: 12px; color: var(--ink-3)">21:03 · Vesper · @nightjar</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: var(--font-mono); font-size: 13px; color: var(--ink)">hooks.lumen.example</span>
+<span>Answered 302 to <span style="font-family: var(--font-mono); font-size: 12px; color: var(--fail)">169.254.169.254</span>. Redirects are never followed, so it counted as a failed attempt.</span>
+<span style="font-size: 12px; color: var(--ink-3)">18:40 · Pipit · @marlow</span>
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--ink-3)">The relay looks up each address itself before every send. Workers doesn’t document blocking private addresses, so the platform isn’t relied on for this.</p>
+</section>
+<section aria-labelledby="gap-h" style="background: var(--surface); box-shadow: var(--ring); border-radius: var(--r-card); padding: 24px; display: flex; flex-direction: column; gap: 8px">
+<h2 id="gap-h" style="margin: 0; font-size: 16px; font-weight: 600; color: var(--ink)">Gap notices</h2>
+<span>9 subscriptions were sent <span style="font-family: var(--font-mono); font-size: 12px; color: var(--ink)">subscription.gap</span> for 03:12–03:14 UTC after an event-intake restart. All acknowledged.</span>
+<a href="admin-health.dc.html" style="align-self: flex-start; font-weight: 600; min-height: 32px; display: flex; align-items: center">See it on Health</a>
+</section>
+</aside>
+</div>
+
+<section aria-labelledby="dl-h" style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px 24px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h2 id="dl-h" style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3)">Failed, kept for replay</h2>
+<span style="font-size: 13px; color: var(--ink-3)">Kept for [retention period]. A replay rechecks channel access and the address first.</span>
+</div>
+<button type="button" onClick="{{replay}}" disabled="{{noneSelected}}" style="min-height: 40px; padding: 0 20px; border: 0; border-radius: var(--r-pill); background: var(--act); color: var(--on-act); font-weight: 600">{{replayLabel}}</button>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0; background: var(--surface); box-shadow: var(--ring); border-radius: var(--r-card); overflow: hidden">
+<sc-for list="{{failed}}" as="f" hint-placeholder-count="5">
+<li style="{{f.divider}}">
+<label style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 12px 24px; cursor: pointer; {{f.rowStyle}}">
+<input type="checkbox" checked="{{f.on}}" onChange="{{f.toggle}}" aria-label="{{f.label}}" style="width: 18px; height: 18px; flex: none; accent-color: var(--act)">
+<span style="flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column"><span style="font-family: var(--font-mono); font-size: 13px; color: var(--ink)">{{f.id}}</span><span style="font-family: var(--font-mono); font-size: 12px; color: var(--ink-3)">{{f.type}}</span></span>
+<span style="flex: 1 1 180px; min-width: 0; font-family: var(--font-mono); font-size: 12px">{{f.host}}</span>
+<span style="flex: 1 1 160px; color: var(--fail)">{{f.answer}}</span>
+<span style="flex: 0 0 104px; text-align: end; color: var(--ink-3)">{{f.when}}</span>
+</label>
+</li>
+</sc-for>
+</ul>
+<p role="status" style="margin: 0; padding-inline: 4px; font-size: 13px; color: var(--ink-3); min-height: 20px">{{replayStatus}}</p>
+</section>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["Dark","Light"],"default":"Dark"},"$preview":{"width":1440,"height":1460}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { picked: { d1: true, d2: true }, replayed: 0 }; }
+  renderVals() { var v = this.vals(); v.theme = (this.props.theme ?? 'Dark') === 'Light' ? 'light' : 'dark'; return v; }
+  vals() {
+    var st = this.state;
+    var self = this;
+    var neutral = 'color: var(--ink-2); padding: 0';
+    var waitT = 'background: var(--wait-soft); color: var(--wait)';
+    var failT = 'background: var(--fail-soft); color: var(--fail)';
+    var st4 = [
+      { label: 'Due now', value: '12', note: 'oldest 0:07', style: 'color: var(--ink)', knot: 'var(--ink-3)' },
+      { label: 'In flight', value: '4', note: '[concurrency] per receiver', style: 'color: var(--ink)', knot: 'var(--ink-3)' },
+      { label: 'Retrying', value: '23', note: 'waits double, with jitter', style: 'color: var(--wait)', knot: 'var(--wait-mark)' },
+      { label: 'Failed', value: '5', note: 'kept for replay', style: 'color: var(--fail)', knot: 'var(--fail-mark)' }
+    ];
+    var stages = st4.map(function (s, i) { return Object.assign({ cord: i < st4.length - 1 ? 'var(--line-strong)' : 'transparent' }, s); });
+    var sb = [
+      { host: 'hooks.kestrel.example', agent: 'Kestrel', owner: '@tessellate', rate: '41 of 58', rateStyle: 'color: var(--wait)', state: 'Retrying', tag: waitT, dot: 'background: var(--wait-mark)', detail: '503 six times · next try 22:52', action: 'Pause', hasAction: true },
+      { host: 'relay-in.vesper.example', agent: 'Vesper', owner: '@nightjar', rate: '0 of 12', rateStyle: 'color: var(--fail)', state: 'Paused', tag: failT, dot: 'background: var(--fail-mark)', detail: 'Refused at send: private address', action: 'Review', hasAction: true },
+      { host: 'tern.wrenfield.example', agent: 'Tern', owner: '@wrenfield', rate: '96 of 96', rateStyle: 'color: var(--ink-2)', state: 'Slow', tag: waitT, dot: 'background: var(--wait-mark)', detail: 'p95 4.8 s, near the [timeout]', action: 'Pause', hasAction: true },
+      { host: 'agents.gannet.example', agent: 'Gannet', owner: '@fenwick', rate: '—', rateStyle: 'color: var(--ink-3)', state: 'Paused', tag: neutral, dot: 'box-shadow: inset 0 0 0 1.5px var(--ink-3)', detail: 'Agent suspended by admins', action: '', hasAction: false },
+      { host: 'kestrel.example', agent: 'Kestrel', owner: '@tessellate', rate: '—', rateStyle: 'color: var(--ink-3)', state: 'Ended', tag: neutral, dot: 'box-shadow: inset 0 0 0 1.5px var(--ink-3)', detail: 'Receiver answered 410 Gone', action: '', hasAction: false },
+      { host: 'hooks.orrery.dev', agent: 'Orrery', owner: '@tessellate', rate: '1,228 of 1,233', rateStyle: 'color: var(--ink-2)', state: 'Healthy', tag: neutral, dot: 'background: var(--ink-2)', detail: '5 retried, then delivered', action: '', hasAction: false }
+    ];
+    var subs = sb.map(function (r, i) { return Object.assign({}, r, { actionAria: r.action + ' ' + r.host, divider: i < sb.length - 1 ? 'border-bottom: 1px solid var(--line)' : '' }); });
+    var base = [
+      { k: 'd1', id: 'del_2K9pRe', type: 'message.updated', host: 'hooks.kestrel.example', answer: '400 Bad Request', when: '17 Oct, 19:03' },
+      { k: 'd2', id: 'del_2K9pQ1', type: 'message.created', host: 'hooks.kestrel.example', answer: '400 Bad Request', when: '17 Oct, 19:01' },
+      { k: 'd3', id: 'del_2K7aB4', type: 'message.created', host: 'relay-in.vesper.example', answer: 'Refused: private address', when: '18 Oct, 21:03' },
+      { k: 'd4', id: 'del_2K6xT0', type: 'message.deleted', host: 'hooks.lumen.example', answer: '302, not followed', when: '18 Oct, 18:40' },
+      { k: 'd5', id: 'del_2K3cLa', type: 'channel.access_changed', host: 'tern.wrenfield.example', answer: 'No answer, [max attempts] times', when: '16 Oct, 08:12' }
+    ];
+    var n = base.filter(function (b) { return st.picked[b.k]; }).length;
+    var failed = base.map(function (b, i) {
+      var on = !!st.picked[b.k];
+      return Object.assign({}, b, { on: on, label: 'Select ' + b.id, rowStyle: on ? 'background: var(--raised)' : '', divider: i < base.length - 1 ? 'border-bottom: 1px solid var(--line)' : '',
+        toggle: function () { var p = Object.assign({}, self.state.picked); p[b.k] = !p[b.k]; self.setState({ picked: p, replayed: 0 }); } });
+    });
+    return {
+      stages: stages, subs: subs, failed: failed,
+      noneSelected: n === 0,
+      replayLabel: n === 1 ? 'Replay 1 delivery' : 'Replay ' + n + ' deliveries',
+      replayStatus: st.replayed ? st.replayed + (st.replayed === 1 ? ' delivery' : ' deliveries') + ' queued again with the same webhook-id.' : '',
+      replay: function () { self.setState({ replayed: n, picked: {} }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

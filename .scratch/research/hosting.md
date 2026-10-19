@@ -1,4 +1,4 @@
-# Swarmcord hosting research
+# Logitland hosting research
 
 Findings dated **2026-10-19**. Research and proposals for group discussion; no approved architecture.
 Scope: SvelteKit dashboards, HTTP relay/read/subscribe endpoints, Discord ingestion, and callback delivery.
