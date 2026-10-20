@@ -147,7 +147,7 @@ class AdminConsole {
     await wait(LATENCY);
     const agent = this.agent(agentId);
     if (!agent || agent.level === level) return;
-    this.#log('agents', `Changed level to ${levelName(level)}`, this.#agentTarget(agent), `${levelName(agent.level)} → ${levelName(level)}`);
+    this.#log('agents', 'Changed level', this.#agentTarget(agent), `${levelName(agent.level)} → ${levelName(level)}`);
     agent.level = level;
   }
 
@@ -157,7 +157,8 @@ class AdminConsole {
     const agent = this.agent(agentId);
     if (!agent) return;
     agent.standing = { kind: 'suspended', until: hours === null ? null : Date.now() + hours * 3_600_000 };
-    this.#log('agents', hours === null ? 'Suspended until lifted' : `Suspended for ${plural(hours, { one: '# hour', other: '# hours' })}`, this.#agentTarget(agent));
+    const length = hours !== null && hours % 24 === 0 ? plural(hours / 24, { one: '# day', other: '# days' }) : plural(hours ?? 0, { one: '# hour', other: '# hours' });
+    this.#log('agents', hours === null ? 'Suspended until lifted' : `Suspended for ${length}`, this.#agentTarget(agent));
   }
 
   async reinstate(agentId: string) {
@@ -354,7 +355,7 @@ class AdminConsole {
 
     if (next.xp !== undefined && next.xp !== rule.xp) changes.push(`XP ${rule.xp} → ${next.xp}`);
     if (next.role !== undefined && next.role !== rule.role) changes.push(`Role ${roleName(rule.role)} → ${roleName(next.role)}`);
-    if (changes.length) this.#log('levels', `Changed ${name}`, target, changes.join(', '));
+    if (changes.length) this.#log('levels', 'Changed XP and role', target, changes.join(', '));
 
     if (next.limits && next.permissions) {
       const diffs = (['orphan', 'adopted'] as const).flatMap((adoption) =>
@@ -367,7 +368,7 @@ class AdminConsole {
           (key) => `${PERMISSION_LABELS[key]} (${adoption}) ${next.permissions![adoption].includes(key) ? 'on' : 'off'}`,
         ),
       );
-      this.#log('levels', `Changed ${name} limits`, target, [...diffs, ...permissionDiffs].join(', '));
+      this.#log('levels', 'Changed limits', target,[...diffs, ...permissionDiffs].join(', '));
     }
 
     if (next.checks) {
@@ -375,7 +376,7 @@ class AdminConsole {
       const turnedOff = rule.checks.filter((c) => !next.checks!.includes(c));
       const label = (checks: Check[]) => list(checks.map((c) => CHECKS[c].label));
       const detail = [turnedOn.length ? `On: ${label(turnedOn)}` : '', turnedOff.length ? `Off: ${label(turnedOff)}` : ''].filter(Boolean).join('. ');
-      this.#log('levels', `Changed ${name} moderation checks`, target, detail);
+      this.#log('levels', 'Changed moderation checks', target, detail);
     }
 
     Object.assign(rule, structuredClone($state.snapshot(next)));
@@ -415,10 +416,10 @@ class AdminConsole {
       const before = this.grants.find((g) => g.roleId === grant.roleId);
       if (!before) this.#log('admins', `Gave ${name(grant.roleId)} admin powers`, undefined, powers(grant.powers));
       else if (powers(before.powers) !== powers(grant.powers))
-        this.#log('admins', `Changed ${name(grant.roleId)}’s admin powers`, undefined, `${powers(before.powers)} → ${powers(grant.powers)}`);
+        this.#log('admins', `Changed admin powers for ${name(grant.roleId)}`, undefined, `${powers(before.powers)} → ${powers(grant.powers)}`);
     }
     for (const removed of this.grants.filter((g) => !next.some((n) => n.roleId === g.roleId))) {
-      this.#log('admins', `Removed ${name(removed.roleId)}’s admin powers`, undefined, powers(removed.powers));
+      this.#log('admins', `Removed admin powers from ${name(removed.roleId)}`, undefined, powers(removed.powers));
     }
     this.grants = structuredClone($state.snapshot(next));
   }
@@ -438,7 +439,7 @@ class AdminConsole {
   async setSwitch(key: KillSwitch, on: boolean) {
     await wait(LATENCY);
     this.health.switches[key] = on;
-    this.#log('health', on ? KILL_SWITCHES[key].label : `Undid “${KILL_SWITCHES[key].label}”`, undefined, `${KILL_SWITCHES[key][on ? 'off' : 'on']} → ${KILL_SWITCHES[key][on ? 'on' : 'off']}`);
+    this.#log('health', KILL_SWITCHES[key][on ? 'on' : 'off']);
   }
 
   /** Re-reads the bot's permissions from Discord. In the prototype, a re-check finds them fixed. */

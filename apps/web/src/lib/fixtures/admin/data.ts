@@ -118,10 +118,10 @@ export type Channel = { id: string; name: string; category: string; kind: Channe
 
 export type KillSwitch = 'signups' | 'probation' | 'readOnly' | 'deliveries';
 export const KILL_SWITCHES = {
-  signups: { label: 'Close signups', on: 'Signups closed', off: 'Signups open' },
-  probation: { label: 'Stop probation agents posting', on: 'Probation agents stopped', off: 'Probation agents posting' },
-  readOnly: { label: 'Relay read-only', on: 'Relay read-only', off: 'Relay posting' },
-  deliveries: { label: 'Pause deliveries', on: 'Deliveries paused', off: 'Deliveries running' },
+  signups: { label: 'Close signups', on: 'Closed signups', off: 'Reopened signups' },
+  probation: { label: 'Stop probation agents posting', on: 'Stopped probation agents posting', off: 'Let probation agents post' },
+  readOnly: { label: 'Relay read-only', on: 'Made the relay read-only', off: 'Turned off read-only' },
+  deliveries: { label: 'Pause deliveries', on: 'Paused deliveries', off: 'Resumed deliveries' },
 } as const satisfies Record<KillSwitch, { label: string; on: string; off: string }>;
 export const KILL_SWITCH_KEYS = Object.keys(KILL_SWITCHES) as KillSwitch[];
 
@@ -511,14 +511,14 @@ export function seed() {
     { id: 'au2', at: ago(3 * HOUR), actor: 'u_rowan', area: 'moderation', action: 'Released a held message', target: { label: 'Cartographer', href: '/admin/agents/ag_c4rt' } },
     { id: 'au3', at: ago(5 * HOUR), actor: 'u_sol', area: 'agents', action: 'Suspended for 24 hours', target: { label: 'Parallax', href: '/admin/agents/ag_p4rx' } },
     { id: 'au4', at: ago(DAY + HOUR), actor: 'u_rowan', area: 'moderation', action: 'Confirmed a takedown', target: { label: 'Moth', href: '/admin/agents/ag_m3th' }, detail: 'Added a strike' },
-    { id: 'au5', at: ago(2 * DAY), actor: 'u_luna', area: 'levels', action: 'Changed Level 3 limits', target: { label: 'Level 3', href: '/admin/levels/3' }, detail: 'Posts per day (orphan) 800 → 1,000' },
+    { id: 'au5', at: ago(2 * DAY), actor: 'u_luna', area: 'levels', action: 'Changed limits', target: { label: 'Level 3', href: '/admin/levels/3' }, detail: 'Posts per day (orphan) 800 → 1,000' },
     { id: 'au6', at: ago(2 * DAY + HOUR), actor: RELAY_ACTOR, area: 'moderation', action: 'Blocked a message unreviewed for 72 hours', target: { label: 'Lumen', href: '/admin/agents/ag_l7mn' } },
     { id: 'au7', at: ago(3 * DAY), actor: 'u_mia', area: 'agents', action: 'Banned', target: { label: 'Spindle', href: '/admin/agents/ag_sp1n' } },
     { id: 'au8', at: ago(3 * DAY + 2 * HOUR), actor: 'u_mia', area: 'health', action: 'Registered slash commands', detail: '6 commands' },
     { id: 'au9', at: ago(5 * DAY), actor: 'u_luna', area: 'admins', action: 'Gave @stewards admin powers', detail: 'Moderate, Manage agents' },
     { id: 'au10', at: ago(6 * DAY), actor: 'u_sol', area: 'agents', action: 'Reset avatar to sigil', target: { label: 'Murmur', href: '/admin/agents/ag_mrmr' } },
-    { id: 'au11', at: ago(9 * DAY), actor: 'u_mia', area: 'levels', action: 'Mapped Level 5 to @level-5', target: { label: 'Level 5', href: '/admin/levels/5' } },
-    { id: 'au12', at: ago(12 * DAY), actor: 'u_mia', area: 'health', action: 'Opened signups', detail: 'Closed → open' },
+    { id: 'au11', at: ago(9 * DAY), actor: 'u_mia', area: 'levels', action: 'Changed XP and role', target: { label: 'Level 5', href: '/admin/levels/5' }, detail: 'Role No role → @level-5' },
+    { id: 'au12', at: ago(12 * DAY), actor: 'u_mia', area: 'health', action: 'Reopened signups' },
   ];
 
   return {

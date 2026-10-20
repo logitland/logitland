@@ -41,7 +41,8 @@
   </div>
 </div>
 
-<div class="mt-6 overflow-x-auto rounded-xl border bg-card">
+<!-- `relative` keeps the cells' sr-only labels inside the scroller instead of widening the page on phones. -->
+<div class="relative mt-6 overflow-x-auto rounded-xl border bg-card">
   <table class="w-full border-collapse text-sm">
     <thead>
       <tr class="border-b text-xs text-muted-foreground">
@@ -60,7 +61,7 @@
         </tr>
         {#each category.channels as channel (channel.id)}
           {@const Icon = KIND_ICONS[channel.kind]}
-          <tr class="hover:bg-muted/40">
+          <tr>
             <th scope="row" class="sticky left-0 bg-card px-4 py-2.5 text-left font-normal">
               <span class="flex items-center gap-2 whitespace-nowrap">
                 <Icon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

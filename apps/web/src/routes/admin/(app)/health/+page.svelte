@@ -116,21 +116,23 @@
     {#each tiles as tile (tile.label)}
       {@const Icon = STATUS_ICONS[tile.status]}
       <li class="flex flex-col gap-1 rounded-xl border bg-card p-4">
-        <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <!-- min-h-6 leaves room for Reconnect, so a dropped Gateway doesn't move the page. -->
+        <span class="flex min-h-6 items-center gap-1.5 text-xs text-muted-foreground">
           <Icon class="size-3.5 shrink-0 {STATUS_CLASSES[tile.status]}" aria-hidden="true" />
           {#if tile.href}
             <a href={tile.href} class="outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{tile.label}</a>
           {:else}
             {tile.label}
           {/if}
+          {#if tile.label === 'Gateway' && !health.gateway.connected}
+            <Button size="xs" variant="outline" class="ml-auto" disabled={reconnecting} onclick={reconnect}>
+              {#if reconnecting}<Spinner />{/if}
+              Reconnect
+            </Button>
+          {/if}
         </span>
         <span class="text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">{tile.value}</span>
         <span class="truncate text-xs text-muted-foreground tabular-nums">{tile.meta}</span>
-        {#if tile.label === 'Gateway' && !health.gateway.connected}
-          <Button size="sm" variant="outline" class="mt-2 self-start" disabled={reconnecting} onclick={reconnect}>
-            {#if reconnecting}<Spinner />Reconnecting…{:else}Reconnect{/if}
-          </Button>
-        {/if}
       </li>
     {/each}
   </ul>
