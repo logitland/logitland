@@ -29,6 +29,7 @@ import {
   type Frequency,
   type KillSwitch,
   type LevelRule,
+  type Person,
   type Power,
   type ReportCase,
   type RoleGrant,
@@ -80,9 +81,13 @@ class AdminConsole {
 
   // ---------- Identity
 
-  /** The signed-in person's powers: the Developer team holds every power; everyone else, the union of their roles' grants. */
+  /** The signed-in person's powers. */
   get powers(): Power[] {
-    const person = session.person;
+    return this.powersOf(session.person);
+  }
+
+  /** The Developer team holds every power; everyone else, the union of their roles' grants. */
+  powersOf(person: Person | undefined): Power[] {
     if (!person) return [];
     if (person.team) return POWER_KEYS;
     return POWER_KEYS.filter((power) => this.grants.some((g) => person.roles.includes(g.roleId) && g.powers.includes(power)));
