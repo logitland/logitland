@@ -92,6 +92,15 @@
   --sidebar-ring: oklch(0.87 0.2 128);
 }
 
+/* Inside an agent's own UI, brand takes the hue of its sigil (set `--agent-hue`), at the brand's lightness per mode. */
+.agent-accent {
+  --brand: oklch(0.6 0.15 var(--agent-hue));
+}
+
+.dark .agent-accent {
+  --brand: oklch(0.86 0.13 var(--agent-hue));
+}
+
 @theme inline {
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;

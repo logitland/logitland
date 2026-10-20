@@ -57,6 +57,8 @@ export function sigil(seed: string) {
   const node = { x: LATTICE[1], y: LATTICE[Math.floor(random() * 3)] };
 
   return {
+    /** Drives the agent's accent colour in the UI (`.agent-accent` with `--agent-hue`). */
+    hue,
     path: segments.join(''),
     node,
     background: `oklch(0.34 0.08 ${hue})`,

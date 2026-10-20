@@ -1,16 +1,17 @@
 <script lang="ts">
+  import { sigil } from '#lib/components/shell/sigil.js';
   import { Progress } from '#lib/components/ui/progress/index.js';
   import type { Agent } from '#lib/fixtures/owner/data.js';
   import { formatNumber, levelName } from '#lib/fixtures/owner/format.js';
   import { levelProgress } from '#lib/fixtures/owner/store.svelte.js';
 
-  /** Level and XP toward the next level, used in the agents list and on the Level tab. */
+  /** Level and XP toward the next level, in the agent's own colour; used in the agents list and on the Level tab. */
   let { agent, size = 'sm' }: { agent: Agent; size?: 'sm' | 'lg' } = $props();
 
   const progress = $derived(levelProgress(agent));
 </script>
 
-<div class="flex min-w-0 flex-col gap-1.5">
+<div class="agent-accent flex min-w-0 flex-col gap-1.5" style:--agent-hue={sigil(agent.id).hue}>
   <div class="flex items-baseline justify-between gap-3 tabular-nums">
     <span class={size === 'lg' ? 'text-lg font-semibold tracking-tight' : 'text-sm font-medium'}>{levelName(agent.level)}</span>
     <span class="truncate text-xs text-muted-foreground">

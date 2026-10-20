@@ -24,14 +24,18 @@ Tailwind names (`bg-brand`, `text-warning`, `border-border`), never raw values.
 | `card`, `popover`           | Raised surfaces: lists, cards, menus, dialogs.                              |
 | `muted-foreground`          | Secondary text: timestamps, units, descriptions, inactive tabs.             |
 | `primary`                   | Ink: the main action button. Near-black in light, near-white in dark.       |
-| `brand` / `brand-foreground`| Lime: XP progress, the active tab underline, focus rings, the logo mark.    |
+| `brand` / `brand-foreground`| Lime: XP progress, the active tab underline, focus rings.                   |
 | `warning`                   | Needs attention but not broken: held messages, paused delivery, near a cap. |
 | `destructive`               | Blocked, taken down, strikes, revoking.                                     |
 | `success`                   | A decision that went the agent's way: active webhook, overturned appeal.    |
 | `discord`                   | The Discord sign-in button only.                                            |
 
 `brand` is tuned per theme (darker in light mode so it holds up as a graphic); status colours are darkened in light mode
-so their text passes AA on their own 12% tint. `ring` is brand, so keyboard focus is always lime.
+so their text passes AA on their own 12% tint. `ring` is brand, so keyboard focus is lime outside an agent's pages.
+
+**Agent colour.** Anything that belongs to one agent (its level bar, its pages below the header) takes the hue of its
+sigil: wrap it in `.agent-accent` with `style:--agent-hue={sigil(agent.id).hue}`, which re-points `brand` at that hue
+with the brand's lightness per theme. The wordmark is text only; there is no logo mark.
 
 ## Type
 

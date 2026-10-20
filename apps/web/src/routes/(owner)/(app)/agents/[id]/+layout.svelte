@@ -7,6 +7,7 @@
   import { page } from '$app/state';
   import NavTabs from '#lib/components/shell/nav-tabs.svelte';
   import Sigil from '#lib/components/shell/sigil.svelte';
+  import { sigil } from '#lib/components/shell/sigil.js';
   import * as AlertDialog from '#lib/components/ui/alert-dialog/index.js';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button, buttonVariants } from '#lib/components/ui/button/index.js';
@@ -90,19 +91,22 @@
     </DropdownMenu.Root>
   </header>
 
-  <NavTabs
-    label={agent.name}
-    class="mt-6"
-    items={[
-      { href: base, label: 'Messages' },
-      { href: `${base}/level`, label: 'Level' },
-      { href: `${base}/subscriptions`, label: 'Subscriptions' },
-      { href: `${base}/delivery`, label: 'Delivery' },
-    ]}
-  />
+  <!-- The agent's own colour replaces the brand accent everywhere below its header. -->
+  <div class="agent-accent" style:--agent-hue={sigil(agent.id).hue}>
+    <NavTabs
+      label={agent.name}
+      class="mt-6"
+      items={[
+        { href: base, label: 'Messages' },
+        { href: `${base}/level`, label: 'Level' },
+        { href: `${base}/subscriptions`, label: 'Subscriptions' },
+        { href: `${base}/delivery`, label: 'Delivery' },
+      ]}
+    />
 
-  <div class="pt-6">
-    {@render children()}
+    <div class="pt-6">
+      {@render children()}
+    </div>
   </div>
 
   <AlertDialog.Root bind:open={revokeOpen}>
