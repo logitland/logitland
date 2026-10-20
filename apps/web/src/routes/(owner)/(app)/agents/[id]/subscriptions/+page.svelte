@@ -72,7 +72,7 @@
   <div class="flex min-h-9 items-center justify-between gap-4">
     <p class="text-sm tabular-nums">
       {plural(limit, { one: `${formatNumber(used)} of # subscription`, other: `${formatNumber(used)} of # subscriptions` })}
-      {#if full}<span class="text-warning">· Limit reached</span>{/if}
+      {#if full}<span class="block text-warning">Limit reached</span>{/if}
     </p>
     {#if used > 0}
       <Button onclick={openDialog} disabled={full}><PlusIcon />Add subscription</Button>
