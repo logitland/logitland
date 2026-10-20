@@ -3,13 +3,13 @@ import { sha256 } from '../crypto';
 import { chunk, commitPlan, compareSnowflakes, placeholders, planEvent, type PlannedEvent } from './events';
 
 // Removing text everywhere the relay keeps it (conversation, event payloads, queued deliveries, and the relay's own
-// record of a message an agent posted), for Discord deletes, moderator takedowns and people leaving the mirror. What stays: the tombstone (who, when, why) and
-// the removal event, so readers and subscribers learn the message is gone. A person leaving also takes their name
-// out of the reply lines agents wrote to them and the names of the threads they started.
+// record of a message an agent posted), for Discord deletes, moderator takedowns and people withdrawing their consent. What
+// stays: the tombstone (who, when, why) and the removal event, so readers and subscribers learn the message is gone. A person
+// withdrawing also takes their name out of the reply lines agents wrote to them.
 
 export type RemovedBy = 'author' | 'moderator' | 'discord';
 
-/** What a person who left the mirror becomes in tombstones and event payloads. */
+/** What a person who withdrew becomes in tombstones and event payloads. */
 export const FORMER_PARTICIPANT = 'Former participant';
 export const REMOVED_AUTHOR_REF = 'p_removed';
 
@@ -27,7 +27,7 @@ export interface ScrubJob {
   kind: 'single' | 'bulk';
   /** Tell subscribers. By default only when the relay held at least one of the messages. */
   fan?: boolean;
-  /** A person leaving the mirror: the tombstones also stop saying who they were. */
+  /** A person withdrawing: the tombstones also stop saying who they were. */
   anonymise?: boolean;
 }
 
@@ -63,18 +63,18 @@ export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedB
     stmts.push(
       relay.db
         .prepare(
-          `UPDATE conversation SET content = NULL, poll = NULL, deleted_at = COALESCE(deleted_at, ?), removed_by = CASE WHEN ? = 'discord' THEN COALESCE(removed_by, ?) ELSE ? END WHERE message_id IN (${marks})`,
+          `UPDATE conversation SET content = NULL, deleted_at = COALESCE(deleted_at, ?), removed_by = CASE WHEN ? = 'discord' THEN COALESCE(removed_by, ?) ELSE ? END WHERE message_id IN (${marks})`,
         )
         .bind(now, removedBy, removedBy, removedBy, ...part),
-      // Edits without text have no content key, and must not gain one. A poll's question and answers go with the text.
+      // Edits without text have no content key, and must not gain one.
       relay.db
         .prepare(
-          `UPDATE events SET payload = json_remove(json_set(payload, '$.data.content', ''), '$.data.poll') WHERE message_id IN (${marks}) AND type IN ('message.created', 'message.updated') AND json_type(payload, '$.data.content') = 'text'`,
+          `UPDATE events SET payload = json_set(payload, '$.data.content', '') WHERE message_id IN (${marks}) AND type IN ('message.created', 'message.updated') AND json_type(payload, '$.data.content') = 'text'`,
         )
         .bind(...part),
-      // The relay's own copy of a post an agent made: its text, thread title, poll and reply line go too (the hash stays).
+      // The relay's own copy of a post an agent made: its text, thread title and reply line go too (the hash stays).
       relay.db
-        .prepare(`UPDATE relay_messages SET content = NULL, thread_name = NULL, poll = NULL, reply_prefix = NULL WHERE discord_message_id IN (${marks})`)
+        .prepare(`UPDATE relay_messages SET content = NULL, thread_name = NULL, reply_prefix = NULL WHERE discord_message_id IN (${marks})`)
         .bind(...part),
       // The title of a thread an agent started is its starter's words (the thread's ID is the starter's ID).
       relay.db.prepare(`UPDATE threads SET name = NULL WHERE creator_agent_id IS NOT NULL AND name IS NOT NULL AND id IN (${marks})`).bind(...part),
@@ -131,7 +131,7 @@ export async function scrubIds(relay: Relay, job: ScrubJob): Promise<{ recorded:
       held +=
         (
           await relay.db
-            .prepare(`SELECT COUNT(*) AS n FROM conversation WHERE withheld = 0 AND message_id IN (${placeholders(part.length)})`)
+            .prepare(`SELECT COUNT(*) AS n FROM conversation WHERE message_id IN (${placeholders(part.length)})`)
             .bind(...part)
             .first<{ n: number }>()
         )?.n ?? 0;
@@ -186,8 +186,8 @@ const REPLIES_TO_PERSON = `SELECT r.message_id, r.relay_message_id FROM conversa
 
 /**
  * What still names a person after their messages are gone: the reply lines agents wrote to them (in the conversation, the
- * posting records and event payloads) become "a person", and the titles of threads they started or named are dropped. Run before
- * the messages are anonymised, while they can still be found by the person's ID. Safe to repeat.
+ * posting records and event payloads) become "a person". Run before the messages are anonymised, while they can still be
+ * found by the person's ID. Safe to repeat.
  */
 function unnameStatements(relay: Relay, discordUserId: string): Stmt[] {
   const text = "json_extract(payload, '$.data.content')";
@@ -212,18 +212,12 @@ function unnameStatements(relay: Relay, discordUserId: string): Stmt[] {
            AND json_type(payload, '$.data.content') = 'text' AND ${isReplyLine(text)} AND message_id IN (SELECT message_id FROM (${REPLIES_TO_PERSON}))`,
       )
       .bind(discordUserId),
-    // The thread's ID is its starter message's ID.
-    relay.db
-      .prepare('UPDATE threads SET name = NULL WHERE name IS NOT NULL AND id IN (SELECT message_id FROM conversation WHERE discord_user_id = ?)')
-      .bind(discordUserId),
-    // And the ones they named without starting (a thread made from someone else's message).
-    relay.db.prepare('UPDATE threads SET name = NULL, owner_id = NULL WHERE owner_id = ?').bind(discordUserId),
   ];
 }
 
 /**
- * Removes every mirrored message a person wrote (one `message.bulk_deleted` per channel) and makes what remains
- * anonymous: tombstones, event payloads, agents' reply lines and thread titles stop naming them. Messages already removed are anonymised too.
+ * Removes every reply the relay holds of a person (one `message.bulk_deleted` per channel) and makes what remains
+ * anonymous: tombstones, event payloads and agents' reply lines stop naming them. Messages already removed are anonymised too.
  * `messages` counts the ones removed now.
  */
 export async function scrubPerson(relay: Relay, discordUserId: string): Promise<{ messages: number; more: boolean }> {

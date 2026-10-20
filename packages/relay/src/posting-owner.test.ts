@@ -24,7 +24,6 @@ let counter = 0;
 const post = (h: Harness, a: { key: string }, text: string) =>
   h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: text }, { ...h.as(a.key), 'idempotency-key': `key-${++counter}-padding` });
 const json = async (res: Response) => (await res.json()) as Record<string, any>;
-const ok = () => Response.json({ id: '300000000000000909', channel_id: LOUNGE, content: 'x', timestamp: new Date().toISOString(), edited_timestamp: null });
 
 describe('an owner’s view of messages', () => {
   it('lists the owner’s agents’ messages, newest first, and nobody else’s', async () => {
@@ -69,93 +68,5 @@ describe('an owner’s view of messages', () => {
     const { h, mine, theirs } = await setup();
     const res = await h.internal('GET', `/internal/owners/${theirs.id}/messages`, undefined, { 'x-logitland-owner': mine.id });
     expect(res.status).toBe(403);
-  });
-});
-
-describe('deciding on a send Discord never confirmed', () => {
-  async function uncertain() {
-    const ctx = await setup();
-    ctx.h.setDiscord(() => new Response('bad gateway', { status: 502 }));
-    const msg = await json(await post(ctx.h, ctx.a1, 'did this land?'));
-    expect(msg.status).toBe('uncertain');
-    ctx.h.setDiscord(async () => ok());
-    return { ...ctx, msg };
-  }
-  const audits = (h: Harness, action: string) =>
-    h.db
-      .prepare('SELECT * FROM audit_log WHERE action = ?')
-      .bind(action)
-      .all<Record<string, any>>()
-      .then((r) => r.results);
-
-  it('resends it, really sending it, and records the owner’s decision', async () => {
-    const { h, mine, msg, api } = await uncertain();
-    expect(h.discordCalls).toHaveLength(1);
-    const res = await api(mine, 'POST', `/messages/${msg.id}/resolve`, { action: 'resend' });
-    expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ id: msg.id, status: 'sent', discord_message_id: '300000000000000909', agent_name: 'Alder', status_reason: null });
-    expect(h.discordCalls).toHaveLength(2);
-    expect(await audits(h, 'message.resent')).toEqual([expect.objectContaining({ actor_type: 'owner', actor_id: mine.id, target_id: msg.id })]);
-  });
-
-  it('can come out uncertain or queued again, depending on what Discord says now', async () => {
-    const one = await uncertain();
-    one.h.setDiscord(() => new Response('still bad', { status: 502 }));
-    expect((await json(await one.api(one.mine, 'POST', `/messages/${one.msg.id}/resolve`, { action: 'resend' }))).status).toBe('uncertain');
-
-    const two = await uncertain();
-    two.h.setDiscord(
-      () => new Response(JSON.stringify({ retry_after: 2 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '2' } }),
-    );
-    expect((await json(await two.api(two.mine, 'POST', `/messages/${two.msg.id}/resolve`, { action: 'resend' }))).status).toBe('queued');
-  });
-
-  it('accepts it as sent without sending anything', async () => {
-    const { h, mine, msg, api } = await uncertain();
-    const res = await api(mine, 'POST', `/messages/${msg.id}/resolve`, { action: 'accept' });
-    expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ status: 'sent', status_reason: 'Accepted by the owner as sent', discord_message_id: null });
-    expect(h.discordCalls).toHaveLength(1);
-    expect(await audits(h, 'message.accepted')).toHaveLength(1);
-  });
-
-  it('decides once', async () => {
-    const { mine, msg, api } = await uncertain();
-    expect((await api(mine, 'POST', `/messages/${msg.id}/resolve`, { action: 'accept' })).status).toBe(200);
-    expect((await api(mine, 'POST', `/messages/${msg.id}/resolve`, { action: 'resend' })).status).toBe(409);
-  });
-
-  it('only resolves uncertain messages', async () => {
-    const { h, mine, a1, api } = await setup();
-    const sent = await json(await post(h, a1, 'plainly sent'));
-    const res = await api(mine, 'POST', `/messages/${sent.id}/resolve`, { action: 'resend' });
-    expect(res.status).toBe(409);
-    expect((await json(res)).detail).toMatch(/Discord didn’t confirm/);
-    expect(h.discordCalls).toHaveLength(1);
-  });
-
-  it('keeps one owner away from another’s messages', async () => {
-    const { h, theirs, other, mine, msg, api } = await uncertain();
-    expect((await api(theirs, 'POST', `/messages/${msg.id}/resolve`, { action: 'accept' })).status).toBe(404);
-    const theirsUncertain = await (async () => {
-      h.setDiscord(() => new Response('bad gateway', { status: 502 }));
-      return json(await post(h, other, 'their uncertain one'));
-    })();
-    expect((await api(mine, 'POST', `/messages/${theirsUncertain.id}/resolve`, { action: 'accept' })).status).toBe(404);
-    expect((await api(mine, 'POST', '/messages/msg_NOSUCHMESSAGE0/resolve', { action: 'accept' })).status).toBe(404);
-  });
-
-  it('rejects an action it does not know', async () => {
-    const { mine, msg, api } = await uncertain();
-    expect((await api(mine, 'POST', `/messages/${msg.id}/resolve`, { action: 'delete' })).status).toBe(400);
-    expect((await api(mine, 'POST', `/messages/${msg.id}/resolve`, {})).status).toBe(400);
-  });
-
-  it('cannot reach an agent without an owner', async () => {
-    const { h, mine, loose, api } = await setup();
-    h.setDiscord(() => new Response('bad gateway', { status: 502 }));
-    const msg = await json(await post(h, loose, 'an unclaimed agent’s uncertain one'));
-    expect(msg.status).toBe('uncertain');
-    expect((await api(mine, 'POST', `/messages/${msg.id}/resolve`, { action: 'accept' })).status).toBe(404);
   });
 });

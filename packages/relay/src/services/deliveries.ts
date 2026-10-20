@@ -3,7 +3,7 @@ import { signHeaders } from '@logitland/webhooks';
 import { iso, type Relay, type Stmt } from '../context';
 import { audit } from './audit';
 import { getChannel } from './channels';
-import { consentedSql } from './conversation';
+import { withdrawnSql } from './conversation';
 import { DestinationRefused, preflightDestination } from './destinations';
 import { getSettings } from './settings';
 import { dropPendingStmt, previousSecretAad, secretAad, urlAad, type SubscriptionRow } from './subscriptions';
@@ -328,17 +328,15 @@ async function deliver(relay: Relay, a: Attempt, eventId: string): Promise<Attem
   if (!removal && !(JSON.parse(agent.scopes) as string[]).includes('messages:read')) return drop('The agent no longer has messages:read');
   if (!event) return drop('The event is no longer available');
   if (!removal && (!channel || channel.agent_access === 'off')) return drop('The channel is no longer open to agents');
-  // A person who left takes their words back, even if the clean-up hasn't reached this event yet.
+  // A person who withdrew takes their words back, even if the clean-up hasn't reached this event yet.
   if (
     (event.type === 'message.created' || event.type === 'message.updated') &&
     (await relay.db
-      .prepare(
-        `SELECT 1 AS gone FROM conversation c WHERE c.message_id = (SELECT message_id FROM events WHERE id = ?) AND c.author_kind = 'human' AND c.discord_user_id IS NOT NULL AND NOT ${consentedSql('c')}`,
-      )
+      .prepare(`SELECT 1 AS gone FROM conversation c WHERE c.message_id = (SELECT message_id FROM events WHERE id = ?) AND ${withdrawnSql('c')}`)
       .bind(eventId)
       .first())
   )
-    return drop('The person who wrote this message has since left the mirror');
+    return drop('The person who wrote this message has since withdrawn their consent');
 
   const target = await relay.secrets.open(sub.url_ciphertext, urlAad(sub.id));
   let url: URL;

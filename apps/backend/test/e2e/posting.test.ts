@@ -193,14 +193,14 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
     const visible = async () => ((await s.call('GET', '/v1/channels', { key: agent.key })).body.channels as { id: string }[]).map((c) => c.id);
     expect(await visible()).toContain(s.channels.media);
 
-    const off = await s.dashboard('PATCH', `/internal/admin/channels/${s.channels.media}`, { owner, body: { agent_access: 'off', public_mirror: false } });
+    const off = await s.dashboard('PATCH', `/internal/admin/channels/${s.channels.media}`, { owner, body: { agent_access: 'off' } });
     expect(off.status).toBe(200);
     expect(await visible()).not.toContain(s.channels.media);
     expect((await s.call('GET', `/v1/channels/${s.channels.media}/messages`, { key: agent.key })).status).toBe(404);
     expect((await post(agent.key, { channel_id: s.channels.media, content: unique('Nobody home'), thread_name: 'x' })).status).toBe(404);
 
     const tail = (await s.call('GET', '/v1/events', { key: agent.key })).body.next_cursor;
-    const said = s.fake.say(s.channels.media, { as: DEV.admin, content: unique('Shout into the unlisted channel'), threadName: 'Unlisted' });
+    const said = s.fake.say(s.channels.media, { as: DEV.newsbot, content: unique('Shout into the unlisted channel'), threadName: 'Unlisted' });
     await sleep(1200);
     expect((await s.sql('SELECT 1 FROM conversation WHERE channel_id = ?', s.channels.media)).length).toBe(0);
     expect(
@@ -213,14 +213,14 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
 
   it('ignores channels and threads it does not relay, without asking Discord about each message', async () => {
     const staff = s.fake.addChannel(s.community.guildId, { name: 'staff-room' });
-    const first = s.fake.say(staff.id, { as: DEV.admin, content: unique('Private business') });
+    const first = s.fake.say(staff.id, { as: DEV.newsbot, content: unique('Private business') });
     const thread = s.fake.startThread(staff.id, first.id, 'Private thread', DEV.admin);
-    s.fake.say(thread.id, { as: DEV.admin, content: unique('More private business') });
+    s.fake.say(thread.id, { as: DEV.newsbot, content: unique('More private business') });
     s.fake.reset();
-    for (let i = 0; i < 3; i++) s.fake.say(staff.id, { as: DEV.admin, content: unique('Even more') });
-    s.fake.say(thread.id, { as: DEV.admin, content: unique('Still private') });
+    for (let i = 0; i < 3; i++) s.fake.say(staff.id, { as: DEV.newsbot, content: unique('Even more') });
+    s.fake.say(thread.id, { as: DEV.newsbot, content: unique('Still private') });
     // A relayed message after them proves they were all handled.
-    const marker = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('Public business') });
+    const marker = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('Public business') });
     await eventually(async () => (await s.sql('SELECT 1 FROM conversation WHERE message_id = ?', marker.id)).length === 1, { what: 'the marker message' });
     expect((await s.sql('SELECT 1 FROM conversation WHERE channel_id = ?', staff.id)).length).toBe(0);
     expect((await s.sql('SELECT 1 FROM events WHERE channel_id = ?', staff.id)).length).toBe(0);

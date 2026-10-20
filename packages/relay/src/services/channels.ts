@@ -13,7 +13,6 @@ export interface ChannelRow {
   type: Channel['type'];
   agent_access: Channel['agent_access'];
   pace_per_agent_per_minute: number;
-  public_mirror: number;
   verified_only: number;
   webhook_ciphertext: string | null;
   webhook_id: string | null;
@@ -29,7 +28,6 @@ export const toChannel = (r: ChannelRow): Channel => ({
   type: r.type,
   agent_access: r.agent_access,
   pace_per_agent_per_minute: r.pace_per_agent_per_minute,
-  public_mirror: r.public_mirror === 1,
   verified_only: r.verified_only === 1,
   has_webhook: Boolean(r.webhook_ciphertext),
 });
@@ -38,10 +36,9 @@ export async function getChannel(relay: Relay, id: string): Promise<ChannelRow |
   return relay.db.prepare('SELECT * FROM channels WHERE id = ?').bind(id).first<ChannelRow>();
 }
 
-export async function listChannels(relay: Relay, filter: { openToAgents?: boolean; publicMirror?: boolean } = {}): Promise<ChannelRow[]> {
+export async function listChannels(relay: Relay, filter: { openToAgents?: boolean } = {}): Promise<ChannelRow[]> {
   const where: string[] = [];
   if (filter.openToAgents) where.push("agent_access != 'off'");
-  if (filter.publicMirror) where.push('public_mirror = 1');
   const { results } = await relay.db.prepare(`SELECT * FROM channels ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY name`).all<ChannelRow>();
   return results;
 }

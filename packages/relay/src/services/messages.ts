@@ -80,23 +80,22 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
   const at = iso(relay.now());
   const content = to.redact ? null : d.target.text;
   const threadName = to.redact ? null : (d.req.thread_name ?? null);
-  const poll = to.redact || !d.req.poll ? null : JSON.stringify(d.req.poll);
   const heldKind = to.status === 'held' ? 'review' : null;
   if (d.existing) {
     if (to.status === 'moderating') return d.existing;
     const r = await relay.db
       .prepare(
-        "UPDATE relay_messages SET status = ?, verdict = ?, policy_code = ?, status_reason = ?, held_kind = ?, content = ?, thread_name = ?, poll = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
+        "UPDATE relay_messages SET status = ?, verdict = ?, policy_code = ?, status_reason = ?, held_kind = ?, content = ?, thread_name = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
       )
-      .bind(to.status, to.verdict, to.policy, to.reason, heldKind, content, threadName, poll, at, d.existing.id)
+      .bind(to.status, to.verdict, to.policy, to.reason, heldKind, content, threadName, at, d.existing.id)
       .run();
     return r.meta.changes === 1 ? getRow(relay, d.existing.id) : null;
   }
   const id = newId('message');
   const r = await relay.db
     .prepare(
-      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, poll, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
+      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
     )
     .bind(
       id,
@@ -108,7 +107,6 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
       d.req.auto_archive_minutes ?? null,
       d.req.reply_to ?? null,
       d.target.replyPrefix,
-      poll,
       content,
       to.status,
       to.verdict,
@@ -163,7 +161,6 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
       shape.tagIds,
       req.auto_archive_minutes ?? null,
       req.reply_to ?? null,
-      req.poll ?? null,
     ]),
   );
   const found = await relay.db
@@ -250,8 +247,7 @@ async function run(
 
   await refusing(() => countAttempt(relay, agent.id, agent.tier));
 
-  const pollText = req.poll ? [req.poll.question, ...req.poll.answers].join('\n') : null;
-  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null, pollText }, { probation }));
+  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { probation }));
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason, 'rules');
   if (ruling.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (ruling.verdict !== 'pass') {
@@ -270,7 +266,6 @@ async function run(
     textHash: draft.textHash,
     excludeId: draft.existing?.id ?? null,
     length: normalise(draft.target.text ?? '').length,
-    poll: req.poll ? JSON.stringify(req.poll) : null,
   });
   trail.add('limits', dup?.verdict ?? 'pass', dup?.policy ?? null, dup?.reason ?? null, 'limits');
   if (dup?.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
@@ -377,57 +372,4 @@ export async function listOwnerMessages(
     .bind(...args, q.limit)
     .all<OwnerRow>();
   return { messages: results.map(toOwnerMessage), next_before: results.length === q.limit ? results[results.length - 1]!.id : null };
-}
-
-/** Sends Discord never confirmed, from every agent, newest first: what an admin settles when an agent has no owner to do it. */
-export async function listUncertainMessages(
-  relay: Relay,
-  q: { before?: string; limit: number },
-): Promise<{ messages: OwnerMessage[]; next_before: string | null }> {
-  const { results } = await relay.db
-    .prepare(
-      `SELECT m.*, a.name AS agent_name FROM relay_messages m JOIN agents a ON a.id = m.agent_id WHERE m.status = 'uncertain' ${q.before ? 'AND m.id < ?' : ''} ORDER BY m.id DESC LIMIT ?`,
-    )
-    .bind(...(q.before ? [q.before, q.limit] : [q.limit]))
-    .all<OwnerRow>();
-  return { messages: results.map(toOwnerMessage), next_before: results.length === q.limit ? results[results.length - 1]!.id : null };
-}
-
-/**
- * A decision on a send Discord never confirmed: send it again (and really send it), or accept that it went out.
- * Owners decide for their own agents' messages; an admin can decide for any, which is how an unowned agent's message is settled.
- */
-export async function resolveUncertain(
-  relay: Relay,
-  by: { type: 'owner' | 'admin'; id: string },
-  messageId: string,
-  action: 'resend' | 'accept',
-): Promise<OwnerMessage> {
-  const owned = by.type === 'owner' ? ' AND a.owner_id = ?' : '';
-  const args = by.type === 'owner' ? [messageId, by.id] : [messageId];
-  const fetchRow = () =>
-    relay.db
-      .prepare(`SELECT m.*, a.name AS agent_name FROM relay_messages m JOIN agents a ON a.id = m.agent_id WHERE m.id = ?${owned}`)
-      .bind(...args)
-      .first<OwnerRow>();
-  const row = await fetchRow();
-  if (!row) throw notFound('No such message');
-  if (row.status !== 'uncertain') throw conflict('Only a message Discord didn’t confirm can be resolved, and this one isn’t waiting for that.');
-  const resend = action === 'resend';
-  const who = by.type === 'owner' ? 'the owner' : 'an admin';
-  const r = await relay.db
-    .prepare("UPDATE relay_messages SET status = ?, status_reason = ?, updated_at = ? WHERE id = ? AND status = 'uncertain'")
-    .bind(resend ? 'queued' : 'sent', resend ? `Sent again at ${who}’s request` : `Accepted by ${who} as sent`, iso(relay.now()), messageId)
-    .run();
-  if (r.meta.changes !== 1) throw conflict('Someone else already resolved this message.');
-  await audit(relay, {
-    actor_type: by.type,
-    actor_id: by.id,
-    action: resend ? 'message.resent' : 'message.accepted',
-    target_type: 'message',
-    target_id: messageId,
-    diff: { status: { from: 'uncertain', to: resend ? 'queued' : 'sent' } },
-  });
-  if (resend) await dispatch(relay, row);
-  return toOwnerMessage((await fetchRow())!);
 }

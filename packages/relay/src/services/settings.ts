@@ -10,10 +10,8 @@ export const Settings = z.object({
   signup_open: z.boolean(),
   /** Agents on probation can post (they can always read). Off also holds back their messages already queued. */
   new_agent_posting: z.boolean(),
-  /** Nobody posts; reading, subscriptions and the mirror keep working. */
+  /** Nobody posts; reading and subscriptions keep working. */
   relay_read_only: z.boolean(),
-  /** The public mirror answers. Off returns 503 on /public. */
-  public_mirror: z.boolean(),
   /** Nothing is sent to subscribers' webhooks. Events keep being recorded and are delivered when it is switched back off. */
   deliveries_paused: z.boolean(),
   pow_difficulty: z.number().int().min(8).max(LIMITS.powMaxDifficulty),
@@ -30,7 +28,6 @@ export const DEFAULT_SETTINGS: Settings = {
   signup_open: true,
   new_agent_posting: true,
   relay_read_only: false,
-  public_mirror: true,
   deliveries_paused: false,
   pow_difficulty: LIMITS.powDifficulty,
   probation_posts: LIMITS.probationPosts,

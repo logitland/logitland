@@ -162,7 +162,7 @@ describe('the cap on messages waiting for a reviewer', () => {
 
   describe('for a hold because moderation is down', () => {
     it('counts outage holds and refuses another when the relay would hold it', async () => {
-      const w = await world({ moderator: mod(down), fallbackModerator: null });
+      const w = await world({ moderator: mod(down) });
       for (let i = 0; i < 10; i++)
         expect(await json(await post(w.h, w.a, say(`Waiting for moderation, number ${i}`)))).toMatchObject({ status: 'held', policy_code: 'outage' });
       const res = await post(w.h, w.a, say('One more while moderation is down'));
@@ -174,7 +174,7 @@ describe('the cap on messages waiting for a reviewer', () => {
     });
 
     it('does not cap a relay that refuses outright instead of holding', async () => {
-      const w = await world({ moderator: mod(down), fallbackModerator: null });
+      const w = await world({ moderator: mod(down) });
       w.h.relay.config.moderationOutage = 'refuse';
       await fill(w);
       const res = await post(w.h, w.a, say('Refused with a 503, not a 429'));
@@ -184,47 +184,19 @@ describe('the cap on messages waiting for a reviewer', () => {
   });
 });
 
-describe('strikes come from the main classifier and from admins, never from the backup model', () => {
+describe('strikes come from the classifier and from admins', () => {
   const violent = (req: { content: string }) => (req.content.includes('violent') ? { verdict: 'block' as const, policy_code: 'violence' as const } : pass);
 
-  it('adds a strike when Jev/Laya blocks something severe', async () => {
+  it('adds a strike when the classifier blocks something severe', async () => {
     const w = await world({ moderator: mod(violent) });
     expect(await json(await post(w.h, w.a, say('Something violent, once')))).toMatchObject({ status: 'blocked', policy_code: 'violence' });
     expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(1);
   });
 
-  it('blocks but adds no strike when only Workers AI answered, however often', async () => {
-    const w = await world({ moderator: mod(down), fallbackModerator: mod(violent) });
-    for (const text of ['Something violent, first', 'Something violent, second', 'Something violent, third']) {
-      const msg = await json(await post(w.h, w.a, say(text)));
-      expect(msg).toMatchObject({ status: 'blocked', policy_code: 'violence' });
-      expect(msg.status_reason).not.toMatch(/strike/);
-    }
-    expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(0);
-    expect((await w.h.db.prepare('SELECT posting_paused_until AS p FROM agents WHERE id = ?').bind(w.a.id).first<{ p: string | null }>())!.p).toBeNull();
-    expect(await status(await post(w.h, w.a, say('A harmless message')))).toBe('sent');
-  });
-
-  it('also adds none when the backup model decides a message held through an outage', async () => {
-    const moderator = mod(down);
-    const fallback = mod({ verdict: 'block', policy_code: 'hate' });
-    // Both down at first, so the message is held; then only the backup answers.
-    let backupUp = false;
-    const backup = { review: async (req: Parameters<typeof fallback.review>[0]) => (backupUp ? fallback.review(req) : down) };
-    const w = await world({ moderator, fallbackModerator: backup });
-    const msg = await json(await post(w.h, w.a, say('Judged later by the backup')));
-    expect(msg).toMatchObject({ status: 'held', policy_code: 'outage' });
-    backupUp = true;
-    w.h.advance(61_000);
-    expect(await reviewHeldJob(w.h.relay)).toBe(1);
-    expect(await row(w.h, msg.id)).toMatchObject({ status: 'blocked', policy_code: 'hate' });
-    expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(0);
-  });
-
-  it('still adds one when Jev/Laya is back for the re-check', async () => {
+  it('adds one when the classifier is back for the re-check', async () => {
     let primaryUp = false;
     const moderator = mod(() => (primaryUp ? { verdict: 'block', policy_code: 'hate' } : down));
-    const w = await world({ moderator, fallbackModerator: null });
+    const w = await world({ moderator });
     const msg = await json(await post(w.h, w.a, say('Judged later by the main classifier')));
     expect(msg.status).toBe('held');
     primaryUp = true;

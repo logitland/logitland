@@ -442,7 +442,7 @@ describe('signup moderation', () => {
     await signedUp(h, 'Clean Bot', { description: 'Says hello' });
     const { results } = await h.db.prepare('SELECT * FROM moderation_log ORDER BY id').all<Record<string, unknown>>();
     expect(results).toHaveLength(2);
-    expect(results[0]).toMatchObject({ layer: 'admission', verdict: 'pass', policy_code: null, source: 'jev_laya', reason: 'name' });
+    expect(results[0]).toMatchObject({ layer: 'admission', verdict: 'pass', policy_code: null, source: 'jev', reason: 'name' });
     expect(results[1]).toMatchObject({ layer: 'admission', verdict: 'pass', reason: 'description' });
     expect(results[0]!.agent_id).toBe(results[1]!.agent_id);
   });
@@ -461,7 +461,7 @@ describe('signup moderation', () => {
       layer: 'admission',
       verdict: 'block',
       policy_code: 'harassment',
-      source: 'jev_laya',
+      source: 'jev',
     });
   });
 
@@ -495,21 +495,8 @@ describe('signup moderation', () => {
     expect((await h.call('POST', '/v1/agents', { name: 'Other', challenge: c.challenge, nonce })).status).toBe(409);
   });
 
-  it('falls back to the second classifier when the first is unavailable', async () => {
-    const h = harness({ moderator: unavailable, fallbackModerator: refuseWhen('Mean', 'harassment') });
-    await easyChallenges(h);
-    expect((await signUp(h, 'Kind Bot')).status).toBe(201);
-    const res = await signUp(h, 'Mean Bot', { headers: ipHeader('198.51.100.1') });
-    expect(res.status).toBe(422);
-    const { results } = await h.db.prepare('SELECT source, verdict FROM moderation_log ORDER BY id').all();
-    expect(results).toEqual([
-      { source: 'workers_ai', verdict: 'pass' },
-      { source: 'workers_ai', verdict: 'block' },
-    ]);
-  });
-
   it('refuses with 503 and a retry time when no classifier answers, and logs the outage', async () => {
-    const h = harness({ moderator: unavailable, fallbackModerator: unavailable });
+    const h = harness({ moderator: unavailable });
     await easyChallenges(h);
     const res = await signUp(h, 'Outage Bot', { description: 'Hello' });
     expect(res.status).toBe(503);
@@ -524,8 +511,8 @@ describe('signup moderation', () => {
     expect(h.log.lines.some((l) => l.event === 'profile.moderation_unavailable')).toBe(true);
   });
 
-  it('refuses the same way in refuse mode, and when the first classifier is down with no fallback', async () => {
-    const h = harness({ moderator: unavailable, fallbackModerator: null, env: { MODERATION_OUTAGE: 'refuse' } });
+  it('refuses the same way in refuse mode', async () => {
+    const h = harness({ moderator: unavailable, env: { MODERATION_OUTAGE: 'refuse' } });
     await easyChallenges(h);
     expect((await signUp(h, 'Lonely Bot')).status).toBe(503);
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(0);

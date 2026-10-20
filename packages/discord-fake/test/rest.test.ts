@@ -147,21 +147,6 @@ describe('execute webhook', () => {
     expect(fake.world.channel(thread.id).thread_metadata?.archived).toBe(false);
   });
 
-  it('supports polls and validates them', async () => {
-    const { message } = await bot.executeWebhook(ref(f.textHook), {
-      username: 'A',
-      poll: { question: { text: 'Tea or coffee?' }, answers: [{ poll_media: { text: 'Tea' } }, { poll_media: { text: 'Coffee' } }], duration: 1 },
-    });
-    expect(message.content).toBe('');
-    expect((message as unknown as { poll: { question: { text: string }; answers: unknown[]; layout_type: number } }).poll).toMatchObject({
-      question: { text: 'Tea or coffee?' },
-      layout_type: 1,
-    });
-    expect(await refusal(bot.executeWebhook(ref(f.textHook), { username: 'A', poll: { question: { text: 'x' }, answers: [] } }))).toMatchObject({
-      code: 50035,
-    });
-  });
-
   it('refuses an empty message (50006), long text (50035) and reserved usernames', async () => {
     expect(await refusal(bot.executeWebhook(ref(f.textHook), { content: '', username: 'A' }))).toMatchObject({ status: 400, code: 50006 });
     const long = await refusal(bot.executeWebhook(ref(f.textHook), { content: 'x'.repeat(2001), username: 'A' }));
@@ -449,25 +434,13 @@ describe('channel messages', () => {
 });
 
 describe('bot messages and threads', () => {
-  it('posts a message with a button', async () => {
-    const message = await bot.createMessage(f.text.id, {
-      content: 'Welcome',
-      components: [{ type: 1, components: [{ type: 2, style: 1, label: 'I agree', custom_id: 'mirror_agree' }] }],
-    });
+  it('posts a message as the bot, with mentions off', async () => {
+    const message = await bot.createMessage(f.text.id, { content: 'Welcome' });
     expect(message).toMatchObject({ author: { id: fake.application.id, bot: true }, content: 'Welcome' });
-    expect((message as unknown as { components: unknown[] }).components).toHaveLength(1);
     expect(fake.requestsTo('channel.messages.create')[0]!.body).toMatchObject({ allowed_mentions: { parse: [] } });
   });
 
-  it('refuses bad buttons and empty messages', async () => {
-    expect(
-      await refusal(bot.createMessage(f.text.id, { content: 'x', components: [{ type: 1, components: [{ type: 2, style: 1, label: 'No id' }] }] })),
-    ).toMatchObject({ status: 400, code: 50035 });
-    expect(
-      await refusal(
-        bot.createMessage(f.text.id, { content: 'x', components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Link', custom_id: 'x' }] }] }),
-      ),
-    ).toMatchObject({ code: 50035 });
+  it('refuses empty messages', async () => {
     expect(await refusal(bot.createMessage(f.text.id, { content: '' }))).toMatchObject({ code: 50006 });
   });
 
@@ -498,36 +471,6 @@ describe('bot messages and threads', () => {
     const m = fake.say(f.text.id, { as: f.alice, content: 'x' });
     expect(await refusal(bot.startThreadFromMessage(f.text.id, m.id, { name: '' }))).toMatchObject({ code: 50035 });
     expect(await refusal(bot.startThreadFromMessage(f.text.id, m.id, { name: 'ok', auto_archive_duration: 5 as 60 }))).toMatchObject({ code: 50035 });
-  });
-});
-
-describe('roles', () => {
-  it('adds and removes a role the bot outranks, with the audit reason', async () => {
-    await bot.addMemberRole(f.guild.id, f.alice.id, f.consentRole.id, 'Agreed to the Logitland public mirror');
-    expect((await bot.getGuildMember(f.guild.id, f.alice.id)).roles).toEqual([f.consentRole.id]);
-    expect(fake.requestsTo('guild.member.role.add')[0]!.headers['x-audit-log-reason']).toBe(encodeURIComponent('Agreed to the Logitland public mirror'));
-    await bot.addMemberRole(f.guild.id, f.alice.id, f.consentRole.id, 'again');
-    expect((await bot.getGuildMember(f.guild.id, f.alice.id)).roles).toEqual([f.consentRole.id]);
-    await bot.removeMemberRole(f.guild.id, f.alice.id, f.consentRole.id, 'Left the mirror');
-    expect((await bot.getGuildMember(f.guild.id, f.alice.id)).roles).toEqual([]);
-  });
-
-  it('refuses a role at or above the bot’s highest role (50013)', async () => {
-    const above = fake.addRole(f.guild.id, { name: 'Moderators', position: 20 });
-    const level = fake.addRole(f.guild.id, { name: 'Same', position: 10 });
-    expect(await refusal(bot.addMemberRole(f.guild.id, f.bob.id, above.id, 'x'))).toMatchObject({ status: 403, code: 50013 });
-    expect(await refusal(bot.addMemberRole(f.guild.id, f.bob.id, level.id, 'x'))).toMatchObject({ code: 50013 });
-    expect(await refusal(bot.removeMemberRole(f.guild.id, f.bob.id, above.id, 'x'))).toMatchObject({ code: 50013 });
-    expect(fake.world.guild(f.guild.id).members.get(f.bob.id)!.roles).toEqual([]);
-  });
-
-  it('refuses without Manage Roles, and for unknown members and roles', async () => {
-    const g = fake.addGuild({ name: 'no roles', botPermissions: Permission.viewChannel });
-    const role = fake.addRole(g.id, { name: 'r', position: 1 });
-    const member = fake.addMember(g.id, { username: 'carol' });
-    expect(await refusal(bot.addMemberRole(g.id, member.user.id, role.id, 'x'))).toMatchObject({ code: 50013 });
-    expect(await refusal(bot.addMemberRole(f.guild.id, '100000000000000000', f.consentRole.id, 'x'))).toMatchObject({ status: 404, code: 10007 });
-    expect(await refusal(bot.addMemberRole(f.guild.id, f.alice.id, '100000000000000000', 'x'))).toMatchObject({ status: 404, code: 10011 });
   });
 });
 

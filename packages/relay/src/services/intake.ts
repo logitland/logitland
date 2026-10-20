@@ -1,10 +1,9 @@
-import { Poll, PollResults, type Author } from '@logitland/contracts';
+import type { Author } from '@logitland/contracts';
 import { z } from 'zod';
 import { iso, type Relay, type Stmt } from '../context';
 import { hmac, sha256 } from '../crypto';
-import { pollFromDiscord, type DiscordPollLike } from '../gateway/normalize';
 import { auditStmt } from './audit';
-import { WITHHELD_NAME, WITHHELD_REF, authorRef, consentedSql } from './conversation';
+import { authorRef } from './conversation';
 import { chunk, commitPlan, compareSnowflakes, fanOutAll, MAX_PARAMS, placeholders, planEvent, snowflakeTime, type PlannedEvent } from './events';
 import type { EventRow } from './deliveries';
 import { contentHash } from './moderation/rows';
@@ -14,11 +13,9 @@ import { planRemoval, scrubStatements, type RemovedBy } from './scrub';
 // deterministic source_key, so replaying a Gateway resume, a backfill or a retried batch records nothing twice,
 // and only a newly recorded event fans out to subscribers.
 //
-// A person's words are kept only if they had agreed to the mirror (consents) when they wrote them. Otherwise the message
-// is stored as a marker with no text, poll, reply, name or Discord ID, and no event is recorded. Backfill goes through
-// the same path, so history from before someone agreed stays withheld. Agents, bots and webhooks are kept as they are.
-
-export { WITHHELD_NAME, WITHHELD_REF };
+// A person's message is kept only when it replies to an agent's message and they had agreed through /consent by the time
+// they wrote it. Every other human message is dropped here: no row, no event, no text. Backfill goes through the same path.
+// Agents, bots and webhooks are kept as they are.
 
 const Snowflake = z.string().regex(/^\d{17,20}$/);
 // Discord sends microsecond precision and an offset; the relay stores one format so strings compare in time order.
@@ -44,10 +41,8 @@ export const IntakeEvent = z.discriminatedUnion('kind', [
     timestamp: Timestamp,
     edited_timestamp: Timestamp.nullish(),
     reply_to: Snowflake.nullish(),
-    poll: Poll.nullish(),
   }),
   z.object({ kind: z.literal('message_update'), ...Located, message_id: Snowflake, content: z.string().optional(), edited_timestamp: Timestamp }),
-  z.object({ kind: z.literal('message_poll'), ...Located, message_id: Snowflake, results: PollResults }),
   z.object({ kind: z.literal('message_delete'), ...Located, message_id: Snowflake }),
   z.object({ kind: z.literal('message_delete_bulk'), ...Located, message_ids: z.array(Snowflake).min(1).max(100) }),
   z.object({
@@ -113,9 +108,6 @@ interface Tomb {
 interface Known {
   edited_at: string | null;
   deleted: boolean;
-  withheld: boolean;
-  /** A person's message whose author has since left (or never agreed before writing it): nothing more of it is stored or sent. */
-  lapsed: boolean;
 }
 
 interface Sent {
@@ -143,10 +135,7 @@ async function sourceKey(e: IntakeEvent): Promise<string | null> {
   }
 }
 
-/** SQL on `conversation`: the message isn't a person's, or its author still has the agreement they had when they wrote it. */
-const STILL_AGREED = `(conversation.discord_user_id IS NULL OR ${consentedSql('conversation')})`;
-
-/** An event condition: this person agreed by `when` and hasn't left. */
+/** An event condition: this person agreed by `when` and hasn't withdrawn. */
 const agreedWhen = (discordUserId: string, when: string) => ({
   sql: 'EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = ? AND k.revoked_at IS NULL AND k.granted_at <= ?)',
   args: [discordUserId, when],
@@ -229,13 +218,10 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
   const known = new Map<string, Known>();
   for (const part of chunk([...messageIds], MAX_PARAMS)) {
     const { results } = await relay.db
-      .prepare(
-        `SELECT CAST(c.message_id AS TEXT) AS id, c.edited_at, c.deleted_at, c.withheld, (c.discord_user_id IS NOT NULL AND NOT ${consentedSql('c')}) AS lapsed
-         FROM conversation c WHERE c.message_id IN (${placeholders(part.length)})`,
-      )
+      .prepare(`SELECT CAST(c.message_id AS TEXT) AS id, c.edited_at, c.deleted_at FROM conversation c WHERE c.message_id IN (${placeholders(part.length)})`)
       .bind(...part)
-      .all<{ id: string; edited_at: string | null; deleted_at: string | null; withheld: number; lapsed: number }>();
-    for (const r of results) known.set(r.id, { edited_at: r.edited_at, deleted: r.deleted_at !== null, withheld: r.withheld === 1, lapsed: r.lapsed === 1 });
+      .all<{ id: string; edited_at: string | null; deleted_at: string | null }>();
+    for (const r of results) known.set(r.id, { edited_at: r.edited_at, deleted: r.deleted_at !== null });
   }
   const ours = keyed.flatMap(({ e, key }) =>
     e.kind === 'message_create' && e.author.webhook_id && e.author.webhook_id === relayed.get(e.channel_id)?.webhook_id && !seen.has(key!)
@@ -252,22 +238,32 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
       .all<Sent & { did: string }>();
     for (const r of results) sent.set(r.did, r);
   }
-  // When each person in the round agreed, for those who still have: their message is kept only if that was no later than they wrote it.
-  const people = new Set(keyed.flatMap(({ e }) => (e.kind === 'message_create' && !e.author.bot && !e.author.webhook_id ? [e.author.id] : [])));
+  // A person's message is kept only if it replies to an agent and they had agreed by the time they wrote it: when each person
+  // in the round agreed (for those who still have), and which of the messages they reply to are agents'.
+  const fromPeople = keyed.flatMap(({ e }) => (e.kind === 'message_create' && !e.author.bot && !e.author.webhook_id ? [e] : []));
   const agreedAt = new Map<string, string>();
-  for (const part of chunk([...people], MAX_PARAMS)) {
+  for (const part of chunk([...new Set(fromPeople.map((e) => e.author.id))], MAX_PARAMS)) {
     const { results } = await relay.db
       .prepare(`SELECT discord_user_id, granted_at FROM consents WHERE revoked_at IS NULL AND discord_user_id IN (${placeholders(part.length)})`)
       .bind(...part)
       .all<{ discord_user_id: string; granted_at: string }>();
     for (const r of results) agreedAt.set(r.discord_user_id, r.granted_at);
   }
+  const agentMessages = new Set<string>();
+  const targets = [...new Set(fromPeople.flatMap((e) => (e.reply_to && agreedAt.has(e.author.id) ? [e.reply_to] : [])))];
+  for (const part of chunk(targets, MAX_PARAMS)) {
+    const { results } = await relay.db
+      .prepare(`SELECT CAST(message_id AS TEXT) AS id FROM conversation WHERE author_kind = 'agent' AND message_id IN (${placeholders(part.length)})`)
+      .bind(...part)
+      .all<{ id: string }>();
+    for (const r of results) agentMessages.add(r.id);
+  }
 
   const stmts: Stmt[] = [];
   const planned: { at: number; event: PlannedEvent }[] = [];
   const cursors = new Map<string, string>();
   const removed: string[] = [];
-  const createdHere: { id: string; thread: string | null; withheld: boolean }[] = [];
+  const createdHere: { id: string; thread: string | null }[] = [];
   const record = (event: PlannedEvent) => {
     planned.push({ at: stmts.length, event });
     stmts.push(event.stmt);
@@ -285,46 +281,30 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
         const tags = e.applied_tags ? JSON.stringify(e.applied_tags) : null;
         const now = iso(relay.now());
         const created = e.created_at ?? snowflakeTime(e.thread_id);
-        // A title is the words of whoever named the thread, so it is kept only if readers may see them: a thread made by one of
-        // our webhooks or the bot is fine; one made by a person needs their agreement from before the thread existed, and
-        // is checked with the owner Discord names (the creator, not necessarily the starter message's author).
-        const person = e.owner_id != null && e.owner_id !== ch.webhook_id && e.owner_id !== relay.config.discord.applicationId;
-        const needs = Number(person);
-        const owner = person ? e.owner_id! : null;
-        const starterHidden = (id: string) =>
-          `EXISTS (SELECT 1 FROM conversation s WHERE s.message_id = ${id} AND s.author_kind = 'human' AND (s.withheld = 1 OR s.discord_user_id IS NULL))`;
-        const ownerAgreed = (at: string) => `EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = ? AND k.revoked_at IS NULL AND k.granted_at <= ${at})`;
+        // A title is the words of whoever named the thread, so it is kept only when the relay's webhook (an agent's forum
+        // post) or the bot (a thread started from an agent's message) made the thread. A person's title is never stored.
+        const named = Number(e.owner_id == null || e.owner_id === ch.webhook_id || e.owner_id === relay.config.discord.applicationId);
         // Two statements rather than ON CONFLICT: the count, time and creator below are read only when the thread is new.
         stmts.push(
           relay.db
             .prepare(
-              `UPDATE threads SET parent_id = ?,
-                 name = CASE WHEN ${starterHidden('threads.id')} OR (? = 1 AND NOT ${ownerAgreed('threads.created_at')}) THEN NULL ELSE COALESCE(?, name) END,
-                 owner_id = CASE WHEN ? = 1 THEN (CASE WHEN ${ownerAgreed('threads.created_at')} THEN ? END) ELSE owner_id END,
+              `UPDATE threads SET parent_id = ?, name = CASE WHEN ? = 1 THEN COALESCE(?, name) END,
                  archived = COALESCE(?, archived), locked = COALESCE(?, locked), applied_tags = COALESCE(?, applied_tags), updated_at = ? WHERE id = ?`,
             )
-            .bind(e.parent_id, needs, owner, e.name ?? null, needs, owner, owner, flag(e.archived), flag(e.locked), tags, now, e.thread_id),
+            .bind(e.parent_id, named, e.name ?? null, flag(e.archived), flag(e.locked), tags, now, e.thread_id),
           // A thread that was written about before it was announced starts with the count, time and creator of what is already stored.
           relay.db
             .prepare(
-              `INSERT OR IGNORE INTO threads (id, parent_id, name, owner_id, created_at, archived, locked, message_count, last_message_at, creator_agent_id, applied_tags, updated_at)
-               SELECT ?, ?, CASE WHEN ${starterHidden('?')} OR (? = 1 AND NOT ${ownerAgreed('?')}) THEN NULL ELSE ? END,
-                 CASE WHEN ? = 1 AND ${ownerAgreed('?')} THEN ? END, ?, COALESCE(?, 0), COALESCE(?, 0), (SELECT COUNT(*) FROM conversation WHERE thread_id = ? AND deleted_at IS NULL AND withheld = 0),
-                 (SELECT MAX(created_at) FROM conversation WHERE thread_id = ? AND withheld = 0), (SELECT agent_id FROM conversation WHERE message_id = ? AND author_kind = 'agent'), COALESCE(?, '[]'), ?
+              `INSERT OR IGNORE INTO threads (id, parent_id, name, created_at, archived, locked, message_count, last_message_at, creator_agent_id, applied_tags, updated_at)
+               SELECT ?, ?, CASE WHEN ? = 1 THEN ? END, ?, COALESCE(?, 0), COALESCE(?, 0), (SELECT COUNT(*) FROM conversation WHERE thread_id = ? AND deleted_at IS NULL),
+                 (SELECT MAX(created_at) FROM conversation WHERE thread_id = ?), (SELECT agent_id FROM conversation WHERE message_id = ? AND author_kind = 'agent'), COALESCE(?, '[]'), ?
                WHERE NOT EXISTS (SELECT 1 FROM threads WHERE id = ?)`,
             )
             .bind(
               e.thread_id,
               e.parent_id,
-              e.thread_id,
-              needs,
-              owner,
-              created,
+              named,
               e.name ?? null,
-              needs,
-              owner,
-              created,
-              owner,
               created,
               flag(e.archived),
               flag(e.locked),
@@ -347,23 +327,12 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
         );
         // Deleting a thread deletes its messages in Discord; the Gateway may not say so message by message, and readers must not keep the text.
         const { results: inThread } = await relay.db
-          .prepare('SELECT CAST(message_id AS TEXT) AS id, withheld FROM conversation WHERE thread_id = ? AND deleted_at IS NULL')
+          .prepare('SELECT CAST(message_id AS TEXT) AS id FROM conversation WHERE thread_id = ? AND deleted_at IS NULL')
           .bind(e.thread_id)
-          .all<{ id: string; withheld: number }>();
-        const held = new Map<string, boolean>(inThread.map((r) => [r.id, r.withheld === 0]));
-        for (const c of createdHere) if (c.thread === e.thread_id) held.set(c.id, !c.withheld);
-        const ids = [...held.keys()];
+          .all<{ id: string }>();
+        const ids = [...new Set([...inThread.map((r) => r.id), ...createdHere.filter((c) => c.thread === e.thread_id).map((c) => c.id)])];
         for (const part of chunk(ids, 100)) {
-          record(
-            await planRemoval(relay, {
-              ids: part,
-              guildId: ch.guild_id,
-              channelId: e.parent_id,
-              removedBy: 'discord',
-              kind: 'bulk',
-              fan: !closed && part.some((id) => held.get(id)),
-            }),
-          );
+          record(await planRemoval(relay, { ids: part, guildId: ch.guild_id, channelId: e.parent_id, removedBy: 'discord', kind: 'bulk', fan: !closed }));
           for (const id of part) {
             const k = known.get(id);
             if (k) k.deleted = true;
@@ -427,38 +396,26 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
         break;
       }
 
-      case 'message_poll':
-        // A finished poll's results are not replaced; unfinished ones are refreshed.
-        stmts.push(
-          relay.db
-            .prepare(
-              "UPDATE conversation SET poll = json_set(poll, '$.results', json(?)) WHERE message_id = ? AND poll IS NOT NULL AND COALESCE(json_extract(poll, '$.results.finalized'), 0) = 0",
-            )
-            .bind(JSON.stringify(e.results), e.message_id),
-        );
-        break;
-
       case 'message_create': {
         if (seen.has(key!)) {
           out.ignored++;
           break;
         }
         seen.add(key!);
-        const who = await resolveAuthor(relay, ch, e, sent, agreedAt);
+        const cursorKey = e.thread_id ?? e.channel_id;
+        cursors.set(cursorKey, bigger(cursors.get(cursorKey), e.message_id));
+        const who = await resolveAuthor(relay, ch, e, sent, agreedAt, agentMessages);
+        if (!who) {
+          // A person's message that isn't a consenting reply to an agent: dropped, not stored.
+          out.ignored++;
+          break;
+        }
+        if (who.kind === 'agent') agentMessages.add(e.message_id);
         // A delete that came first leaves a tombstone: the late create is kept as a removed message, without its text.
         const tomb = tombs.get(e.message_id);
-        const reply_to = who.withheld ? null : (e.reply_to ?? who.reply_to);
-        stmts.push(
-          createStmt(relay, e, who, {
-            content: who.withheld ? null : e.content,
-            poll: who.withheld || !e.poll ? null : JSON.stringify(e.poll),
-            reply_to,
-            edited_at: who.withheld ? null : (e.edited_timestamp ?? null),
-          }),
-        );
-        // A thread started from a withheld message is titled in that person's words, so the relay keeps no title for it.
-        if (who.withheld) stmts.push(relay.db.prepare('UPDATE threads SET name = NULL WHERE id = ?').bind(e.message_id));
-        if (tomb || ctx.history || who.withheld) out.ignored++;
+        const reply_to = e.reply_to ?? who.reply_to;
+        stmts.push(createStmt(relay, e, who, { content: e.content, reply_to, edited_at: e.edited_timestamp ?? null }));
+        if (tomb || ctx.history) out.ignored++;
         else {
           record(
             planEvent(relay, {
@@ -469,7 +426,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
               sourceKey: key!,
               // A delete committed after this round read the tombstones still wins: the text is never logged or sent.
               unless: `delete:${e.message_id}`,
-              // So does a person leaving after this round read their agreement.
+              // So does a person withdrawing after this round read their agreement.
               ...(who.discord_user_id ? { when: agreedWhen(who.discord_user_id, e.timestamp) } : {}),
               data: {
                 message_id: e.message_id,
@@ -478,28 +435,20 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
                 content: e.content,
                 created_at: e.timestamp,
                 ...(reply_to ? { reply_to } : {}),
-                ...(e.poll ? { poll: e.poll } : {}),
               },
             }),
           );
         }
-        known.set(e.message_id, {
-          edited_at: who.withheld ? null : (e.edited_timestamp ?? null),
-          deleted: Boolean(tomb),
-          withheld: who.withheld,
-          lapsed: false,
-        });
-        createdHere.push({ id: e.message_id, thread: e.thread_id ?? null, withheld: who.withheld });
-        const cursorKey = e.thread_id ?? e.channel_id;
-        cursors.set(cursorKey, bigger(cursors.get(cursorKey), e.message_id));
+        known.set(e.message_id, { edited_at: e.edited_timestamp ?? null, deleted: Boolean(tomb) });
+        createdHere.push({ id: e.message_id, thread: e.thread_id ?? null });
         break;
       }
 
       case 'message_update': {
         const k = known.get(e.message_id);
-        // A message the relay holds takes only newer edits; one it has never seen is logged without telling subscribers,
-        // and without its text, since nothing says who wrote it. A person's withheld message has no text to update.
-        if (k?.withheld || k?.lapsed || seen.has(key!) || k?.deleted || (k?.edited_at && e.edited_timestamp <= k.edited_at)) {
+        // A message the relay holds takes only newer edits; one it has never seen (a dropped person's message, say) is logged
+        // without telling subscribers, and without its text, since nothing says who wrote it.
+        if (seen.has(key!) || k?.deleted || (k?.edited_at && e.edited_timestamp <= k.edited_at)) {
           out.ignored++;
           break;
         }
@@ -513,9 +462,9 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
             sourceKey: key!,
             data: { message_id: e.message_id, ...(e.content === undefined || !k ? {} : { content: e.content }), edited_at: e.edited_timestamp },
             fan: Boolean(k),
-            // A person who left since the round read their message gets no new text recorded or sent.
+            // A person who withdrew since the round read their message gets no new text recorded or sent.
             when: {
-              sql: `NOT EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = ? AND c.discord_user_id IS NOT NULL AND NOT ${consentedSql('c')})`,
+              sql: 'NOT EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = ? AND c.discord_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = c.discord_user_id AND k.revoked_at IS NULL))',
               args: [e.message_id],
             },
           }),
@@ -524,13 +473,11 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
           stmts.push(
             e.content === undefined
               ? relay.db
-                  .prepare(
-                    `UPDATE conversation SET edited_at = ? WHERE message_id = ? AND deleted_at IS NULL AND (edited_at IS NULL OR edited_at < ?) AND ${STILL_AGREED}`,
-                  )
+                  .prepare('UPDATE conversation SET edited_at = ? WHERE message_id = ? AND deleted_at IS NULL AND (edited_at IS NULL OR edited_at < ?)')
                   .bind(e.edited_timestamp, e.message_id, e.edited_timestamp)
               : relay.db
                   .prepare(
-                    `UPDATE conversation SET content = ?, edited_at = ? WHERE message_id = ? AND deleted_at IS NULL AND (edited_at IS NULL OR edited_at < ?) AND ${STILL_AGREED}`,
+                    'UPDATE conversation SET content = ?, edited_at = ? WHERE message_id = ? AND deleted_at IS NULL AND (edited_at IS NULL OR edited_at < ?)',
                   )
                   .bind(e.content, e.edited_timestamp, e.message_id, e.edited_timestamp),
           );
@@ -555,7 +502,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
             channelId: e.channel_id,
             removedBy: 'discord',
             kind: e.kind === 'message_delete' ? 'single' : 'bulk',
-            fan: !closed && ids.some((id) => known.get(id)?.withheld === false),
+            fan: !closed && ids.some((id) => known.has(id)),
           }),
         );
         for (const id of ids) {
@@ -599,11 +546,17 @@ interface Who {
   relay_message_id: string | null;
   /** What the relay knows an agent's message replies to; the Gateway's echo of a webhook message can't say. */
   reply_to: string | null;
-  /** A person who hadn't agreed when they wrote it: kept as a marker only. */
-  withheld: boolean;
 }
 
-async function resolveAuthor(relay: Relay, channel: Relayed, e: Create, sent: Map<string, Sent>, agreedAt: Map<string, string>): Promise<Who> {
+/** Who wrote a message, or null for a person's message the relay doesn't keep (anything but a consenting reply to an agent). */
+async function resolveAuthor(
+  relay: Relay,
+  channel: Relayed,
+  e: Create,
+  sent: Map<string, Sent>,
+  agreedAt: Map<string, string>,
+  agentMessages: ReadonlySet<string>,
+): Promise<Who | null> {
   const a = e.author;
   if (a.webhook_id) {
     // One of our channel webhooks is an agent; any other webhook is just a webhook.
@@ -617,7 +570,6 @@ async function resolveAuthor(relay: Relay, channel: Relayed, e: Create, sent: Ma
         display_name: agent.name,
         relay_message_id: agent.id,
         reply_to: agent.reply_to,
-        withheld: false,
       };
     return {
       kind: 'webhook',
@@ -627,7 +579,6 @@ async function resolveAuthor(relay: Relay, channel: Relayed, e: Create, sent: Ma
       display_name: a.username,
       relay_message_id: null,
       reply_to: null,
-      withheld: false,
     };
   }
   const display_name = a.global_name ?? a.username;
@@ -640,20 +591,9 @@ async function resolveAuthor(relay: Relay, channel: Relayed, e: Create, sent: Ma
       display_name,
       relay_message_id: null,
       reply_to: null,
-      withheld: false,
     };
   const granted = agreedAt.get(a.id);
-  if (granted === undefined || granted > e.timestamp)
-    return {
-      kind: 'human',
-      agent_id: null,
-      author_ref: WITHHELD_REF,
-      discord_user_id: null,
-      display_name: WITHHELD_NAME,
-      relay_message_id: null,
-      reply_to: null,
-      withheld: true,
-    };
+  if (granted === undefined || granted > e.timestamp || !e.reply_to || !agentMessages.has(e.reply_to)) return null;
   return {
     kind: 'human',
     agent_id: null,
@@ -662,7 +602,6 @@ async function resolveAuthor(relay: Relay, channel: Relayed, e: Create, sent: Ma
     display_name,
     relay_message_id: null,
     reply_to: null,
-    withheld: false,
   };
 }
 
@@ -670,16 +609,11 @@ async function resolveAuthor(relay: Relay, channel: Relayed, e: Create, sent: Ma
  * The conversation row for a create. A delete event that exists when the statement runs makes it a tombstone with no text,
  * decided here and not from what the round read earlier: a scrub that commits in between can't be overwritten by the late create.
  */
-function createStmt(
-  relay: Relay,
-  e: Create,
-  who: Who,
-  v: { content: string | null; poll: string | null; reply_to: string | null; edited_at: string | null },
-): Stmt {
+function createStmt(relay: Relay, e: Create, who: Who, v: { content: string; reply_to: string | null; edited_at: string | null }): Stmt {
   return relay.db
     .prepare(
-      `INSERT OR IGNORE INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, edited_at, deleted_at, removed_by, reply_to, poll, withheld)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN d.id IS NULL THEN ? END, ?, ?, ?, d.observed_at, CASE WHEN d.id IS NOT NULL THEN COALESCE(json_extract(d.payload, '$.data.removed_by'), 'discord') END, ?, CASE WHEN d.id IS NULL THEN ? END, ?
+      `INSERT OR IGNORE INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, edited_at, deleted_at, removed_by, reply_to)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN d.id IS NULL THEN ? END, ?, ?, ?, d.observed_at, CASE WHEN d.id IS NOT NULL THEN COALESCE(json_extract(d.payload, '$.data.removed_by'), 'discord') END, ?
        FROM (SELECT 1) LEFT JOIN events d ON d.source_key = ?`,
     )
     .bind(
@@ -696,36 +630,26 @@ function createStmt(
       e.timestamp,
       v.edited_at,
       v.reply_to,
-      v.poll,
-      Number(who.withheld),
       `delete:${e.message_id}`,
     );
 }
 
 /**
  * The Gateway can deliver a webhook message before the HTTP response that tells the sender its Discord ID.
- * Match it to a send still waiting: same channel, same text (and poll question), an agent named like the webhook user, and
- * attempted within the last ten minutes (updated_at moves when a send starts, so a message released from review long after
- * it was written still matches). A send in flight is preferred to one the relay was unsure about. Claiming the row with a compare-and-set also settles sends the relay was unsure about, the way the
- * sender does: Discord's own timestamp is when the post was confirmed (edits are allowed for 24 hours from it), and the
- * reason the send was in doubt no longer applies.
+ * Match it to a send still waiting: same channel, same text, an agent named like the webhook user, and attempted within the
+ * last ten minutes (updated_at moves when a send starts, so a message released from review long after it was written still
+ * matches). A send in flight is preferred to one the relay was unsure about. Claiming the row with a compare-and-set also
+ * settles sends the relay was unsure about, the way the sender does: Discord's own timestamp is when the post was confirmed
+ * (edits are allowed for 24 hours from it), and the reason the send was in doubt no longer applies.
  */
 async function settleSend(relay: Relay, e: Create): Promise<Sent | null> {
   const { results } = await relay.db
     .prepare(
       `SELECT m.id, m.agent_id, a.name, m.reply_to FROM relay_messages m JOIN agents a ON a.id = m.agent_id
        WHERE m.channel_id = ? AND m.status IN ('sending', 'uncertain') AND m.discord_message_id IS NULL AND m.content_hash = ? AND lower(a.name) = lower(?) AND m.updated_at >= ?
-         AND (? IS NULL OR m.poll IS NULL OR json_extract(m.poll, '$.question') = ?)
        ORDER BY m.status = 'sending' DESC, m.created_at LIMIT 3`,
     )
-    .bind(
-      e.channel_id,
-      await contentHash(e.content),
-      e.author.username,
-      iso(new Date(relay.now().getTime() - ATTRIBUTION_WINDOW_MS)),
-      e.poll?.question ?? null,
-      e.poll?.question ?? null,
-    )
+    .bind(e.channel_id, await contentHash(e.content), e.author.username, iso(new Date(relay.now().getTime() - ATTRIBUTION_WINDOW_MS)))
     .all<Sent>();
   for (const candidate of results) {
     const claimed = await relay.db
@@ -754,8 +678,6 @@ export interface AgentPost {
   /** The Discord message this one answers. Webhooks can't reply natively, so only the relay knows. (`reply_to` is accepted too.) */
   replyTo?: string | null;
   reply_to?: string | null;
-  /** A poll sent with the message: in the relay's shape, or as Discord's webhook answer describes it. */
-  poll?: Poll | DiscordPollLike | null;
 }
 
 /** Called by the posting pipeline once Discord confirms an agent's post, so agent messages never depend on the Gateway. */
@@ -768,18 +690,17 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
   const key = `create:${post.discordMessageId}`;
   const created = new Date(post.createdAt).toISOString();
   const replyTo = post.replyTo ?? post.reply_to ?? null;
-  const poll = post.poll ? (typeof (post.poll as Poll).question === 'string' ? (post.poll as Poll) : pollFromDiscord(post.poll as DiscordPollLike)) : null;
   const tomb = await relay.db
     .prepare("SELECT observed_at, json_extract(payload, '$.data.removed_by') AS removed_by FROM events WHERE source_key = ?")
     .bind(`delete:${post.discordMessageId}`)
     .first<{ observed_at: string; removed_by: RemovedBy | null }>();
   const stmts: Stmt[] = [
     // The Gateway may have stored this message as a generic webhook first. Upgrade that, and add what only the relay knows
-    // (the reply, the poll) to an agent's row; never downgrade an agent, human or bot.
+    // (the reply) to an agent's row; never downgrade an agent, human or bot.
     relay.db
       .prepare(
-        `INSERT INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, deleted_at, removed_by, reply_to, poll)
-         VALUES (?, ?, ?, 'agent', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, deleted_at, removed_by, reply_to)
+         VALUES (?, ?, ?, 'agent', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (message_id) DO UPDATE SET
            author_kind = 'agent',
            agent_id = excluded.agent_id,
@@ -787,8 +708,7 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
            discord_user_id = NULL,
            display_name = excluded.display_name,
            relay_message_id = COALESCE(conversation.relay_message_id, excluded.relay_message_id),
-           reply_to = COALESCE(conversation.reply_to, excluded.reply_to),
-           poll = COALESCE(conversation.poll, excluded.poll)
+           reply_to = COALESCE(conversation.reply_to, excluded.reply_to)
          WHERE conversation.author_kind = 'webhook' OR (conversation.author_kind = 'agent' AND conversation.agent_id = excluded.agent_id)`,
       )
       .bind(
@@ -804,7 +724,6 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
         tomb?.observed_at ?? null,
         tomb ? (tomb.removed_by ?? 'discord') : null,
         replyTo,
-        poll && !tomb ? JSON.stringify(poll) : null,
       ),
     cursorStmt(relay, post.threadId ?? post.channelId, post.discordMessageId),
   ];
@@ -823,7 +742,6 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
         content: post.content,
         created_at: created,
         ...(replyTo ? { reply_to: replyTo } : {}),
-        ...(poll ? { poll } : {}),
       },
     });
     planned.push({ at: 0, event });

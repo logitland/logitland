@@ -6,14 +6,14 @@ import { EVENT_TEXT_DAYS } from './events';
 // A run stops at its statement or time budget and the next one continues, because every rule finds its rows again by
 // age or by what is left to blank (see the indexes under "Retention" in the migration).
 //
-//   Event text and polls ....................... blanked after EVENT_TEXT_DAYS (30 days); the event stays while a delivery refers to it
+//   Event text ................................. blanked after EVENT_TEXT_DAYS (30 days); the event stays while a delivery refers to it
 //   Events ..................................... deleted after 30 days if no delivery refers to them, except removal events
 //                                                (type message.deleted: intake finds them to stop a late create bringing a
 //                                                removed message's text back, and they hold no text) and the newest event
 //                                                older than that, which is how GET /v1/events tells a cursor is too old
 //   Delivery attempts .......................... deleted after 30 days
 //   Deliveries ................................. deleted after 30 days once finished (delivered, failed or dropped) and with no attempts left
-//   Blocked, held and failed messages' text .... blanked after 90 days (content, thread name, poll, reply line)
+//   Blocked, held and failed messages' text .... blanked after 90 days (content, thread name, reply line)
 //   Removed messages' text ..................... blanked at once (also done when a message is removed; this is the backstop)
 //   Sent messages ............................. kept: what an agent said is the public record
 //   Reports and appeals ........................ free text and the reporter reference blanked 1 year after they are resolved
@@ -21,7 +21,7 @@ import { EVENT_TEXT_DAYS } from './events';
 //   Audit log and moderation log ............... deleted after 365 days
 //   Rate counters .............................. windows older than 2 days (limits.ts, same schedule)
 //   Raw IP addresses (30 days) and address and network hashes (90 days) ... services/origins.ts, same schedule
-//   Consent records, owners, threads, conversation ... kept until the person or owner is removed (scrub.ts, consent.ts)
+//   Consent records, owners, threads, conversation ... kept until the person withdraws or the owner is removed (scrub.ts, consent.ts)
 
 const BATCH = 500;
 const DAY = 86_400_000;
@@ -36,16 +36,15 @@ export interface Rule {
   args?: (ago: (days: number) => string) => unknown[];
 }
 
-const BLANK_MESSAGE_TEXT = 'content = NULL, thread_name = NULL, poll = NULL, reply_prefix = NULL';
+const BLANK_MESSAGE_TEXT = 'content = NULL, thread_name = NULL, reply_prefix = NULL';
 // Written out as in the index relay_messages_with_text, which is what lets SQLite use it.
-const HAS_MESSAGE_TEXT =
-  "status IN ('blocked', 'held', 'failed', 'removed') AND (content IS NOT NULL OR thread_name IS NOT NULL OR poll IS NOT NULL OR reply_prefix IS NOT NULL)";
+const HAS_MESSAGE_TEXT = "status IN ('blocked', 'held', 'failed', 'removed') AND (content IS NOT NULL OR thread_name IS NOT NULL OR reply_prefix IS NOT NULL)";
 
 export const RULES: Rule[] = [
   {
     name: 'event_text',
-    sql: `UPDATE events SET payload = json_remove(json_set(payload, '$.data.content', ''), '$.data.poll') WHERE seq IN (
-            SELECT seq FROM events WHERE observed_at < ? AND (json_extract(payload, '$.data.content') != '' OR json_type(payload, '$.data.poll') IS NOT NULL) LIMIT ?)`,
+    sql: `UPDATE events SET payload = json_set(payload, '$.data.content', '') WHERE seq IN (
+            SELECT seq FROM events WHERE observed_at < ? AND json_extract(payload, '$.data.content') != '' LIMIT ?)`,
     args: (ago) => [ago(EVENT_TEXT_DAYS)],
   },
   // Children first: attempts, then the deliveries without any, then the events nothing refers to.

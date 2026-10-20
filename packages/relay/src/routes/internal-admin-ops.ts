@@ -63,7 +63,6 @@ export async function health(relay: Relay): Promise<AdminHealth> {
       signup_open: s.signup_open,
       new_agent_posting: s.new_agent_posting,
       relay_read_only: s.relay_read_only,
-      public_mirror: s.public_mirror,
       deliveries_paused: s.deliveries_paused,
     },
   };

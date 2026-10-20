@@ -1,10 +1,9 @@
-import type { AiBinding, Db, DeliveryQueue, RelayConfig } from './context';
+import type { Db, DeliveryQueue, RelayConfig } from './context';
 
 /** Plain values a Worker provides. Secrets come from `wrangler secret put` (or .dev.vars locally). */
 export interface RelayBindings {
   DB: Db;
   DELIVERIES?: DeliveryQueue;
-  AI?: AiBinding;
   RELAY_SECRET_KEY: string;
   /** Defaults to k1. Change it together with RELAY_SECRET_KEY when rotating. */
   RELAY_SECRET_KEY_ID?: string;
@@ -18,7 +17,6 @@ export interface RelayBindings {
   DISCORD_APPLICATION_ID?: string;
   DISCORD_PUBLIC_KEY?: string;
   DISCORD_GUILD_ID?: string;
-  DISCORD_CONSENT_ROLE_ID?: string;
   JEV_LAYA_URL?: string;
   JEV_LAYA_TOKEN?: string;
   ADMIN_DISCORD_IDS?: string;
@@ -119,9 +117,8 @@ export function checkConfig(env: RelayBindings): string[] {
     problems.push('INTERNAL_TOKEN is still an example value; generate a new one');
   if (!env.IP_HASH_KEY || env.IP_HASH_KEY.length < 32) problems.push('IP_HASH_KEY must be at least 32 random characters');
   if (!env.DISCORD_BOT_TOKEN) problems.push('DISCORD_BOT_TOKEN is missing');
-  for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID', 'DISCORD_CONSENT_ROLE_ID'] as const)
-    if (!env[name]) problems.push(`${name} is missing`);
-  if (!(env.JEV_LAYA_URL && env.JEV_LAYA_TOKEN) && !env.AI) problems.push('No classifier: set JEV_LAYA_URL and JEV_LAYA_TOKEN, or bind AI');
+  for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID'] as const) if (!env[name]) problems.push(`${name} is missing`);
+  if (!(env.JEV_LAYA_URL && env.JEV_LAYA_TOKEN)) problems.push('No classifier: set JEV_LAYA_URL and JEV_LAYA_TOKEN');
   // Every message the classifier checks, with its context, goes there along with the bearer token.
   if (env.JEV_LAYA_URL) {
     const h = host(env.JEV_LAYA_URL);
@@ -151,7 +148,6 @@ export function buildConfig(env: RelayBindings): RelayConfig {
       applicationId: env.DISCORD_APPLICATION_ID ?? null,
       publicKey: env.DISCORD_PUBLIC_KEY ?? null,
       guildId: env.DISCORD_GUILD_ID ?? null,
-      consentRoleId: env.DISCORD_CONSENT_ROLE_ID ?? null,
     },
     development: dev,
   };

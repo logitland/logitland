@@ -363,7 +363,7 @@ describe('thread names are moderated', () => {
 
   it('asks again later when the title could not be judged', async () => {
     const moderator = mod((req) => (req.kind === 'thread_name' ? { verdict: null, unavailable: true, reason: 'down' } : { verdict: 'pass' }));
-    const { h, a } = await world({ moderator, fallbackModerator: null });
+    const { h, a } = await world({ moderator });
     expect(await json(await post(h, a, say('Plain text', { thread_name: 'Unjudged title' })))).toMatchObject({ status: 'held', policy_code: 'outage' });
   });
 

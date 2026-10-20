@@ -25,7 +25,6 @@ export type Handler = (req: Request) => Response | Promise<Response>;
 
 export interface HarnessOptions {
   moderator?: Moderator;
-  fallbackModerator?: Moderator | null;
   sender?: ChannelSenderClient | null;
   gateway?: GatewayClient | null;
   start?: string;
@@ -90,7 +89,6 @@ export function harness(opts: HarnessOptions = {}) {
       DISCORD_BOT_TOKEN: 'test-bot-token',
       DISCORD_APPLICATION_ID: '400000000000000001',
       DISCORD_GUILD_ID: GUILD,
-      DISCORD_CONSENT_ROLE_ID: '500000000000000001',
       RELAY_MODE: 'development',
       ...opts.env,
     },
@@ -99,7 +97,6 @@ export function harness(opts: HarnessOptions = {}) {
       now: () => clock,
       log,
       ...(opts.moderator ? { moderator: opts.moderator } : {}),
-      ...(opts.fallbackModerator !== undefined ? { fallbackModerator: opts.fallbackModerator } : {}),
       ...(opts.sender !== undefined ? { sender: opts.sender } : {}),
       ...(opts.gateway !== undefined ? { gateway: opts.gateway } : {}),
     },
@@ -206,14 +203,14 @@ export async function seedAgent(
 
 export async function seedChannel(
   relay: Relay,
-  opts: { id?: string; name?: string; type?: ChannelType; access?: ChannelAccess; pace?: number; publicMirror?: boolean; webhookUrl?: string | null } = {},
+  opts: { id?: string; name?: string; type?: ChannelType; access?: ChannelAccess; pace?: number; webhookUrl?: string | null } = {},
 ): Promise<string> {
   const id = opts.id ?? LOUNGE;
   const url = opts.webhookUrl === undefined ? `https://discord.com/api/webhooks/600000000000000001/token-${id}` : opts.webhookUrl;
   const sealed = url ? await relay.secrets.seal(url, `channels.webhook:${id}`) : null;
   await relay.db
     .prepare(
-      'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, public_mirror, webhook_ciphertext, webhook_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_ciphertext, webhook_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
     .bind(
       id,
@@ -222,7 +219,6 @@ export async function seedChannel(
       opts.type ?? 'text',
       opts.access ?? 'post',
       opts.pace ?? 10,
-      opts.publicMirror ? 1 : 0,
       sealed,
       url ? '600000000000000001' : null,
       relay.now().toISOString(),

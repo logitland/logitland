@@ -12,7 +12,6 @@ import {
   HUMAN,
   msg,
   one,
-  poll,
   push,
   relayMessage,
   remove,
@@ -95,7 +94,7 @@ describe('creating messages', () => {
     const { h } = await world();
     const r = await push(h, human(1, { channel_id: BENCH }), human(2), human(3, { channel_id: '119999999999999999' }));
     expect(r).toMatchObject({ recorded: 1, ignored: 2 });
-    expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(1);
+    expect(await all(h, "SELECT 1 FROM conversation WHERE author_kind = 'human'")).toHaveLength(1);
   });
 
   it('maps thread messages to the parent channel with thread_id and remembers threads of open channels', async () => {
@@ -139,11 +138,11 @@ describe('creating messages', () => {
     expect((await one<{ last: string }>(h, 'SELECT CAST(last_message_id AS TEXT) AS last FROM channel_cursors WHERE channel_id = ?', LOUNGE))!.last).toBe(
       nineteen,
     );
-    expect((await all<{ id: string }>(h, 'SELECT CAST(message_id AS TEXT) AS id FROM conversation ORDER BY message_id')).map((r) => r.id)).toEqual([
-      eighteen,
-      '1000000000000000000',
-      nineteen,
-    ]);
+    expect(
+      (await all<{ id: string }>(h, "SELECT CAST(message_id AS TEXT) AS id FROM conversation WHERE author_kind = 'human' ORDER BY message_id")).map(
+        (r) => r.id,
+      ),
+    ).toEqual([eighteen, '1000000000000000000', nineteen]);
   });
 });
 
@@ -387,24 +386,8 @@ describe('telling agents’ posts from other webhooks', () => {
     expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', id)).toEqual({ status: 'sent', discord_message_id: msg(5) });
   });
 
-  it('prefers the send in flight to an older uncertain one, and tells polls apart by their question', async () => {
+  it('prefers the send in flight to an older uncertain one', async () => {
     const { h, agent } = await world();
-    const hash = await contentHash('');
-    const a = await relayMessage(h, agent.id, { content: '', status: 'uncertain', hash });
-    h.advance(1_000);
-    const b = await relayMessage(h, agent.id, { content: '', status: 'sending', hash });
-    await h.db
-      .prepare('UPDATE relay_messages SET poll = ? WHERE id = ?')
-      .bind(JSON.stringify({ question: 'Soup?' }), a)
-      .run();
-    await h.db
-      .prepare('UPDATE relay_messages SET poll = ? WHERE id = ?')
-      .bind(JSON.stringify({ question: 'Noodles?' }), b)
-      .run();
-    await push(h, fromWebhook(5, 'Moth-9', '', { poll: poll({ question: 'Noodles?' }) }));
-    expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', b)).toEqual({ status: 'sent', discord_message_id: msg(5) });
-    expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', a)).toEqual({ status: 'uncertain', discord_message_id: null });
-    // Without a poll question to go on, the one still in flight goes first.
     const c = await relayMessage(h, agent.id, { content: 'plain', status: 'uncertain', hash: await contentHash('plain') });
     h.advance(1_000);
     const d = await relayMessage(h, agent.id, { content: 'plain', status: 'sending', hash: await contentHash('plain') });
@@ -588,7 +571,7 @@ describe('limits', () => {
     expect((await push(h, ...mixed)).recorded).toBe(250);
     // Three rounds of at most 100 events each.
     expect(queries).toBeLessThan(1000);
-    expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(200);
+    expect(await all(h, "SELECT 1 FROM conversation WHERE author_kind = 'human'")).toHaveLength(200);
   });
 
   it('chunks long ID lists under D1’s limit of 100 bound parameters', async () => {

@@ -2,7 +2,7 @@ import { CreatedAgent, IssuedKey, LIMITS } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { asOwner, count, easyChallenges, ipHeader, seedDelivery, seedSubscription, signUp, signedUp } from './signup.helpers';
 import { recordOrigin } from './services/origins';
-import { ADMIN_DISCORD, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
+import { ADMIN_DISCORD, harness, seedAgent, seedOwner, type Harness } from './testing';
 
 const owned = (h: Harness, ownerId: string, method: string, path: string, body?: unknown) =>
   h.internal(method, `/internal/owners/${ownerId}${path}`, body, asOwner(ownerId));
@@ -267,40 +267,5 @@ describe('POST /v1/me/keys/rotate', () => {
     const text = await (await h.call('GET', '/auth.md')).text();
     expect(text).toContain('POST /v1/me/keys/rotate');
     expect(text).toMatch(/never in a prompt, a log or a message/);
-  });
-});
-
-describe('a person who signs in only to remove their messages', () => {
-  const PERSON = '700000000000000001';
-
-  it('is known by their Discord ID alone: no owner account is made', async () => {
-    const h = harness();
-    await seedChannel(h.relay, { publicMirror: true });
-    await h.db
-      .prepare(
-        "INSERT INTO conversation (message_id, channel_id, author_kind, author_ref, discord_user_id, display_name, content, created_at) VALUES ('310000000000000001', ?, 'human', 'p_x', ?, 'Pat', 'hello', ?)",
-      )
-      .bind(LOUNGE, PERSON, h.now().toISOString())
-      .run();
-    const status = await h.internal('GET', `/internal/people/${PERSON}`, undefined, { 'x-logitland-person': PERSON });
-    expect(status.status).toBe(200);
-    expect(await status.json()).toMatchObject({ agreed: false });
-    const removal = await h.internal('POST', `/internal/people/${PERSON}/removal`, { mode: 'remove_messages' }, { 'x-logitland-person': PERSON });
-    expect(removal.status).toBe(200);
-    expect(await count(h, 'SELECT COUNT(*) AS n FROM owners')).toBe(0);
-    expect(await h.db.prepare("SELECT actor_type, actor_id FROM audit_log WHERE target_type = 'person' ORDER BY rowid DESC").first()).toEqual({
-      actor_type: 'public',
-      actor_id: PERSON,
-    });
-  });
-
-  it('can only act as themselves, and a signed-in owner still works as before', async () => {
-    const h = harness();
-    expect((await h.internal('GET', `/internal/people/${PERSON}`, undefined, { 'x-logitland-person': '700000000000000002' })).status).toBe(403);
-    expect((await h.internal('GET', `/internal/people/${PERSON}`)).status).toBe(401);
-    expect((await h.internal('GET', `/internal/people/${PERSON}`, undefined, { 'x-logitland-person': 'x', ...ipHeader('203.0.113.7') })).status).toBe(403);
-    const owner = await seedOwner(h.relay, PERSON, 'pat');
-    expect((await h.internal('GET', `/internal/people/${PERSON}`, undefined, asOwner(owner.id))).status).toBe(200);
-    expect((await h.internal('GET', '/internal/people/700000000000000002', undefined, asOwner(owner.id))).status).toBe(403);
   });
 });

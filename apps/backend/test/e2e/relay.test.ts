@@ -26,8 +26,6 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   const idem = () => `e2e-${Date.now().toString(36)}-${counter++}`;
   const post = (who: Agent, body: Record<string, unknown>) => s.call('POST', '/v1/messages', { key: who.key, body, headers: { 'idempotency-key': idem() } });
   const channelPage = (who: Agent, channel: string, query = '') => s.call('GET', `/v1/channels/${channel}/messages${query}`, { key: who.key });
-  /** The public mirror may be cached at the edge, so every read asks for a page nobody has asked for before (the mirror takes no other parameters, so the page size varies). */
-  const publicPage = (channel: string, query = '') => s.call('GET', `/public/channels/${channel}/messages?limit=${100 - (counter++ % 50)}${query}`);
   const find = (res: Reply, messageId: string) => res.body.messages.find((m: { message_id: string }) => m.message_id === messageId);
   const seen = (who: Agent, channel: string, messageId: string) => async () => find(await channelPage(who, channel), messageId);
   const executions = () => s.fake.requestsTo('webhook.execute');
@@ -155,14 +153,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       expect((await s.sql('SELECT 1 FROM conversation WHERE message_id = ?', did)).length).toBe(1);
       expect((await s.sql('SELECT 1 FROM events WHERE source_key = ?', `create:${did}`)).length).toBe(1);
 
-      // The public mirror shows it for a mirrored channel, and only for one.
-      const pub = await publicPage(s.channels.lounge);
-      expect(pub.status).toBe(200);
-      expect(find(pub, did)).toMatchObject({ content, author: { kind: 'agent', display_name: 'Atlas-7' } });
-      expect(JSON.stringify(pub.body)).not.toMatch(/discord\.com|webhook/i);
-      expect((await publicPage(s.channels.media)).status).toBe(404);
-      const channels = await s.call('GET', '/public/channels');
-      expect(channels.body.channels.map((c: { id: string }) => c.id).sort()).toEqual([s.channels.lounge, s.channels.forum, s.channels.announcements].sort());
+      // There is no public view of the channels.
+      expect((await s.call('GET', '/public/channels')).status).toBe(404);
 
       // And in the agent's own record of the send.
       const record = await s.call('GET', `/v1/messages/${sent.body.id}`, { key: atlas.key });
@@ -235,131 +227,105 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       expect(refused.status).toBe(403);
       expect(executions()).toHaveLength(before);
 
-      const news = s.fake.say(s.channels.announcements, { as: DEV.admin, content: unique('Release day') });
+      // Agents can still read here, through bots and webhooks; a person's own message is never relayed unless it's a consenting reply.
+      const news = s.fake.say(s.channels.announcements, { as: DEV.newsbot, content: unique('Release day') });
       const row = await eventually(seen(atlas, s.channels.announcements, news.id), { what: 'the announcement' });
-      expect(row).toMatchObject({ author: { kind: 'human' } });
+      expect(row).toMatchObject({ author: { kind: 'bot', display_name: 'newsbot' } });
     });
   });
 
-  /* ---------- (e) People, consent and the public mirror ---------- */
+  /* ---------- (e) People and consent ---------- */
 
-  it('(e) withholds a person’s text from agents and the public until they agree, agrees only on the button, and scrubs everything on /mirror leave', async () => {
-    // Before agreeing: the relay keeps a marker, nothing else, and says the same to agents and to the public.
+  it('(e) relays only a consenting person’s replies to agents, agrees only on the button, and deletes them on /consent withdraw', async () => {
+    const agentPost = await post(atlas, { channel_id: s.channels.lounge, content: unique('Anyone know where the lanterns are?') });
+    expect(agentPost.status).toBe(201);
+    const target: string = agentPost.body.discord_message_id;
+    const notStored = async (id: string) => (await s.sql('SELECT 1 FROM conversation WHERE message_id = ?', id)).length === 0;
+
+    // Before agreeing: neither a plain message nor a reply to an agent is kept, not even as a marker.
     const before = unique('A person says hello before agreeing');
     const early = s.fake.say(s.channels.lounge, { as: visitor, content: before });
-    const marker = await eventually(seen(atlas, s.channels.lounge, early.id), { what: 'the marker for the first message' });
-    expect(marker).toMatchObject({ content: null, author: { kind: 'human', display_name: 'A person in Discord', author_id: 'p_withheld', agent_id: null } });
-    expect(find(await publicPage(s.channels.lounge), early.id)).toMatchObject({
-      content: null,
-      author: { kind: 'human', display_name: 'A person in Discord', author_id: 'p_withheld' },
+    const earlyReply = s.fake.say(s.channels.lounge, { as: visitor, content: unique('An early reply'), replyTo: target });
+    const marker = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('The admin says something after them') });
+    // The admin agreed before the suite but isn't replying to an agent, so this is dropped too; waiting for intake to pass it
+    // means the visitor's messages, sent before it, have been looked at.
+    await eventually(async () => (await s.sql('SELECT 1 FROM channel_cursors WHERE last_message_id >= CAST(? AS INTEGER)', marker.id)).length > 0, {
+      what: 'intake to pass the messages',
     });
-    expect(
-      (
-        await s.sql<{ content: string | null; discord_user_id: string | null; display_name: string; withheld: number }>(
-          'SELECT content, discord_user_id, display_name, withheld FROM conversation WHERE message_id = ?',
-          early.id,
-        )
-      )[0],
-    ).toEqual({ content: null, discord_user_id: null, display_name: 'A person in Discord', withheld: 1 });
-    expect(await s.sql('SELECT 1 FROM events WHERE message_id = ?', early.id)).toEqual([]);
+    for (const m of [early, earlyReply, marker]) expect(await notStored(m.id)).toBe(true);
+    expect(await s.sql('SELECT 1 FROM events WHERE message_id IN (?, ?, ?)', early.id, earlyReply.id, marker.id)).toEqual([]);
 
-    // /mirror agree shows the notice and a button, and agrees to nothing.
-    const notice = await s.fake.interact({ user: visitor, command: { name: 'mirror', subcommand: 'agree' }, channelId: s.channels.lounge });
+    // /consent agree shows the notice and a button, and agrees to nothing.
+    const notice = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'agree' }, channelId: s.channels.lounge });
     expect(notice.status).toBe(200);
     expect(notice.body).toMatchObject({
       type: 4,
       data: {
         flags: 64,
-        content: expect.stringContaining('The Logitland public mirror'),
-        components: [{ type: 1, components: [{ type: 2, style: 1, custom_id: expect.stringMatching(/^mirror_agree_cmd:\d{4}-\d{2}-\d{2}$/) }] }],
+        content: expect.stringContaining('Replying to agents in Logitland'),
+        components: [{ type: 1, components: [{ type: 2, style: 1, custom_id: expect.stringMatching(/^consent_agree:\d{4}-\d{2}-\d{2}$/) }] }],
       },
     });
     expect((notice.body as { data: { content: string } }).data.content.length).toBeLessThanOrEqual(2000);
-    expect(s.fake.requestsTo('guild.member.role.add')).toHaveLength(0);
     expect(await s.sql('SELECT 1 FROM consents WHERE discord_user_id = ?', visitor)).toEqual([]);
 
-    // Pressing the button agrees. The answer is a deferral; the role follows.
+    // Pressing the button agrees, at once. No Discord role is involved.
     const press = await s.fake.interact({
       user: visitor,
       button: { customId: (notice.body as { data: { components: { components: { custom_id: string }[] }[] } }).data.components[0]!.components[0]!.custom_id },
       channelId: s.channels.lounge,
     });
     expect(press.status).toBe(200);
-    expect(press.body).toEqual({ type: 5, data: { flags: 64 } });
-    await eventually(() => s.fake.requestsTo('guild.member.role.add').length === 1, { what: 'the role to be given' });
-    const grant = s.fake.requestsTo('guild.member.role.add');
-    expect(grant[0]!.params).toMatchObject({ guild: s.community.guildId, user: visitor, role: s.community.consentRoleId });
-    expect(grant[0]!.status).toBe(204);
-    expect(decodeURIComponent(grant[0]!.headers['x-audit-log-reason']!)).toBe('Agreed to the Logitland public mirror');
-    expect(grant[0]!.headers.authorization).toBe(`Bot ${s.fake.botToken}`);
-    expect(s.fake.world.guild(s.community.guildId).members.get(visitor)!.roles).toEqual([s.community.consentRoleId]);
-    await eventually(() => press.interaction.followUps.length > 0, { what: 'the follow-up to the button' });
-    expect(press.interaction.followUps[0]).toMatchObject({
-      kind: 'original',
-      content: expect.stringContaining('You agreed to the Logitland public mirror'),
-      flags: 64,
-    });
+    expect(press.body).toMatchObject({ type: 4, data: { flags: 64, content: expect.stringContaining('You agreed') } });
+    expect(s.fake.requestsTo('guild.member.role.add')).toHaveLength(0);
     expect(
       (
-        await s.sql<{ method: string; revoked_at: string | null; notice_version: string; interaction_id: string }>(
-          'SELECT method, revoked_at, notice_version, interaction_id FROM consents WHERE discord_user_id = ?',
+        await s.sql<{ method: string; revoked_at: string | null; interaction_id: string }>(
+          'SELECT method, revoked_at, interaction_id FROM consents WHERE discord_user_id = ?',
           visitor,
         )
       )[0],
-    ).toEqual({ method: 'command', revoked_at: null, notice_version: '2026-10-19', interaction_id: press.interaction.id });
-    expect(await s.sql('SELECT action, method FROM consent_history WHERE discord_user_id = ?', visitor)).toEqual([{ action: 'granted', method: 'command' }]);
+    ).toEqual({ method: 'command', revoked_at: null, interaction_id: press.interaction.id });
 
-    // What they write from now on is kept and shown, to agents and the public alike; what they wrote before is not.
-    const text = unique('A person says hello after agreeing');
-    const said = s.fake.say(s.channels.lounge, { as: visitor, content: text });
-    const agentRow = await eventually(
+    // Now a reply to an agent is relayed; anything else they write still isn't.
+    const text = unique('In the cellar, I think');
+    const reply = s.fake.say(s.channels.lounge, { as: visitor, content: text, replyTo: target });
+    const chatter = s.fake.say(s.channels.lounge, { as: visitor, content: unique('Just chatting') });
+    const row = await eventually(
       async () => {
-        const row = find(await channelPage(atlas, s.channels.lounge), said.id);
-        return row?.content ? row : null;
+        const r = find(await channelPage(orrery, s.channels.lounge), reply.id);
+        return r?.content ? r : null;
       },
-      { what: 'the person’s message' },
+      { what: 'the person’s reply' },
     );
-    expect(agentRow).toMatchObject({ content: text, author: { kind: 'human', display_name: 'A visitor', agent_id: null } });
-    expect(agentRow.author.author_id).toMatch(/^p_(?!withheld)/);
-    expect(JSON.stringify(agentRow)).not.toContain(visitor);
-    expect(find(await publicPage(s.channels.lounge), said.id)).toMatchObject({ content: text, author: { display_name: 'A visitor' } });
-    expect(find(await channelPage(atlas, s.channels.lounge), early.id)).toMatchObject({ content: null, author: { display_name: 'A person in Discord' } });
-    expect(find(await publicPage(s.channels.lounge), early.id)).toMatchObject({ content: null, author: { display_name: 'A person in Discord' } });
+    expect(row).toMatchObject({ content: text, reply_to: target, author: { kind: 'human', display_name: 'A visitor', agent_id: null } });
+    expect(row.author.author_id).toMatch(/^p_/);
+    expect(JSON.stringify(row)).not.toContain(visitor);
+    expect(await notStored(chatter.id)).toBe(true);
 
-    // /mirror leave: the agreement ends at once, the role goes, the words go.
-    const leave = await s.fake.interact({ user: visitor, command: { name: 'mirror', subcommand: 'leave' }, channelId: s.channels.lounge });
-    expect(leave.status).toBe(200);
-    expect(leave.body).toMatchObject({ type: 5, data: { flags: 64 } });
-    await eventually(() => s.fake.requestsTo('guild.member.role.remove').length === 1, { what: 'the role to be taken away' });
-    expect(s.fake.requestsTo('guild.member.role.remove')[0]!.params).toMatchObject({ user: visitor, role: s.community.consentRoleId });
-    expect(s.fake.world.guild(s.community.guildId).members.get(visitor)!.roles).toEqual([]);
-
+    // /consent withdraw: the agreement ends at once and the held replies go.
+    const withdraw = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'withdraw' }, channelId: s.channels.lounge });
+    expect(withdraw.status).toBe(200);
+    expect(withdraw.body).toMatchObject({ type: 5, data: { flags: 64 } });
     const gone = await eventually(
       async () => {
-        const row = find(await channelPage(atlas, s.channels.lounge), said.id);
-        return row?.deleted ? row : null;
+        const r = find(await channelPage(orrery, s.channels.lounge), reply.id);
+        return r?.deleted ? r : null;
       },
-      { what: 'the message to be scrubbed' },
+      { what: 'the reply to be deleted' },
     );
     expect(gone).toMatchObject({ content: null, deleted: true });
-    expect(find(await publicPage(s.channels.lounge), said.id)).toMatchObject({ content: null, deleted: true });
-    expect((await s.sql<{ content: string | null }>('SELECT content FROM conversation WHERE message_id = ?', said.id))[0]!.content).toBeNull();
     const created = await s.sql<{ text: string | null }>(
       "SELECT json_extract(payload, '$.data.content') AS text FROM events WHERE message_id = ? AND type = 'message.created'",
-      said.id,
+      reply.id,
     );
     expect(created.map((r) => r.text)).toEqual(['']);
-    expect((await s.sql<{ revoked_at: string | null }>('SELECT revoked_at FROM consents WHERE discord_user_id = ?', visitor))[0]!.revoked_at).not.toBeNull();
     expect(
       (await s.sql('SELECT action FROM consent_history WHERE discord_user_id = ? ORDER BY id', visitor)).map((r) => (r as { action: string }).action),
     ).toEqual(['granted', 'revoked']);
-
-    // The relay answers the deferred reply through Discord's follow-up call, which the suite sent to the fake.
-    const record = s.fake.interactions.all().find((i) => i.id === leave.interaction.id)!;
-    await eventually(() => record.followUps.length > 0, { what: 'the follow-up to /mirror leave' });
-    expect(record.followUps[0]).toMatchObject({ kind: 'original', content: expect.stringContaining('You left the Logitland public mirror'), flags: 64 });
-    // The message itself stays in Discord: the relay only holds what it stores.
-    expect(s.fake.messages(s.channels.lounge).some((m) => m.id === said.id && m.content === text)).toBe(true);
+    const record = s.fake.interactions.all().find((i) => i.id === withdraw.interaction.id)!;
+    await eventually(() => record.followUps.length > 0, { what: 'the follow-up to /consent withdraw' });
+    expect(record.followUps[0]).toMatchObject({ kind: 'original', content: expect.stringContaining('You withdrew'), flags: 64 });
     // Nothing the person wrote is anywhere in the relay's stores, before or after.
     for (const word of [before, text]) {
       expect(JSON.stringify(await s.sql('SELECT payload FROM events'))).not.toContain(word);
@@ -367,7 +333,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     }
   });
 
-  // Interaction follow-ups use DISCORD_API_BASE in development, so /mirror leave never reaches the real Discord.
+  // Interaction follow-ups use DISCORD_API_BASE in development, so /consent withdraw never reaches the real Discord.
   it('(e) sends interaction follow-ups to DISCORD_API_BASE, never to the real discord.com', () => {
     expect(s.outbound.redirected.filter((r) => r.includes('/messages/@original'))).toEqual([]);
   });
@@ -416,7 +382,6 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       { what: 'the thread to be recorded' },
     );
     expect(thread).toEqual({ parent_id: s.channels.forum, name: title });
-    expect(find(await publicPage(s.channels.forum, `&thread_id=${threadId}`), threadId)).toMatchObject({ content: opening, thread_id: threadId });
 
     // A forum post needs a thread, and the relay checks tags before Discord does.
     const before = executions().length;
@@ -486,37 +451,17 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(s.fake.requestsTo('webhook.message.edit').at(-1)!.query).toEqual({});
   });
 
-  it('(f) sends a poll, and a reply that points at the message it answers', async () => {
-    const poll = { question: 'Which lantern should we light first?', answers: ['Brass', 'Paper'], duration_hours: 2 };
-    const asked = await post(vesper, { channel_id: s.channels.lounge, poll });
-    expect(asked.status).toBe(201);
-    expect(asked.body.poll).toMatchObject({ question: poll.question, answers: ['Brass', 'Paper'] });
-    const execute = executions().find((r) => (r.body as { poll?: unknown }).poll !== undefined)!;
-    expect(execute.body).toMatchObject({
-      poll: {
-        question: { text: poll.question },
-        answers: [{ poll_media: { text: 'Brass' } }, { poll_media: { text: 'Paper' } }],
-        duration: 2,
-        allow_multiselect: false,
-      },
-    });
-    const stored = s.fake.messages(s.channels.lounge).find((m) => m.id === asked.body.discord_message_id)!;
-    expect(stored.poll).toMatchObject({ question: { text: poll.question }, layout_type: 1 });
-    const row = await eventually(seen(atlas, s.channels.lounge, asked.body.discord_message_id), { what: 'the poll message' });
-    expect(row.poll).toMatchObject({ question: poll.question, allow_multiselect: false });
-    expect(row.poll.answers).toHaveLength(2);
-
-    // A person's message to reply to. The visitor has not agreed to the mirror, so the reply line doesn't name them.
-    const question = s.fake.say(s.channels.lounge, { as: visitor, content: unique('Does anyone know where the lanterns are kept?') });
-    await eventually(seen(atlas, s.channels.lounge, question.id), { what: 'the question' });
+  it('(f) sends a reply that points at the message it answers', async () => {
+    const question = await post(vesper, { channel_id: s.channels.lounge, content: unique('Does anyone know where the lanterns are kept?') });
+    expect(question.status).toBe(201);
+    const qid: string = question.body.discord_message_id;
+    await eventually(seen(atlas, s.channels.lounge, qid), { what: 'the question' });
     const answer = unique('In the cellar, I believe');
-    const replied = await post(orrery, { channel_id: s.channels.lounge, content: answer, reply_to: question.id });
+    const replied = await post(orrery, { channel_id: s.channels.lounge, content: answer, reply_to: qid });
     expect(replied.status).toBe(201);
-    expect(replied.body.reply_to).toBe(question.id);
+    expect(replied.body.reply_to).toBe(qid);
     const shown = s.fake.messages(s.channels.lounge).find((m) => m.id === replied.body.discord_message_id)!;
-    expect(shown.content).toBe(
-      `-# ↪ Replying to **a person** · https://discord.com/channels/${s.community.guildId}/${s.channels.lounge}/${question.id}\n${answer}`,
-    );
+    expect(shown.content).toBe(`-# ↪ Replying to **Vesper** · https://discord.com/channels/${s.community.guildId}/${s.channels.lounge}/${qid}\n${answer}`);
     expect((await post(orrery, { channel_id: s.channels.lounge, content: unique('Reply to nothing'), reply_to: '100000000000000000' })).status).toBe(400);
     const row2 = await eventually(seen(atlas, s.channels.lounge, shown.id), { what: 'the reply' });
     expect(row2.reply_to ?? null).toBeTruthy();
@@ -584,7 +529,6 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       { what: 'the deletion' },
     );
     expect(row).toMatchObject({ content: null, deleted: true, removed_by: 'discord', author: { kind: 'agent' } });
-    expect(find(await publicPage(s.channels.lounge), did)).toMatchObject({ content: null, deleted: true, removed_by: 'discord' });
     expect((await s.sql<{ content: string | null }>('SELECT content FROM conversation WHERE message_id = ?', did))[0]!.content).toBeNull();
     expect(
       (
@@ -706,8 +650,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   /* ---------- Edits and system messages ---------- */
 
   it('shows edits, and ignores system messages', async () => {
-    // The admin agreed before the suite started, so their words are kept.
-    const said = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('First draft') });
+    const said = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('First draft') });
     await eventually(seen(atlas, s.channels.lounge, said.id), { what: 'the message' });
     const edited = s.fake.edit(s.channels.lounge, said.id, unique('Second draft'));
     const row = await eventually(
@@ -721,7 +664,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
 
     const join = s.fake.say(s.channels.lounge, { as: visitor, content: '', type: 7 });
     const starter = s.fake.say(s.channels.lounge, { as: visitor, content: '', type: 21 });
-    const reply = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('A reply'), replyTo: said.id });
+    const reply = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('A reply'), replyTo: said.id });
     await eventually(seen(atlas, s.channels.lounge, reply.id), { what: 'the reply' });
     const page = await channelPage(atlas, s.channels.lounge);
     expect(find(page, join.id)).toBeUndefined();
@@ -731,7 +674,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   /* ---------- (j) Gateway close and resume ---------- */
 
   it('(j) a Gateway close and resume backfills nothing twice, and a lost session recovers the gap over REST without duplicates', async () => {
-    const say = (content: string) => s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique(content) });
+    const say = (content: string) => s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique(content) });
     const count = async (id: string) => ({
       conversation: (await s.sql('SELECT 1 FROM conversation WHERE message_id = ?', id)).length,
       events: (await s.sql('SELECT 1 FROM events WHERE source_key = ?', `create:${id}`)).length,
@@ -786,7 +729,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(stale.status).toBe(401);
 
     // A body signed for another body doesn't pass: the signature covers the raw text.
-    const status = await s.fake.interact({ user: visitor, command: { name: 'mirror', subcommand: 'status' } });
+    const status = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'status' } });
     expect(status.status).toBe(200);
     expect(status.body).toMatchObject({ type: 4, data: { flags: 64, content: expect.stringContaining('haven’t agreed') } });
     const unknown = await s.fake.interact({ user: visitor, command: { name: 'nonsense' } });
@@ -858,8 +801,6 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   it.todo(
     'classifier outage: hold, automatic re-check and release. Needs JEV_LAYA_URL pointed at a fake classifier on loopback (allowed by the suite’s outbound bridge) and a controllable clock for the re-check backoff',
   );
-  it.todo('the consent welcome message and its button (mirror_agree) posted by the admin console, then clicked through the fake');
   it.todo('quarter-hour cron jobs (retention, raw-IP purge, counter sweep): cron only fires them at minute 0/15/30/45 of the Worker’s real clock');
-  it.todo('Workers AI fallback classifier: the AI binding only runs remotely');
   it.todo('owner claim by Discord sign-in: the dashboard’s OAuth talks to the real discord.com');
 });

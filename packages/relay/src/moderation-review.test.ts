@@ -2,6 +2,7 @@ import { LIMITS, newId } from '@logitland/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import { handleScheduled } from './jobs';
 import type { ModerationResult, Moderator } from './services/moderation/classifier';
+import { UNCONFIRMED_REASON } from './services/moderation/rows';
 import { reviewHeldJob } from './services/review';
 import { sweepStuckJob } from './services/sending';
 import { LOUNGE, harness, seedAgent, seedChannel, type Harness } from './testing';
@@ -24,7 +25,7 @@ function control(initial: ModerationResult = down) {
 
 async function setup(initial: ModerationResult = down) {
   const c = control(initial);
-  const h = harness({ moderator: c.moderator, fallbackModerator: null });
+  const h = harness({ moderator: c.moderator });
   await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
   const a = await seedAgent(h.relay, { tier: 'claimed' });
   return { h, a, ...c };
@@ -235,9 +236,19 @@ describe('stuck messages', () => {
     expect(h.discordCalls).toHaveLength(0);
   });
 
+  it('mark a send failed once it has stayed uncertain for 10 minutes', async () => {
+    const { h, a } = await setup();
+    const stale = await insert(h, a.id, 'uncertain', 11);
+    const fresh = await insert(h, a.id, 'uncertain', 9);
+    expect(await sweepStuckJob(h.relay)).toBe(1);
+    expect(await row(h, stale)).toMatchObject({ status: 'failed', status_reason: UNCONFIRMED_REASON });
+    expect((await row(h, fresh))!.status).toBe('uncertain');
+    expect(h.discordCalls).toHaveLength(0);
+  });
+
   it('leave finished messages alone', async () => {
     const { h, a } = await setup();
-    for (const status of ['sent', 'blocked', 'failed', 'uncertain', 'removed']) await insert(h, a.id, status, 600);
+    for (const status of ['sent', 'blocked', 'failed', 'removed']) await insert(h, a.id, status, 600);
     expect(await sweepStuckJob(h.relay)).toBe(0);
   });
 });

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { backfill, seedHistory } from './gateway';
-import { NEWS, all, at, conversation, human, moreChannels, msg, one, push, subscribe, world } from './intake-fixtures';
+import { AGENT_POST, NEWS, all, at, conversation, human, moreChannels, msg, one, push, subscribe, world } from './intake-fixtures';
 import { BENCH, FORUM, LOUNGE } from './testing';
 
 const THREAD = '120000000000000001';
-const AUTHOR = { id: '200000000000000001', username: 'luna' };
+// A bot: intake keeps what bots write as it is, so these tests are about fetching, not about whose words are kept.
+const AUTHOR = { id: '200000000000000001', username: 'luna', bot: true };
 const rest = (n: number, over: Record<string, unknown> = {}) => ({
   id: msg(n),
   channel_id: LOUNGE,
@@ -88,22 +89,17 @@ describe('seedHistory', () => {
     const { h, agent } = await world();
     await subscribe(h, agent.id);
     const asked = discordPages(h, {
-      [LOUNGE]: () => [
-        rest(3),
-        rest(2, { type: 19, message_reference: { message_id: msg(1) } }),
-        rest(1, { content: '', poll: { question: { text: 'Q?' }, answers: [{ answer_id: 1, poll_media: { text: 'a' } }] } }),
-      ],
+      [LOUNGE]: () => [rest(3), rest(2, { type: 19, message_reference: { message_id: msg(1) } }), rest(1)],
     });
     const r = await seedHistory(h.relay, 10);
     expect(asked).toEqual([`${LOUNGE} after=null`]);
     expect(r).toEqual({ places: 1, messages: 3, more: false });
-    expect((await all<{ id: string }>(h, 'SELECT CAST(message_id AS TEXT) AS id FROM conversation ORDER BY message_id')).map((c) => c.id)).toEqual([
-      msg(1),
-      msg(2),
-      msg(3),
-    ]);
+    expect(
+      (await all<{ id: string }>(h, 'SELECT CAST(message_id AS TEXT) AS id FROM conversation WHERE message_id != ? ORDER BY message_id', AGENT_POST)).map(
+        (c) => c.id,
+      ),
+    ).toEqual([msg(1), msg(2), msg(3)]);
     expect(await conversation(h, 2)).toMatchObject({ reply_to: msg(1) });
-    expect(JSON.parse((await conversation(h, 1))!.poll).question).toBe('Q?');
     // History is not news.
     expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(0);
     expect(await all(h, 'SELECT 1 FROM deliveries')).toHaveLength(0);

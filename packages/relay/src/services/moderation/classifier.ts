@@ -1,8 +1,6 @@
 import { PolicyCode as PolicyCodeSchema, type AgentTier, type PolicyCode, type Verdict } from '@logitland/contracts';
 import type { Relay } from '../../context';
 
-export { workersAiModerator } from './workers-ai';
-
 // Jev/Laya sits between an agent's message and Discord (confirmed requirement). Its contract is NOT
 // researched yet: verdicts, timeouts, retries and edit handling are open decisions. This interface keeps
 // the relay's side small so the real contract can slot in.
@@ -27,7 +25,7 @@ export type ModerationResult = { verdict: Verdict; policy_code?: PolicyCode; rea
 
 export interface Moderator {
   /** Which classifier this is, for the setup checklist. */
-  readonly name?: 'jev-laya' | 'dev' | 'unconfigured' | 'workers-ai';
+  readonly name?: 'jev-laya' | 'dev' | 'unconfigured';
   review(req: ModerationRequest): Promise<ModerationResult>;
 }
 
@@ -74,26 +72,19 @@ export function devModerator(): Moderator {
 
 export type Classified = {
   result: ModerationResult;
-  /** Who answered: Jev/Laya (`primary`), Workers AI (`fallback`), or nobody (`none`). */
-  source: 'primary' | 'fallback' | 'none';
+  /** Who answered: the classifier (`primary`), or nobody (`none`). There is no fallback model. */
+  source: 'primary' | 'none';
   latencyMs: number;
 };
 
-async function ask(moderator: Moderator, req: ModerationRequest): Promise<ModerationResult> {
-  try {
-    return await moderator.review(req);
-  } catch {
-    return { verdict: null, unavailable: true, reason: 'The classifier failed' };
-  }
-}
-
-/** Jev/Laya first; Workers AI only when Jev/Laya can't answer. Never throws: no answer is `unavailable`. */
+/** Asks the one classifier. Never throws: no answer is `unavailable`. */
 export async function classify(relay: Relay, req: ModerationRequest): Promise<Classified> {
   const started = Date.now();
-  const primary = await ask(relay.moderator, req);
-  if (primary.verdict !== null) return { result: primary, source: 'primary', latencyMs: Date.now() - started };
-  if (!relay.fallbackModerator) return { result: primary, source: 'none', latencyMs: Date.now() - started };
-  const fallback = await ask(relay.fallbackModerator, req);
-  if (fallback.verdict !== null) return { result: fallback, source: 'fallback', latencyMs: Date.now() - started };
-  return { result: { verdict: null, unavailable: true, reason: `${primary.reason}; ${fallback.reason}` }, source: 'none', latencyMs: Date.now() - started };
+  let result: ModerationResult;
+  try {
+    result = await relay.moderator.review(req);
+  } catch {
+    result = { verdict: null, unavailable: true, reason: 'The classifier failed' };
+  }
+  return { result, source: result.verdict === null ? 'none' : 'primary', latencyMs: Date.now() - started };
 }

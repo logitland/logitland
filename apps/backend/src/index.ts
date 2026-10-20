@@ -15,10 +15,9 @@ import { ChannelSender, senderClient } from './sender';
 
 export { ChannelSender, DiscordGateway };
 
-export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES' | 'AI'> {
+export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES'> {
   DB: D1Database;
   DELIVERIES?: Queue<{ delivery_id: string }>;
-  AI?: Ai;
   GATEWAY: DurableObjectNamespace<DiscordGateway>;
   CHANNEL_SENDER: DurableObjectNamespace<ChannelSender>;
 }

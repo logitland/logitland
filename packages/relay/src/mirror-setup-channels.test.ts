@@ -2,22 +2,7 @@ import type { Channel, DiscordChannelListing, RelayChannelResult } from '@logitl
 import { describe, expect, it } from 'vitest';
 import { openWebhook, getChannel } from './services/channels';
 import { BENCH, FORUM, GUILD, LOUNGE, harness, seedChannel, seedOwner, type Harness } from './testing';
-import {
-  BOT_ROLE,
-  CONSENT_ROLE,
-  NEW_HOOK,
-  P,
-  admin,
-  allow,
-  bits,
-  deny,
-  discordError,
-  discordWorld,
-  enforced,
-  overwrites,
-  type ChannelSpec,
-  type World,
-} from './mirror.testkit';
+import { BOT_ROLE, NEW_HOOK, P, admin, allow, deny, discordError, discordWorld, overwrites, type ChannelSpec, type World } from './mirror.testkit';
 
 const CAT_AGENTS = '120000000000000001';
 const CAT_COMMUNITY = '120000000000000002';
@@ -33,7 +18,6 @@ const forum = (over: Partial<ChannelSpec> = {}): ChannelSpec => ({
   type: 15,
   parent_id: CAT_AGENTS,
   position: 1,
-  permission_overwrites: enforced(),
   available_tags: [
     { id: TAG_IDEA, name: 'Idea', moderated: false },
     { id: TAG_OFFICIAL, name: 'Official', moderated: true },
@@ -64,19 +48,19 @@ describe('GET /internal/admin/discord/channels', () => {
     world.channels = [
       { id: CAT_AGENTS, name: 'Agents', type: 4, position: 1 },
       { id: CAT_COMMUNITY, name: 'Community', type: 4, position: 0 },
-      { id: LOUNGE, name: 'lounge', type: 0, parent_id: CAT_AGENTS, position: 0, permission_overwrites: enforced() },
+      { id: LOUNGE, name: 'lounge', type: 0, parent_id: CAT_AGENTS, position: 0 },
       forum(),
       { id: BENCH, name: 'news', type: 5, parent_id: CAT_COMMUNITY, position: 3 },
-      { id: MEDIA, name: 'pictures', type: 16, parent_id: null, position: 0, permission_overwrites: overwrites(...enforced(), deny(BOT_ROLE, P.VIEW_CHANNEL)) },
+      { id: MEDIA, name: 'pictures', type: 16, parent_id: null, position: 0, permission_overwrites: [deny(BOT_ROLE, P.VIEW_CHANNEL)] },
       { id: VOICE, name: 'voice', type: 2, parent_id: CAT_COMMUNITY, position: 4 },
       { id: '110000000000000006', name: 'stage', type: 13, parent_id: CAT_COMMUNITY, position: 5 },
     ];
   };
 
-  it('lists the supported channels with category, type, tags, relay status, the bot’s permissions and whether consent is enforced', async () => {
+  it('lists the supported channels with category, type, tags, relay status and the bot’s permissions', async () => {
     const { h, world, as } = await ready();
     server(world);
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post', publicMirror: true });
+    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post' });
     const res = await h.internal('GET', '/internal/admin/discord/channels', undefined, as);
     expect(res.status).toBe(200);
     const listing = (await res.json()) as DiscordChannelListing;
@@ -101,7 +85,6 @@ describe('GET /internal/admin/discord/channels', () => {
       type: 'text',
       agent_access: 'post',
       pace_per_agent_per_minute: 10,
-      public_mirror: true,
       verified_only: false,
       has_webhook: true,
     });
@@ -112,9 +95,6 @@ describe('GET /internal/admin/discord/channels', () => {
       { id: TAG_OFFICIAL, name: 'Official', moderated: true },
     ]);
     expect(by[LOUNGE]!.bot).toEqual({ can_view: true, can_read_history: true, can_manage_webhooks: true, can_create_threads: true, can_send_in_threads: true });
-    expect(by[LOUNGE]!.consent_enforced).toBe(true);
-    expect(by[FORUM]!.consent_enforced).toBe(true);
-    expect(by[BENCH]!.consent_enforced).toBe(false);
     expect(JSON.stringify(listing)).not.toContain('token');
   });
 
@@ -128,7 +108,7 @@ describe('GET /internal/admin/discord/channels', () => {
 
   it('reflects Manage Webhooks and thread permissions granted server-wide or taken away in a channel', async () => {
     const { world, h, as } = await ready();
-    world.roles.find((r) => r.id === BOT_ROLE)!.permissions = bits(P.MANAGE_ROLES);
+    world.roles.find((r) => r.id === BOT_ROLE)!.permissions = '0';
     world.channels = [
       { id: LOUNGE, name: 'lounge', type: 0, permission_overwrites: [] },
       { id: BENCH, name: 'bench', type: 0, permission_overwrites: overwrites(allow(BOT_ROLE, P.MANAGE_WEBHOOKS), deny(BOT_ROLE, P.CREATE_PUBLIC_THREADS)) },
@@ -137,22 +117,6 @@ describe('GET /internal/admin/discord/channels', () => {
     const bots = Object.fromEntries(listing.channels.map((c) => [c.id, c.bot]));
     expect(bots[LOUNGE]).toMatchObject({ can_manage_webhooks: false, can_create_threads: true });
     expect(bots[BENCH]).toMatchObject({ can_manage_webhooks: true, can_create_threads: false, can_send_in_threads: true });
-  });
-
-  it('says when consent is not enforced and why it matters', async () => {
-    const { world, h, as } = await ready();
-    world.channels = [
-      { id: LOUNGE, name: 'open', type: 0, permission_overwrites: [] },
-      {
-        id: BENCH,
-        name: 'half',
-        type: 0,
-        permission_overwrites: [deny(GUILD, P.SEND_MESSAGES), allow(CONSENT_ROLE, P.SEND_MESSAGES, P.SEND_MESSAGES_IN_THREADS)],
-      },
-      { id: FORUM, name: 'closed', type: 15, permission_overwrites: [deny(GUILD, P.SEND_MESSAGES, P.SEND_MESSAGES_IN_THREADS)] },
-    ];
-    const listing = (await (await h.internal('GET', '/internal/admin/discord/channels', undefined, as)).json()) as DiscordChannelListing;
-    expect(listing.channels.map((c) => c.consent_enforced)).toEqual([false, false, false]);
   });
 
   it('is for admins, and fails plainly when Discord or the configuration does', async () => {
@@ -189,7 +153,6 @@ describe('POST /internal/admin/discord/channels/:channelId/relay', () => {
         type: 'forum',
         agent_access: 'post_new_threads',
         pace_per_agent_per_minute: 10,
-        public_mirror: true,
         verified_only: false,
         has_webhook: true,
       },
@@ -219,7 +182,6 @@ describe('POST /internal/admin/discord/channels/:channelId/relay', () => {
       name: { from: null, to: 'channel-ideas' },
       type: { from: null, to: 'forum' },
       agent_access: { from: null, to: 'post_new_threads' },
-      public_mirror: { from: null, to: true },
       webhook: { from: null, to: 'set' },
     });
     const everything = JSON.stringify((await h.db.prepare('SELECT * FROM audit_log').all()).results) + JSON.stringify(h.log.lines) + JSON.stringify(out);
@@ -228,24 +190,24 @@ describe('POST /internal/admin/discord/channels/:channelId/relay', () => {
 
   it('saves no tags for text and announcement channels, and allows new threads there', async () => {
     const { h, world, relay } = await ready();
-    world.channels = [{ id: LOUNGE, name: 'lounge', type: 0, permission_overwrites: enforced() }];
+    world.channels = [{ id: LOUNGE, name: 'lounge', type: 0 }];
     const res = await relay(LOUNGE, { agent_access: 'post_new_threads' });
     expect(res.status).toBe(201);
     expect(((await res.json()) as RelayChannelResult).channel).toMatchObject({ type: 'text', agent_access: 'post_new_threads' });
     expect((await stored(h, LOUNGE))!.tags).toBe('[]');
   });
 
-  it('applies the request’s access, mirror and pace instead of the defaults', async () => {
+  it('applies the request’s access and pace instead of the defaults', async () => {
     const { world, relay } = await ready();
     world.channels = [{ id: LOUNGE, name: 'lounge', type: 0 }];
-    const out = (await (await relay(LOUNGE, { agent_access: 'read_only', public_mirror: false, pace_per_agent_per_minute: 3 })).json()) as RelayChannelResult;
-    expect(out.channel).toMatchObject({ agent_access: 'read_only', public_mirror: false, pace_per_agent_per_minute: 3 });
+    const out = (await (await relay(LOUNGE, { agent_access: 'read_only', pace_per_agent_per_minute: 3 })).json()) as RelayChannelResult;
+    expect(out.channel).toMatchObject({ agent_access: 'read_only', pace_per_agent_per_minute: 3 });
   });
 
   it('keeps an existing webhook and settings, and updates only what the request sets', async () => {
     const { h, world, relay } = await ready();
     world.channels = [{ id: LOUNGE, name: 'lounge', type: 0 }];
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'read_only', publicMirror: false, pace: 4 });
+    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'read_only', pace: 4 });
     const before = (await getChannel(h.relay, LOUNGE))!.webhook_ciphertext;
 
     const same = await relay(LOUNGE);
@@ -253,23 +215,23 @@ describe('POST /internal/admin/discord/channels/:channelId/relay', () => {
     const out = (await same.json()) as RelayChannelResult;
     expect(out).toMatchObject({
       webhook_created: false,
-      channel: { agent_access: 'read_only', public_mirror: false, pace_per_agent_per_minute: 4, has_webhook: true },
+      channel: { agent_access: 'read_only', pace_per_agent_per_minute: 4, has_webhook: true },
     });
     expect(h.discordCalls.map(path)).toEqual([`GET /channels/${LOUNGE}`]);
     expect((await getChannel(h.relay, LOUNGE))!.webhook_ciphertext).toBe(before);
     expect(await channelAudit(h)).toEqual([]);
 
-    const changed = (await (await relay(LOUNGE, { agent_access: 'post', public_mirror: true })).json()) as RelayChannelResult;
-    expect(changed.channel).toMatchObject({ agent_access: 'post', public_mirror: true, pace_per_agent_per_minute: 4 });
+    const changed = (await (await relay(LOUNGE, { agent_access: 'post' })).json()) as RelayChannelResult;
+    expect(changed.channel).toMatchObject({ agent_access: 'post', pace_per_agent_per_minute: 4 });
     expect((await channelAudit(h)).map((e) => e.action)).toEqual(['channel.updated']);
   });
 
-  it('treats a channel that exists but is off and unmirrored as not relayed yet, and applies the defaults', async () => {
+  it('treats a channel that exists but is off as not relayed yet, and applies the defaults', async () => {
     const { h, world, relay } = await ready();
     world.channels = [{ id: LOUNGE, name: 'lounge', type: 0 }];
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'off', publicMirror: false, pace: 4 });
+    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'off', pace: 4 });
     const out = (await (await relay(LOUNGE)).json()) as RelayChannelResult;
-    expect(out.channel).toMatchObject({ agent_access: 'post', public_mirror: true, pace_per_agent_per_minute: 4, has_webhook: true });
+    expect(out.channel).toMatchObject({ agent_access: 'post', pace_per_agent_per_minute: 4, has_webhook: true });
     expect(world.createdHooks).toBe(0);
   });
 
@@ -346,7 +308,7 @@ describe('POST /internal/admin/discord/channels/:channelId/relay', () => {
     world.channels = [{ id: LOUNGE, name: 'lounge', type: 0 }];
     expect((await relay(LOUNGE, { agent_access: 'everything' })).status).toBe(400);
     expect((await relay(LOUNGE, { pace_per_agent_per_minute: 500 })).status).toBe(400);
-    expect((await relay(LOUNGE, { public_mirror: 'yes' })).status).toBe(400);
+    expect((await relay(LOUNGE, { verified_only: 'yes' })).status).toBe(400);
     expect((await relay('nope')).status).toBe(400);
     const person = await seedOwner(h.relay, '200000000000000002', 'person');
     expect((await h.internal('POST', `/internal/admin/discord/channels/${LOUNGE}/relay`, {}, { 'x-logitland-owner': person.id })).status).toBe(403);

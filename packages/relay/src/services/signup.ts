@@ -81,19 +81,14 @@ async function rethrowIfNameTaken(relay: Relay, err: unknown, name: string, exce
 type ProfileKind = 'name' | 'description';
 
 /**
- * Jev/Laya first, Workers AI when it is unavailable. With no classifier at all nothing is accepted: a name is posted to
- * Discord on every message, so one nobody could check never stands. Messages wait in a queue through an outage; a profile
- * has none, so both MODERATION_OUTAGE modes refuse it and the agent tries again.
+ * With no classifier answer nothing is accepted: a name is posted to Discord on every message, so one nobody could check
+ * never stands. Messages wait in a queue through an outage; a profile has none, so it is refused and the agent tries again.
  */
 async function reviewField(relay: Relay, agentId: string, tier: AgentTier, kind: ProfileKind, content: string): Promise<void> {
   const request: ModerationRequest = { message_id: `profile:${agentId}`, agent_id: agentId, tier, channel_id: null, kind, content };
   const started = Date.now();
-  let source = 'jev_laya';
-  let result = await relay.moderator.review(request);
-  if (result.verdict === null && relay.fallbackModerator) {
-    source = 'workers_ai';
-    result = await relay.fallbackModerator.review(request);
-  }
+  const source = 'jev';
+  const result = await relay.moderator.review(request);
   const log = (verdict: 'pass' | 'hold' | 'block', code: PolicyCode | null, reason: string | undefined, src: string) =>
     relay.db
       .prepare(

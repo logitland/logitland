@@ -3,7 +3,6 @@ import type { ModerationRequest, ModerationResult, Moderator } from './services/
 import { sendMessage } from './services/messages';
 import { authenticateKey } from './services/identity';
 import { NO_CLIENT } from './types';
-import { agree } from './consent.testkit';
 import { BENCH, LOUNGE, harness, seedAgent, seedChannel, type Harness, type HarnessOptions } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
@@ -447,27 +446,12 @@ describe('the classifier', () => {
   it('asks Jev/Laya with the recent conversation, the tier, the strike count and the thread name', async () => {
     const moderator = mod();
     const { h, a } = await setup({ moderator }, { name: 'Orrery' }, { type: 'forum', access: 'post_new_threads' });
-    const ANN = '700000000000000001';
-    const LATE = '700000000000000002';
-    await agree(h, ANN, { at: '2026-10-19T00:00:00.000Z' });
-    // LATE agreed only after writing line 11; nobody ever agreed for 8; 4 was withheld at intake.
-    await agree(h, LATE, { at: new Date(h.now().getTime() - 1500).toISOString() });
     for (let i = 1; i <= 12; i++) {
-      const hidden = i === 4;
       await h.db
         .prepare(
-          "INSERT INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, created_at, withheld) VALUES (?, ?, '120000000000000001', 'human', NULL, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, display_name, content, created_at) VALUES (?, ?, '120000000000000001', 'human', NULL, 'p_x', ?, ?, ?)",
         )
-        .bind(
-          String(500000000000000000n + BigInt(i)),
-          LOUNGE,
-          hidden ? 'p_withheld' : 'p_x',
-          hidden ? null : i === 11 ? LATE : i === 8 ? '700000000000000003' : ANN,
-          hidden ? 'A person in Discord' : `Person ${i}`,
-          hidden ? null : `line ${i}`,
-          new Date(h.now().getTime() - (13 - i) * 1000).toISOString(),
-          Number(hidden),
-        )
+        .bind(String(500000000000000000n + BigInt(i)), LOUNGE, `Person ${i}`, `line ${i}`, new Date(h.now().getTime() - (13 - i) * 1000).toISOString())
         .run();
     }
     await h.db
@@ -486,36 +470,14 @@ describe('the classifier', () => {
     const req = moderator.calls[0]!;
     expect(req).toMatchObject({ agent_id: a.id, tier: 'claimed', channel_id: LOUNGE, kind: 'message', content: 'replying here', strikes: 1 });
     expect(req.message_id).toBe((await json(res)).id);
-    // The twelve newest rows were read (the deleted one and lines 2 to 12); the withheld one, the stranger's and the one written
-    // before LATE agreed are not passed on.
-    expect(req.context!.map((c) => c.author)).toEqual(['Person 2', 'Person 3', 'Person 5', 'Person 6', 'Person 7', 'Person 9', 'Person 10', 'Person 12']);
-    expect(req.context![7]).toEqual({ author: 'Person 12', content: 'line 12' });
+    // The twelve newest rows were read (the deleted one and lines 2 to 12); the ten newest with text are passed on, oldest first.
+    expect(req.context!.map((c) => c.author)).toEqual(Array.from({ length: 10 }, (_, i) => `Person ${i + 3}`));
+    expect(req.context![9]).toEqual({ author: 'Person 12', content: 'line 12' });
     expect(req.context!.some((c) => c.content === 'deleted words')).toBe(false);
-    expect(JSON.stringify(req.context)).not.toMatch(/A person in Discord|Person 8|Person 11/);
 
     await post(h, a, 'starting a thread', { thread_name: 'Weekly sync' });
     // A new thread has no conversation yet, and the channel's other messages aren't read for it.
     expect(moderator.calls[1]).toMatchObject({ thread_name: 'Weekly sync', context: [] });
-  });
-
-  it('asks Workers AI only when Jev/Laya is unavailable, and uses its answer', async () => {
-    const primary = mod(down);
-    const fallback = mod({ verdict: 'block', policy_code: 'violence' });
-    const { h, a } = await setup({ moderator: primary, fallbackModerator: fallback });
-    const msg = await json(await post(h, a, 'a message the fallback judges'));
-    expect(msg).toMatchObject({ status: 'blocked', policy_code: 'violence' });
-    expect(primary.calls).toHaveLength(1);
-    expect(fallback.calls).toHaveLength(1);
-    expect((await logOf(h, msg.id)).find((l) => l.layer === 'classifier')!.source).toBe('fallback');
-  });
-
-  it('does not ask the fallback when Jev/Laya answers', async () => {
-    const primary = mod({ verdict: 'hold', policy_code: 'sexual' });
-    const fallback = mod(pass);
-    const { h, a } = await setup({ moderator: primary, fallbackModerator: fallback });
-    const msg = await json(await post(h, a, 'a message jev judges'));
-    expect(msg).toMatchObject({ status: 'held', verdict: 'hold', policy_code: 'sexual' });
-    expect(fallback.calls).toHaveLength(0);
   });
 
   it('treats a classifier that throws as unavailable', async () => {
@@ -524,9 +486,8 @@ describe('the classifier', () => {
         throw new Error('boom');
       },
     };
-    const fallback = mod(pass);
-    const { h, a } = await setup({ moderator: primary, fallbackModerator: fallback });
-    expect(await status(await post(h, a, 'jev has crashed'))).toBe('sent');
+    const { h, a } = await setup({ moderator: primary });
+    expect(await json(await post(h, a, 'jev has crashed'))).toMatchObject({ status: 'held', policy_code: 'outage' });
   });
 
   it('gives a sentence for a block even when the classifier gave only a verdict', async () => {
@@ -561,7 +522,7 @@ describe('the classifier', () => {
 
   describe('when nothing answers', () => {
     it('holds the message for an automatic re-check by default', async () => {
-      const { h, a } = await setup({ moderator: mod(down), fallbackModerator: mod(down) });
+      const { h, a } = await setup({ moderator: mod(down) });
       const res = await post(h, a, 'nobody can judge this right now');
       expect(res.status).toBe(202);
       const msg = await json(res);
@@ -577,14 +538,9 @@ describe('the classifier', () => {
       expect(h.discordCalls).toHaveLength(0);
     });
 
-    it('holds when there is no fallback at all', async () => {
-      const { h, a } = await setup({ moderator: mod(down), fallbackModerator: null });
-      expect(await status(await post(h, a, 'jev only, and it is down'))).toBe('held');
-    });
-
     it('refuses with a 503 when the relay is set to refuse, and the same key works once moderation is back', async () => {
       let healthy = false;
-      const { h, a } = await setup({ moderator: mod(() => (healthy ? pass : down)), fallbackModerator: null });
+      const { h, a } = await setup({ moderator: mod(() => (healthy ? pass : down)) });
       h.relay.config.moderationOutage = 'refuse';
       const k = 'refused-then-ok-key';
       const send = () => h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: 'try me twice' }, { ...h.as(a.key), 'idempotency-key': k });

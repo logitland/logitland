@@ -23,11 +23,6 @@ export interface DeliveryQueue {
   sendBatch?(messages: { body: { delivery_id: string } }[]): Promise<unknown>;
 }
 
-/** Workers AI, reduced to what the fallback classifier calls. */
-export interface AiBinding {
-  run(model: string, inputs: Record<string, unknown>): Promise<unknown>;
-}
-
 /** Hands a message to its channel's send queue (the ChannelSender Durable Object). Null runs sends inline. */
 export interface ChannelSenderClient {
   enqueue(channelId: string, messageId: string): Promise<void>;
@@ -58,8 +53,6 @@ export interface RelayConfig {
     applicationId: string | null;
     publicKey: string | null;
     guildId: string | null;
-    /** The role that may chat in relayed channels; granted when a person agrees to the mirror. */
-    consentRoleId: string | null;
   };
   development: boolean;
 }
@@ -69,10 +62,8 @@ export interface Relay {
   config: RelayConfig;
   secrets: SecretBox;
   discord: DiscordRest;
-  /** Jev/Laya in production; the development stub locally. */
+  /** Jev on TypeSafe's API in production; the development stub locally. The only classifier: there is no fallback. */
   moderator: Moderator;
-  /** Workers AI (Llama Guard) when Jev/Laya fails; null when no AI binding is configured. */
-  fallbackModerator: Moderator | null;
   resolver: Resolver;
   queue: DeliveryQueue | null;
   sender: ChannelSenderClient | null;

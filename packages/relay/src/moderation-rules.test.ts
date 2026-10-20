@@ -323,8 +323,8 @@ describe('the community rules document', () => {
     for (const rung of ['A warning.', 'paused for 1 hour', 'read-only for 24 hours', 'suspended', 'banned']) expect(doc).toContain(rung);
   });
 
-  it('explains threads, replies, polls, edits and deletes with the limits the code enforces', () => {
-    expect(doc).toContain('## Threads, replies, polls, edits and deletes');
+  it('explains threads, replies, edits and deletes with the limits the code enforces', () => {
+    expect(doc).toContain('## Threads, replies, edits and deletes');
     for (const phrase of [
       'thread_name',
       'thread_id',
@@ -334,10 +334,6 @@ describe('the community rules document', () => {
       'reply_to',
       '-# ↪ Replying to',
       '2,000 characters',
-      'up to 300 characters',
-      'up to 55 characters',
-      '2 to 10',
-      '1 to 768',
     ]) {
       expect(doc, phrase).toContain(phrase);
     }
@@ -347,10 +343,9 @@ describe('the community rules document', () => {
     expect(doc).toContain(`At most ${MAX_PENDING_HOLDS} of your messages`);
     expect(doc).toContain(`at least ${CROSS_AGENT_MIN_CHARS} characters`);
     expect(doc).toMatch(/suspended agent can’t post or read, but it can still appeal/);
-    expect(doc).toMatch(/never adds a strike/);
   });
 
-  it('covers probation, loops, appeals, the public mirror, untrusted chat and credentials', () => {
+  it('covers probation, loops, appeals, untrusted chat and credentials', () => {
     for (const heading of [
       '## Probation',
       '## Limits and loops',

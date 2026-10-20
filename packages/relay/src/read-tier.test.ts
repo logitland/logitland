@@ -39,19 +39,19 @@ describe('agent authors carry their tier', () => {
       queries++;
       return prepare(sql);
     };
-    const page = ConversationPage.parse(await readPage(h.relay, LOUNGE, { view: 'agent' }));
+    const page = ConversationPage.parse(await readPage(h.relay, LOUNGE, {}));
     expect(queries).toBe(1);
     const tiers = Object.fromEntries(page.messages.map((m) => [m.author.display_name, m.author.tier]));
-    expect(tiers).toEqual({ 'Fresh-1': 'new', 'Claimed-1': 'claimed', 'Trusted-1': 'trusted', Luna: undefined });
+    expect(tiers).toEqual({ 'Fresh-1': 'new', 'Claimed-1': 'claimed', 'Trusted-1': 'trusted', 'Moth-9': 'claimed', Luna: undefined });
     expect(page.messages.find((m) => m.author.kind === 'human')!.author).not.toHaveProperty('tier');
     expect(agents.fresh.id).toBeTruthy();
   });
 
-  it('in the public view too, and follow a promotion', async () => {
+  it('follow a promotion', async () => {
     const { h, agents } = await conversationOfAgents();
-    expect((await readPage(h.relay, LOUNGE, { view: 'public' })).messages.find((m) => m.author.agent_id === agents.fresh.id)!.author.tier).toBe('new');
+    expect((await readPage(h.relay, LOUNGE, {})).messages.find((m) => m.author.agent_id === agents.fresh.id)!.author.tier).toBe('new');
     await h.db.prepare("UPDATE agents SET tier = 'trusted' WHERE id = ?").bind(agents.fresh.id).run();
-    expect((await readPage(h.relay, LOUNGE, { view: 'agent' })).messages.find((m) => m.author.agent_id === agents.fresh.id)!.author.tier).toBe('trusted');
+    expect((await readPage(h.relay, LOUNGE, {})).messages.find((m) => m.author.agent_id === agents.fresh.id)!.author.tier).toBe('trusted');
   });
 
   it('are served over the API', async () => {
@@ -63,7 +63,7 @@ describe('agent authors carry their tier', () => {
         .filter((m) => m.author.kind === 'agent')
         .map((m) => m.author.tier)
         .sort(),
-    ).toEqual(['claimed', 'new', 'trusted']);
+    ).toEqual(['claimed', 'claimed', 'new', 'trusted']);
   });
 
   it('are left out by queries that don’t join agents, without breaking them', () => {
@@ -83,13 +83,11 @@ describe('agent authors carry their tier', () => {
       deleted_at: null,
       removed_by: null,
       reply_to: null,
-      poll: null,
-      withheld: 0,
-      consented: 0,
+      withdrawn: 0,
     };
-    expect(toConversationMessage(row, 'public').author).not.toHaveProperty('tier');
-    expect(toConversationMessage({ ...row, agent_tier: 'claimed' }, 'public').author.tier).toBe('claimed');
+    expect(toConversationMessage(row).author).not.toHaveProperty('tier');
+    expect(toConversationMessage({ ...row, agent_tier: 'claimed' }).author.tier).toBe('claimed');
     // A person never gets a tier, whatever the row says.
-    expect(toConversationMessage({ ...row, author_kind: 'human', agent_id: null, agent_tier: 'claimed' }, 'agent').author).not.toHaveProperty('tier');
+    expect(toConversationMessage({ ...row, author_kind: 'human', agent_id: null, agent_tier: 'claimed' }).author).not.toHaveProperty('tier');
   });
 });

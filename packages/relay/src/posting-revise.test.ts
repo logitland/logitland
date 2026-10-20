@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { agree } from './consent.testkit';
 import { sha256 } from './crypto';
 import { scrubMessage } from './services/scrub';
 import { activeStrikeCount } from './services/strikes';
@@ -89,17 +88,13 @@ describe('editing a message', () => {
     expect((await audits(w.h, 'message.edited'))[0]).toMatchObject({ actor_type: 'agent', actor_id: w.a.id, target_id: msg.id });
   });
 
-  it('gives the classifier the conversation as context, leaving out people who had not agreed to the mirror', async () => {
+  it('gives the classifier the conversation as context', async () => {
     const moderator = mod();
     const w = await world({ moderator });
     const msg = await sent(w);
-    await agree(w.h, '700000000000000007', { at: '2026-10-19T00:00:00.000Z' });
-    await converse(w.h, { name: 'Ann', userId: '700000000000000007', content: 'someone said this before' });
-    await converse(w.h, { name: 'Bob', userId: '700000000000000008', content: 'a stranger said this' });
+    await converse(w.h, { author: 'bot', name: 'Ann', content: 'someone said this before' });
     await patch(w.h, w.a, msg.id, { content: 'A better version of this message' });
-    const context = moderator.calls[1]!.context!;
-    expect(context.some((c) => c.content === 'someone said this before')).toBe(true);
-    expect(JSON.stringify(context)).not.toMatch(/stranger|Bob/);
+    expect(moderator.calls[1]!.context).toContainEqual({ author: 'Ann', content: 'someone said this before' });
   });
 
   it('keeps a reply line above the new text', async () => {
@@ -226,21 +221,10 @@ describe('editing a message', () => {
       expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(1);
     });
 
-    it('adds no strike when only the backup model blocked it', async () => {
-      const primary = mod(down);
-      const fallback = mod((req) => (req.content.includes('violent') ? { verdict: 'block', policy_code: 'violence' } : pass));
-      const w = await world({ moderator: primary, fallbackModerator: fallback });
-      // The original was sent while the primary was down too, through the backup.
-      const msg = await sent(w);
-      const res = await patch(w.h, w.a, msg.id, { content: 'something violent' });
-      expect(res.status).toBe(422);
-      expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(0);
-    });
-
     it('answers 503 when nothing can judge the edit, whatever the outage setting', async () => {
       let up = true;
       const moderator = mod(() => (up ? pass : down));
-      const w = await world({ moderator, fallbackModerator: null });
+      const w = await world({ moderator });
       const msg = await sent(w);
       up = false;
       for (const setting of ['hold', 'refuse'] as const) {
@@ -303,16 +287,6 @@ describe('editing a message', () => {
       const res = await patch(w.h, w.a, msg.id, { content: 'Edit after delete' });
       expect(res.status).toBe(409);
       expect((await json(res)).detail).toMatch(/was deleted/);
-    });
-
-    it('not a poll', async () => {
-      const w = await world();
-      const poll = await json(await post(w.h, w.a, { channel_id: LOUNGE, content: 'Vote below', poll: { question: 'Which?', answers: ['A', 'B'] } }));
-      expect(poll.status).toBe('sent');
-      const res = await patch(w.h, w.a, poll.id, { content: 'Vote below, edited' });
-      expect(res.status).toBe(409);
-      expect((await json(res)).detail).toMatch(/poll can’t be edited/);
-      expect(await calls(w.h, 'PATCH', WEBHOOK_MESSAGE)).toHaveLength(0);
     });
 
     it('not a message Discord never confirmed', async () => {

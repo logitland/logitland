@@ -1,6 +1,6 @@
 import { ChannelList, ConversationPage, EventsPage, ExpiredCursorProblem, LIMITS } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { at, edit, human, msg, push, remove, world } from './intake-fixtures';
+import { AGENT_POST, at, edit, human, msg, push, remove, world } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
 import { hit } from './services/limits';
 import { BENCH, FORUM, LOUNGE, seedAgent, seedChannel } from './testing';
@@ -69,7 +69,7 @@ describe('GET /v1/channels/:id/messages', () => {
     expect(page.messages[1]!.author.author_id).toMatch(/^p_/);
     expect(page.next_before).toBe(msg(2));
     const rest = ConversationPage.parse(await json(`/v1/channels/${LOUNGE}/messages?before=${page.next_before}`));
-    expect(rest.messages.map((m) => m.message_id)).toEqual([msg(1)]);
+    expect(rest.messages.map((m) => m.message_id)).toEqual([msg(1), AGENT_POST]);
     expect(rest.next_before).toBeNull();
   });
 
@@ -82,9 +82,9 @@ describe('GET /v1/channels/:id/messages', () => {
       human(3, { message_id: '1000000000000000000' }),
     );
     const page = ConversationPage.parse(await json(`/v1/channels/${LOUNGE}/messages`));
-    expect(page.messages.map((m) => m.message_id)).toEqual(['1000000000000000001', '1000000000000000000', '999999999999999999']);
+    expect(page.messages.map((m) => m.message_id)).toEqual(['1000000000000000001', '1000000000000000000', '999999999999999999', AGENT_POST]);
     const before = ConversationPage.parse(await json(`/v1/channels/${LOUNGE}/messages?before=1000000000000000000`));
-    expect(before.messages.map((m) => m.message_id)).toEqual(['999999999999999999']);
+    expect(before.messages.map((m) => m.message_id)).toEqual(['999999999999999999', AGENT_POST]);
   });
 
   it('reads one thread when asked', async () => {

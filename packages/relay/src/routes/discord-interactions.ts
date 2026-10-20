@@ -2,7 +2,7 @@ import { RelayError } from '../errors';
 import { handleInteraction, verifyInteraction } from '../services/interactions';
 import type { AppContext, RegisterRoutes } from './shared';
 
-// Discord calls this URL for /mirror commands and the welcome button. Every request is signature-checked
+// Discord calls this URL for the /consent command and its button. Every request is signature-checked
 // over the raw body before anything is parsed.
 
 /** Finishes work after the answer is sent. Without an execution context (plain Node) the work simply keeps running. */

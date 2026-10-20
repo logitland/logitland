@@ -123,7 +123,6 @@ CREATE TABLE channels (
   type TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'announcement', 'forum', 'media')),
   agent_access TEXT NOT NULL DEFAULT 'off' CHECK (agent_access IN ('off', 'read_only', 'post', 'post_new_threads')),
   pace_per_agent_per_minute INTEGER NOT NULL DEFAULT 10,
-  public_mirror INTEGER NOT NULL DEFAULT 0 CHECK (public_mirror IN (0, 1)),
   -- 1: agents that haven't verified with Discord (tier 'new') can read here but not post or start threads.
   verified_only INTEGER NOT NULL DEFAULT 0 CHECK (verified_only IN (0, 1)),
   -- Discord webhook URL, sealed with RELAY_SECRET_KEY. Never returned by the API.
@@ -144,13 +143,11 @@ CREATE TABLE threads (
   archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
   locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
   deleted_at TEXT,
-  -- Kept by the triggers on conversation: messages not removed (withheld ones don't count), and when the newest one was sent.
+  -- Kept by the triggers on conversation: messages not removed, and when the newest one was sent.
   message_count INTEGER NOT NULL DEFAULT 0,
   last_message_at TEXT,
   -- Set when the starter message is an agent's.
   creator_agent_id TEXT,
-  -- The Discord user who made the thread, kept only for a person who had agreed before it existed (the name is theirs). Cleared when they leave.
-  owner_id TEXT,
   -- Forum and media tags applied to the post: a JSON array of tag IDs (the names are in channels.tags).
   applied_tags TEXT NOT NULL DEFAULT '[]',
   updated_at TEXT NOT NULL
@@ -162,7 +159,7 @@ CREATE INDEX threads_open ON threads(parent_id, id) WHERE archived = 0 AND delet
 /* ---------- Posting ---------- */
 
 -- Messages agents asked the relay to post. When one is removed (deleted by its author, cancelled before it was posted, or taken down)
--- content, thread_name, poll and reply_prefix are set to NULL; the hashes stay, for the idempotency and duplicate checks.
+-- content, thread_name and reply_prefix are set to NULL; the hashes stay, for the idempotency and duplicate checks.
 CREATE TABLE relay_messages (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
@@ -176,8 +173,6 @@ CREATE TABLE relay_messages (
   -- The Discord message this one replies to, and the line posted above the text that points at it.
   reply_to TEXT,
   reply_prefix TEXT,
-  -- JSON of the poll as the agent asked for it: {question, answers, duration_hours, allow_multiselect}. Content is NULL for a poll alone.
-  poll TEXT,
   content TEXT,
   status TEXT NOT NULL CHECK (status IN ('moderating', 'held', 'blocked', 'queued', 'sending', 'sent', 'uncertain', 'failed', 'removed')),
   verdict TEXT CHECK (verdict IN ('pass', 'hold', 'block')),
@@ -293,8 +288,8 @@ CREATE TABLE events (
 CREATE INDEX events_channel ON events(channel_id, seq);
 CREATE INDEX events_message ON events(message_id);
 CREATE INDEX events_observed ON events(observed_at);
--- Events that still hold message text or a poll, so the retention job finds the old ones without scanning the blanked ones.
-CREATE INDEX events_with_text ON events(observed_at) WHERE json_extract(payload, '$.data.content') != '' OR json_type(payload, '$.data.poll') IS NOT NULL;
+-- Events that still hold message text, so the retention job finds the old ones without scanning the blanked ones.
+CREATE INDEX events_with_text ON events(observed_at) WHERE json_extract(payload, '$.data.content') != '';
 CREATE INDEX events_unfanned ON events(observed_at) WHERE fanned_out_at IS NULL;
 -- What retention may delete once it is old. Removal events ('delete:<id>' tombstones) are kept for good: intake finds them
 -- to stop a late create from bringing back a removed message's text, and they hold no text.
@@ -308,8 +303,9 @@ CREATE TABLE conversation (
   author_kind TEXT NOT NULL CHECK (author_kind IN ('agent', 'human', 'webhook', 'bot')),
   agent_id TEXT,
   -- Pseudonymous, stable per person (HMAC of the Discord user ID). Readers see this, never the Discord ID.
-  -- A withheld message has the constant 'p_withheld' instead, so nobody can link a person's hidden messages.
   author_ref TEXT NOT NULL,
+  -- Set only for a person's reply to an agent (the only people's messages kept, and only from people who agreed), so
+  -- withdrawing can find and delete them.
   discord_user_id TEXT,
   display_name TEXT NOT NULL,
   content TEXT,
@@ -319,33 +315,24 @@ CREATE TABLE conversation (
   deleted_at TEXT,
   removed_by TEXT CHECK (removed_by IN ('author', 'moderator', 'discord')),
   -- The message this one answers.
-  reply_to TEXT,
-  -- A Discord poll, as JSON (the Poll shape in packages/contracts), with results once Discord reports them.
-  poll TEXT,
-  -- 1 for a person's message written before they agreed to the mirror (see consents). Intake stores such a message as a
-  -- marker only: no text, poll, reply, name or Discord ID, so the relay never holds what they wrote. It stays withheld
-  -- if they agree later. Thread counts leave it out.
-  withheld INTEGER NOT NULL DEFAULT 0 CHECK (withheld IN (0, 1))
+  reply_to TEXT
 );
 CREATE INDEX conversation_channel ON conversation(channel_id, message_id);
 CREATE INDEX conversation_channel_thread ON conversation(channel_id, thread_id, message_id);
 CREATE INDEX conversation_thread ON conversation(thread_id, message_id);
 CREATE INDEX conversation_agent ON conversation(agent_id);
--- An agent's public profile counts its messages per channel (services/mirror.ts); covering, so an index-only scan.
-CREATE INDEX conversation_agent_channel ON conversation(agent_id, channel_id, deleted_at, created_at);
 CREATE INDEX conversation_person ON conversation(discord_user_id);
--- Leaving the mirror finds the agent replies that name the person.
+-- Withdrawing consent finds the agent replies that name the person.
 CREATE INDEX conversation_reply ON conversation(reply_to) WHERE reply_to IS NOT NULL;
 
 -- Thread bookkeeping stays right however a message arrives (Gateway, backfill, an agent's own post) or leaves.
--- Withheld messages are not counted, so a thread's size and last activity say nothing about people who haven't agreed.
-CREATE TRIGGER conversation_thread_added AFTER INSERT ON conversation WHEN NEW.thread_id IS NOT NULL AND NEW.deleted_at IS NULL AND NEW.withheld = 0 BEGIN
+CREATE TRIGGER conversation_thread_added AFTER INSERT ON conversation WHEN NEW.thread_id IS NOT NULL AND NEW.deleted_at IS NULL BEGIN
   UPDATE threads
   SET message_count = message_count + 1,
       last_message_at = CASE WHEN last_message_at IS NULL OR last_message_at < NEW.created_at THEN NEW.created_at ELSE last_message_at END
   WHERE id = CAST(NEW.thread_id AS INTEGER);
 END;
-CREATE TRIGGER conversation_thread_removed AFTER UPDATE OF deleted_at ON conversation WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NEW.thread_id IS NOT NULL AND NEW.withheld = 0 BEGIN
+CREATE TRIGGER conversation_thread_removed AFTER UPDATE OF deleted_at ON conversation WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NEW.thread_id IS NOT NULL BEGIN
   UPDATE threads SET message_count = MAX(message_count - 1, 0) WHERE id = CAST(NEW.thread_id AS INTEGER);
 END;
 -- The starter message has the thread's ID. When an agent wrote it, the thread is that agent's.
@@ -376,13 +363,13 @@ CREATE TABLE channel_cursors (
   updated_at TEXT NOT NULL
 );
 
--- People who agreed to the mirror. Intake stores and shares a person's words only if a row exists with revoked_at NULL
--- and granted_at no later than the message's created_at; everything else of theirs is withheld. Agreeing again after
--- leaving replaces granted_at, so nothing written before the new time shows.
+-- People who agreed, through /consent, to have their replies to agents relayed. Intake keeps a person's reply to an agent only
+-- if a row exists with revoked_at NULL and granted_at no later than the message's created_at; every other human message is
+-- dropped. Agreeing again after withdrawing replaces granted_at, so nothing written in between is relayed.
 CREATE TABLE consents (
   discord_user_id TEXT PRIMARY KEY,
   guild_id TEXT NOT NULL,
-  method TEXT NOT NULL CHECK (method IN ('command', 'button')),
+  method TEXT NOT NULL CHECK (method IN ('command')),
   -- The notice they were shown (CONSENT_NOTICE_VERSION in services/consent.ts) and the interaction that recorded the click.
   notice_version TEXT NOT NULL,
   interaction_id TEXT,
@@ -524,7 +511,7 @@ CREATE INDEX audit_log_target ON audit_log(target_type, target_id);
 -- Each index holds only the rows the job still has to change, so a run that has caught up reads nothing. The WHERE
 -- terms are written out in the job's statements exactly as here, which is what lets SQLite use the index.
 CREATE INDEX relay_messages_with_text ON relay_messages(status, created_at)
-  WHERE status IN ('blocked', 'held', 'failed', 'removed') AND (content IS NOT NULL OR thread_name IS NOT NULL OR poll IS NOT NULL OR reply_prefix IS NOT NULL);
+  WHERE status IN ('blocked', 'held', 'failed', 'removed') AND (content IS NOT NULL OR thread_name IS NOT NULL OR reply_prefix IS NOT NULL);
 CREATE INDEX reports_with_text ON reports(resolved_at) WHERE status != 'open' AND (reason != '' OR note IS NOT NULL OR reporter_ref IS NOT NULL);
 CREATE INDEX appeals_with_text ON appeals(resolved_at) WHERE status != 'open' AND (message != '' OR response IS NOT NULL);
 CREATE INDEX claims_expires ON claims(expires_at);

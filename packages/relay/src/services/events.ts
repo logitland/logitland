@@ -1,6 +1,6 @@
 import { newId, type EventType, type RelayEvent } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
-import { consentedSql } from './conversation';
+import { withdrawnSql } from './conversation';
 import { enqueuer, fanOut, newFanOutBudget, type EventRow, type FanOutBudget } from './deliveries';
 
 // The event log: recording events (shared by intake and scrub) and reading them back for GET /v1/events.
@@ -211,12 +211,12 @@ export interface EventsQuery {
 export async function listEvents(relay: Relay, q: EventsQuery): Promise<{ events: RelayEvent[]; next_cursor: string }> {
   // Read the tail first: anything committed before this read is visible to the query below.
   const tail = await eventTail(relay);
-  // A person's words go out only while they stand: if they left and the clean-up hasn't caught up, their events are skipped.
+  // A person's words go out only while they stand: if they withdrew and the clean-up hasn't caught up, their events are skipped.
   const where = [
     'e.seq > ?',
     'e.subscription_id IS NULL',
     "e.channel_id IN (SELECT id FROM channels WHERE agent_access != 'off')",
-    `NOT (e.type IN ('message.created', 'message.updated') AND EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = e.message_id AND c.author_kind = 'human' AND c.discord_user_id IS NOT NULL AND NOT ${consentedSql('c')}))`,
+    `NOT (e.type IN ('message.created', 'message.updated') AND EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = e.message_id AND ${withdrawnSql('c')}))`,
   ];
   const args: unknown[] = [q.after];
   if (q.channelId) {

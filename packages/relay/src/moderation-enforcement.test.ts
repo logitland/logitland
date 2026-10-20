@@ -1,4 +1,4 @@
-import { APPEAL_MESSAGE_CHARS, LIMITS, POLL_LIMITS, newId } from '@logitland/contracts';
+import { APPEAL_MESSAGE_CHARS, LIMITS, newId } from '@logitland/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import { decideAppeal } from './services/moderation/admin';
 import { OUTAGE_BACKOFF_MINUTES, RULE_BLOCKS_PER_STRIKE, explain, isOnProbation, outageGiveUpMinutes, outageRecheckDue } from './services/moderation/policy';
@@ -93,15 +93,6 @@ describe('repeated fixed-rule blocks earn a strike', () => {
     expect(await activeStrikeCount(calm.h.relay, calm.a.id)).toBe(0);
     for (let i = 0; i < RULE_BLOCKS_PER_STRIKE; i++) await post(calm.h, calm.a, say(`mark ${i} here: lk_${'K7QMXV2D'.repeat(4)}`));
     expect(await activeStrikeCount(calm.h.relay, calm.a.id)).toBe(1);
-  });
-
-  it('does not strike for answers only the backup model gave', async () => {
-    const w = await world({
-      moderator: mod({ verdict: null, unavailable: true, reason: 'down' }),
-      fallbackModerator: mod({ verdict: 'block', policy_code: 'violence' }),
-    });
-    for (let i = 0; i < 6; i++) await post(w.h, w.a, say(`a message the backup model dislikes ${i}`));
-    expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(0);
   });
 
   it('counts refused edits too', async () => {
@@ -336,55 +327,6 @@ describe('reports', () => {
   });
 });
 
-describe('hiding a message someone else wrote', () => {
-  it('hides a reported person’s message from the mirror and agents, closes the report, and audits it', async () => {
-    const w = await world();
-    const api = await admin(w.h);
-    const message = await converse(w.h, { content: 'something unkind', name: 'Ann' });
-    const { id } = await createReport(w.h.relay, { target_type: 'message', target_id: message, reason: 'unkind' }, { kind: 'public', ref: 'r1' });
-    const res = await w.h.internal('POST', `/internal/admin/reports/${id}`, { action: 'hide', note: 'Targets a person' }, api);
-    expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ status: 'actioned', message: { deleted: true, content: null } });
-    expect(await w.h.db.prepare('SELECT content, deleted_at, removed_by FROM conversation WHERE message_id = ?').bind(message).first()).toMatchObject({
-      content: null,
-      removed_by: 'moderator',
-    });
-    const audits = (await w.h.db.prepare("SELECT actor_type, target_id, reason FROM audit_log WHERE action = 'message.hidden'").all()).results;
-    expect(audits).toEqual([{ actor_type: 'admin', target_id: message, reason: 'Targets a person' }]);
-    expect(await count(w.h, "SELECT COUNT(*) AS n FROM events WHERE type = 'message.deleted' AND message_id = ?", message)).toBe(1);
-  });
-
-  it('works without a report too, is safe to repeat, and refuses what it cannot hide', async () => {
-    const w = await world();
-    const api = await admin(w.h);
-    const hide = (id: string, body: unknown = {}) => w.h.internal('POST', `/internal/admin/mirror/messages/${id}/hide`, body, api);
-    const bot = await converse(w.h, { author: 'bot', name: 'Helper' });
-    const webhook = await converse(w.h, { author: 'webhook', name: 'Bridge' });
-    expect(await json(await hide(bot))).toEqual({ message_id: bot, hidden: true });
-    expect(await json(await hide(bot))).toEqual({ message_id: bot, hidden: false });
-    expect(await json(await hide(webhook, { note: 'Spam relay' }))).toEqual({ message_id: webhook, hidden: true });
-    expect(await count(w.h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'message.hidden'")).toBe(2);
-
-    const agentMessage = await converse(w.h, { author: 'agent', name: 'Some agent' });
-    expect((await hide(agentMessage)).status).toBe(400);
-    expect((await hide('999999999999999999')).status).toBe(404);
-    expect((await hide('not-a-snowflake')).status).toBe(400);
-    const notAdmin = await seedOwner(w.h.relay, '200000000000000008', 'not-admin');
-    expect((await w.h.internal('POST', `/internal/admin/mirror/messages/${bot}/hide`, {}, { 'x-logitland-owner': notAdmin.id })).status).toBe(403);
-  });
-
-  it('keeps a report open when the message cannot be hidden', async () => {
-    const w = await world();
-    const api = await admin(w.h);
-    const agentMessage = await converse(w.h, { author: 'agent', name: 'Some agent' });
-    const { id } = await createReport(w.h.relay, { target_type: 'message', target_id: agentMessage, reason: 'meh' }, { kind: 'public', ref: 'r1' });
-    expect((await w.h.internal('POST', `/internal/admin/reports/${id}`, { action: 'hide' }, api)).status).toBe(400);
-    expect((await w.h.db.prepare('SELECT status FROM reports WHERE id = ?').bind(id).first<{ status: string }>())!.status).toBe('open');
-    const agentReport = await createReport(w.h.relay, { target_type: 'agent', target_id: w.a.id, reason: 'meh' }, { kind: 'public', ref: 'r2' });
-    expect((await w.h.internal('POST', `/internal/admin/reports/${agentReport.id}`, { action: 'hide' }, api)).status).toBe(400);
-  });
-});
-
 describe('deciding an appeal', () => {
   it('reopens the appeal when its effects fail, so it is not left decided with nothing done, and works on a second try', async () => {
     const w = await world();
@@ -469,10 +411,10 @@ describe('the community rules document', () => {
   it('gives agents plain duties about people’s messages and their own key', () => {
     for (const phrase of [
       '## People and their messages',
-      "Not store or quote people who haven't agreed",
+      'Not go looking for people',
       '`message.deleted` or `message.bulk_deleted`',
       "Not train models on people's messages",
-      'Not bulk-export the mirror',
+      'Not bulk-export the server',
       'Not fetch links from chat blindly',
       'POST /v1/me/keys/rotate',
     ]) {
@@ -485,7 +427,6 @@ describe('the community rules document', () => {
     expect(doc).toContain('checks again after 1 minute, then after a further 1, 2, 5, 10 and 30 minutes, and then every 60 minutes');
     expect(doc).toContain('after about 7 hours');
     expect(doc).toContain(`message\` is ${APPEAL_MESSAGE_CHARS.min} to ${APPEAL_MESSAGE_CHARS.max} characters`);
-    expect(doc).toContain(`up to ${POLL_LIMITS.questionChars} characters`);
     expect(doc).toContain(`${LIMITS.messageChars.toLocaleString('en-US')} characters`);
     expect(doc).toContain(`stay \`queued\``);
   });

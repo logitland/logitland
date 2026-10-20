@@ -3,7 +3,6 @@ import { getSettings, updateSettings } from './services/settings';
 import { processSend, sweepStuckJob } from './services/sending';
 import { release } from './services/moderation/admin';
 import { reviewHeldJob } from './services/review';
-import { resolveUncertain } from './services/messages';
 import { STUCK_AFTER_MS } from './services/moderation/policy';
 import { down, json, mod, post, row, say, world } from './posting-fixtures';
 import { ADMIN_DISCORD, seedAgent, seedOwner } from './testing';
@@ -94,7 +93,7 @@ describe('kill switches reach messages that were already accepted', () => {
     expect(handed).toEqual([id]);
   });
 
-  it('applies to an admin release, a recheck after an outage, and a resend of an uncertain send', async () => {
+  it('applies to an admin release and a recheck after an outage', async () => {
     const down1 = mod(down);
     const { h, admin, a, handed } = await queued({ moderator: down1 });
     // An outage hold, re-checked by the job once the classifier is back.
@@ -102,9 +101,6 @@ describe('kill switches reach messages that were already accepted', () => {
     expect((await row(h, outage))!.status).toBe('held');
     // A review hold, released by an admin.
     const review = (await json(await post(h, a, say('write to me@example.com about it')))).id as string;
-    // An uncertain send, resent.
-    const uncertain = (await json(await post(h, a, say('probably out there')))).id as string;
-    await h.db.prepare("UPDATE relay_messages SET status = 'uncertain', status_reason = 'x' WHERE id = ?").bind(uncertain).run();
     await updateSettings(h.relay, admin.id, { relay_read_only: true });
     handed.length = 0;
     h.relay.moderator = mod({ verdict: 'pass' });
@@ -112,10 +108,9 @@ describe('kill switches reach messages that were already accepted', () => {
     h.advance(70_000);
     await reviewHeldJob(h.relay);
     await release(h.relay, admin.id, review);
-    await resolveUncertain(h.relay, { type: 'admin', id: admin.id }, uncertain, 'resend');
-    expect(handed.sort()).toEqual([outage, review, uncertain].sort());
+    expect(handed.sort()).toEqual([outage, review].sort());
     for (const id of handed) await processSend(h.relay, id);
-    for (const id of [outage, review, uncertain]) expect(await row(h, id), id).toMatchObject({ status: 'queued', discord_message_id: null });
+    for (const id of [outage, review]) expect(await row(h, id), id).toMatchObject({ status: 'queued', discord_message_id: null });
     expect(posted(h)).toBe(0);
   });
 });
@@ -164,13 +159,11 @@ describe('settings are read key by key', () => {
     await put('relay_read_only', 'true');
     await put('pow_difficulty', '"hard"');
     await put('probation_posts', '999999');
-    await put('public_mirror', '{not json');
     await put('unknown_key', 'true');
     const s = await getSettings(h.relay);
     expect(s.relay_read_only).toBe(true);
     expect(s.pow_difficulty).toBe(20);
     expect(s.probation_posts).toBe(20);
-    expect(s.public_mirror).toBe(true);
     expect(s).not.toHaveProperty('unknown_key');
   });
 

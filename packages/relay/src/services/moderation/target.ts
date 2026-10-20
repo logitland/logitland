@@ -2,7 +2,6 @@ import type { SendMessageRequest } from '@logitland/contracts';
 import type { Relay } from '../../context';
 import { forbidden, invalid } from '../../errors';
 import type { ChannelRow } from '../channels';
-import { consentedSql } from '../conversation';
 import { parseTags } from '../setup';
 import { evaluateRules } from './rules';
 
@@ -12,7 +11,7 @@ import { evaluateRules } from './rules';
 // succeeded still returns the message even if the world has moved on since.
 
 export interface Target {
-  /** The agent's text; null for a poll sent alone. */
+  /** The agent's text. */
   text: string | null;
   /** The line posted above the text when this replies to a message. */
   replyPrefix: string | null;
@@ -47,22 +46,19 @@ async function pointer(relay: Relay, channel: ChannelRow, req: SendMessageReques
   if (req.thread_name && isForum(channel))
     throw invalid('A new forum or media post can’t be a reply. Reply inside an existing post with thread_id, or leave reply_to out.');
   const target = await relay.db
-    .prepare(
-      `SELECT c.display_name, c.author_kind, c.thread_id, c.deleted_at, c.withheld, ${consentedSql('c')} AS consented FROM conversation c WHERE c.message_id = ? AND c.channel_id = ?`,
-    )
+    .prepare('SELECT c.display_name, c.thread_id, c.deleted_at FROM conversation c WHERE c.message_id = ? AND c.channel_id = ?')
     .bind(req.reply_to!, channel.id)
-    .first<{ display_name: string; author_kind: string; thread_id: string | null; deleted_at: string | null; withheld: number; consented: number }>();
+    .first<{ display_name: string; thread_id: string | null; deleted_at: string | null }>();
   const where = req.thread_id ? 'in that thread' : 'in that channel (not inside a thread)';
   if (!target || target.deleted_at || (target.thread_id ?? null) !== (req.thread_id ?? null)) {
     throw invalid(`reply_to must be a message that still exists ${where}. Read the conversation again for a message ID to reply to.`);
   }
-  // A person's name appears in the agent's message, so only if they had agreed when they wrote the message being answered.
-  const name = target.author_kind === 'human' && (target.withheld || !target.consented) ? 'a person' : replyName(target.display_name);
+  const name = replyName(target.display_name);
   return `-# ↪ Replying to **${name}** · https://discord.com/channels/${channel.guild_id}/${req.thread_id ?? channel.id}/${req.reply_to}`;
 }
 
 export interface Shape {
-  /** The agent's text; null for a poll sent alone. */
+  /** The agent's text. */
   text: string | null;
   tagIds: string[] | null;
 }
@@ -83,8 +79,8 @@ export function checkShape(channel: ChannelRow, req: SendMessageRequest): Shape 
   if (req.reply_to && starting && forum) {
     throw invalid('A new forum or media post can’t be a reply. Reply inside an existing post with thread_id, or leave reply_to out.');
   }
-  const text = req.content !== undefined && req.content.trim() ? req.content : null;
-  if (!text && !req.poll) throw invalid('The message is empty. Send some text, a poll, or both.');
+  const text = req.content.trim() ? req.content : null;
+  if (!text) throw invalid('The message is empty. Send some text.');
   return { text, tagIds: req.tag_ids ? [...new Set(req.tag_ids)] : null };
 }
 

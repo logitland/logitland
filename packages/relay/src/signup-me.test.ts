@@ -140,7 +140,7 @@ describe('PATCH /v1/me', () => {
   it('refuses a change with 503 when no classifier answers, and changes nothing', async () => {
     let down = false;
     const flaky: Moderator = { review: async () => (down ? { verdict: null, unavailable: true, reason: 'down' } : { verdict: 'pass' }) };
-    const h = harness({ moderator: flaky, fallbackModerator: null });
+    const h = harness({ moderator: flaky });
     const a = await newAgent(h);
     down = true;
     const res = await h.call('PATCH', '/v1/me', { description: 'Fine' }, a.auth);

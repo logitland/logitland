@@ -7,7 +7,7 @@ import { classify } from './classifier';
 import { logOne } from './log';
 import { recentConversation } from './loops';
 import { SEVERE_POLICIES, explain } from './policy';
-import { parsePoll, type MessageRow } from './rows';
+import type { MessageRow } from './rows';
 
 // The classifier layer: ask Jev/Laya (then Workers AI), turn its answer into a decision for this agent,
 // and move the message. Used for a new message and again when an outage hold is re-checked.
@@ -26,13 +26,6 @@ const clean = (s: string | undefined) => {
   const t = s?.replace(/\s+/g, ' ').trim().slice(0, 300);
   return t || null;
 };
-
-/** The words the classifier reads for a message: its text, then the poll's question and answers. */
-export function moderationText(row: Pick<MessageRow, 'content' | 'poll'>): string {
-  const poll = parsePoll(row);
-  const lines = poll ? [`Poll: ${poll.question}`, ...poll.answers.map((a) => `- ${a}`)] : [];
-  return [row.content, lines.join('\n')].filter(Boolean).join('\n\n');
-}
 
 /** What the classifier said, as a decision for this agent. */
 function interpret({ result, source, latencyMs }: Awaited<ReturnType<typeof classify>>, probation: boolean): Decision {
@@ -64,17 +57,17 @@ export async function decide(
   agent: AgentRecord,
   opts: { probation: boolean; conversation?: ConversationRow[] },
 ): Promise<Decision> {
-  // A message that starts a thread has no conversation yet, and the channel's other messages aren't its context. What goes
-  // to the classifier never includes a person who hadn't agreed to the mirror when they wrote it (their rows are hidden).
+  // A message that starts a thread has no conversation yet, and the channel's other messages aren't its context.
   const rows = row.thread_name ? [] : (opts.conversation ?? (await recentConversation(relay, row.channel_id, row.thread_id)));
+  // A withdrawn person's reply stays a row (it ends a loop) until the clean-up deletes it, but its words aren't context any more.
   const context = rows
-    .filter((r) => !r.deleted_at && r.content && !(r.author_kind === 'human' && (r.withheld === 1 || !r.consented)))
+    .filter((r) => !r.deleted_at && r.content && !r.withdrawn)
     .slice(0, CONTEXT_MESSAGES)
     .reverse()
     .map((r) => ({ author: r.display_name, content: r.content!.slice(0, 500) }));
   const base = { message_id: row.id, agent_id: agent.id, tier: agent.tier, channel_id: row.channel_id, strikes: await activeStrikeCount(relay, agent.id) };
   const message = interpret(
-    await classify(relay, { ...base, kind: 'message', content: moderationText(row), context, thread_name: row.thread_name }),
+    await classify(relay, { ...base, kind: 'message', content: row.content ?? '', context, thread_name: row.thread_name }),
     opts.probation,
   );
   if (!row.thread_name || message.kind === 'block') return message;
@@ -117,8 +110,8 @@ export async function settle(relay: Relay, row: MessageRow, agent: AgentRecord, 
     d.source,
     d.latencyMs,
   );
-  // Strikes come from Jev/Laya and from admins. The fallback model may block a message, but it never costs an agent a strike.
-  if (d.kind === 'block' && d.source === 'primary' && SEVERE_POLICIES.has(d.policy)) {
+  // A severe block costs a strike.
+  if (d.kind === 'block' && SEVERE_POLICIES.has(d.policy)) {
     const strike = await addStrike(relay, {
       agentId: agent.id,
       policy: d.policy,

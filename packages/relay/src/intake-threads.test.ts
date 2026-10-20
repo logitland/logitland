@@ -4,7 +4,6 @@ import {
   HUMAN,
   MEDIA,
   NEWS,
-  STRANGER,
   WEBHOOK,
   all,
   conversation,
@@ -15,20 +14,18 @@ import {
   one,
   push,
   remove,
-  stranger,
   subscribe,
   thread,
   threadRow,
   world,
 } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
-import { scrubMessage, scrubPerson } from './services/scrub';
+import { scrubMessage } from './services/scrub';
 import { readPage } from './services/conversation';
 import { listThreads } from './services/threads';
 import { FORUM, LOUNGE } from './testing';
-import { agree } from './consent.testkit';
 
-const list = async (h: Awaited<ReturnType<typeof world>>['h'], channel = LOUNGE, opts: Parameters<typeof listThreads>[2] = { view: 'agent' }) =>
+const list = async (h: Awaited<ReturnType<typeof world>>['h'], channel = LOUNGE, opts: Parameters<typeof listThreads>[2] = {}) =>
   ThreadPage.parse(await listThreads(h.relay, channel, opts));
 
 describe('threads in a text channel', () => {
@@ -264,60 +261,37 @@ describe('forum tags on posts', () => {
     expect((await list(h)).threads[0]!.applied_tags).toEqual([]);
   });
 
-  it('show in the public list too, whatever the name does', async () => {
+  it('show whatever the name does', async () => {
     const { h } = await world();
     await moreChannels(h);
-    await push(h, thread(msg(30), FORUM, { applied_tags: [TAG_A] }));
-    // The relay holds no starter for this post, so its name is hidden; the tags are not the starter's words.
-    expect((await list(h, FORUM, { view: 'public' })).threads[0]).toMatchObject({ applied_tags: [TAG_A], name_hidden: true });
+    await push(h, thread(msg(30), FORUM, { applied_tags: [TAG_A], owner_id: HUMAN }));
+    // A person named this post, so its name is hidden; the tags are not their words.
+    expect((await list(h, FORUM)).threads[0]).toMatchObject({ applied_tags: [TAG_A], name_hidden: true });
   });
 });
 
 describe('who named a thread', () => {
-  const OTHER = '200000000000000009';
+  /** The relay's Discord application (the harness's DISCORD_APPLICATION_ID), which owns threads the bot starts. */
+  const BOT_APPLICATION = '400000000000000001';
 
-  it('keeps the title of a thread a person who had agreed made, and takes it (and their ID) away when they leave', async () => {
+  it('keeps no title a person gave, even one who agreed, nor from a later update', async () => {
     const { h } = await world();
     await push(h, human(10), thread(msg(10), LOUNGE, { name: 'my topic', owner_id: HUMAN }));
-    expect(await one(h, 'SELECT name, owner_id FROM threads WHERE id = ?', msg(10))).toEqual({ name: 'my topic', owner_id: HUMAN });
-    await h.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ?').bind(h.now().toISOString(), HUMAN).run();
-    await scrubPerson(h.relay, HUMAN);
-    expect(await one(h, 'SELECT name, owner_id FROM threads WHERE id = ?', msg(10))).toEqual({ name: null, owner_id: null });
-    // A later update from Discord (auto-archive, a tag) doesn't write the title or the ID back.
-    await push(h, thread(msg(10), LOUNGE, { name: 'my topic', owner_id: HUMAN, archived: true }));
-    expect(await one(h, 'SELECT name, owner_id, archived FROM threads WHERE id = ?', msg(10))).toEqual({ name: null, owner_id: null, archived: 1 });
-  });
-
-  it('keeps no title that someone who never agreed gave to a thread made from an agreed person’s message', async () => {
-    const { h } = await world();
-    await push(
-      h,
-      human(10, { content: 'an opening by someone who agreed' }),
-      thread(msg(10), LOUNGE, { name: 'what a stranger called it', owner_id: STRANGER }),
-    );
-    expect(await one(h, 'SELECT name, owner_id FROM threads WHERE id = ?', msg(10))).toEqual({ name: null, owner_id: null });
-    await push(h, thread(msg(10), LOUNGE, { name: 'renamed by a stranger', owner_id: STRANGER }));
     expect((await threadRow(h, msg(10)))!.name).toBeNull();
-    // Agreeing afterwards doesn't bring back a title given before.
-    await agree(h, STRANGER, { at: '2026-10-19T03:30:00.000Z' });
-    await push(h, thread(msg(10), LOUNGE, { name: 'renamed again', owner_id: STRANGER }));
-    expect((await threadRow(h, msg(10)))!.name).toBeNull();
+    await push(h, thread(msg(10), LOUNGE, { name: 'renamed', owner_id: HUMAN, archived: true }));
+    expect(await threadRow(h, msg(10))).toMatchObject({ name: null, archived: 1 });
+    expect((await list(h, LOUNGE, { includeArchived: true })).threads[0]).toMatchObject({ name: 'Untitled thread', name_hidden: true });
   });
 
   it('keeps titles of threads the bot or one of the channel’s webhooks made', async () => {
     const { h } = await world();
-    await push(h, thread(msg(10), LOUNGE, { name: 'by the webhook', owner_id: WEBHOOK }));
+    await push(
+      h,
+      thread(msg(10), LOUNGE, { name: 'by the webhook', owner_id: WEBHOOK }),
+      thread(msg(11), LOUNGE, { name: 'by the bot', owner_id: BOT_APPLICATION }),
+    );
     expect((await threadRow(h, msg(10)))!.name).toBe('by the webhook');
-    expect(await one(h, 'SELECT owner_id FROM threads WHERE id = ?', msg(10))).toEqual({ owner_id: null });
-  });
-
-  it('writes no title back for a thread whose starter left, even from a later update', async () => {
-    const { h } = await world();
-    await push(h, human(10), thread(msg(10), LOUNGE, { name: 'Luna’s private title' }));
-    await scrubPerson(h.relay, HUMAN);
-    expect((await threadRow(h, msg(10)))!.name).toBeNull();
-    await push(h, thread(msg(10), LOUNGE, { name: 'Luna’s private title', archived: true }));
-    expect(await threadRow(h, msg(10))).toMatchObject({ name: null, archived: 1 });
+    expect((await threadRow(h, msg(11)))!.name).toBe('by the bot');
   });
 });
 
@@ -328,7 +302,7 @@ describe('archiving, locking and deleting', () => {
     await push(h, thread(msg(11), LOUNGE, { name: 'closed', archived: true, locked: true }));
     expect(await threadRow(h, msg(11))).toMatchObject({ name: 'closed', archived: 1, locked: 1 });
     expect((await list(h)).threads.map((t) => t.id)).toEqual([msg(10)]);
-    const all_ = await list(h, LOUNGE, { view: 'agent', includeArchived: true });
+    const all_ = await list(h, LOUNGE, { includeArchived: true });
     expect(all_.threads.map((t) => [t.id, t.archived, t.locked])).toEqual([
       [msg(11), true, true],
       [msg(10), false, false],
@@ -343,16 +317,16 @@ describe('archiving, locking and deleting', () => {
   it('are kept but hidden when deleted, and their messages are removed like any Discord delete', async () => {
     const { h, agent } = await world();
     await subscribe(h, agent.id);
-    await push(h, thread(msg(10)), human(11, { thread_id: msg(10) }), stranger(12, { thread_id: msg(10) }));
+    await push(h, thread(msg(10)), human(11, { thread_id: msg(10) }), human(12, { thread_id: msg(10) }));
     await push(h, { kind: 'thread_delete', thread_id: msg(10), parent_id: LOUNGE });
     const row = await threadRow(h, msg(10));
     expect(row!.deleted_at).toBe(h.now().toISOString());
-    expect((await list(h, LOUNGE, { view: 'agent', includeArchived: true })).threads).toEqual([]);
+    expect((await list(h, LOUNGE, { includeArchived: true })).threads).toEqual([]);
     expect(await all(h, 'SELECT content, deleted_at, removed_by FROM conversation WHERE thread_id = ?', msg(10))).toEqual([
       { content: null, deleted_at: h.now().toISOString(), removed_by: 'discord' },
       { content: null, deleted_at: h.now().toISOString(), removed_by: 'discord' },
     ]);
-    expect(await readPage(h.relay, LOUNGE, { view: 'public', threadId: msg(10) })).toMatchObject({
+    expect(await readPage(h.relay, LOUNGE, { threadId: msg(10) })).toMatchObject({
       messages: [
         { deleted: true, content: null },
         { deleted: true, content: null },
@@ -361,8 +335,8 @@ describe('archiving, locking and deleting', () => {
     const removal = await all<{ payload: string }>(h, "SELECT payload FROM events WHERE type = 'message.bulk_deleted'");
     expect(removal).toHaveLength(1);
     expect(JSON.parse(removal[0]!.payload).data.message_ids).toEqual([msg(11), msg(12)]);
-    // The withheld message was never announced, so only the removal of the held one and the creation are delivered.
-    expect(await one(h, 'SELECT COUNT(*) AS n FROM deliveries')).toEqual({ n: 2 });
+    // The two creations and one removal are delivered.
+    expect(await one(h, 'SELECT COUNT(*) AS n FROM deliveries')).toEqual({ n: 3 });
     // Messages that arrive in the same batch as the delete go too.
     await push(h, thread(msg(20)), human(21, { thread_id: msg(20) }), { kind: 'thread_delete', thread_id: msg(20), parent_id: LOUNGE });
     expect(await conversation(h, 21)).toMatchObject({ content: null, removed_by: 'discord' });
@@ -398,10 +372,10 @@ describe('listing threads', () => {
     const { h } = await world();
     const ids = ['999999999999999998', '999999999999999999', '1000000000000000001', '1000000000000000000'];
     await push(h, ...ids.map((id) => thread(id)));
-    const first = await list(h, LOUNGE, { view: 'agent', limit: 3 });
+    const first = await list(h, LOUNGE, { limit: 3 });
     expect(first.threads.map((t) => t.id)).toEqual(['1000000000000000001', '1000000000000000000', '999999999999999999']);
     expect(first.next_before).toBe('999999999999999999');
-    const second = await list(h, LOUNGE, { view: 'agent', limit: 3, before: first.next_before! });
+    const second = await list(h, LOUNGE, { limit: 3, before: first.next_before! });
     expect(second.threads.map((t) => t.id)).toEqual(['999999999999999998']);
     expect(second.next_before).toBeNull();
   });
@@ -411,52 +385,6 @@ describe('listing threads', () => {
     await moreChannels(h);
     await push(h, thread(msg(10)), thread(msg(11), FORUM));
     expect((await list(h, FORUM)).threads.map((t) => t.id)).toEqual([msg(11)]);
-  });
-
-  it('show a thread’s name, to agents and the public alike, only while its starter may be shown', async () => {
-    const { h, agent } = await world();
-    await push(
-      h,
-      stranger(10, { content: 'a private opening' }),
-      thread(msg(10), LOUNGE, { name: 'what I think about X' }),
-      human(11, { content: 'an opening by someone who agreed' }),
-      thread(msg(11), LOUNGE, { name: 'a topic from someone who agreed' }),
-    );
-    await recordAgentPost(h.relay, {
-      discordMessageId: msg(20),
-      channelId: LOUNGE,
-      threadId: null,
-      agentId: agent.id,
-      displayName: 'Moth-9',
-      content: 'agent opening',
-      relayMessageId: 'msg_01JB7Q2M8R',
-      createdAt: at(0, 20),
-    });
-    await push(h, thread(msg(20), LOUNGE, { name: 'an agent’s topic' }), thread(msg(30), LOUNGE, { name: 'no starter' }));
-
-    const HIDDEN = 'A thread started by a person in Discord';
-    for (const view of ['agent', 'public'] as const) {
-      const threads = (await list(h, LOUNGE, { view })).threads;
-      expect(Object.fromEntries(threads.map((t) => [t.id, t.name]))).toEqual({
-        [msg(10)]: HIDDEN, // the starter is withheld
-        [msg(11)]: 'a topic from someone who agreed',
-        [msg(20)]: 'an agent’s topic',
-        [msg(30)]: HIDDEN, // no starter the relay holds, so it can't be shown to be safe
-      });
-      expect(Object.fromEntries(threads.map((t) => [t.id, t.name_hidden]))).toEqual({ [msg(10)]: true, [msg(11)]: false, [msg(20)]: false, [msg(30)]: true });
-    }
-
-    // Agreeing afterwards doesn't reveal a thread started before.
-    await agree(h, STRANGER, { at: '2026-10-19T03:00:00.000Z' });
-    expect((await list(h, LOUNGE, { view: 'agent' })).threads.find((t) => t.id === msg(10))!.name_hidden).toBe(true);
-  });
-
-  it('show the name of a thread an agent started even if its starter message is not held', async () => {
-    const { h, agent } = await world();
-    await push(h, thread(msg(40), LOUNGE, { name: 'agent thread' }));
-    await h.db.prepare('UPDATE threads SET creator_agent_id = ? WHERE id = ?').bind(agent.id, msg(40)).run();
-    for (const view of ['agent', 'public'] as const)
-      expect((await list(h, LOUNGE, { view })).threads[0]).toMatchObject({ name: 'agent thread', name_hidden: false });
   });
 
   it('count a subscription’s events the same as any other: nothing about threads is announced on its own', async () => {

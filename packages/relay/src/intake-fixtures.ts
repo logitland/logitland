@@ -6,14 +6,17 @@ import { ingest, type IntakeEventInput } from './services/intake';
 import { BENCH, FORUM, LOUNGE, harness, seedAgent, seedChannel, type Harness } from './testing';
 
 export const HUMAN = '200000000000000001';
-/** Someone who never agrees to the mirror: whatever they write is withheld. */
+/** Someone who never agrees: whatever they write is dropped. */
 export const STRANGER = '200000000000000002';
 export const WEBHOOK = '600000000000000001';
+/** The agent's message in #lounge that `world()` stores before the fixtures' messages, and that `human()` replies to. */
+export const AGENT_POST = '299000000000000001';
 
 /** Snowflakes in time order, 18 digits. */
 export const msg = (n: number) => String(300000000000000000n + BigInt(n));
 export const at = (minutes: number, seconds = 0) => new Date(Date.UTC(2026, 9, 19, 3, minutes, seconds)).toISOString();
 
+/** A person's message. It replies to AGENT_POST, since intake keeps a person's message only as a reply to an agent; pass `reply_to: null` for one it drops. */
 export function human(n: number, over: Record<string, unknown> = {}) {
   return {
     kind: 'message_create' as const,
@@ -22,6 +25,7 @@ export function human(n: number, over: Record<string, unknown> = {}) {
     author: { id: HUMAN, username: 'luna', global_name: 'Luna', bot: false },
     content: `message ${n}`,
     timestamp: at(0, n),
+    reply_to: AGENT_POST,
     ...over,
   } satisfies IntakeEventInput;
 }
@@ -57,13 +61,22 @@ export function stranger(n: number, over: Record<string, unknown> = {}) {
   return human(n, { author: { id: STRANGER, username: 'sam', global_name: 'Sam', bot: false }, ...over });
 }
 
-/** A relay with an open channel (#lounge, with a webhook), a closed one (#bench) and one agent. HUMAN agreed to the mirror before any of the fixtures' messages. */
+/**
+ * A relay with an open channel (#lounge, with a webhook), a closed one (#bench), one agent and its message AGENT_POST in
+ * #lounge (stored directly: no event). HUMAN agreed before any of the fixtures' messages.
+ */
 export async function world(opts: { start?: string; agreed?: boolean } = {}) {
   const h = harness(opts.start ? { start: opts.start } : {});
   if (opts.agreed !== false) await agree(h, HUMAN);
   await seedChannel(h.relay, { id: LOUNGE, access: 'post' });
   await seedChannel(h.relay, { id: BENCH, access: 'off', name: 'bench', webhookUrl: null });
   const agent = await seedAgent(h.relay, { name: 'Moth-9' });
+  await h.db
+    .prepare(
+      "INSERT INTO conversation (message_id, channel_id, author_kind, agent_id, author_ref, display_name, content, created_at) VALUES (?, ?, 'agent', ?, ?, ?, 'hello, people', ?)",
+    )
+    .bind(AGENT_POST, LOUNGE, agent.id, agent.id, agent.name, '2026-10-19T02:59:00.000Z')
+    .run();
   return { h, agent };
 }
 
@@ -102,7 +115,7 @@ export async function one<T>(h: Harness, sql: string, ...args: unknown[]): Promi
 }
 
 export const CONV =
-  'CAST(message_id AS TEXT) AS message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, edited_at, deleted_at, removed_by, reply_to, poll, withheld';
+  'CAST(message_id AS TEXT) AS message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, edited_at, deleted_at, removed_by, reply_to';
 
 export const conversation = (h: Harness, n: number) => one<Record<string, any>>(h, `SELECT ${CONV} FROM conversation WHERE message_id = ?`, msg(n));
 export const eventTypes = async (h: Harness) => (await all<{ type: string }>(h, 'SELECT type FROM events ORDER BY seq')).map((e) => e.type);
@@ -137,7 +150,7 @@ export async function relayMessage(
   return id;
 }
 
-/* ---------- threads, replies, polls ---------- */
+/* ---------- threads and replies ---------- */
 
 export const NEWS = '110000000000000005';
 export const MEDIA = '110000000000000004';
@@ -165,14 +178,3 @@ export const THREAD_COLUMNS =
   'CAST(id AS TEXT) AS id, parent_id, name, created_at, archived, locked, deleted_at, message_count, last_message_at, creator_agent_id, applied_tags';
 
 export const threadRow = (h: Harness, id: string) => one<Record<string, any>>(h, `SELECT ${THREAD_COLUMNS} FROM threads WHERE id = ?`, id);
-
-export const poll = (over: Record<string, unknown> = {}) => ({
-  question: 'Lunch?',
-  answers: [
-    { id: 1, text: 'Soup', emoji: null },
-    { id: 2, text: 'Noodles', emoji: null },
-  ],
-  expires_at: '2026-10-20T03:00:00.000Z',
-  allow_multiselect: false,
-  ...over,
-});

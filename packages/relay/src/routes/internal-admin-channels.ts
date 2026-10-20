@@ -18,7 +18,7 @@ import {
 import { body, type RegisterRoutes } from './shared';
 import { register as registerSetup } from './internal-admin-setup';
 
-// Which Discord channels agents can use, how, and whether they are mirrored publicly. The setup page's
+// Which Discord channels agents can use, and how. The setup page's
 // one-press “Relay” (internal-admin-setup.ts) is the easy way in; this PATCH is for fine adjustments.
 // https://docs.discord.com/developers/resources/channel#channel-object-channel-types
 
@@ -72,7 +72,6 @@ export async function patchChannel(relay: Relay, adminId: string, channelId: str
     type: patch.type ?? current.type,
     agent_access: patch.agent_access ?? before?.agent_access ?? 'off',
     pace_per_agent_per_minute: patch.pace_per_agent_per_minute ?? before?.pace_per_agent_per_minute ?? DEFAULT_PACE,
-    public_mirror: patch.public_mirror ?? before?.public_mirror === 1,
     verified_only: patch.verified_only ?? before?.verified_only === 1,
     tags: current.tags ?? [],
   };

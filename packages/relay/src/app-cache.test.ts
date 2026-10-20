@@ -1,9 +1,8 @@
-import type { ConversationPage, PublicAgentProfile, PublicChannel } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { checkConfig, type RelayBindings } from './config';
 import { SecretBox } from './crypto';
 import { DEFAULT_SETTINGS, updateSettings } from './services/settings';
-import { ADMIN_DISCORD, BENCH, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
+import { ADMIN_DISCORD, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
 
 // Workers Cache keeps a 200 with no Cache-Control for two hours and answers a hit without running the Worker. So
 // everything the relay serves is private until its handler says otherwise.
@@ -37,68 +36,15 @@ describe('cache headers', () => {
     expect(unknown.headers.get('cache-control')).toBe('private, no-store');
   });
 
-  it('leave a handler’s own choice alone, and let only the docs and the mirror be shared', async () => {
+  it('leave a handler’s own choice alone, and let only the docs be shared', async () => {
     const h = harness();
-    await seedChannel(h.relay, { publicMirror: true });
+    await seedChannel(h.relay);
     const agent = await seedAgent(h.relay);
     expect((await h.call('GET', '/')).headers.get('cache-control')).toBe('public, max-age=300');
     expect((await h.call('GET', '/auth.md')).headers.get('cache-control')).toBe('public, max-age=300');
     expect((await h.call('GET', '/rules.md')).headers.get('cache-control')).toBe('public, max-age=300');
-    expect((await h.call('GET', '/public/channels')).headers.get('cache-control')).toBe('public, max-age=15');
-    expect((await h.call('GET', `/public/channels/${LOUNGE}/messages`)).headers.get('cache-control')).toBe('public, max-age=5, stale-while-revalidate=10');
-    expect((await h.call('GET', `/public/channels/${LOUNGE}/messages?before=310000000000000009`)).headers.get('cache-control')).toBe('public, max-age=30');
-    expect((await h.call('GET', `/public/agents/${agent.id}`)).headers.get('cache-control')).toBe('public, max-age=15');
     // An explicit no-store from the handler stays as it is.
     expect((await h.call('GET', '/v1/channels', undefined, h.as(agent.key))).headers.get('cache-control')).toBe('no-store');
-  });
-});
-
-async function say(h: Harness, id: string, channel: string, agentId: string) {
-  await h.db
-    .prepare(
-      "INSERT INTO conversation (message_id, channel_id, author_kind, agent_id, author_ref, display_name, content, created_at) VALUES (?, ?, 'agent', ?, 'p_none', 'Agent', 'hello', ?)",
-    )
-    .bind(id, channel, agentId, h.now().toISOString())
-    .run();
-}
-
-describe('the public mirror serves only channels that are relayed', () => {
-  async function world() {
-    const h = harness();
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', publicMirror: true });
-    // Stale data from before the channel was switched off: still marked for the mirror, but no longer being kept up to date.
-    await seedChannel(h.relay, { id: BENCH, name: 'bench', access: 'off', publicMirror: true, webhookUrl: null });
-    const agent = await seedAgent(h.relay);
-    await say(h, '310000000000000001', LOUNGE, agent.id);
-    await say(h, '310000000000000002', BENCH, agent.id);
-    return { h, agent };
-  }
-
-  it('lists, pages and threads only relayed channels', async () => {
-    const { h } = await world();
-    const channels = ((await (await h.call('GET', '/public/channels')).json()) as { channels: PublicChannel[] }).channels;
-    expect(channels.map((c) => c.id)).toEqual([LOUNGE]);
-    expect((await h.call('GET', `/public/channels/${LOUNGE}/messages`)).status).toBe(200);
-    expect((await h.call('GET', `/public/channels/${BENCH}/messages`)).status).toBe(404);
-    expect((await h.call('GET', `/public/channels/${BENCH}/threads`)).status).toBe(404);
-  });
-
-  it('counts an agent’s messages only in relayed channels, and refuses reports about the rest', async () => {
-    const { h, agent } = await world();
-    const profile = (await (await h.call('GET', `/public/agents/${agent.id}`)).json()) as PublicAgentProfile;
-    expect(profile.post_counts.total).toBe(1);
-    expect(profile.post_counts.by_channel.map((c) => c.channel_id)).toEqual([LOUNGE]);
-    expect(profile.recent_messages.map((m) => m.message_id)).toEqual(['310000000000000001']);
-    const report = (id: string) => h.call('POST', '/public/reports', { target_type: 'message', target_id: id, reason: 'spam in the channel' });
-    expect((await report('310000000000000001')).status).toBe(201);
-    expect((await report('310000000000000002')).status).toBe(404);
-  });
-
-  it('shows the page again if the channel is relayed again', async () => {
-    const { h } = await world();
-    await h.db.prepare("UPDATE channels SET agent_access = 'read_only' WHERE id = ?").bind(BENCH).run();
-    const page = (await (await h.call('GET', `/public/channels/${BENCH}/messages`)).json()) as ConversationPage;
-    expect(page.messages).toHaveLength(1);
   });
 });
 
@@ -182,7 +128,6 @@ const prodEnv = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   DISCORD_APPLICATION_ID: '1',
   DISCORD_PUBLIC_KEY: 'ab',
   DISCORD_GUILD_ID: '2',
-  DISCORD_CONSENT_ROLE_ID: '3',
   JEV_LAYA_URL: 'https://jev.logitland.org/review',
   JEV_LAYA_TOKEN: 't',
   ADMIN_DISCORD_IDS: '200000000000000099',
@@ -223,15 +168,8 @@ describe('queries that used to scan', () => {
       .join(' | ');
   }
 
-  it('read an agent’s profile counts and a page of the audit trail from indexes', async () => {
+  it('read a page of the audit trail from an index', async () => {
     const h = harness();
-    expect(
-      await plan(
-        h,
-        "SELECT ch.id, COUNT(*) AS n FROM conversation c JOIN channels ch ON ch.id = c.channel_id AND ch.public_mirror = 1 AND ch.agent_access != 'off' WHERE c.agent_id = ? AND c.deleted_at IS NULL GROUP BY ch.id",
-        'agt_1',
-      ),
-    ).toContain('SEARCH c USING COVERING INDEX conversation_agent_channel (agent_id=?)');
     const audit = await plan(h, 'SELECT * FROM audit_log WHERE (created_at, id) < (?, ?) ORDER BY created_at DESC, id DESC LIMIT 5', 'a', 'b');
     expect(audit).toContain('SEARCH audit_log USING INDEX audit_log_created');
     expect(audit).not.toContain('TEMP B-TREE');
@@ -257,6 +195,6 @@ describe('the health page’s kill switches', () => {
     expect((await health()).deliveries_paused).toBe(false);
 
     await updateSettings(h.relay, admin.id, { deliveries_paused: true, relay_read_only: true });
-    expect(await health()).toMatchObject({ deliveries_paused: true, relay_read_only: true, public_mirror: true });
+    expect(await health()).toMatchObject({ deliveries_paused: true, relay_read_only: true });
   });
 });

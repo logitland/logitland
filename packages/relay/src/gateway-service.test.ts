@@ -11,13 +11,16 @@ import {
   type SocketEvents,
 } from './gateway';
 import { snowflakeTime } from './services/events';
-import { NEWS, all, at, conversation, moreChannels, msg, one, subscribe, world } from './intake-fixtures';
+import { AGENT_POST, NEWS, all, at, conversation, moreChannels, msg, one, subscribe, world } from './intake-fixtures';
 import { BENCH, FORUM, GUILD as GUILD_ID, LOUNGE, type Harness } from './testing';
 
 // WebCrypto answers on the thread pool, so the work behind a dispatch takes a few turns of the event loop.
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
-const AUTHOR = { id: '200000000000000001', username: 'luna', global_name: 'Luna' };
+// A bot: intake keeps what bots write as it is, so these tests are about the Gateway, not about whose words are kept.
+const AUTHOR = { id: '200000000000000001', username: 'luna', global_name: 'Luna', bot: true };
 const THREAD = '120000000000000001';
+/** The conversation rows the Gateway stored: world() stores AGENT_POST itself. */
+const FED = `FROM conversation WHERE message_id != ${AGENT_POST}`;
 
 class FakeSocket implements GatewaySocket {
   sent: { op: number; d: any }[] = [];
@@ -180,10 +183,7 @@ describe('connecting and recording', () => {
     await settle();
     expect(await conversation(h, 1)).toBeNull();
     await clock.advance(500);
-    expect((await all<{ id: string }>(h, 'SELECT CAST(message_id AS TEXT) AS id FROM conversation ORDER BY message_id')).map((r) => r.id)).toEqual([
-      msg(1),
-      msg(2),
-    ]);
+    expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]);
     expect(await all(h, 'SELECT type FROM events ORDER BY seq')).toHaveLength(2);
     expect(g.storage.get('session')).toEqual({ sessionId: 'sess-1', resumeUrl: 'wss://resume.discord.gg', seq: 3 });
     expect(g.wakes.at(-1)! - clock.now()).toBeLessThanOrEqual(WAKE_MS);
@@ -205,7 +205,7 @@ describe('connecting and recording', () => {
     g.ready(1);
     for (let i = 1; i <= 50; i++) g.message(i + 1, i);
     // No timer has been advanced: the batch size alone triggered the write.
-    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(50), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(50), { timeout: 5_000 });
   });
 
   it('answers status() with what the admin page shows', async () => {
@@ -268,10 +268,7 @@ describe('restarts', () => {
     second.message(3, 2);
     second.message(4, 1);
     await clock.advance(500);
-    expect((await all<{ id: string }>(h, 'SELECT CAST(message_id AS TEXT) AS id FROM conversation ORDER BY message_id')).map((r) => r.id)).toEqual([
-      msg(1),
-      msg(2),
-    ]);
+    expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]);
     expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(2);
     // A resumed session is not a gap.
     expect(await all(h, "SELECT 1 FROM events WHERE type = 'subscription.gap'")).toHaveLength(0);
@@ -359,7 +356,7 @@ describe('a lost session', () => {
     expect(data.reason).toContain('edits and deletions made during it can’t be recovered');
 
     expect(calls.filter((c) => c.includes('after='))).toEqual([`GET /channels/${LOUNGE}/messages?limit=100&after=${msg(2)}`]);
-    expect(await conversation(h, 4)).toMatchObject({ content: 'while you were away', author_kind: 'human' });
+    expect(await conversation(h, 4)).toMatchObject({ content: 'while you were away', author_kind: 'bot' });
     const created = await all<{ seq: number; type: string }>(h, "SELECT seq, type FROM events WHERE type IN ('message.created') ORDER BY seq");
     expect(created.at(-1)!.seq).toBeGreaterThan(gaps[0]!.seq);
     expect(second.storage.get('backfill')).toBeUndefined();
@@ -928,10 +925,10 @@ describe('a full buffer', () => {
     expect(firstKept!.seq).toBeGreaterThan(gaps[0]!.seq);
 
     // And the messages that were dropped are fetched from Discord, starting where the relay stood before.
-    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(131), { timeout: 5_000 });
     expect(calls.some((c) => c.includes(`after=${msg(1)}`))).toBe(true);
     for (const n of [2, 15, 31, 32, 131]) expect(await conversation(h, n)).not.toBeNull();
-    expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131);
+    expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(131);
   });
 
   it('never drops the batch being written, so what overflows is the part that was not written, and the gap is recorded before newer events', async () => {
@@ -954,7 +951,7 @@ describe('a full buffer', () => {
     expect(storage.get('lost')).toMatchObject({ channels: [LOUNGE] });
     release();
     await clock.advance(5_000);
-    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(131), { timeout: 5_000 });
     const gaps = await all<{ seq: number }>(h, "SELECT seq FROM events WHERE type = 'subscription.gap'");
     expect(gaps).toHaveLength(1);
     // Nothing the buffer kept after the dropped part was written ahead of the gap.
@@ -985,7 +982,7 @@ describe('a full buffer', () => {
     const { h, clock, g } = await outage(500);
     for (let n = 2; n <= 131; n++) g.message(n + 1, n);
     await clock.advance(500);
-    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(131), { timeout: 5_000 });
     expect(await all(h, "SELECT 1 FROM events WHERE type = 'subscription.gap'")).toHaveLength(0);
     expect(g.svc.snapshot().events_dropped).toBe(false);
   });
@@ -1053,11 +1050,11 @@ describe('a backlog of events', () => {
     for (let i = 0; i < 10 && (g.svc.snapshot().buffered as number) > 0; i++) {
       queries = 0;
       await g.svc.tick();
-      await vi.waitFor(async () => expect((await all(h, 'SELECT 1 FROM conversation')).length).toBeGreaterThan(300 - left), { timeout: 10_000 });
+      await vi.waitFor(async () => expect((await all(h, `SELECT 1 ${FED}`)).length).toBeGreaterThan(300 - left), { timeout: 10_000 });
       await settle();
       expect(queries).toBeLessThanOrEqual(QUERY_BUDGET + 350);
     }
-    expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(300);
+    expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(300);
     expect(g.svc.snapshot().buffered).toBe(0);
     expect(g.storage.get('session')).toMatchObject({ seq: 301 });
   }, 30_000);

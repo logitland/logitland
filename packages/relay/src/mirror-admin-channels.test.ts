@@ -46,7 +46,7 @@ const audits = async (h: Harness) =>
 describe('GET /internal/admin/channels', () => {
   it('lists every channel with its policy and whether it has a webhook, never the webhook', async () => {
     const { h, as } = await setup();
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post', publicMirror: true });
+    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post' });
     await seedChannel(h.relay, { id: BENCH, name: 'bench', access: 'off', webhookUrl: null });
     const res = await h.internal('GET', '/internal/admin/channels', undefined, as);
     expect(res.status).toBe(200);
@@ -59,7 +59,6 @@ describe('GET /internal/admin/channels', () => {
         type: 'text',
         agent_access: 'off',
         pace_per_agent_per_minute: 10,
-        public_mirror: false,
         verified_only: false,
         has_webhook: false,
       },
@@ -70,7 +69,6 @@ describe('GET /internal/admin/channels', () => {
         type: 'text',
         agent_access: 'post',
         pace_per_agent_per_minute: 10,
-        public_mirror: true,
         verified_only: false,
         has_webhook: true,
       },
@@ -91,7 +89,7 @@ describe('adding a channel', () => {
   it('fills the name, guild and type from Discord when they’re left out', async () => {
     const { h, admin, patch } = await setup();
     discordKnows(h, { channels: { [FORUM]: { type: 15, name: 'channel-ideas' } } });
-    const res = await patch(FORUM, { agent_access: 'post_new_threads', public_mirror: true });
+    const res = await patch(FORUM, { agent_access: 'post_new_threads' });
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({
       id: FORUM,
@@ -100,7 +98,6 @@ describe('adding a channel', () => {
       type: 'forum',
       agent_access: 'post_new_threads',
       pace_per_agent_per_minute: 10,
-      public_mirror: true,
       verified_only: false,
       has_webhook: false,
     });
@@ -111,7 +108,7 @@ describe('adding a channel', () => {
     expect(JSON.parse(entry!.diff)).toMatchObject({
       name: { from: null, to: 'channel-ideas' },
       type: { from: null, to: 'forum' },
-      public_mirror: { from: null, to: true },
+      agent_access: { from: null, to: 'post_new_threads' },
     });
   });
 
@@ -345,17 +342,16 @@ describe('channel webhooks', () => {
 });
 
 describe('changing a channel', () => {
-  it('updates access, pace, name and the mirror flag, and audits exactly what changed', async () => {
+  it('updates access, pace and name, and audits exactly what changed', async () => {
     const { h, admin, patch } = await setup();
     await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'off', pace: 10 });
-    const res = await patch(LOUNGE, { agent_access: 'post', pace_per_agent_per_minute: 6, public_mirror: true, name: 'agent-lounge' });
+    const res = await patch(LOUNGE, { agent_access: 'post', pace_per_agent_per_minute: 6, name: 'agent-lounge' });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       id: LOUNGE,
       name: 'agent-lounge',
       agent_access: 'post',
       pace_per_agent_per_minute: 6,
-      public_mirror: true,
       verified_only: false,
       has_webhook: true,
     });
@@ -366,27 +362,25 @@ describe('changing a channel', () => {
       name: { from: 'lounge', to: 'agent-lounge' },
       agent_access: { from: 'off', to: 'post' },
       pace_per_agent_per_minute: { from: 10, to: 6 },
-      public_mirror: { from: false, to: true },
     });
   });
 
   it('does nothing, and audits nothing, when the values are already what was asked', async () => {
     const { h, patch } = await setup();
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post', publicMirror: true });
-    const res = await patch(LOUNGE, { agent_access: 'post', public_mirror: true, name: 'lounge' });
+    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post' });
+    const res = await patch(LOUNGE, { agent_access: 'post', name: 'lounge' });
     expect(res.status).toBe(200);
     expect(await audits(h)).toEqual([]);
   });
 
   it('keeps what the patch leaves out', async () => {
     const { h, patch } = await setup();
-    await seedChannel(h.relay, { id: FORUM, type: 'forum', access: 'post_new_threads', pace: 3, publicMirror: true, name: 'forum' });
+    await seedChannel(h.relay, { id: FORUM, type: 'forum', access: 'post_new_threads', pace: 3, name: 'forum' });
     await patch(FORUM, { pace_per_agent_per_minute: 5 });
     expect(await getChannel(h.relay, FORUM)).toMatchObject({
       type: 'forum',
       agent_access: 'post_new_threads',
       pace_per_agent_per_minute: 5,
-      public_mirror: 1,
       name: 'forum',
     });
   });
@@ -398,7 +392,7 @@ describe('changing a channel', () => {
     expect((await patch(LOUNGE, { agent_access: 'everything' })).status).toBe(400);
     expect((await patch(LOUNGE, { type: 'voice' })).status).toBe(400);
     expect((await patch(LOUNGE, { pace_per_agent_per_minute: 500 })).status).toBe(400);
-    expect((await patch(LOUNGE, { public_mirror: 'yes' })).status).toBe(400);
+    expect((await patch(LOUNGE, { verified_only: 'yes' })).status).toBe(400);
     expect((await patch('not-a-channel', { agent_access: 'off' })).status).toBe(400);
     expect((await h.internal('PATCH', `/internal/admin/channels/${LOUNGE}`, undefined, as)).status).toBe(400);
   });

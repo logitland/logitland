@@ -1,24 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { agree } from './consent.testkit';
-import {
-  CONV,
-  all,
-  at,
-  conversation,
-  deliveryCount,
-  edit,
-  human,
-  HUMAN,
-  msg,
-  one,
-  push,
-  relayMessage,
-  remove,
-  subscribe,
-  thread,
-  threadRow,
-  world,
-} from './intake-fixtures';
+import { CONV, all, at, conversation, deliveryCount, edit, human, HUMAN, msg, one, push, relayMessage, remove, subscribe, world } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
 import { scrubMessage, scrubPerson } from './services/scrub';
 import { BENCH, GUILD, LOUNGE } from './testing';
@@ -139,8 +121,8 @@ describe('the relay’s own copy of a post an agent made', () => {
     const mine = await relayMessage(h, agent.id, { content: 'my private-ish words', status: 'sent', discordMessageId: msg(1), hash: 'mine' });
     const other = await relayMessage(h, agent.id, { content: 'someone else’s post', status: 'sent', discordMessageId: msg(2), hash: 'other' });
     await h.db
-      .prepare('UPDATE relay_messages SET thread_name = ?, poll = ?, reply_prefix = ? WHERE id IN (?, ?)')
-      .bind('a title', '{"question":"Lunch?"}', '-# ↪ Replying to **Tess** · https://discord.com/channels/1/2/3', mine, other)
+      .prepare('UPDATE relay_messages SET thread_name = ?, reply_prefix = ? WHERE id IN (?, ?)')
+      .bind('a title', '-# ↪ Replying to **Tess** · https://discord.com/channels/1/2/3', mine, other)
       .run();
     await recordAgentPost(h.relay, {
       discordMessageId: msg(1),
@@ -155,16 +137,16 @@ describe('the relay’s own copy of a post an agent made', () => {
     return { h, mine, other };
   }
   const copy = (h: Awaited<ReturnType<typeof world>>['h'], id: string) =>
-    one<{ content: string | null; thread_name: string | null; poll: string | null; reply_prefix: string | null; content_hash: string; status: string }>(
+    one<{ content: string | null; thread_name: string | null; reply_prefix: string | null; content_hash: string; status: string }>(
       h,
-      'SELECT content, thread_name, poll, reply_prefix, content_hash, status FROM relay_messages WHERE id = ?',
+      'SELECT content, thread_name, reply_prefix, content_hash, status FROM relay_messages WHERE id = ?',
       id,
     );
 
-  it('goes with the message when a moderator takes it down: text, thread title, poll and reply line', async () => {
+  it('goes with the message when a moderator takes it down: text, thread title and reply line', async () => {
     const { h, mine, other } = await posted();
     await scrubMessage(h.relay, msg(1), 'moderator');
-    expect(await copy(h, mine)).toMatchObject({ content: null, thread_name: null, poll: null, reply_prefix: null, content_hash: 'mine' });
+    expect(await copy(h, mine)).toMatchObject({ content: null, thread_name: null, reply_prefix: null, content_hash: 'mine' });
     expect(await copy(h, other)).toMatchObject({
       content: 'someone else’s post',
       thread_name: 'a title',
@@ -175,13 +157,13 @@ describe('the relay’s own copy of a post an agent made', () => {
   it('goes with the message when Discord deletes it, singly or in bulk', async () => {
     const { h, mine, other } = await posted();
     await push(h, remove(1));
-    expect(await copy(h, mine)).toMatchObject({ content: null, thread_name: null, poll: null, reply_prefix: null });
+    expect(await copy(h, mine)).toMatchObject({ content: null, thread_name: null, reply_prefix: null });
     expect(await copy(h, other))!.toMatchObject({ content: 'someone else’s post' });
     await push(h, { kind: 'message_delete_bulk', channel_id: LOUNGE, message_ids: [msg(2), msg(3)] });
-    expect(await copy(h, other)).toMatchObject({ content: null, thread_name: null, poll: null, reply_prefix: null });
+    expect(await copy(h, other)).toMatchObject({ content: null, thread_name: null, reply_prefix: null });
   });
 
-  it('is left alone by a person leaving the mirror, which wrote none of it', async () => {
+  it('is left alone by a person withdrawing, who wrote none of it', async () => {
     const { h, mine } = await posted();
     await scrubPerson(h.relay, HUMAN);
     expect(await copy(h, mine)).toMatchObject({ content: 'my private-ish words', thread_name: 'a title' });
@@ -261,7 +243,7 @@ describe('scrubbing a person', () => {
     await push(h, ...Array.from({ length: 100 }, (_, i) => human(i + 101)));
     await push(h, ...Array.from({ length: 70 }, (_, i) => human(i + 201)));
     expect((await scrubPerson(h.relay, HUMAN)).messages).toBe(270);
-    expect(await all(h, 'SELECT 1 FROM conversation WHERE content IS NOT NULL')).toHaveLength(0);
+    expect(await all(h, "SELECT 1 FROM conversation WHERE author_kind = 'human' AND content IS NOT NULL")).toHaveLength(0);
     expect(JSON.stringify(await all(h, 'SELECT payload FROM events'))).not.toContain('\\"content\\":\\"message');
   });
 
@@ -274,7 +256,7 @@ describe('scrubbing a person', () => {
   });
 });
 
-describe('a person leaving the mirror stops being identifiable', () => {
+describe('a person withdrawing stops being identifiable', () => {
   const FORMER = { discord_user_id: null, display_name: 'Former participant', author_ref: 'p_removed' };
 
   async function world2() {
@@ -333,14 +315,14 @@ describe('a person leaving the mirror stops being identifiable', () => {
     expect(everything).not.toContain('Luna');
   });
 
-  it('shows readers “A person in Discord”, the same for everyone, in place of the former participant', async () => {
+  it('shows agents the former participant, not the person', async () => {
     const { h, agent } = await world2();
     await scrubPerson(h.relay, HUMAN);
     const page = await (await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agent.key))).json();
     const mine = (page as { messages: { message_id: string; author: object; deleted: boolean; content: string | null }[] }).messages.find(
       (m) => m.message_id === msg(1),
     )!;
-    expect(mine).toMatchObject({ deleted: true, content: null, author: { kind: 'human', author_id: 'p_withheld', display_name: 'A person in Discord' } });
+    expect(mine).toMatchObject({ deleted: true, content: null, author: { kind: 'human', author_id: 'p_removed', display_name: 'Former participant' } });
     const events = await (await h.call('GET', '/v1/events?after=0', undefined, h.as(agent.key))).json();
     expect(JSON.stringify(events)).not.toContain('Luna');
   });
@@ -369,11 +351,11 @@ describe('a person leaving the mirror stops being identifiable', () => {
     const first = await scrubPerson(h.relay, HUMAN);
     expect(first).toEqual({ messages: 100, more: false });
     expect(await all(h, 'SELECT 1 FROM conversation WHERE discord_user_id IS NOT NULL')).toHaveLength(0);
-    expect(await all(h, "SELECT 1 FROM conversation WHERE display_name != 'Former participant'")).toHaveLength(0);
+    expect(await all(h, "SELECT 1 FROM conversation WHERE author_kind = 'human' AND display_name != 'Former participant'")).toHaveLength(0);
   });
 });
 
-describe('a person leaving the mirror stops being named in what agents wrote to them', () => {
+describe('a person withdrawing stops being named in what agents wrote to them', () => {
   const TESS = { id: '200000000000000002', username: 'tess', global_name: 'Tess' };
   const line = (name: string, target: number) => `-# ↪ Replying to **${name}** · https://discord.com/channels/${GUILD}/${LOUNGE}/${msg(target)}`;
 
@@ -381,13 +363,7 @@ describe('a person leaving the mirror stops being named in what agents wrote to 
     const w = await world();
     const { h, agent } = w;
     await agree(h, TESS.id);
-    await push(
-      h,
-      human(1, { content: 'luna one' }),
-      thread(msg(1), LOUNGE, { name: 'Luna’s topic' }),
-      human(2, { content: 'tess one', author: TESS }),
-      thread(msg(2), LOUNGE, { name: 'Tess’s topic' }),
-    );
+    await push(h, human(1, { content: 'luna one' }), human(2, { content: 'tess one', author: TESS }));
     const post = (n: number, replyTo: number, text: string, name = 'Luna') =>
       recordAgentPost(h.relay, {
         discordMessageId: msg(n),
@@ -444,23 +420,6 @@ describe('a person leaving the mirror stops being named in what agents wrote to 
     expect(text('message.updated', 3)).toBe(`${line('a person', 1)}\ngood point, revised`);
     expect(text('message.created', 4)).toBe(`${line('Tess', 2)}\ngood point too`);
     expect(text('message.created', 5)).toBe(`Look: ${line('Luna', 1)}`);
-  });
-
-  it('drops the names of the threads they started, and only those', async () => {
-    const { h } = await replies();
-    await scrubPerson(h.relay, HUMAN);
-    expect((await threadRow(h, msg(1)))!.name).toBeNull();
-    expect((await threadRow(h, msg(2)))!.name).toBe('Tess’s topic');
-  });
-
-  it('shows agents and the public the same “a person” whether or not the clean-up ran', async () => {
-    const { h, agent } = await replies();
-    await h.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ?').bind(at(30), HUMAN).run();
-    const page = await (await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agent.key))).json();
-    const text = (page as { messages: { message_id: string; content: string }[] }).messages.find((m) => m.message_id === msg(3))!.content;
-    expect(text.split('\n')[0]).toBe(line('a person', 1));
-    await scrubPerson(h.relay, HUMAN);
-    expect((await conversation(h, 3))!.content!.split('\n')[0]).toBe(line('a person', 1));
   });
 
   it('can be repeated, and finds nothing more to change', async () => {

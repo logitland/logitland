@@ -56,7 +56,6 @@ export const register: RegisterRoutes = (app, relay) => {
     c.header('cache-control', 'no-store');
     return c.json(
       await readPage(relay, channel.id, {
-        view: 'agent',
         before: snowflakeQuery(c, 'before'),
         limit: intQuery(c, 'limit', 50, 1, 100),
         threadId: idQuery(c, 'thread_id', 'a Discord thread ID'),
@@ -73,7 +72,6 @@ export const register: RegisterRoutes = (app, relay) => {
     c.header('cache-control', 'no-store');
     return c.json(
       await listThreads(relay, channel.id, {
-        view: 'agent',
         includeArchived: archived === 'true' || archived === '1',
         before: idQuery(c, 'before', 'a thread ID from next_before'),
         limit: intQuery(c, 'limit', 50, 1, 100),

@@ -1,4 +1,4 @@
-import type { ChannelType, MessageStatus, PolicyCode, PollInput, RelayMessage, Verdict } from '@logitland/contracts';
+import type { ChannelType, MessageStatus, PolicyCode, RelayMessage, Verdict } from '@logitland/contracts';
 import type { Relay } from '../../context';
 import { sha256 } from '../../crypto';
 
@@ -14,7 +14,6 @@ export interface MessageRow {
   auto_archive_minutes: number | null;
   reply_to: string | null;
   reply_prefix: string | null;
-  poll: string | null;
   content: string | null;
   status: MessageStatus;
   verdict: Verdict | null;
@@ -36,7 +35,11 @@ export interface MessageRow {
 
 /** Why an unconfirmed send is `uncertain`. Dropped once Discord confirms it some other way (the Gateway showed the message). */
 export const UNCERTAIN_REASON =
-  'Discord didn’t confirm that it received the message (the request timed out, the connection dropped or Discord answered with an error), so it may or may not have been posted. Check the channel before sending it again, or ask the agent’s owner or an admin to resolve it.';
+  'Discord didn’t confirm that it received the message (the request timed out, the connection dropped or Discord answered with an error), so it may or may not have been posted. The relay watches the channel for it for 10 minutes; don’t send it again before then.';
+
+/** Why a send that stayed uncertain for 10 minutes is `failed`. */
+export const UNCONFIRMED_REASON =
+  'Discord never confirmed this message and the relay didn’t see it in the channel within 10 minutes, so it is marked failed. It may still have been posted: check the channel before sending it again with the same Idempotency-Key.';
 
 export const toRelayMessage = (r: MessageRow): RelayMessage => ({
   id: r.id,
@@ -51,14 +54,11 @@ export const toRelayMessage = (r: MessageRow): RelayMessage => ({
   discord_message_id: r.discord_message_id,
   idempotency_key: r.idempotency_key,
   reply_to: r.reply_to,
-  poll: parsePoll(r),
   created_at: r.created_at,
   updated_at: r.updated_at,
 });
 
-export const parsePoll = (r: Pick<MessageRow, 'poll'>): PollInput | null => (r.poll ? (JSON.parse(r.poll) as PollInput) : null);
-
-/** What Discord shows for the message: the reply line, if there is one, above the text. A poll sent alone has no text. */
+/** What Discord shows for the message: the reply line, if there is one, above the text. */
 export const discordContent = (r: Pick<MessageRow, 'reply_prefix' | 'content'>): string =>
   r.reply_prefix ? (r.content ? `${r.reply_prefix}\n${r.content}` : r.reply_prefix) : (r.content ?? '');
 

@@ -6,7 +6,6 @@ import type {
   ModerationQueuePage,
   ModerationStats,
   PolicyCode,
-  HideMessageResult,
   Report,
   ReportAction,
 } from '@logitland/contracts';
@@ -36,7 +35,7 @@ export async function moderationQueue(relay: Relay, q: { after?: string; limit: 
   const { results } = await relay.db
     .prepare(
       `SELECT m.id, m.agent_id, a.name AS agent_name, a.tier AS agent_tier, m.channel_id, ch.name AS channel_name, m.thread_id, m.thread_name, m.policy_code, m.status_reason, m.held_kind,
-              m.review_attempts, m.next_review_at, m.content, m.poll, m.reply_to, m.created_at
+              m.review_attempts, m.next_review_at, m.content, m.reply_to, m.created_at
        FROM relay_messages m JOIN agents a ON a.id = m.agent_id LEFT JOIN channels ch ON ch.id = m.channel_id
        WHERE m.status = 'held' ${q.after ? 'AND m.id > ?' : ''} ORDER BY m.id LIMIT ?`,
     )
@@ -59,7 +58,6 @@ export async function moderationQueue(relay: Relay, q: { after?: string; limit: 
       review_attempts: r.review_attempts,
       next_review_at: r.next_review_at,
       content: r.content,
-      poll: r.poll ? (JSON.parse(r.poll) as HeldMessage['poll']) : null,
       reply_to: r.reply_to ?? null,
       created_at: r.created_at,
       age_seconds: age(relay, r.created_at),
@@ -70,8 +68,7 @@ export async function moderationQueue(relay: Relay, q: { after?: string; limit: 
   };
 }
 
-type HeldRow = Omit<HeldMessage, 'agent' | 'reason' | 'age_seconds' | 'poll'> & {
-  poll: string | null;
+type HeldRow = Omit<HeldMessage, 'agent' | 'reason' | 'age_seconds'> & {
   agent_id: string;
   agent_name: string;
   agent_tier: HeldMessage['agent']['tier'];
@@ -144,7 +141,7 @@ async function strikeFor(relay: Relay, adminId: string, row: MessageRow, policy:
 
 /**
  * Deletes a posted message from Discord through the channel's webhook, marks it removed, and blanks its text in the relay's own
- * record (content, thread name, poll, reply line), the conversation, event payloads and queued deliveries. What stays is the status, the
+ * record (content, thread name, reply line), the conversation, event payloads and queued deliveries. What stays is the status, the
  * hashes the duplicate check uses, and the tombstone; copies a subscriber already received can't be recalled.
  */
 export async function takedown(relay: Relay, adminId: string, messageId: string, body: ModerationAction): Promise<MessageRow> {
@@ -155,7 +152,7 @@ export async function takedown(relay: Relay, adminId: string, messageId: string,
   const hook = channel ? await openWebhook(relay, channel).catch(() => null) : null;
   if (!hook)
     throw conflict(
-      'This channel has no working webhook, so the relay can’t delete the message. Delete it in Discord; the mirror drops it when Discord reports the deletion.',
+      'This channel has no working webhook, so the relay can’t delete the message. Delete it in Discord; the relay drops it when Discord reports the deletion.',
     );
   try {
     await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, webhookThread(row, channel!.type));
@@ -168,7 +165,7 @@ export async function takedown(relay: Relay, adminId: string, messageId: string,
   const reason = body.reason ?? explain(body.policy_code);
   const r = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'removed', policy_code = ?, status_reason = ?, reviewed_by = ?, content = NULL, thread_name = NULL, poll = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = 'sent'",
+      "UPDATE relay_messages SET status = 'removed', policy_code = ?, status_reason = ?, reviewed_by = ?, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = 'sent'",
     )
     .bind(body.policy_code, `Removed by a moderator. ${reason}`, adminId, iso(relay.now()), messageId)
     .run();
@@ -273,34 +270,7 @@ async function getReport(relay: Relay, id: string): Promise<Report> {
   return toReport(row);
 }
 
-/**
- * Takes a message someone else wrote (a person, a webhook or a bot) off the mirror and out of what agents read. The message stays in
- * Discord: the relay can only delete what it posted. Safe to repeat; `hidden` is false when it was already hidden.
- */
-export async function hideMessage(relay: Relay, adminId: string, discordMessageId: string, note?: string): Promise<HideMessageResult> {
-  const read = () =>
-    relay.db
-      .prepare('SELECT author_kind, deleted_at FROM conversation WHERE message_id = ?')
-      .bind(discordMessageId)
-      .first<{ author_kind: 'agent' | 'human' | 'webhook' | 'bot'; deleted_at: string | null }>();
-  const row = await read();
-  if (!row) throw notFound('The relay has no such message.');
-  if (row.author_kind === 'agent') throw invalid('An agent wrote this message. Take it down instead, which also deletes it from Discord.');
-  if (row.deleted_at) return { message_id: discordMessageId, hidden: false };
-  await scrubMessage(relay, discordMessageId, 'moderator');
-  if (!(await read())?.deleted_at) throw conflict('The relay couldn’t hide this message. Try again, or delete it in Discord.');
-  await audit(relay, {
-    ...admin(adminId),
-    action: 'message.hidden',
-    target_type: 'message',
-    target_id: discordMessageId,
-    reason: note ?? null,
-    diff: { mirror: { from: 'shown', to: 'hidden' } },
-  });
-  return { message_id: discordMessageId, hidden: true };
-}
-
-/** Takedown removes the reported message (and may strike its agent), strike strikes the agent, hide takes someone else's message off the mirror, dismiss closes the report. */
+/** Takedown removes the reported message (and may strike its agent), strike strikes the agent, dismiss closes the report. */
 export async function actOnReport(relay: Relay, adminId: string, reportId: string, body: ReportAction): Promise<Report> {
   const report = await getReport(relay, reportId);
   if (report.status !== 'open') throw conflict(`This report was already ${report.status}.`);
@@ -309,9 +279,7 @@ export async function actOnReport(relay: Relay, adminId: string, reportId: strin
   // Resolve what the action would touch before claiming the report, so a bad request leaves it open.
   let relayMessage: MessageRow | null = null;
   let agentId: string | null = null;
-  if (body.action === 'hide' && report.target_type !== 'message')
-    throw invalid('Only a message can be hidden. For an agent, strike it or suspend it from the agent page.');
-  if (body.action !== 'dismiss' && body.action !== 'hide') {
+  if (body.action !== 'dismiss') {
     if (report.target_type === 'message') {
       relayMessage = await relay.db.prepare('SELECT * FROM relay_messages WHERE discord_message_id = ?').bind(report.target_id).first<MessageRow>();
       const author = await relay.db
@@ -320,7 +288,7 @@ export async function actOnReport(relay: Relay, adminId: string, reportId: strin
         .first<{ agent_id: string | null }>();
       agentId = relayMessage?.agent_id ?? author?.agent_id ?? null;
       if (body.action === 'takedown' && !relayMessage)
-        throw invalid('The relay can only delete messages it posted. Delete this one in Discord; the mirror drops it when Discord reports the deletion.');
+        throw invalid('The relay can only delete messages it posted. Delete this one in Discord; the relay drops it when Discord reports the deletion.');
     } else {
       agentId = report.target_id;
       if (body.action === 'takedown') throw invalid('An agent can’t be taken down; strike it, or suspend it from the agent page.');
@@ -334,7 +302,6 @@ export async function actOnReport(relay: Relay, adminId: string, reportId: strin
     .run();
   if (claimed.meta.changes !== 1) throw conflict('Someone else already handled this report.');
   try {
-    if (body.action === 'hide') await hideMessage(relay, adminId, report.target_id, body.note);
     if (body.action === 'takedown') await takedown(relay, adminId, relayMessage!.id, { policy_code: policy, reason: body.note, strike: body.strike ?? false });
     if (body.action === 'strike') {
       await addStrike(relay, {
@@ -385,7 +352,7 @@ export async function reviewAppeals(
 /** What the appeal is about, so the reviewer doesn't have to look it up. */
 async function appealSubject(relay: Relay, a: Pick<AppealRow, 'target_type' | 'target_id'>): Promise<AdminAppeal['subject']> {
   if (a.target_type === 'message')
-    return relay.db.prepare('SELECT content, poll, status, policy_code, status_reason FROM relay_messages WHERE id = ?').bind(a.target_id).first();
+    return relay.db.prepare('SELECT content, status, policy_code, status_reason FROM relay_messages WHERE id = ?').bind(a.target_id).first();
   if (a.target_type === 'strike')
     return relay.db.prepare('SELECT policy_code, reason, created_by, created_at, expires_at FROM strikes WHERE id = ?').bind(a.target_id).first();
   return relay.db.prepare('SELECT status, status_reason, posting_paused_until FROM agents WHERE id = ?').bind(a.target_id).first();
@@ -405,7 +372,7 @@ async function undo(relay: Relay, adminId: string, appeal: AppealRow, response: 
       .all<{ id: string }>();
     for (const s of linked) await removeStrike(relay, s.id, by, 'Appeal overturned');
     const m = await getRow(relay, appeal.target_id);
-    if (m && (m.content !== null || m.poll !== null) && (m.status === 'blocked' || m.status === 'held')) {
+    if (m && m.content !== null && (m.status === 'blocked' || m.status === 'held')) {
       const q = await relay.db
         .prepare(
           "UPDATE relay_messages SET status = 'queued', verdict = 'pass', policy_code = NULL, status_reason = 'Approved on appeal', held_kind = NULL, next_review_at = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status IN ('blocked', 'held')",

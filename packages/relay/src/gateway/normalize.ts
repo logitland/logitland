@@ -1,10 +1,10 @@
-import type { Poll } from '@logitland/contracts';
 import { snowflakeTime } from '../services/events';
 import type { IntakeEventInput } from '../services/intake';
 
 // Discord dispatch payloads in, intake events out. Messages in a thread belong to the thread's parent
 // channel and carry `thread_id`. Only default (0) and reply (19) messages are kept: the rest are system
-// messages (joins, pins, thread notices, poll results) with no author text.
+// messages (joins, pins, thread notices, poll results) with no author text. A poll's question and answers are not relayed:
+// a message with a poll keeps only its text.
 
 export const MESSAGE_TYPES: ReadonlySet<number> = new Set([0, 19]);
 const REPLY = 19;
@@ -12,14 +12,6 @@ const REPLY = 19;
 const THREAD_TYPES: ReadonlySet<number> = new Set([10, 11]);
 /** The channel types the relay can use: text, announcement, forum, media. */
 export const CHANNEL_TYPES: Readonly<Record<number, 'text' | 'announcement' | 'forum' | 'media'>> = { 0: 'text', 5: 'announcement', 15: 'forum', 16: 'media' };
-
-export interface DiscordPollLike {
-  question?: { text?: string | null };
-  answers?: { answer_id?: number; poll_media?: { text?: string | null; emoji?: { name?: string | null } | null } }[];
-  expiry?: string | null;
-  allow_multiselect?: boolean;
-  results?: { is_finalized?: boolean; answer_counts?: { id: number; count: number }[] } | null;
-}
 
 export interface DiscordMessageLike {
   id: string;
@@ -32,7 +24,6 @@ export interface DiscordMessageLike {
   edited_timestamp?: string | null;
   type?: number;
   message_reference?: { message_id?: string; type?: number } | null;
-  poll?: DiscordPollLike | null;
 }
 
 export interface DiscordChannelLike {
@@ -61,33 +52,9 @@ export function locate(channelId: string, threads: ReadonlyMap<string, string>):
   return parent ? { channel_id: parent, thread_id: channelId } : { channel_id: channelId, thread_id: null };
 }
 
-/** A poll as Discord describes it (on a message, or in a webhook's answer) in the shape the relay stores. Null for no poll. */
-export function pollFromDiscord(p: DiscordPollLike | null | undefined): Poll | null {
-  if (!p?.answers?.length) return null;
-  const results = pollResults(p);
-  return {
-    question: p.question?.text ?? '',
-    answers: p.answers.map((a, i) => ({
-      id: a.answer_id ?? i + 1,
-      text: a.poll_media?.text ?? a.poll_media?.emoji?.name ?? '',
-      emoji: a.poll_media?.emoji?.name ?? null,
-    })),
-    expires_at: p.expiry ? new Date(p.expiry).toISOString() : null,
-    allow_multiselect: p.allow_multiselect ?? false,
-    ...(results ? { results } : {}),
-  };
-}
-
-/** The tallies Discord reports once a poll has results; null before. */
-export function pollResults(p: DiscordPollLike | null | undefined): NonNullable<Poll['results']> | null {
-  const r = p?.results;
-  return r ? { finalized: r.is_finalized ?? false, counts: (r.answer_counts ?? []).map((c) => ({ id: c.id, count: c.count })) } : null;
-}
-
 /** A message as Discord's REST API or the Gateway describes it. Null for system messages. */
 export function messageCreated(m: DiscordMessageLike, threads: ReadonlyMap<string, string>): IntakeEventInput | null {
   if (!m.author || m.timestamp === undefined || !MESSAGE_TYPES.has(m.type ?? 0)) return null;
-  const poll = pollFromDiscord(m.poll);
   return {
     kind: 'message_create',
     ...locate(m.channel_id, threads),
@@ -104,7 +71,6 @@ export function messageCreated(m: DiscordMessageLike, threads: ReadonlyMap<strin
     edited_timestamp: m.edited_timestamp ?? null,
     // Only a reply (type 19) answers a message; forwards and pins also carry a reference.
     reply_to: m.type === REPLY ? (m.message_reference?.message_id ?? null) : null,
-    poll,
   };
 }
 
@@ -153,23 +119,18 @@ export function normalizeDispatch(t: string, d: unknown, ctx: NormalizeContext):
       return e ? [e] : [];
     }
     case 'MESSAGE_UPDATE': {
-      // Discord also sends this when an embed unfurls or a message is pinned; only a real edit has a new edited_timestamp.
-      // A poll that has ended reports its results the same way, without an edit.
+      // Discord also sends this when an embed unfurls, a message is pinned or a poll ends; only a real edit has a new edited_timestamp.
       const m = d as DiscordMessageLike;
-      if (!inGuild(m.guild_id)) return [];
-      const out: IntakeEventInput[] = [];
-      if (m.edited_timestamp && (m.type === undefined || MESSAGE_TYPES.has(m.type))) {
-        out.push({
+      if (!inGuild(m.guild_id) || !m.edited_timestamp || (m.type !== undefined && !MESSAGE_TYPES.has(m.type))) return [];
+      return [
+        {
           kind: 'message_update',
           ...locate(m.channel_id, ctx.threads),
           message_id: m.id,
           ...(typeof m.content === 'string' ? { content: m.content } : {}),
           edited_timestamp: m.edited_timestamp,
-        });
-      }
-      const results = pollResults(m.poll);
-      if (results) out.push({ kind: 'message_poll', ...locate(m.channel_id, ctx.threads), message_id: m.id, results });
-      return out;
+        },
+      ];
     }
     case 'MESSAGE_DELETE': {
       const m = d as { id: string; channel_id: string; guild_id?: string };

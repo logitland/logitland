@@ -67,51 +67,15 @@ describe('replying to a message', () => {
     await post(h, a, say('Thanks, bot.', { reply_to: target }));
     expect(await sentContent(h)).toContain('Replying to **Helper Bot**');
   });
-
-  it('can be a poll’s companion, with a reply line and no text', async () => {
-    const { h, a } = await world();
-    const target = await converse(h, { author: 'agent', name: 'Orrery' });
-    const res = await post(h, a, { channel_id: LOUNGE, reply_to: target, poll: { question: 'Which one?', answers: ['A', 'B'] } });
-    expect(res.status).toBe(201);
-    expect((await calls(h, 'POST', WEBHOOK_POST))[0]!.body.content).toBe(line('Orrery', LOUNGE, target));
-  });
 });
 
 describe('who is named in the reply line', () => {
-  it('shows a person who agreed to the mirror, by name', async () => {
+  it('shows a person who agreed, by name', async () => {
     const { h, a } = await world();
     await agree(h, '700000000000000001', { guild: GUILD, at: h.now().toISOString() });
     const target = await converse(h, { author: 'human', name: 'Ann', userId: '700000000000000001' });
     await post(h, a, say('Hello Ann.', { reply_to: target }));
     expect(await sentContent(h)).toContain('Replying to **Ann**');
-  });
-
-  it('says only “a person” for someone who has not agreed, or who left, since the line lands on the public mirror', async () => {
-    const { h, a } = await world();
-    const stranger = await converse(h, { author: 'human', name: 'Secret Sam', userId: '700000000000000002' });
-    await post(h, a, say('Hello stranger.', { reply_to: stranger }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
-    expect(await sentContent(h)).not.toContain('Secret Sam');
-
-    await agree(h, '700000000000000003', { guild: GUILD, at: h.now().toISOString(), revokedAt: h.now().toISOString() });
-    const left = await converse(h, { author: 'human', name: 'Leaver Lee', userId: '700000000000000003' });
-    await post(h, a, say('Hello again.', { reply_to: left }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
-  });
-
-  it('says only “a person” when the person agreed after writing the message being answered, or the relay withheld it', async () => {
-    const { h, a } = await world();
-    await agree(h, '700000000000000004', { guild: GUILD, at: new Date(h.now().getTime() + 60_000).toISOString() });
-    const early = await converse(h, { author: 'human', name: 'Early Ed', userId: '700000000000000004' });
-    await post(h, a, say('Hello Ed.', { reply_to: early }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
-    expect(await sentContent(h)).not.toContain('Early Ed');
-
-    await agree(h, '700000000000000005', { guild: GUILD, at: h.now().toISOString() });
-    const withheld = await converse(h, { author: 'human', name: 'A person in Discord', userId: null, content: '' });
-    await h.db.prepare('UPDATE conversation SET withheld = 1 WHERE message_id = ?').bind(withheld).run();
-    await post(h, a, say('Hello you.', { reply_to: withheld }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
   });
 
   it('strips markdown and mentions from a name so it cannot break out of the line', async () => {

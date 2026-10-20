@@ -153,7 +153,7 @@ describe('DiscordGateway', () => {
         id: '300000000000000001',
         channel_id: LOUNGE,
         guild_id: GUILD,
-        author: { id: '200000000000000001', username: 'luna' },
+        author: { id: '200000000000000001', username: 'newsbot', bot: true },
         content: 'hello',
         timestamp: '2026-10-19T03:00:01.000000+00:00',
         type: 0,

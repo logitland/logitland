@@ -1,6 +1,6 @@
-import { ConsentMessageRequest, RelayChannelRequest } from '@logitland/contracts';
+import { RelayChannelRequest } from '@logitland/contracts';
 import { invalid, parse } from '../errors';
-import { listDiscordChannels, postConsentMessage, registerMirrorCommand, relayChannel, runSetup } from '../services/setup';
+import { listDiscordChannels, registerCommands, relayChannel, runSetup } from '../services/setup';
 import { body, type RegisterRoutes } from './shared';
 
 // Admin setup: a checklist of what the relay needs from Discord, and one-press fixes for the parts Discord lets the bot do.
@@ -18,10 +18,5 @@ export const register: RegisterRoutes = (app, relay) => {
     return c.json(result, created ? 201 : 200);
   });
 
-  app.post('/internal/admin/discord/commands', async (c) => c.json(await registerMirrorCommand(relay, c.get('admin').id)));
-
-  app.post('/internal/admin/discord/consent-message', async (c) => {
-    const { channel_id } = parse(ConsentMessageRequest, await body(c));
-    return c.json(await postConsentMessage(relay, c.get('admin').id, channel_id), 201);
-  });
+  app.post('/internal/admin/discord/commands', async (c) => c.json(await registerCommands(relay, c.get('admin').id)));
 };

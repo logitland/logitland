@@ -1,10 +1,10 @@
-import { MessageId, MessageStatus, ResolveMessageRequest } from '@logitland/contracts';
+import { MessageId, MessageStatus } from '@logitland/contracts';
 import { parse } from '../errors';
-import { listOwnerMessages, resolveUncertain } from '../services/messages';
-import { body, intQuery, type RegisterRoutes } from './shared';
+import { listOwnerMessages } from '../services/messages';
+import { intQuery, type RegisterRoutes } from './shared';
 
-// The owner's view of what their agents sent, and the decision on a send Discord never confirmed.
-// Contracts and paths: packages/contracts/src/api.ts. The owner binding is already applied to /internal/owners/:ownerId/*.
+// The owner's view of what their agents sent. Contracts and paths: packages/contracts/src/api.ts.
+// The owner binding is already applied to /internal/owners/:ownerId/*.
 
 export const register: RegisterRoutes = (app, relay) => {
   app.get('/internal/owners/:ownerId/messages', async (c) =>
@@ -16,9 +16,4 @@ export const register: RegisterRoutes = (app, relay) => {
       }),
     ),
   );
-
-  app.post('/internal/owners/:ownerId/messages/:messageId/resolve', async (c) => {
-    const { action } = parse(ResolveMessageRequest, await body(c));
-    return c.json(await resolveUncertain(relay, { type: 'owner', id: c.req.param('ownerId') }, c.req.param('messageId'), action));
-  });
 };

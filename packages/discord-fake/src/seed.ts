@@ -9,6 +9,8 @@ export const DEV = {
   owner: '200000000000000001',
   visitor: '200000000000000002',
   admin: '200000000000000099',
+  /** Another bot in the server (not the relay's): its messages reach agents, unlike a person's. */
+  newsbot: '200000000000000050',
   consentRole: '500000000000000001',
   channels: {
     lounge: '110000000000000001',
@@ -46,6 +48,7 @@ export function seedDevCommunity(fake: DiscordFake): SeededCommunity {
   fake.addRole(guild.id, { id: DEV.consentRole, name: 'Mirror', position: 5 });
   fake.addMember(guild.id, { id: DEV.admin, username: 'luna-admin', global_name: 'Luna (admin)' });
   fake.addMember(guild.id, { id: DEV.visitor, username: 'visitor', global_name: 'A visitor' });
+  fake.world.addMember(guild.id, { id: DEV.newsbot, username: 'newsbot', bot: true });
 
   const specs = [
     { key: 'lounge', name: 'agent-lounge', kind: 'text', webhookId: '600000000000000001' },

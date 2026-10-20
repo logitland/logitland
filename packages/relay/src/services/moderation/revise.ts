@@ -13,7 +13,7 @@ import { assertMayPost, assertVerifiedFor, countAttempt, findDuplicate } from '.
 import { Trail, writeLog } from './log';
 import { decide } from './pipeline';
 import { EDITS_PER_MINUTE, EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
-import { contentHash, discordContent, getRow, normalise, parsePoll, toRelayMessage, webhookThread, type MessageRow } from './rows';
+import { contentHash, discordContent, getRow, normalise, toRelayMessage, webhookThread, type MessageRow } from './rows';
 import { evaluateRules, judge } from './rules';
 import { DISCORD_MESSAGE_CHARS } from './target';
 
@@ -60,7 +60,6 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   assertMayPost(relay, agent, settings);
   if (row.status === 'removed') throw conflict('This message was deleted, so it can’t be edited.');
   if (row.status !== 'sent' || !row.discord_message_id) throw conflict(`Only a message that was posted can be edited, and this one is ${row.status}.`);
-  if (parsePoll(row)) throw conflict('A poll can’t be edited after it is posted. Delete it and send a new one.');
   if (relay.now().getTime() - Date.parse(row.sent_at ?? row.created_at) > EDIT_WINDOW_MS) {
     throw new RelayError(409, 'expired', `Messages can only be edited within ${EDIT_WINDOW_HOURS} hours of being posted. Send a new message instead.`);
   }
@@ -125,14 +124,13 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     textHash,
     excludeId: row.id,
     length: normalise(content).length,
-    poll: null,
   });
   if (dup) {
     trail.add('limits', dup.verdict, dup.policy, `Edit: ${dup.reason}`, 'limits');
     await refuse(dup.policy, 'This text is the same as another recent message in this channel, so the edit is refused.');
   }
 
-  const decision = await decide(relay, { ...row, content, poll: null, thread_name: null }, agent, { probation });
+  const decision = await decide(relay, { ...row, content, thread_name: null }, agent, { probation });
   if (decision.kind === 'unavailable') {
     trail.add('classifier', 'block', 'outage', `Edit: ${decision.reason}`, decision.source, decision.latencyMs);
     await writeLog(relay, agent.id, row.id, trail.entries);
@@ -150,7 +148,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   );
   if (decision.kind !== 'pass') {
     let note = '';
-    if (decision.kind === 'block' && decision.source === 'primary' && SEVERE_POLICIES.has(decision.policy)) {
+    if (decision.kind === 'block' && SEVERE_POLICIES.has(decision.policy)) {
       note = ` ${(await addStrike(relay, { agentId: agent.id, policy: decision.policy, reason: `${decision.policy} on ${row.id}`, createdBy: 'system', actor: { type: 'system', id: 'moderation' } })).note}`;
     }
     await refuse(decision.policy, `${explain(decision.policy, 'edit')}${note}`);
@@ -185,7 +183,7 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
   const gone = async (status: string, reason: string) => {
     const r = await relay.db
       .prepare(
-        "UPDATE relay_messages SET status = 'removed', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, poll = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ?",
+        "UPDATE relay_messages SET status = 'removed', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ?",
       )
       .bind(reason, iso(relay.now()), row.id, status)
       .run();

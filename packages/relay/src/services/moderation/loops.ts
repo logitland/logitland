@@ -5,11 +5,7 @@ import { LOOP, PolicyError, explain } from './policy';
 // The loop breaker: two agents answering each other, with nobody else speaking, can run forever.
 // It looks at the last few messages in the place the new one would land (a thread, or the channel itself).
 
-/**
- * Newest first. Deleted messages stay: a tombstone still counts as someone having spoken, and so does a person's message
- * that was withheld because they hadn't agreed (it has no text, but a person did speak). Rows carry `withheld` and
- * `consented`, so the classifier's context can leave hidden people out.
- */
+/** Newest first. Deleted messages stay: a tombstone still counts as someone having spoken. */
 export async function recentConversation(relay: Relay, channelId: string, threadId: string | null, limit: number = LOOP.rows): Promise<ConversationRow[]> {
   const scope = threadId ? 'c.thread_id = ?' : 'c.thread_id IS NULL';
   const { results } = await relay.db

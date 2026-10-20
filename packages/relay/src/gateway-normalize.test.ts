@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { channelChanges, messageChannelId, messageCreated, normalizeDispatch, pollFromDiscord, type NormalizeContext } from './gateway';
+import { channelChanges, messageChannelId, messageCreated, normalizeDispatch, type NormalizeContext } from './gateway';
 import { snowflakeTime } from './services/events';
 import { IntakeEvent } from './services/intake';
 
@@ -229,84 +229,6 @@ describe('replies', () => {
   it('are read the same way from REST messages', () => {
     const { guild_id: _guild, ...rest } = message({ type: 19, message_reference: { message_id: REFERENCE } });
     expect(messageCreated(rest, new Map())).toMatchObject({ reply_to: REFERENCE });
-  });
-});
-
-describe('polls', () => {
-  const discordPoll = {
-    question: { text: 'Lunch?' },
-    answers: [
-      { answer_id: 1, poll_media: { text: 'Soup' } },
-      { answer_id: 2, poll_media: { text: 'Noodles', emoji: { name: 'noodle' } } },
-      { answer_id: 3, poll_media: { emoji: { name: 'pizza' } } },
-    ],
-    expiry: '2026-10-20T03:00:00.000000+00:00',
-    allow_multiselect: true,
-    layout_type: 1,
-  };
-
-  it('are stored in the relay’s shape, whether or not the message has text', () => {
-    const [e] = normalizeDispatch('MESSAGE_CREATE', message({ content: '', poll: discordPoll }), ctx());
-    expect(IntakeEvent.parse(e)).toMatchObject({
-      content: '',
-      poll: {
-        question: 'Lunch?',
-        answers: [
-          { id: 1, text: 'Soup', emoji: null },
-          { id: 2, text: 'Noodles', emoji: 'noodle' },
-          { id: 3, text: 'pizza', emoji: 'pizza' },
-        ],
-        expires_at: '2026-10-20T03:00:00.000Z',
-        allow_multiselect: true,
-      },
-    });
-  });
-
-  it('turn a webhook’s answer or a plain create object into the same shape', () => {
-    expect(pollFromDiscord({ question: { text: 'Q' }, answers: [{ poll_media: { text: 'a' } }, { poll_media: { text: 'b' } }] })).toEqual({
-      question: 'Q',
-      answers: [
-        { id: 1, text: 'a', emoji: null },
-        { id: 2, text: 'b', emoji: null },
-      ],
-      expires_at: null,
-      allow_multiselect: false,
-    });
-    expect(pollFromDiscord(undefined)).toBeNull();
-    expect(pollFromDiscord({ question: { text: 'no answers' }, answers: [] })).toBeNull();
-  });
-
-  it('report results from MESSAGE_UPDATE even though nothing was edited', () => {
-    const results = {
-      is_finalized: true,
-      answer_counts: [
-        { id: 1, count: 4, me_voted: false },
-        { id: 2, count: 1, me_voted: false },
-      ],
-    };
-    const out = normalizeDispatch(
-      'MESSAGE_UPDATE',
-      { id: '300000000000000001', channel_id: LOUNGE, guild_id: GUILD, poll: { ...discordPoll, results }, edited_timestamp: null },
-      ctx(),
-    );
-    expect(out).toEqual([
-      {
-        kind: 'message_poll',
-        channel_id: LOUNGE,
-        thread_id: null,
-        message_id: '300000000000000001',
-        results: {
-          finalized: true,
-          counts: [
-            { id: 1, count: 4 },
-            { id: 2, count: 1 },
-          ],
-        },
-      },
-    ]);
-    expect(IntakeEvent.parse(out[0])).toMatchObject({ kind: 'message_poll' });
-    // No results, no edit: nothing to record.
-    expect(normalizeDispatch('MESSAGE_UPDATE', { id: '300000000000000001', channel_id: LOUNGE, guild_id: GUILD, poll: discordPoll }, ctx())).toEqual([]);
   });
 });
 

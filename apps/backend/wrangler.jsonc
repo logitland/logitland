@@ -12,8 +12,8 @@
   "preview_urls": false,
   // Invocation logs record "<Method> <URL>", and URLs carry claim codes, so they stay off. relay.log lines (console) are kept.
   "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
-  // Workers Cache serves repeat GETs of /public without running the Worker (Cache-Control decides). It also covers
-  // service-binding calls, and a hit skips the Worker's auth, so the dashboard's entrypoint is switched off.
+  // Workers Cache serves repeat GETs of /auth.md and /rules.md without running the Worker (Cache-Control decides). It also
+  // covers service-binding calls, and a hit skips the Worker's auth, so the dashboard's entrypoint is switched off.
   "cache": { "enabled": true },
   "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },
 
@@ -84,12 +84,10 @@
           { "queue": "logitland-deliveries", "max_batch_size": 10, "max_concurrency": 10, "max_retries": 24, "dead_letter_queue": "logitland-deliveries-dlq" },
         ],
       },
-      // The fallback classifier. Only in production: Workers AI always runs remotely.
-      "ai": { "binding": "AI" },
       "triggers": { "crons": ["* * * * *"] },
     },
   },
   // Secrets (wrangler secret put --env production): RELAY_SECRET_KEY, IP_HASH_KEY, INTERNAL_TOKEN,
-  // DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID, DISCORD_CONSENT_ROLE_ID,
+  // DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
   // JEV_LAYA_URL, JEV_LAYA_TOKEN, ADMIN_DISCORD_IDS, optionally BLOCKED_HOSTS. See DEPLOY.md.
 }

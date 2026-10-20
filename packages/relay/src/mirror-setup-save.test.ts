@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { getChannel } from './services/channels';
 import { saveChannel, type ChannelRowWithTags } from './services/setup';
 import { BENCH, FORUM, GUILD, LOUNGE, harness, seedChannel, type Harness } from './testing';
-import { NEW_HOOK, admin, connectGateway, discordError, discordWorld, enforced, type ChannelSpec } from './mirror.testkit';
+import { NEW_HOOK, admin, connectGateway, discordError, discordWorld, type ChannelSpec } from './mirror.testkit';
 import { runSetup } from './services/setup';
 
 const MEDIA = '110000000000000004';
@@ -11,7 +11,6 @@ const forum = (over: Partial<ChannelSpec> = {}): ChannelSpec => ({
   id: FORUM,
   name: 'channel-ideas',
   type: 15,
-  permission_overwrites: enforced(),
   available_tags: [],
   ...over,
 });
@@ -29,17 +28,13 @@ async function ready() {
 describe('what a relayed channel starts with', () => {
   it('lets agents post in a text channel and start threads in a forum or media channel, at one pace', async () => {
     const { world, relay } = await ready();
-    world.channels = [
-      { id: LOUNGE, name: 'lounge', type: 0, permission_overwrites: enforced() },
-      forum(),
-      { id: MEDIA, name: 'gallery', type: 16, permission_overwrites: enforced() },
-    ];
+    world.channels = [{ id: LOUNGE, name: 'lounge', type: 0 }, forum(), { id: MEDIA, name: 'gallery', type: 16 }];
     const text = (await (await relay(LOUNGE)).json()) as RelayChannelResult;
     const forumOut = (await (await relay(FORUM)).json()) as RelayChannelResult;
     const media = (await (await relay(MEDIA)).json()) as RelayChannelResult;
-    expect(text.channel).toMatchObject({ agent_access: 'post', pace_per_agent_per_minute: 10, public_mirror: true });
-    expect(forumOut.channel).toMatchObject({ agent_access: 'post_new_threads', pace_per_agent_per_minute: 10, public_mirror: true });
-    expect(media.channel).toMatchObject({ agent_access: 'post_new_threads', pace_per_agent_per_minute: 10, public_mirror: true });
+    expect(text.channel).toMatchObject({ agent_access: 'post', pace_per_agent_per_minute: 10 });
+    expect(forumOut.channel).toMatchObject({ agent_access: 'post_new_threads', pace_per_agent_per_minute: 10 });
+    expect(media.channel).toMatchObject({ agent_access: 'post_new_threads', pace_per_agent_per_minute: 10 });
   });
 
   it('still takes what the request says, and an existing forum keeps its own access', async () => {
@@ -69,39 +64,6 @@ describe('the Gateway line of the checklist', () => {
   });
 });
 
-describe('a channel agents can’t use is not on the public mirror', () => {
-  it('is refused with a 422 when relaying, before any webhook is made', async () => {
-    const { h, world, relay } = await ready();
-    world.channels = [forum()];
-    const res = await relay(FORUM, { agent_access: 'off', public_mirror: true });
-    expect(res.status).toBe(422);
-    expect(((await res.json()) as { detail: string }).detail).toContain('public mirror');
-    expect(world.createdHooks).toBe(0);
-    expect(await getChannel(h.relay, FORUM)).toBeNull();
-    // Off with the mirror off is a fine thing to ask for.
-    expect((await relay(FORUM, { agent_access: 'off', public_mirror: false })).status).toBe(201);
-  });
-
-  it('is refused with a 422 when saving, whether both are sent or only one changes', async () => {
-    const { h, world, patch } = await ready();
-    world.channels = [{ id: BENCH, name: 'bench', type: 0 }];
-    const both = await patch(BENCH, { agent_access: 'off', public_mirror: true, name: 'bench', guild_id: GUILD, type: 'text' });
-    expect(both.status).toBe(422);
-    expect(await getChannel(h.relay, BENCH)).toBeNull();
-
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post', publicMirror: true });
-    const closing = await patch(LOUNGE, { agent_access: 'off' });
-    expect(closing.status).toBe(422);
-    expect(((await closing.json()) as { detail: string }).detail).toContain('Turn the mirror off');
-    expect((await getChannel(h.relay, LOUNGE))!.agent_access).toBe('post');
-
-    expect((await patch(LOUNGE, { agent_access: 'off', public_mirror: false })).status).toBe(200);
-    expect(await getChannel(h.relay, LOUNGE)).toMatchObject({ agent_access: 'off', public_mirror: 0 });
-    // And it can't be put back on the mirror while still closed.
-    expect((await patch(LOUNGE, { public_mirror: true })).status).toBe(422);
-  });
-});
-
 describe('saving a channel', () => {
   it('writes only what the admin changed, so a rename from Discord in between is not undone', async () => {
     const { h, owner } = await ready();
@@ -121,7 +83,6 @@ describe('saving a channel', () => {
         type: stale.type,
         agent_access: stale.agent_access,
         pace_per_agent_per_minute: 3,
-        public_mirror: stale.public_mirror === 1,
         verified_only: stale.verified_only === 1,
         tags: [],
       },
@@ -142,13 +103,12 @@ describe('saving a channel', () => {
       type: before.type,
       agent_access: before.agent_access,
       pace_per_agent_per_minute: 10,
-      public_mirror: false,
       verified_only: false,
       tags: [{ id: '700000000000000011', name: 'Idea', moderated: false }],
     };
     await saveChannel(h.relay, owner.id, FORUM, before, next, null);
     const after = (await getChannel(h.relay, FORUM)) as ChannelRowWithTags;
-    expect(after).toMatchObject({ webhook_ciphertext: null, webhook_id: null, public_mirror: 0 });
+    expect(after).toMatchObject({ webhook_ciphertext: null, webhook_id: null });
     expect(JSON.parse(after.tags)).toEqual(next.tags);
   });
 });
@@ -158,7 +118,7 @@ describe('a webhook made for a relay that then failed', () => {
   const insertRow = (h: Harness) =>
     (h.db as unknown as { raw: { prepare(sql: string): { run(...v: unknown[]): unknown } } }).raw
       .prepare(
-        "INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, public_mirror, webhook_id, tags, updated_at) VALUES (?, ?, 'channel-ideas', 'forum', 'post_new_threads', 10, 1, '600000000000000001', '[]', ?)",
+        "INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_id, tags, updated_at) VALUES (?, ?, 'channel-ideas', 'forum', 'post_new_threads', 10, '600000000000000001', '[]', ?)",
       )
       .run(FORUM, GUILD, h.now().toISOString());
 
@@ -229,10 +189,10 @@ describe('verified-only channels', () => {
 
   it('are switched on and off with PATCH, change nothing else, and are audited', async () => {
     const { h, patch } = await ready();
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post', pace: 7, publicMirror: true });
+    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post', pace: 7 });
     const on = await patch(LOUNGE, { verified_only: true });
     expect(on.status).toBe(200);
-    expect(await on.json()).toMatchObject({ verified_only: true, agent_access: 'post', pace_per_agent_per_minute: 7, public_mirror: true });
+    expect(await on.json()).toMatchObject({ verified_only: true, agent_access: 'post', pace_per_agent_per_minute: 7 });
     expect(await getChannel(h.relay, LOUNGE)).toMatchObject({ verified_only: 1, pace_per_agent_per_minute: 7 });
     expect(await diffs(h, LOUNGE)).toEqual([{ verified_only: { from: false, to: true } }]);
 

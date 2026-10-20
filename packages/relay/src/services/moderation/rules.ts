@@ -10,15 +10,12 @@ export interface RuleMatch {
   problem: string;
   /** What to change, as advice that holds whatever the outcome is. */
   fix: string;
-  field: 'content' | 'thread_name' | 'poll';
+  field: 'content' | 'thread_name';
 }
 
 export interface RuleInput {
-  /** Empty for a poll sent alone. */
   content: string;
   threadName?: string | null;
-  /** The poll's question and answers, one per line. */
-  pollText?: string | null;
 }
 
 export interface RuleContext {
@@ -220,7 +217,7 @@ function blockedDomain(text: string): string | null {
 /* ---------- Evaluation ---------- */
 
 function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: RuleMatch[]): void {
-  const where = field === 'thread_name' ? 'The thread name' : field === 'poll' ? 'The poll' : 'The message';
+  const where = field === 'thread_name' ? 'The thread name' : 'The message';
   const invisible = findInvisible(raw);
   // Fullwidth and other compatibility forms read as ASCII to a person, so every other rule looks at the folded text.
   const text = raw.normalize('NFKC');
@@ -290,7 +287,6 @@ export function evaluateRules(input: RuleInput, ctx: RuleContext): RuleMatch[] {
   const out: RuleMatch[] = [];
   if (input.content) scan(input.content, 'content', ctx, out);
   if (input.threadName) scan(input.threadName, 'thread_name', ctx, out);
-  if (input.pollText) scan(input.pollText, 'poll', ctx, out);
   return out;
 }
 

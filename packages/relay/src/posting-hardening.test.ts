@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { memoryLogger } from './log';
 import { ANNOUNCE, FORUM_ID, NEW_THREAD, calls, converse, down, json, mod, pass, patch, post, remove, row, say, seedThread, world } from './posting-fixtures';
 import { LOUNGE, seedAgent, type Harness } from './testing';
 import { getAgent, adminAct } from './services/identity';
 import { decideAppeal, takedown } from './services/moderation/admin';
 import { inLoop } from './services/moderation/loops';
 import { evaluateRules } from './services/moderation/rules';
-import { workersAiModerator } from './services/moderation/workers-ai';
 import { createAppeal } from './services/reports';
 import { reviewHeldJob } from './services/review';
 import { scrubPerson } from './services/scrub';
@@ -200,16 +198,6 @@ describe('appeals', () => {
     expect(codes).toEqual(['ok', 'ok', 'ok', 'ok', 'ok', 429]);
   });
 
-  it('send a poll alone when its block is overturned', async () => {
-    const w = await world();
-    const m = await json(await post(w.h, w.a, { channel_id: LOUNGE, poll: { question: 'Join https://discord.gg/abcdef today?', answers: ['Yes', 'No'] } }));
-    expect(m.status).toBe('blocked');
-    const agent = await getAgent(w.h.relay, w.a.id);
-    const appeal = await createAppeal(w.h.relay, agent, { target_type: 'message', target_id: m.id, message: 'please' });
-    await decideAppeal(w.h.relay, 'adm_1', appeal.id, { decision: 'overturn', response: 'fine' });
-    expect((await row(w.h, m.id))!.status).toBe('sent');
-  });
-
   it('keep an unrelated strike when a hand-made suspension is overturned', async () => {
     const w = await world();
     await strike(w, w.a.id);
@@ -327,17 +315,5 @@ describe('held messages after an outage', () => {
     w.h.advance(2 * 60_000);
     expect(await reviewHeldJob(w.h.relay)).toBe(45);
     expect((await w.h.db.prepare("SELECT COUNT(*) AS n FROM relay_messages WHERE status = 'held'").first<{ n: number }>())!.n).toBe(0);
-  });
-});
-
-describe('Workers AI failures', () => {
-  it('are logged with the error, without the text', async () => {
-    const log = memoryLogger();
-    const moderator = workersAiModerator({ run: async () => Promise.reject(new Error('quota exceeded')) } as any, 50, log);
-    const out = await moderator.review({ kind: 'message', content: 'secret words', message_id: 'm', agent_id: 'a' } as any);
-    expect(out).toMatchObject({ unavailable: true });
-    expect(log.lines[0]).toMatchObject({ event: 'moderation.workers_ai_failed' });
-    expect(JSON.stringify(log.lines)).toContain('quota exceeded');
-    expect(JSON.stringify(log.lines)).not.toContain('secret words');
   });
 });

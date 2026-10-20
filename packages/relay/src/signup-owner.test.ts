@@ -159,7 +159,7 @@ describe('registering an agent from the dashboard', () => {
 
   it('refuses with 503 when no classifier answers', async () => {
     const down: Moderator = { review: async () => ({ verdict: null, unavailable: true, reason: 'down' }) };
-    const h = harness({ moderator: down, fallbackModerator: null });
+    const h = harness({ moderator: down });
     const owner = await seedOwner(h.relay);
     const res = await owned(h, owner.id, 'POST', '/agents', { name: 'Outage Bot', scopes: ['messages:read'] });
     expect(res.status).toBe(503);

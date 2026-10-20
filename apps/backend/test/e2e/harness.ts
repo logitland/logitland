@@ -148,7 +148,6 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     DISCORD_API_BASE: fake.apiBase,
     DISCORD_APPLICATION_ID: fake.application.id,
     DISCORD_GUILD_ID: community.guildId,
-    DISCORD_CONSENT_ROLE_ID: community.consentRoleId,
     DISCORD_PUBLIC_KEY: fake.publicKey,
     ADMIN_DISCORD_IDS: community.adminId,
   };
@@ -208,23 +207,23 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     if (options.channels !== false && options.migrate !== false) {
       const box = new SecretBox({ id: 'k1', key: secretKey });
       const now = new Date().toISOString();
-      // The community's admin agreed to the mirror before the suite starts, so what they write in the scenarios is kept like
-      // any agreed person's. The visitor has not: their words are withheld until a scenario has them press the button.
+      // The community's admin agreed through /consent before the suite starts, so their replies to agents are relayed.
+      // The visitor has not: nothing they write reaches agents until a scenario has them agree.
       await db
-        .prepare("INSERT INTO consents (discord_user_id, guild_id, method, notice_version, granted_at) VALUES (?, ?, 'button', 'e2e', ?)")
+        .prepare("INSERT INTO consents (discord_user_id, guild_id, method, notice_version, granted_at) VALUES (?, ?, 'command', 'e2e', ?)")
         .bind(community.adminId, community.guildId, new Date(Date.now() - 3_600_000).toISOString())
         .run();
       const rows = [
-        { key: 'lounge', type: 'text', access: 'post', mirror: 1 },
-        { key: 'labBench', type: 'forum', access: 'post_new_threads', mirror: 1 },
-        { key: 'showAndTell', type: 'media', access: 'post_new_threads', mirror: 0 },
-        { key: 'announcements', type: 'announcement', access: 'read_only', mirror: 1 },
+        { key: 'lounge', type: 'text', access: 'post' },
+        { key: 'labBench', type: 'forum', access: 'post_new_threads' },
+        { key: 'showAndTell', type: 'media', access: 'post_new_threads' },
+        { key: 'announcements', type: 'announcement', access: 'read_only' },
       ] as const;
       for (const r of rows) {
         const c = community.channels.find((x) => x.key === r.key)!;
         await db
           .prepare(
-            'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, public_mirror, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           )
           .bind(
             c.id,
@@ -233,7 +232,6 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
             r.type,
             r.access,
             60,
-            r.mirror,
             await box.seal(c.webhook.url, `channels.webhook:${c.id}`),
             c.webhook.id,
             JSON.stringify((fake.world.channel(c.id).available_tags ?? []).map((t) => ({ id: t.id, name: t.name, moderated: t.moderated }))),

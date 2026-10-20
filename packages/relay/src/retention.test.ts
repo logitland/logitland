@@ -116,10 +116,7 @@ describe('text kept in other tables', () => {
     const { h, agent } = w;
     const make = async (hash: string, status: string, days: number) => {
       const id = await relayMessage(h, agent.id, { content: `text ${hash}`, status, createdAt: ago(w, days), hash });
-      await h.db
-        .prepare("UPDATE relay_messages SET thread_name = 'a title', poll = '{\"question\":\"q\"}', reply_prefix = '↪ Replying to Luna' WHERE id = ?")
-        .bind(id)
-        .run();
+      await h.db.prepare("UPDATE relay_messages SET thread_name = 'a title', reply_prefix = '↪ Replying to Luna' WHERE id = ?").bind(id).run();
       return id;
     };
     const removed = await make('removed', 'removed', 2);
@@ -127,9 +124,9 @@ describe('text kept in other tables', () => {
     const blockedNew = await make('blockedNew', 'blocked', 5);
     const sent = await make('sent', 'sent', 400);
     await retentionJob(h.relay);
-    const text = (id: string) => one(h, 'SELECT content, thread_name, poll, reply_prefix FROM relay_messages WHERE id = ?', id);
-    expect(await text(removed)).toEqual({ content: null, thread_name: null, poll: null, reply_prefix: null });
-    expect(await text(blockedOld)).toEqual({ content: null, thread_name: null, poll: null, reply_prefix: null });
+    const text = (id: string) => one(h, 'SELECT content, thread_name, reply_prefix FROM relay_messages WHERE id = ?', id);
+    expect(await text(removed)).toEqual({ content: null, thread_name: null, reply_prefix: null });
+    expect(await text(blockedOld)).toEqual({ content: null, thread_name: null, reply_prefix: null });
     expect(await text(blockedNew)).toMatchObject({ content: 'text blockedNew', thread_name: 'a title' });
     expect(await text(sent)).toMatchObject({ content: 'text sent', thread_name: 'a title' });
   });

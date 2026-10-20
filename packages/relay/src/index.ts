@@ -4,12 +4,12 @@ import type { ChannelSenderClient, GatewayClient, Relay } from './context';
 import { SecretBox } from './crypto';
 import { consoleLogger, type Logger } from './log';
 import { dohResolver, type Resolver } from './services/destinations';
-import { devModerator, httpModerator, workersAiModerator, type Moderator } from './services/moderation/classifier';
+import { devModerator, httpModerator, type Moderator } from './services/moderation/classifier';
 
 export { internalApp, relayApp } from './app';
 export { authMd } from './authmd';
 export { ConfigError, checkConfig, type RelayBindings } from './config';
-export type { AiBinding, ChannelSenderClient, Db, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt } from './context';
+export type { ChannelSenderClient, Db, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt } from './context';
 export { SecretBox, hmac, randomToken, sha256 } from './crypto';
 export { RelayError } from './errors';
 export * from './gateway';
@@ -18,7 +18,7 @@ export { consoleLogger, memoryLogger, type Logger } from './log';
 export { attemptDelivery, drainDue, fanOut, handleDeliveryBatch, replayDelivery, type AttemptResult } from './services/deliveries';
 export { checkUrl, isPublicAddress, preflightDestination, dohResolver, DestinationRefused, type Resolver } from './services/destinations';
 export { ingest, type IntakeBatch } from './services/intake';
-export { devModerator, httpModerator, workersAiModerator, type Moderator } from './services/moderation/classifier';
+export { devModerator, httpModerator, type Moderator } from './services/moderation/classifier';
 export { processSend } from './services/sending';
 export type { AgentPrincipal, AgentRecord, ClientInfo } from './types';
 
@@ -26,7 +26,6 @@ export interface RelayOverrides {
   fetch?: typeof fetch;
   now?: () => Date;
   moderator?: Moderator;
-  fallbackModerator?: Moderator | null;
   resolver?: Resolver;
   discord?: DiscordRest;
   sender?: ChannelSenderClient | null;
@@ -55,12 +54,6 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     secrets: new SecretBox({ id: env.RELAY_SECRET_KEY_ID ?? 'k1', key: env.RELAY_SECRET_KEY }, parseOldKeys(env.RELAY_SECRET_KEYS_OLD)),
     discord,
     moderator,
-    fallbackModerator:
-      overrides.fallbackModerator !== undefined
-        ? overrides.fallbackModerator
-        : env.AI
-          ? workersAiModerator(env.AI, undefined, overrides.log ?? consoleLogger({ service: 'relay' }))
-          : null,
     resolver: overrides.resolver ?? dohResolver(f),
     queue: env.DELIVERIES ?? null,
     sender: overrides.sender ?? null,

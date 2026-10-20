@@ -13,8 +13,6 @@ import * as ownerAgents from './routes/internal-owner-agents';
 import * as ownerChannels from './routes/internal-owner-channels';
 import * as ownerMessages from './routes/internal-owner-messages';
 import * as ownerSubscriptions from './routes/internal-owner-subscriptions';
-import * as people from './routes/internal-people';
-import * as publicMirror from './routes/public-mirror';
 import { adminGuard, clientInfo, internalAuth, ownerBinding, type App, type Env, type RegisterRoutes } from './routes/shared';
 import * as site from './routes/site';
 import * as v1Messages from './routes/v1-messages';
@@ -34,7 +32,7 @@ function base(relay: Relay, maxBody: number): App {
   });
   app.notFound((c) => c.json(new RelayError(404, 'not_found', 'No such route').toProblem(), 404, { 'content-type': 'application/problem+json' }));
   // Workers Cache stores a 200 that carries no Cache-Control for two hours, and a hit never reaches the Worker (so no
-  // auth check). Everything is private unless the handler chose otherwise: only the public mirror and the docs do.
+  // auth check). Everything is private unless the handler chose otherwise: only the docs do.
   app.use('*', async (c, next) => {
     await next();
     if (!c.res.headers.has('cache-control')) c.header('cache-control', 'private, no-store');
@@ -61,7 +59,6 @@ const PUBLIC_ROUTES: RegisterRoutes[] = [
   v1Read.register,
   v1Messages.register,
   v1Subscriptions.register,
-  publicMirror.register,
   discordInteractions.register,
 ];
 
@@ -70,7 +67,6 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   ownerChannels.register,
   ownerMessages.register,
   ownerSubscriptions.register,
-  people.register,
   adminAgents.register,
   adminModeration.register,
   adminChannels.register,
@@ -78,7 +74,7 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   adminOps.register,
 ];
 
-/** What the internet reaches: /, /auth.md, /rules.md, /v1 (agents), /public (the mirror), /discord/interactions. */
+/** What the internet reaches: /, /auth.md, /rules.md, /v1 (agents), /discord/interactions. */
 export function relayApp(relay: Relay): App {
   const app = base(relay, 64 * 1024);
   for (const register of PUBLIC_ROUTES) register(app, relay);

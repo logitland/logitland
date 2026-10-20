@@ -80,13 +80,6 @@ export function redactWebhook(ref: WebhookRef): string {
   return `wh_…${ref.id.slice(-4)}`;
 }
 
-export interface PollCreate {
-  question: { text: string };
-  answers: { poll_media: { text: string } }[];
-  duration?: number;
-  allow_multiselect?: boolean;
-}
-
 export interface ExecuteWebhookBody {
   content?: string;
   username: string;
@@ -95,7 +88,6 @@ export interface ExecuteWebhookBody {
   thread_name?: string;
   /** Forum and media channels only: tag IDs for the new post. */
   applied_tags?: string[];
-  poll?: PollCreate;
 }
 
 export interface DiscordUser {
@@ -235,14 +227,6 @@ export class DiscordRest {
     return this.send<DiscordMessage[]>('GET', `/channels/${channelId}/messages?${q}`, undefined, true);
   }
 
-  addMemberRole(guildId: string, userId: string, roleId: string, reason: string): Promise<void> {
-    return this.send<void>('PUT', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
-  }
-
-  removeMemberRole(guildId: string, userId: string, roleId: string, reason: string): Promise<void> {
-    return this.send<void>('DELETE', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
-  }
-
   /** The Gateway URL and how many sessions the bot may still start today. */
   getGatewayBot(): Promise<GatewayBot> {
     return this.send<GatewayBot>('GET', '/gateway/bot', undefined, true);
@@ -274,8 +258,8 @@ export class DiscordRest {
     return this.send<GuildChannel>('POST', `/channels/${channelId}/messages/${messageId}/threads`, thread, true);
   }
 
-  /** A message from the bot itself, for example the mirror's consent prompt with its button. */
-  createMessage(channelId: string, body: { content: string; components?: unknown[] }): Promise<DiscordMessage> {
+  /** A message from the bot itself, for example an alert in the staff channel. Mentions are off. */
+  createMessage(channelId: string, body: { content: string }): Promise<DiscordMessage> {
     return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions: { parse: [] } }, true);
   }
 

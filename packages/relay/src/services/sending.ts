@@ -7,7 +7,7 @@ import { getAgent } from './identity';
 import { recordAgentPost, type AgentPost } from './intake';
 import { logStmt } from './moderation/log';
 import { STUCK_AFTER_MS, VERIFY_HOW, isOnProbation, isVerified } from './moderation/policy';
-import { UNCERTAIN_REASON, discordContent, getRow, parsePoll, type MessageRow } from './moderation/rows';
+import { UNCERTAIN_REASON, UNCONFIRMED_REASON, discordContent, getRow, type MessageRow } from './moderation/rows';
 import { isForum } from './moderation/target';
 import { getSettings, type Settings } from './settings';
 
@@ -16,6 +16,8 @@ import { getSettings, type Settings } from './settings';
 
 /** How many rows one sweep touches per statement, so a backlog is worked off over several runs instead of in one. */
 const SWEEP_BATCH = 100;
+/** An uncertain send the Gateway hasn't confirmed by then is called failed (decided with Mia, #30). */
+const UNCONFIRMED_AFTER_MS = 10 * 60_000;
 
 export interface SendResult {
   /** The message is still queued (Discord said to wait); leave it at the head of the line. */
@@ -58,10 +60,9 @@ export async function dispatch(relay: Relay, row: { id: string; channel_id: stri
   }
 }
 
-/** What goes to Discord: the text under its reply line, a poll in Discord's shape, and for a new forum post its title and tags. */
+/** What goes to Discord: the text under its reply line, and for a new forum post its title and tags. */
 function webhookBody(row: MessageRow, agent: { name: string; tier: string; avatar_url: string | null }, forum: boolean): ExecuteWebhookBody {
   const text = discordContent(row);
-  const poll = parsePoll(row);
   const tags = row.tag_ids ? (JSON.parse(row.tag_ids) as string[]) : [];
   return {
     username: agent.name,
@@ -70,22 +71,11 @@ function webhookBody(row: MessageRow, agent: { name: string; tier: string; avata
     ...(text ? { content: text } : {}),
     ...(forum && row.thread_name ? { thread_name: row.thread_name } : {}),
     ...(forum && tags.length ? { applied_tags: tags } : {}),
-    ...(poll
-      ? {
-          poll: {
-            question: { text: poll.question },
-            answers: poll.answers.map((a) => ({ poll_media: { text: a } })),
-            duration: poll.duration_hours,
-            allow_multiselect: poll.allow_multiselect,
-          },
-        }
-      : {}),
   };
 }
 
-/** What intake is told about the post: the agent's own words (the reply line is carried as `replyTo`) and the poll. */
+/** What intake is told about the post: what Discord shows (the reply is carried as `replyTo` too). */
 function recordedPost(row: MessageRow, agent: { id: string; name: string }, sent: { id: string; at: string; threadId: string | null }): AgentPost {
-  const poll = parsePoll(row);
   return {
     discordMessageId: sent.id,
     channelId: row.channel_id,
@@ -97,14 +87,6 @@ function recordedPost(row: MessageRow, agent: { id: string; name: string }, sent
     relayMessageId: row.id,
     createdAt: sent.at,
     replyTo: row.reply_to,
-    poll: poll
-      ? {
-          question: { text: poll.question },
-          answers: poll.answers.map((text, i) => ({ answer_id: i + 1, poll_media: { text } })),
-          expiry: new Date(Date.parse(sent.at) + poll.duration_hours * 3_600_000).toISOString(),
-          allow_multiselect: poll.allow_multiselect,
-        }
-      : null,
   };
 }
 
@@ -276,13 +258,20 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
 /**
  * Cron. A request that died mid-way leaves rows behind:
  * `moderating` goes back through review (held for an automatic re-check), `sending` becomes `uncertain` (it may have posted),
- * and `queued` is handed to the sender again (the sender ignores IDs it already has).
+ * and `queued` is handed to the sender again (the sender ignores IDs it already has). A send that stays `uncertain` for
+ * UNCONFIRMED_AFTER_MS without the Gateway showing it becomes `failed`: the agent decides whether to send it again.
  */
 export async function sweepStuckJob(relay: Relay): Promise<number> {
   const now = relay.now();
   const at = iso(now);
   const cutoff = iso(new Date(now.getTime() - STUCK_AFTER_MS));
   // Each statement takes at most SWEEP_BATCH rows (the rest wait for the next run), so a backlog can't make one cron run unbounded.
+  const unconfirmed = await relay.db
+    .prepare(
+      "UPDATE relay_messages SET status = 'failed', status_reason = ?, updated_at = ? WHERE id IN (SELECT id FROM relay_messages WHERE status = 'uncertain' AND updated_at < ? ORDER BY updated_at LIMIT ?) AND status = 'uncertain' RETURNING id",
+    )
+    .bind(UNCONFIRMED_REASON, at, iso(new Date(now.getTime() - UNCONFIRMED_AFTER_MS)), SWEEP_BATCH)
+    .all<{ id: string }>();
   const sending = await relay.db
     .prepare(
       "UPDATE relay_messages SET status = 'uncertain', status_reason = ?, updated_at = ? WHERE id IN (SELECT id FROM relay_messages WHERE status = 'sending' AND updated_at < ? ORDER BY updated_at LIMIT ?) AND status = 'sending' RETURNING id",
@@ -314,5 +303,6 @@ export async function sweepStuckJob(relay: Relay): Promise<number> {
     .all<{ id: string; channel_id: string }>();
   for (const q of queued.results) await dispatch(relay, q);
   if (sending.results.length) relay.log.warn('send.swept_uncertain', { count: sending.results.length });
-  return sending.results.length + moderating.results.length + queued.results.length;
+  if (unconfirmed.results.length) relay.log.warn('send.unconfirmed_failed', { count: unconfirmed.results.length });
+  return unconfirmed.results.length + sending.results.length + moderating.results.length + queued.results.length;
 }

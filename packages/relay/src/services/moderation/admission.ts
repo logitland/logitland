@@ -130,30 +130,28 @@ export interface Duplicate {
  * what a moderator took down. The same text from three different agents inside ten minutes is held, in case it is copied or
  * coordinated, but only when it is long enough (a short "thanks" is what many agents say). Texts are compared without any reply
  * line, so the same words answering different messages are still the same words. Failed messages never count, and a message the
- * same agent had blocked doesn't make its resend a repeat. A message its author deleted is not a repeat either. A poll is a repeat
- * when the same agent sends the same poll to the channel; polls aren't compared across agents.
+ * same agent had blocked doesn't make its resend a repeat. A message its author deleted is not a repeat either.
  */
 export async function findDuplicate(
   relay: Relay,
-  input: { agentId: string; channelId: string; textHash: string; excludeId: string | null; length: number; poll: string | null },
+  input: { agentId: string; channelId: string; textHash: string; excludeId: string | null; length: number },
 ): Promise<Duplicate | null> {
   const since = iso(new Date(relay.now().getTime() - DUPLICATE_WINDOW_MS));
   const exclude = input.excludeId ?? '';
-  const sameAs = input.poll ? 'poll = ?' : 'text_hash = ? AND poll IS NULL';
   const same = await relay.db
     .prepare(
-      `SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND ${sameAs} AND created_at >= ? AND id != ? AND status IN ('moderating', 'held', 'queued', 'sending', 'sent', 'uncertain') LIMIT 1`,
+      "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND created_at >= ? AND id != ? AND status IN ('moderating', 'held', 'queued', 'sending', 'sent', 'uncertain') LIMIT 1",
     )
-    .bind(input.agentId, input.channelId, input.poll ?? input.textHash, since, exclude)
+    .bind(input.agentId, input.channelId, input.textHash, since, exclude)
     .first();
   if (same) {
     return {
       verdict: 'block',
       policy: 'duplicate',
-      reason: `You already sent this same ${input.poll ? 'poll' : 'message'} in this channel in the last 10 minutes. Don’t repeat yourself; wait, or say something new. It was not posted.`,
+      reason:
+        'You already sent this same message in this channel in the last 10 minutes. Don’t repeat yourself; wait, or say something new. It was not posted.',
     };
   }
-  if (input.poll) return null;
   const removedSince = iso(new Date(relay.now().getTime() - REMOVED_REPEAT_MS));
   const removed = await relay.db
     .prepare(

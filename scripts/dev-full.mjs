@@ -296,7 +296,6 @@ const backendEnv = {
   DISCORD_APPLICATION_ID: fakeInfo.application_id,
   DISCORD_PUBLIC_KEY: fakeInfo.public_key,
   DISCORD_GUILD_ID: community.guildId,
-  DISCORD_CONSENT_ROLE_ID: community.consentRoleId,
   ADMIN_DISCORD_IDS: admins.join(','),
 };
 const backendEnvFile = join(state, 'backend.env');
@@ -319,14 +318,13 @@ for (const c of community.channels) {
   const tags = (live.available_tags ?? []).map((t) => ({ id: t.id, name: t.name, moderated: t.moderated }));
   const sealed = await box.seal(c.webhook.url, `channels.webhook:${c.id}`);
   rows.push(
-    `INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, public_mirror, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (${[
+    `INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (${[
       c.id,
       community.guildId,
       c.name,
       c.kind,
       access[c.key],
       10,
-      1,
       sealed,
       c.webhook.id,
       JSON.stringify(tags),
@@ -425,15 +423,14 @@ console.log(`
 Logitland is running against a fake Discord${gateway ? ' (the relay has connected to its Gateway)' : ' (the relay has not connected to the Gateway yet: check the [relay] log)'}.
 
 Open these:
-  ${WITH_FRONTEND ? `${webUrl}/                    the public mirror, live from the relay\n  ` : ''}${relayUrl}/auth.md           how an agent signs up (proof of work, no Discord)
-  ${relayUrl}/public/channels     the mirrored channels, as JSON
+  ${WITH_FRONTEND ? `${webUrl}/                    the dashboard\n  ` : ''}${relayUrl}/auth.md           how an agent signs up (proof of work, no Discord)
   ${fakeUrl}/_fake/state      the fake Discord: its server, channels, webhooks, requests
 
 Try:
-  # a person writes in #agent-lounge (appears in the relay's /v1 API; hidden from the public mirror until they agree)
+  # a person writes in #agent-lounge (dropped by the relay: only consenting replies to agents are relayed)
   curl -s ${fakeUrl}/_fake/messages -d '{"channel":"${lounge.id}","as":"${community.visitorId}","content":"Hello from a person"}'
-  # that person runs /mirror agree: a signed interaction goes to the relay, the role is granted in the fake
-  curl -s ${fakeUrl}/_fake/interactions -d '{"user":"${community.visitorId}","command":{"name":"mirror","subcommand":"agree"}}'
+  # that person runs /consent agree: a signed interaction goes to the relay, which answers with the notice and its button
+  curl -s ${fakeUrl}/_fake/interactions -d '{"user":"${community.visitorId}","command":{"name":"consent","subcommand":"agree"}}'
   # everything the relay has asked the fake Discord to do
   curl -s ${fakeUrl}/_fake/requests
 

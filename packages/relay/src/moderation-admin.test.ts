@@ -88,10 +88,7 @@ describe('the held queue', () => {
   });
 
   it('includes outage holds, marked as such', async () => {
-    const { h, a, api } = await setup({
-      moderator: decide(() => ({ verdict: null, unavailable: true, reason: 'down' }) as ModerationResult),
-      fallbackModerator: null,
-    });
+    const { h, a, api } = await setup({ moderator: decide(() => ({ verdict: null, unavailable: true, reason: 'down' }) as ModerationResult) });
     await post(h, a, 'nothing can judge this');
     const page = await json(await api('GET', '/internal/admin/moderation/queue'));
     expect(page.items[0]).toMatchObject({ held_kind: 'outage', policy_code: 'outage', review_attempts: 0 });
@@ -784,65 +781,6 @@ describe('stats', () => {
     expect(month.total).toBe(week.total + 1);
     expect(week.total).toBe(day.total + 1);
     expect(stats.queue).toEqual({ size: 1, oldest_age_seconds: 120 });
-  });
-});
-
-describe('admin resolution of uncertain messages', () => {
-  const ok = () => Response.json({ id: '300000000000000909', channel_id: LOUNGE, content: 'x', timestamp: new Date().toISOString(), edited_timestamp: null });
-
-  async function uncertain(h: Harness, a: { key: string }, text = 'did this land?') {
-    h.setDiscord(() => new Response('bad gateway', { status: 502 }));
-    const msg = await json(await post(h, a, text));
-    expect(msg.status).toBe('uncertain');
-    h.setDiscord(async () => ok());
-    return msg;
-  }
-
-  it('resends the message of an agent that has no owner, and really sends it', async () => {
-    const { h, a, admin, api } = await setup();
-    const msg = await uncertain(h, a);
-    expect(h.discordCalls).toHaveLength(1);
-    const res = await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'resend' });
-    expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ id: msg.id, status: 'sent', discord_message_id: '300000000000000909', agent_name: a.name, status_reason: null });
-    expect(h.discordCalls).toHaveLength(2);
-    expect((await audits(h, 'message.resent'))[0]).toMatchObject({ actor_type: 'admin', actor_id: admin.id, target_id: msg.id });
-  });
-
-  it('accepts it as sent without sending anything', async () => {
-    const { h, a, admin, api } = await setup();
-    const msg = await uncertain(h, a);
-    const res = await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'accept' });
-    expect(await json(res)).toMatchObject({ status: 'sent', status_reason: 'Accepted by an admin as sent', discord_message_id: null });
-    expect(h.discordCalls).toHaveLength(1);
-    expect((await audits(h, 'message.accepted'))[0]).toMatchObject({ actor_type: 'admin', actor_id: admin.id });
-  });
-
-  it('works for an owned agent too, where the owner can decide as well', async () => {
-    const { h, api } = await setup();
-    const owner = await seedOwner(h.relay, '200000000000000007', 'owner');
-    const owned = await seedAgent(h.relay, { tier: 'claimed', ownerId: owner.id });
-    const msg = await uncertain(h, owned, 'an owned agent’s message');
-    expect((await json(await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'accept' }))).status).toBe('sent');
-  });
-
-  it('decides once, and only for messages waiting on Discord', async () => {
-    const { h, a, api } = await setup();
-    const msg = await uncertain(h, a);
-    expect((await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'accept' })).status).toBe(200);
-    expect((await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'resend' })).status).toBe(409);
-    const sent = await json(await post(h, a, 'plainly sent'));
-    expect((await api('POST', `/internal/admin/messages/${sent.id}/resolve`, { action: 'resend' })).status).toBe(409);
-    expect((await api('POST', '/internal/admin/messages/msg_NOSUCHMESSAGE0/resolve', { action: 'accept' })).status).toBe(404);
-    expect((await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'delete' })).status).toBe(400);
-  });
-
-  it('is for admins only', async () => {
-    const { h, a } = await setup();
-    const msg = await uncertain(h, a);
-    const person = await seedOwner(h.relay, '200000000000000002', 'person');
-    const res = await h.internal('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'accept' }, { 'x-logitland-owner': person.id });
-    expect(res.status).toBe(403);
   });
 });
 

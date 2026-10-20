@@ -1,6 +1,7 @@
 import { Permission } from '@logitland/discord';
 import type { SetupCheck } from '@logitland/contracts';
 import type { Moderator } from './services/moderation/classifier';
+import { CONSENT_COMMAND } from './services/interactions';
 import { ADMIN_DISCORD, GUILD, LOUNGE, seedOwner, type Harness } from './testing';
 
 // A scriptable Discord for the setup tests: a server with roles, channels, commands and webhooks that the
@@ -8,14 +9,11 @@ import { ADMIN_DISCORD, GUILD, LOUNGE, seedOwner, type Harness } from './testing
 
 export const BOT = '900000000000000001';
 export const APP = '400000000000000001';
-export const CONSENT_ROLE = '500000000000000001';
 export const BOT_ROLE = '500000000000000002';
 export const EXISTING_HOOK = '600000000000000001';
 export const NEW_HOOK = '600000000000000777';
-export const MANAGE_ROLES = 1n << 28n;
-export const CREATE_PRIVATE_THREADS = 1n << 36n;
 
-export const P = { ...Permission, MANAGE_ROLES, CREATE_PRIVATE_THREADS };
+export const P = Permission;
 export const bits = (...flags: bigint[]) => String(flags.reduce((a, b) => a | b, 0n));
 
 export interface RoleSpec {
@@ -56,16 +54,6 @@ export interface World {
   messages: number;
 }
 
-/**
- * How a channel should be set up: @everyone can't send or start threads, the consent role can send, and the bot's role gets
- * its own allow (a role's server-wide permission doesn't survive an @everyone deny in the channel).
- */
-export const enforced = (): OverwriteSpec[] => [
-  { id: GUILD, type: 0, allow: '0', deny: bits(P.SEND_MESSAGES, P.SEND_MESSAGES_IN_THREADS, P.CREATE_PUBLIC_THREADS, P.CREATE_PRIVATE_THREADS) },
-  { id: CONSENT_ROLE, type: 0, allow: bits(P.SEND_MESSAGES, P.SEND_MESSAGES_IN_THREADS), deny: '0' },
-  { id: BOT_ROLE, type: 0, allow: bits(P.SEND_MESSAGES, P.SEND_MESSAGES_IN_THREADS, P.CREATE_PUBLIC_THREADS), deny: '0' },
-];
-
 export const deny = (id: string, ...flags: bigint[]): OverwriteSpec => ({ id, type: 0, allow: '0', deny: bits(...flags) });
 export const allow = (id: string, ...flags: bigint[]): OverwriteSpec => ({ id, type: 0, allow: bits(...flags), deny: '0' });
 
@@ -95,31 +83,19 @@ export function goodWorld(): World {
         id: GUILD,
         name: '@everyone',
         position: 0,
-        permissions: bits(
-          P.VIEW_CHANNEL,
-          P.SEND_MESSAGES,
-          P.READ_MESSAGE_HISTORY,
-          P.SEND_MESSAGES_IN_THREADS,
-          P.CREATE_PUBLIC_THREADS,
-          P.CREATE_PRIVATE_THREADS,
-        ),
+        permissions: bits(P.VIEW_CHANNEL, P.SEND_MESSAGES, P.READ_MESSAGE_HISTORY, P.SEND_MESSAGES_IN_THREADS, P.CREATE_PUBLIC_THREADS),
       },
-      { id: CONSENT_ROLE, name: 'Chatter', position: 1, permissions: '0' },
-      { id: BOT_ROLE, name: 'Logitland Relay', position: 5, permissions: bits(P.MANAGE_ROLES, P.MANAGE_WEBHOOKS) },
+      { id: BOT_ROLE, name: 'Logitland Relay', position: 5, permissions: bits(P.MANAGE_WEBHOOKS) },
     ],
     botRoles: [BOT_ROLE],
-    channels: [{ id: LOUNGE, name: 'lounge', type: 0, position: 0, permission_overwrites: enforced() }],
+    channels: [{ id: LOUNGE, name: 'lounge', type: 0, position: 0, permission_overwrites: [] }],
     commands: [
       {
         id: '810000000000000001',
-        name: 'mirror',
-        description: 'Join or leave the Logitland public mirror',
-        type: 1,
-        options: [
-          { type: 1, name: 'agree' },
-          { type: 1, name: 'leave' },
-          { type: 1, name: 'status' },
-        ],
+        name: CONSENT_COMMAND.name,
+        description: CONSENT_COMMAND.description,
+        type: CONSENT_COMMAND.type,
+        options: CONSENT_COMMAND.options.map((o) => ({ type: o.type, name: o.name })),
       },
     ],
     webhooks: { [EXISTING_HOOK]: LOUNGE },

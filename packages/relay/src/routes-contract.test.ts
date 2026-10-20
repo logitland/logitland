@@ -15,7 +15,7 @@ describe('route lists', () => {
   const internalRoutes = registered(internalApp(relay));
 
   it('are compared against routes that exist', () => {
-    expect(publicRoutes).toContain('GET /public/channels');
+    expect(publicRoutes).toContain('GET /v1/channels');
     expect(internalRoutes).toContain('GET /internal/admin/health');
   });
 

@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEV } from '../../../../packages/discord-fake/src/index.ts';
 import { E2E, eventually, startStack, type Stack } from './harness.ts';
 
-// The admin's setup path: the relay reads Discord's channels, creates webhooks, registers the /mirror command, posts the
-// consent message and answers its button. Every REST call the relay makes in setup goes to the fake.
+// The admin's setup path: the relay reads Discord's channels, creates webhooks and registers the /consent command. Every
+// REST call the relay makes in setup goes to the fake.
 describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
   let s: Stack;
   let admin: string;
@@ -25,7 +25,7 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
     expect(blocked).toEqual([]);
   });
 
-  it('lists the server’s channels with what the bot may do and whether chatting needs the consent role', async () => {
+  it('lists the server’s channels with what the bot may do', async () => {
     const listing = await s.dashboard('GET', '/internal/admin/discord/channels', { owner: admin });
     expect(listing.status).toBe(200);
     expect(listing.body.guild_id).toBe(s.community.guildId);
@@ -35,7 +35,6 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
       id: s.channels.lounge,
       type: 'text',
       relay: null,
-      consent_enforced: true,
       bot: { can_view: true, can_manage_webhooks: true, can_create_threads: true },
     });
     expect(byName['lab-bench']).toMatchObject({ type: 'forum', available_tags: [{ name: 'idea', moderated: false }, { name: 'question' }] });
@@ -52,7 +51,7 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
       webhook_created: true,
-      channel: { id: s.channels.lounge, name: 'agent-lounge', type: 'text', agent_access: 'post', public_mirror: true, has_webhook: true },
+      channel: { id: s.channels.lounge, name: 'agent-lounge', type: 'text', agent_access: 'post', has_webhook: true },
     });
     const created = s.fake.requestsTo('channel.webhooks.create');
     expect(created).toHaveLength(1);
@@ -74,7 +73,7 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
     expect(forum.body.tags.map((t: { name: string }) => t.name)).toEqual(['idea', 'question']);
     const news = await s.dashboard('POST', `/internal/admin/discord/channels/${s.channels.announcements}/relay`, {
       owner: admin,
-      body: { agent_access: 'read_only', public_mirror: true },
+      body: { agent_access: 'read_only' },
     });
     expect(news.status).toBe(201);
     expect(news.body.webhook_created).toBe(true);
@@ -84,7 +83,7 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
     s.fake.reset();
     const patched = await s.dashboard('PATCH', `/internal/admin/channels/${s.channels.media}`, {
       owner: admin,
-      body: { agent_access: 'post_new_threads', public_mirror: false, webhook_url: hook.url },
+      body: { agent_access: 'post_new_threads', webhook_url: hook.url },
     });
     expect(patched.status).toBe(201);
     expect(s.fake.requestsTo('webhook.get')[0]).toMatchObject({ params: { id: hook.id, token: hook.token }, status: 200 });
@@ -102,55 +101,15 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
     );
   });
 
-  it('registers the /mirror command in the server', async () => {
+  it('registers the /consent command in the server', async () => {
     s.fake.reset();
     const res = await s.dashboard('POST', '/internal/admin/discord/commands', { owner: admin });
     expect(res.status).toBe(200);
-    expect(res.body.commands).toEqual([expect.objectContaining({ name: 'mirror', subcommands: ['agree', 'leave', 'status'] })]);
+    expect(res.body.commands).toEqual([expect.objectContaining({ name: 'consent', subcommands: ['agree', 'withdraw', 'status'] })]);
     const [put] = s.fake.requestsTo('commands.put');
     expect(put).toMatchObject({ params: { app: s.fake.application.id, guild: s.community.guildId }, status: 200 });
-    expect(put!.body).toEqual([expect.objectContaining({ name: 'mirror', type: 1, options: expect.any(Array) })]);
-    expect(s.fake.world.commands.get(s.community.guildId)!.map((c) => c.name)).toEqual(['mirror']);
-  });
-
-  it('posts the consent notice, and the button on it grants the role once it is pressed', async () => {
-    s.fake.reset();
-    const res = await s.dashboard('POST', '/internal/admin/discord/consent-message', { owner: admin, body: { channel_id: s.channels.lounge } });
-    expect(res.status).toBe(201);
-    const message = s.fake.messages(s.channels.lounge).find((m) => m.id === res.body.message_id)!;
-    expect(message.author.id).toBe(s.fake.application.id);
-    expect(message.content).toContain('The Logitland public mirror');
-    expect(message.content.length).toBeLessThanOrEqual(2000);
-    expect(message.content).toContain('/privacy');
-    expect(message.content).toContain('Cloudflare Workers AI');
-    expect(message.components).toEqual([
-      { type: 1, components: [{ type: 2, style: 1, label: expect.any(String), custom_id: expect.stringMatching(/^mirror_agree:\d{4}-\d{2}-\d{2}$/) }] },
-    ]);
-    const agreeId = (message.components as unknown as { components: { custom_id: string }[] }[])[0]!.components[0]!.custom_id;
-    // It can't go in a forum.
-    expect((await s.dashboard('POST', '/internal/admin/discord/consent-message', { owner: admin, body: { channel_id: s.channels.forum } })).status).toBe(422);
-
-    // Nothing is agreed until the button is pressed, and the press is answered with a deferral: the role call can be slow.
-    expect(await s.sql('SELECT 1 FROM consents WHERE discord_user_id = ?', DEV.visitor)).toEqual([]);
-    const click = await s.fake.interact({ user: DEV.visitor, button: { customId: agreeId, messageId: message.id }, channelId: s.channels.lounge });
-    expect(click.status).toBe(200);
-    expect(click.body).toEqual({ type: 5, data: { flags: 64 } });
-    await eventually(() => click.interaction.followUps.length > 0, { what: 'the follow-up to the button' });
-    expect(click.interaction.followUps[0]).toMatchObject({ kind: 'original', content: expect.stringContaining('You agreed'), flags: 64 });
-    expect(s.fake.world.guild(s.community.guildId).members.get(DEV.visitor)!.roles).toEqual([s.community.consentRoleId]);
-    expect(
-      (
-        await s.sql<{ method: string; notice_version: string; interaction_id: string }>(
-          'SELECT method, notice_version, interaction_id FROM consents WHERE discord_user_id = ?',
-          DEV.visitor,
-        )
-      )[0],
-    ).toEqual({
-      method: 'button',
-      notice_version: '2026-10-19',
-      interaction_id: click.interaction.id,
-    });
-    expect(await s.sql('SELECT action, method FROM consent_history WHERE discord_user_id = ?', DEV.visitor)).toEqual([{ action: 'granted', method: 'button' }]);
+    expect(put!.body).toEqual([expect.objectContaining({ name: 'consent', type: 1, options: expect.any(Array) })]);
+    expect(s.fake.world.commands.get(s.community.guildId)!.map((c) => c.name)).toEqual(['consent']);
   });
 
   it('shows a clean checklist once the Gateway has connected, and an agent can post through a webhook the relay made', async () => {
