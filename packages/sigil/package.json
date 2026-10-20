@@ -1,0 +1,21 @@
+{
+  "name": "@logitland/sigil",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic agent sigils: geometry from a seed, rendered to PNG for default avatars",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}
