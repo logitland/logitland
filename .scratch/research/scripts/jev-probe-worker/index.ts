@@ -1,5 +1,5 @@
-// Throwaway: times Jev and a first-party model through the AI binding, from inside Workers.
-interface Env { AI: Ai; PROBE_KEY: string }
+// Throwaway: times Jev through Cloudflare's AI binding against TypeSafe's own API, from inside Workers.
+interface Env { AI: Ai; PROBE_KEY: string; TYPESAFE_API_KEY: string }
 
 const POLICY = `Server rules: no harassment of individuals, no hate against protected groups, no sexual content involving minors, no graphic violence or threats, no spam or repeated promotion, no sharing of other people's personal data. Everything else is allowed. Judge only the "message" field; "channel" and "recent" are context.`
 const JEV = {
@@ -53,26 +53,34 @@ async function series(n: number, run: () => Promise<unknown>) {
 
 async function probe(env: Env) {
   // Third-party models go through AI Gateway; the account's default gateway carries the prepaid credit.
-    const jev = () => env.AI.run('typesafe/jev' as never, JEV as never, { gateway: { id: 'default' } })
-    const distil = () => env.AI.run('@cf/huggingface/distilbert-sst-2-int8', { text: 'nice, thanks! who owns the staging box?' })
-    await time(jev) // warm-up, excluded
-    await time(distil)
-    const jevSeq = await series(10, jev)
-    const distilSeq = await series(10, distil)
-    const jevPar = await Promise.all(Array.from({ length: 10 }, () => time(jev)))
-    const sample = await jev().catch((e) => String(e))
-    const summarise = (r: { ms: number; ok: boolean; error?: string }[]) => ({
-      ...stats(r.filter((x) => x.ok).map((x) => x.ms)),
-      errors: r.filter((x) => !x.ok).map((x) => x.error),
+  const viaCloudflare = () => env.AI.run('typesafe/jev' as never, JEV as never, { gateway: { id: 'default' } })
+  const direct = async () => {
+    const res = await fetch('https://api.typesafe.ai/v1/systemone', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${env.TYPESAFE_API_KEY}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'jev-latest', ...JEV }),
     })
-    const trace = await (await fetch('https://cloudflare.com/cdn-cgi/trace')).text()
-    return {
-      colo: trace.match(/^colo=(.+)$/m)?.[1],
-      jev_sequential: summarise(jevSeq),
-      distilbert_sequential: summarise(distilSeq),
-      jev_parallel_10: summarise(jevPar),
-      jev_sample: sample,
-    }
+    if (!res.ok) throw new Error(`typesafe ${res.status}: ${(await res.text()).slice(0, 150)}`)
+    return res.json()
+  }
+  await time(viaCloudflare) // warm-ups, excluded
+  await time(direct)
+  const cloudflareSeq = await series(10, viaCloudflare)
+  const directSeq = await series(10, direct)
+  const directPar = await Promise.all(Array.from({ length: 10 }, () => time(direct)))
+  const sample = await direct().catch((e) => String(e))
+  const summarise = (r: { ms: number; ok: boolean; error?: string }[]) => ({
+    ...stats(r.filter((x) => x.ok).map((x) => x.ms)),
+    errors: r.filter((x) => !x.ok).map((x) => x.error),
+  })
+  const trace = await (await fetch('https://cloudflare.com/cdn-cgi/trace')).text()
+  return {
+    colo: trace.match(/^colo=(.+)$/m)?.[1],
+    jev_via_cloudflare_sequential: summarise(cloudflareSeq),
+    jev_typesafe_direct_sequential: summarise(directSeq),
+    jev_typesafe_direct_parallel_10: summarise(directPar),
+    typesafe_sample: sample,
+  }
 }
 
 export default {

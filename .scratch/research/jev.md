@@ -283,3 +283,21 @@ A throwaway Worker on Logit Land ([`scripts/jev-probe-worker/index.ts`](scripts/
 **Verified:** from inside Workers, Jev takes about 320 ms per call, steady, with no errors. That is about 100 ms less than over the REST API, not the 120 ms total inferred above. The REST route's overhead turned out smaller than the first breakdown suggested, and most of Jev's time is spent behind the gateway.
 
 **Inferred:** Jev is proxied to TypeSafe rather than run on Cloudflare's GPUs (no neurons header, gateway billing, and a floor near TypeSafe's own published 270 ms). A direct call to `api.typesafe.ai` from a Worker would skip only the gateway hop. Getting well under 300 ms likely means a different model or self-hosting.
+
+**Corrected by the next measurement:** the direct API is much faster than the gateway route, so the gateway hop is the cost, not TypeSafe.
+
+## TypeSafe direct versus Cloudflare (2026-10-20)
+
+Same 611-token request, `model: "jev-latest"` (served as `jev-1.13.0`), against `POST https://api.typesafe.ai/v1/systemone` with a TypeSafe API key. `api.typesafe.ai` itself sits behind Cloudflare (TCP connect 21 ms from Amsterdam).
+
+| Route | Where from | n | Min | Median | p90 / max |
+| --- | --- | --- | --- | --- | --- |
+| TypeSafe direct | this machine (Amsterdam) | 10 | 187 ms | 210 ms | 242 ms |
+| TypeSafe direct, sequential | inside a Worker | 10 | 188 ms | 213 ms | 240 ms |
+| TypeSafe direct, 10 in parallel | inside a Worker | 10 | 179 ms | 203 ms | 408 ms |
+| Cloudflare AI binding via AI Gateway | inside a Worker, same run | 10 | 489 ms | 506 ms | 1,241 ms |
+| Cloudflare AI binding via AI Gateway | inside a Worker, earlier run (LHR) | 10 | 283 ms | 318 ms | 338 ms |
+
+**Verified:** calling TypeSafe directly takes about 210 ms per call, steady across both locations and under parallel load. The Cloudflare route adds 100–300 ms and varies with the edge location. OpenRouter's advertised 0.13 s is presumably measured close to TypeSafe and excludes the caller's network.
+
+Scripts: [`scripts/jev-probe-worker/index.ts`](scripts/jev-probe-worker/index.ts) (deployed once, then deleted with its secret) and [`scripts/jev-probe-worker/local-direct.mjs`](scripts/jev-probe-worker/local-direct.mjs).
