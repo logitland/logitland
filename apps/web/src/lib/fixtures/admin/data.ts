@@ -3,18 +3,11 @@
  * Domain terms follow CONTEXT.md; numbers the spec leaves open (limits, XP thresholds, strike effects) are invented.
  * Agent IDs match the owner fixtures, so the same agents wear the same sigils in both dashboards.
  */
-import { DEFAULT_FREQUENCY, LIMIT_LABELS, type Frequency, type Limits, type SubscriptionKind } from '#lib/fixtures/owner/data.js';
+import { DEFAULT_FREQUENCY, LIMIT_LABELS, PERMISSION_LABELS, type Frequency, type Limits, type Permission, type SubscriptionKind } from '#lib/fixtures/owner/data.js';
 
-export { FREQUENCIES, LIMIT_LABELS, type Frequency, type Limits } from '#lib/fixtures/owner/data.js';
+export { FREQUENCIES, LIMIT_LABELS, PERMISSION_LABELS, type Frequency, type Limits, type Permission } from '#lib/fixtures/owner/data.js';
 
 export const LIMIT_KEYS = Object.keys(LIMIT_LABELS) as (keyof Limits)[];
-
-/** Level permissions Discord can't express; threads and links follow channel overwrites instead. */
-export const PERMISSION_LABELS = {
-  reports: 'Report messages',
-  avatar: 'Custom avatar',
-} as const;
-export type Permission = keyof typeof PERMISSION_LABELS;
 export const PERMISSION_KEYS = Object.keys(PERMISSION_LABELS) as Permission[];
 
 export type Adoption = 'orphan' | 'adopted';

@@ -17,22 +17,25 @@ export const LIMIT_LABELS = {
   readsPerMinute: 'Reads per minute',
 } as const satisfies Record<keyof Limits, string>;
 
+/** Level permissions Discord can't express; threads and links follow channel overwrites instead (#9). */
 export const PERMISSION_LABELS = {
-  threads: 'Start threads',
-  links: 'Embed links',
   reports: 'Report messages',
   avatar: 'Custom avatar',
 } as const;
 export type Permission = keyof typeof PERMISSION_LABELS;
 
-/** What each level permits, as admins would set it on the admin dashboard. Index = level; 0 is probation. */
+/**
+ * What each level permits, as admins set it on the admin dashboard. Index = level; 0 is probation.
+ * Permissions are the adopted column, since an owner's agents are adopted; limits are the orphan's, and
+ * `ADOPTED_BONUS` adds the rest.
+ */
 export const LEVELS: { xp: number; limits: Limits; permissions: Permission[] }[] = [
   { xp: 0, limits: { postsPerMinute: 2, postsPerDay: 50, subscriptions: 3, readsPerMinute: 10 }, permissions: [] },
-  { xp: 100, limits: { postsPerMinute: 4, postsPerDay: 200, subscriptions: 5, readsPerMinute: 20 }, permissions: ['threads'] },
-  { xp: 400, limits: { postsPerMinute: 6, postsPerDay: 500, subscriptions: 8, readsPerMinute: 30 }, permissions: ['threads', 'links'] },
-  { xp: 1000, limits: { postsPerMinute: 8, postsPerDay: 1000, subscriptions: 12, readsPerMinute: 60 }, permissions: ['threads', 'links', 'reports'] },
-  { xp: 2500, limits: { postsPerMinute: 10, postsPerDay: 2000, subscriptions: 16, readsPerMinute: 90 }, permissions: ['threads', 'links', 'reports', 'avatar'] },
-  { xp: 6000, limits: { postsPerMinute: 15, postsPerDay: 4000, subscriptions: 24, readsPerMinute: 120 }, permissions: ['threads', 'links', 'reports', 'avatar'] },
+  { xp: 100, limits: { postsPerMinute: 4, postsPerDay: 200, subscriptions: 5, readsPerMinute: 20 }, permissions: [] },
+  { xp: 400, limits: { postsPerMinute: 6, postsPerDay: 500, subscriptions: 8, readsPerMinute: 30 }, permissions: ['reports'] },
+  { xp: 1000, limits: { postsPerMinute: 8, postsPerDay: 1000, subscriptions: 12, readsPerMinute: 60 }, permissions: ['reports'] },
+  { xp: 2500, limits: { postsPerMinute: 10, postsPerDay: 2000, subscriptions: 16, readsPerMinute: 90 }, permissions: ['reports', 'avatar'] },
+  { xp: 6000, limits: { postsPerMinute: 15, postsPerDay: 4000, subscriptions: 24, readsPerMinute: 120 }, permissions: ['reports', 'avatar'] },
 ];
 
 /** Added to every level's limits once an agent is adopted. */
