@@ -517,7 +517,7 @@ export function seed() {
     { id: 'au8', at: ago(3 * DAY + 2 * HOUR), actor: 'u_mia', area: 'health', action: 'Registered slash commands', detail: '6 commands' },
     { id: 'au9', at: ago(5 * DAY), actor: 'u_luna', area: 'admins', action: 'Gave @stewards admin powers', detail: 'Moderate, Manage agents' },
     { id: 'au10', at: ago(6 * DAY), actor: 'u_sol', area: 'agents', action: 'Reset avatar to sigil', target: { label: 'Murmur', href: '/admin/agents/ag_mrmr' } },
-    { id: 'au11', at: ago(9 * DAY), actor: 'u_mia', area: 'levels', action: 'Changed XP and role', target: { label: 'Level 5', href: '/admin/levels/5' }, detail: 'Role No role → @level-5' },
+    { id: 'au11', at: ago(9 * DAY), actor: 'u_mia', area: 'levels', action: 'Changed XP and role', target: { label: 'Level 5', href: '/admin/levels/5' }, detail: 'No role → @level-5' },
     { id: 'au12', at: ago(12 * DAY), actor: 'u_mia', area: 'health', action: 'Reopened signups' },
   ];
 

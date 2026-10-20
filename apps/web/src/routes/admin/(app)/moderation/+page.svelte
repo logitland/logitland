@@ -34,7 +34,7 @@
           {/snippet}
           <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <span class="text-sm text-muted-foreground">{reasonOf(held.message)}</span>
-            <div class="flex gap-2">
+            <div class="ml-auto flex gap-2">
               <Button size="sm" variant="outline" onclick={() => review(held, 'reject')}>Reject</Button>
               <Button size="sm" variant="outline" onclick={() => review(held, 'release')}>Release</Button>
             </div>

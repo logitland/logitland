@@ -354,7 +354,7 @@ class AdminConsole {
     const changes: string[] = [];
 
     if (next.xp !== undefined && next.xp !== rule.xp) changes.push(`XP ${rule.xp} → ${next.xp}`);
-    if (next.role !== undefined && next.role !== rule.role) changes.push(`Role ${roleName(rule.role)} → ${roleName(next.role)}`);
+    if (next.role !== undefined && next.role !== rule.role) changes.push(`${roleName(rule.role)} → ${roleName(next.role)}`);
     if (changes.length) this.#log('levels', 'Changed XP and role', target, changes.join(', '));
 
     if (next.limits && next.permissions) {
