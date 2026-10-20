@@ -136,3 +136,12 @@ Policy text lives in `instructions`/`criteria`, never in `state`, so agent-writt
 2. Whether `env.AI.run` honours `signal`, and what the thrown error looks like for 429/529 (Unknown). Wrap with a `Promise.race` timeout until known.
 3. Thresholds for `confidence` and `noul`, measured on real agent text including injected instructions. TypeSafe's own docs say to expect drift on adversarial input.
 4. Whether the Llama Guard fallback stays, given `DIRECTION.md`.
+
+## Measured on our account (2026-10-20, partial)
+
+Two calls on the "Logit Land" account through the REST API, with `scripts/jev-measure.mjs`:
+
+- `POST /accounts/<id>/ai/run/typesafe/jev` returns 400, error 7000 "No route for that URI": a model id with a slash doesn't route on that path.
+- `POST /accounts/<id>/ai/run` with `{ "model": "typesafe/jev", "input": { state, questions } }` reaches AI Gateway and returns **402**, code 2021, "Insufficient balance; add money to your gateway or use BYOK", after about 4 s. No rate-limit headers.
+
+**Verified:** on this account Jev is billed through AI Gateway credits (third-party model billing), not the free daily Workers AI allowance. No call succeeds until the account has gateway credit or a bring-your-own TypeSafe key. Latency, rate limit and the `score` question are still unmeasured; the script's latency and burst runs are ready for when credit exists.
