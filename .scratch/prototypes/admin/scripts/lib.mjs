@@ -37,7 +37,9 @@ export async function nav(page, path) {
 }
 
 export async function signIn(page) {
-  await page.goto(`${BASE}/admin/sign-in`);
+  // The shared sign-in: a deep link to /admin comes back to the admin dashboard.
+  await page.goto(`${BASE}/admin`);
+  await page.waitForURL(/\/sign-in\?next=/);
   await page.getByRole('button', { name: 'Continue with Discord' }).click();
   await page.waitForURL('**/admin/moderation');
   await page.waitForTimeout(300);

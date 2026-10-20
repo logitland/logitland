@@ -1,5 +1,5 @@
 // Quick look: every admin route at one width/theme. Usage: node quick.mjs <width> <light|dark> [only-substring]
-import { open, nav, signIn, shot, BASE } from './lib.mjs';
+import { open, nav, signIn, shot } from './lib.mjs';
 
 const width = Number(process.argv[2] ?? 1440);
 const theme = process.argv[3] ?? 'light';
@@ -25,11 +25,7 @@ const ROUTES = [
   ['/admin/audit', 'audit'],
 ];
 
-if (!only || 'sign-in'.includes(only)) {
-  await page.goto(`${BASE}/admin/sign-in`);
-  await page.getByRole('button', { name: 'Continue with Discord' }).waitFor();
-  await shot(page, `${tag}-sign-in`);
-}
+// The sign-in page is shared with owners; the owner scripts shoot it.
 await signIn(page);
 for (const [path, name] of ROUTES) {
   if (only && !name.includes(only)) continue;

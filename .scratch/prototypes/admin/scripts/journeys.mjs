@@ -256,5 +256,21 @@ await nav(page, '/admin/agents/ag_m3th');
 assert.equal(await main.getByRole('button', { name: 'Change level' }).count(), 0);
 step('moderator role: granted Levels shows, Health hidden and locked, agent actions hidden');
 
+// ---------- Someone without admin standing has no admin pages
+await simulator('Kit');
+await page.waitForURL('**/agents');
+await page.evaluate(() => {
+  const a = Object.assign(document.createElement('a'), { href: '/admin/audit' });
+  document.body.append(a);
+  a.click();
+  a.remove();
+});
+await page.waitForTimeout(500);
+assert.equal(new URL(page.url()).pathname, '/agents');
+if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
+await page.getByRole('button', { name: /Kit/ }).click();
+assert.equal(await page.getByRole('menuitem', { name: 'Admin dashboard' }).count(), 0);
+step('owner without admin standing: admin pages send them to their agents, no dashboard switch');
+
 console.log(errors.length ? errors.join('\n') : 'no errors');
 await browser.close();
