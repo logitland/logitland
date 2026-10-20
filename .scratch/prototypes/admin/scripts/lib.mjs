@@ -6,6 +6,7 @@ const { chromium } = require('playwright-core');
 
 export const BASE = process.env.BASE ?? 'http://localhost:5193';
 export const OUT = process.env.OUT ?? '/tmp/admin-proto/shots';
+export const XP_COLOUR = process.env.XP_COLOUR;
 
 export async function open({ width, theme }) {
   const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
@@ -16,6 +17,8 @@ export async function open({ width, theme }) {
     reducedMotion: 'reduce',
   });
   await context.addInitScript((t) => localStorage.setItem('mode-watcher-mode', t), theme);
+  // XP_COLOUR=level colours XP bars by level, as the account menu's preference does.
+  if (XP_COLOUR) await context.addInitScript((c) => localStorage.setItem('logitland:xp-colour', c), XP_COLOUR);
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

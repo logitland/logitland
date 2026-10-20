@@ -82,7 +82,7 @@ assert.equal(await main.getByText('2 reports').count(), 1);
 step('reports: cancel, restore, take down, simulated report');
 
 await nav(page, '/admin/agents/ag_q8w2');
-assert.ok(await main.getByText('1,620 / 2,500 XP').isVisible(), 'Quill lost 20 XP for a rejected report');
+assert.ok(await main.getByText('3,160 / 4,000 XP').isVisible(), 'Quill lost 20 XP for a rejected report');
 await nav(page, '/admin/agents/ag_l7mn');
 assert.ok(await main.getByText('Takedown confirmed: spam').isVisible());
 step('reports changed reporters’ XP and added a strike');
@@ -163,15 +163,31 @@ step('agent: change level, suspend, lift, cancel ban, reset avatar');
 
 // ---------- Levels
 await nav(page, '/admin/levels/3');
-const xp = main.getByLabel('XP to reach Level 3');
-await xp.fill('300');
+assert.ok(await main.getByText('2,250 XP', { exact: true }).isVisible(), 'Level 3 shows its threshold from the curve');
+await main.getByRole('link', { name: 'Change curve' }).click();
+await page.waitForURL('**/admin/levels/defaults');
+const base = main.getByLabel('Level 1 XP');
+await base.fill('0');
+await main.getByLabel('Growth').fill('9');
 await main.getByRole('button', { name: 'Save' }).first().click();
-assert.ok(await main.getByText('Enter a whole number from 401 to 2,499').isVisible());
+assert.ok(await main.getByText('Enter a whole number from 1 to 100,000.').isVisible());
+assert.ok(await main.getByText('Enter a number from 1 to 3.').isVisible());
 await shot(page, `${tag}-journey-level-errors`, { full: false });
-await xp.fill('1100');
+await main.getByLabel('Growth').fill('2');
+await base.fill('300');
+assert.ok(await main.getByText('Level 5 at 7,500 XP · Level 10 at 30,000 XP').isVisible(), 'the curve previews its result');
 await main.getByRole('button', { name: 'Save' }).first().click();
-await toast('Saved Level 3');
+await toast('Saved level curve');
 await dismissToasts();
+await main.getByLabel('Level 3 colour').click();
+await page.getByRole('option', { name: 'Orange' }).click();
+await main.getByLabel('Level 2 colour').click();
+await page.getByRole('option', { name: 'Tween' }).click();
+await main.getByRole('button', { name: 'Save' }).nth(1).click();
+await toast('Saved level colours');
+await dismissToasts();
+await nav(page, '/admin/levels/3');
+assert.ok(await main.getByText('2,700 XP', { exact: true }).isVisible(), 'Level 3 follows the new curve');
 await main.getByLabel('Posts per day, adopted').fill('10');
 await main.getByRole('button', { name: 'Save' }).nth(1).click();
 assert.ok(await main.getByText('Adopted can’t be lower than orphan.').isVisible());
@@ -189,10 +205,27 @@ await dismissToasts();
 await nav(page, '/admin/levels/defaults');
 await main.getByLabel('Channel subscriptions').click();
 await page.getByRole('option', { name: '5m', exact: true }).click();
-await main.getByRole('button', { name: 'Save' }).click();
+await main.getByRole('button', { name: 'Save' }).nth(2).click();
 await toast('Saved subscription defaults');
 await dismissToasts();
-step('levels: XP validation, limits validation, discard, save limits, checks, defaults');
+step('levels: curve validation and save, colours, limits validation, discard, save limits, checks, defaults');
+
+// ---------- The owner dashboard reads the same curve and colours (same browser session)
+await nav(page, '/admin/agents/ag_q8w2');
+assert.ok(await main.getByText('3,160 / 4,800 XP').isVisible(), 'admin meter follows the new curve');
+if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
+await page.getByRole('button', { name: /Ada/ }).click();
+await page.getByRole('menuitemradio', { name: 'Level' }).click();
+await page.keyboard.press('Escape');
+if (width < 768) await page.keyboard.press('Escape');
+await nav(page, '/agents');
+const quill = main.locator('li', { hasText: 'Quill' }).first();
+assert.ok(await quill.getByText('3,180 / 4,800 XP').isVisible(), 'owner meter follows the admin’s curve');
+const bar = await quill.locator('[data-slot="progress-indicator"]').evaluate((el) => getComputedStyle(el).backgroundColor);
+assert.match(bar, /oklch\([\d.]+ [\d.]+ 55\)/, `Quill's level 3 bar is orange, got ${bar}`);
+await shot(page, `${tag}-journey-owner-by-level`, { full: false });
+await nav(page, '/admin/moderation');
+step('owner dashboard: same curve, level colour from the admin’s choice');
 
 // ---------- Admins
 await nav(page, '/admin/admins');
@@ -238,7 +271,7 @@ step('health: kill switch cancel and confirm, re-check, slash commands, Gateway 
 
 // ---------- Audit sees all of it
 await nav(page, '/admin/audit');
-for (const text of ['Released a held message', 'Restored a taken-down message', 'Overturned a strike on appeal', 'Changed level', 'Changed limits', 'Changed admin powers for @moderators', 'Closed signups', 'Changed subscription defaults']) {
+for (const text of ['Released a held message', 'Restored a taken-down message', 'Overturned a strike on appeal', 'Changed level', 'Changed level curve', 'Changed level colours', 'Changed limits', 'Changed admin powers for @moderators', 'Closed signups', 'Changed subscription defaults']) {
   assert.ok((await main.getByText(text).count()) > 0, `audit has “${text}”`);
 }
 // Rowan's fixture release is the only one: the undone release left no entry.

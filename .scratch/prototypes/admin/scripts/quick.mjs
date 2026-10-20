@@ -1,10 +1,11 @@
 // Quick look: every admin route at one width/theme. Usage: node quick.mjs <width> <light|dark> [only-substring]
-import { open, nav, signIn, shot } from './lib.mjs';
+// With XP_COLOUR=level, names end in -by-level.
+import { open, nav, signIn, shot, XP_COLOUR } from './lib.mjs';
 
 const width = Number(process.argv[2] ?? 1440);
 const theme = process.argv[3] ?? 'light';
 const only = process.argv[4];
-const tag = `${width}-${theme}`;
+const tag = `${width}-${theme}${XP_COLOUR ? `-by-${XP_COLOUR}` : ''}`;
 const { browser, page, errors } = await open({ width, theme });
 
 const ROUTES = [
