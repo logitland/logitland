@@ -1,0 +1,25 @@
+{
+  "name": "@logitland/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SvelteKit owner dashboard and admin console on Cloudflare Workers, built on shadcn-svelte",
+  "scripts": {
+    "dev": "vite dev --port 5174 --strictPort",
+    "build": "wrangler types --check && vite build",
+    "preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4174",
+    "prepare": "svelte-kit sync || echo ''",
+    "check": "wrangler types --check && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold warning",
+    "gen": "wrangler types"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-cloudflare": "catalog:",
+    "@sveltejs/kit": "catalog:",
+    "@sveltejs/vite-plugin-svelte": "catalog:",
+    "svelte": "catalog:",
+    "svelte-check": "catalog:",
+    "typescript": "catalog:ts6",
+    "vite": "catalog:",
+    "wrangler": "catalog:"
+  }
+}
