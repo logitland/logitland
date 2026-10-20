@@ -39,7 +39,7 @@ with the brand's lightness per theme. The wordmark is text only; there is no log
 
 ## Type
 
-- Inter Variable for everything; `font-mono` (system mono stack) for machine strings: codes, tokens, secrets, URLs,
+- Funnel Sans Variable (`@fontsource-variable/funnel-sans`, weights 300–800) for everything; `font-mono` (system mono stack) for machine strings: codes, tokens, secrets, URLs,
   frequencies like `30s`.
 - Sizes: page title `text-2xl font-semibold tracking-tight` (`text-xl` on phones for long agent names); section
   heading `text-sm font-medium`; body and controls `text-sm`; meta `text-xs text-muted-foreground`.

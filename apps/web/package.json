@@ -16,7 +16,7 @@
     "#lib/*": "./src/lib/*"
   },
   "devDependencies": {
-    "@fontsource-variable/inter": "catalog:",
+    "@fontsource-variable/funnel-sans": "catalog:",
     "@internationalized/date": "catalog:",
     "@lucide/svelte": "catalog:",
     "@shadcn-svelte/primitives": "catalog:",

@@ -12,7 +12,7 @@ allowBuilds:
 # GHSA-vfpm-58rq-9qcg, GHSA-9jrq-w75r-8gcw), and formsnap 2.1.0 (2026-10-20), the first release that accepts
 # sveltekit-superforms 3, which SvelteKit 3 needs.
 catalog:
-  '@fontsource-variable/inter': 5.3.0
+  '@fontsource-variable/funnel-sans': 5.3.0
   '@internationalized/date': 3.12.4
   '@lucide/svelte': 1.52.0
   '@shadcn-svelte/primitives': 0.0.1
