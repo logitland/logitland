@@ -1,9 +1,12 @@
 <script lang="ts">
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-	import { cn, type WithElementRef } from "#lib/utils.js";
+	import { cn } from "#lib/utils.js";
 	import type { HTMLSelectAttributes } from "svelte/elements";
 
-	type NativeSelectProps = Omit<WithElementRef<HTMLSelectAttributes>, "size"> & {
+	// Not WithElementRef: the Workers runtime types merge HTMLRewriter's `Element.remove(): Element` into the DOM's Element,
+	// so HTMLSelectElement no longer satisfies its HTMLElement constraint.
+	type NativeSelectProps = Omit<HTMLSelectAttributes, "size"> & {
+		ref?: HTMLSelectElement | null;
 		size?: "sm" | "default";
 	};
 
