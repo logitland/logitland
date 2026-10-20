@@ -2,67 +2,43 @@
   import { untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import SaveCard from '#lib/components/admin/save-card.svelte';
+  import { Button } from '#lib/components/ui/button/index.js';
   import * as Field from '#lib/components/ui/field/index.js';
-  import { Input } from '#lib/components/ui/input/index.js';
   import * as Select from '#lib/components/ui/select/index.js';
   import type { LevelRule } from '#lib/fixtures/admin/data.js';
   import { formatNumber, levelName } from '#lib/fixtures/admin/format.js';
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { levelSettings } from '#lib/fixtures/levels.svelte.js';
 
-  /** The XP that reaches this level, and the Discord level role mapped to it. */
+  /** The Discord level role mapped to this level, and the XP that reaches it (set by the curve on Defaults). */
   let { level, rule }: { level: number; rule: LevelRule } = $props();
 
   const NO_ROLE = 'none';
 
-  let xp = $state(untrack(() => String(rule.xp)));
   let role = $state(untrack(() => rule.role ?? NO_ROLE));
-  let error = $state<string>();
 
   const probation = $derived(level === 0);
-  const min = $derived(probation ? 0 : admin.levels[level - 1].xp + 1);
-  const max = $derived(admin.levels[level + 1] ? admin.levels[level + 1].xp - 1 : 1_000_000);
-  const dirty = $derived(Number(xp) !== rule.xp || role !== (rule.role ?? NO_ROLE));
+  const dirty = $derived(role !== (rule.role ?? NO_ROLE));
 
   // `@agents` and `@adopted` have their own jobs; every other agent role can be a level role.
   const roles = $derived(admin.serverRoles.filter((r) => r.kind === 'agent' && r.id !== 'r_agents' && r.id !== 'r_adopted'));
   const roleLabel = (roleId: string) => (roleId === NO_ROLE ? 'No role' : `@${admin.role(roleId)?.name}`);
 
-  function discard() {
-    xp = String(rule.xp);
-    role = rule.role ?? NO_ROLE;
-    error = undefined;
-  }
-
   async function save() {
-    const value = Number(xp);
-    if (!probation && !(Number.isInteger(value) && value >= min && value <= max)) {
-      error = `Enter a whole number from ${formatNumber(min)} to ${formatNumber(max)}, so levels stay in order.`;
-      return;
-    }
-    await admin.saveLevel(level, { xp: value, role: role === NO_ROLE ? null : role });
+    await admin.saveLevel(level, { role: role === NO_ROLE ? null : role });
     toast.success(`Saved ${levelName(level)}`);
   }
 </script>
 
-<SaveCard title={probation ? 'Discord role' : 'XP and Discord role'} {dirty} onDiscard={discard} onSave={save}>
+<SaveCard title={probation ? 'Discord role' : 'XP and Discord role'} {dirty} onDiscard={() => (role = rule.role ?? NO_ROLE)} onSave={save}>
   <div class="grid gap-6 sm:grid-cols-2">
     {#if !probation}
-      <Field.Field data-invalid={error ? true : undefined}>
-        <Field.Label for="level-xp">XP to reach {levelName(level)}</Field.Label>
-        <Input
-          id="level-xp"
-          type="number"
-          inputmode="numeric"
-          {min}
-          {max}
-          step="1"
-          bind:value={() => xp, (next) => (xp = String(next ?? ''))}
-          oninput={() => (error = undefined)}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'level-xp-error' : undefined}
-          class="max-w-40 tabular-nums"
-        />
-        {#if error}<Field.Error id="level-xp-error">{error}</Field.Error>{/if}
+      <Field.Field>
+        <Field.Title>XP to reach {levelName(level)}</Field.Title>
+        <div class="flex h-9 items-center justify-between gap-3 sm:max-w-60">
+          <span class="text-sm tabular-nums">{formatNumber(levelSettings.xp(level))} XP</span>
+          <Button href="/admin/levels/defaults" variant="link" size="sm" class="px-0 underline">Change curve</Button>
+        </div>
       </Field.Field>
     {/if}
     <Field.Field>

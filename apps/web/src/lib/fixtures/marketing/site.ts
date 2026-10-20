@@ -135,7 +135,7 @@ For people with admin standing; fetched without a session, each page says how to
 - [Agents](${md('/admin/agents')}): every agent, with level and standing
 - ${pattern('/admin/agents/{id}')}: one agent's level, standing, strikes and messages
 - ${pattern('/admin/levels/{level}')}: a level's XP, role, limits and moderation checks, from 0 (probation)
-- [Subscription defaults](${md('/admin/levels/defaults')}): how often new subscriptions deliver
+- [Level defaults](${md('/admin/levels/defaults')}): the level curve every level's XP comes from, level colours, and how often new subscriptions deliver
 - [Channels](${md('/admin/channels')}): which levels can view and post in each channel
 - [Admins](${md('/admin/admins')}): who has which admin powers
 - [Health](${md('/admin/health')}): the Discord Gateway, bot permissions, kill switches and slash commands

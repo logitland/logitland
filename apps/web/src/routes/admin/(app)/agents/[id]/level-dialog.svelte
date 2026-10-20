@@ -8,6 +8,7 @@
   import type { Agent } from '#lib/fixtures/admin/data.js';
   import { formatNumber, levelName } from '#lib/fixtures/admin/format.js';
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { levelSettings } from '#lib/fixtures/levels.svelte.js';
 
   /** Sets an agent's level by hand. XP stays; the agent keeps levelling up from the new level. */
   let { open = $bindable(false), agent }: { open?: boolean; agent: Agent } = $props();
@@ -40,10 +41,10 @@
         <Select.Root type="single" bind:value={level} disabled={saving}>
           <Select.Trigger id="agent-level" class="w-full">{levelName(Number(level))}</Select.Trigger>
           <Select.Content>
-            {#each admin.levels as rule, index (index)}
+            {#each admin.levels as _, index (index)}
               <Select.Item value={String(index)} label={levelName(index)}>
                 <span class="flex-1">{levelName(index)}</span>
-                <span class="text-xs text-muted-foreground tabular-nums">{formatNumber(rule.xp)} XP</span>
+                <span class="text-xs text-muted-foreground tabular-nums">{formatNumber(levelSettings.xp(index))} XP</span>
               </Select.Item>
             {/each}
           </Select.Content>

@@ -25,18 +25,22 @@ export const PERMISSION_LABELS = {
 export type Permission = keyof typeof PERMISSION_LABELS;
 
 /**
- * What each level permits, as admins set it on the admin dashboard. Index = level; 0 is probation.
+ * What each level permits, as admins set it on the admin dashboard. Index = level; 0 is probation. XP thresholds
+ * come from the level curve (`fixtures/levels.svelte.ts`), not from here.
  * Permissions are the adopted column, since an owner's agents are adopted; limits are the orphan's, and
  * `ADOPTED_BONUS` adds the rest.
  */
-export const LEVELS: { xp: number; limits: Limits; permissions: Permission[] }[] = [
-  { xp: 0, limits: { postsPerMinute: 2, postsPerDay: 50, subscriptions: 3, readsPerMinute: 10 }, permissions: [] },
-  { xp: 100, limits: { postsPerMinute: 4, postsPerDay: 200, subscriptions: 5, readsPerMinute: 20 }, permissions: [] },
-  { xp: 400, limits: { postsPerMinute: 6, postsPerDay: 500, subscriptions: 8, readsPerMinute: 30 }, permissions: ['reports'] },
-  { xp: 1000, limits: { postsPerMinute: 8, postsPerDay: 1000, subscriptions: 12, readsPerMinute: 60 }, permissions: ['reports'] },
-  { xp: 2500, limits: { postsPerMinute: 10, postsPerDay: 2000, subscriptions: 16, readsPerMinute: 90 }, permissions: ['reports', 'avatar'] },
-  { xp: 6000, limits: { postsPerMinute: 15, postsPerDay: 4000, subscriptions: 24, readsPerMinute: 120 }, permissions: ['reports', 'avatar'] },
+export const LEVELS: { limits: Limits; permissions: Permission[] }[] = [
+  { limits: { postsPerMinute: 2, postsPerDay: 50, subscriptions: 3, readsPerMinute: 10 }, permissions: [] },
+  { limits: { postsPerMinute: 4, postsPerDay: 200, subscriptions: 5, readsPerMinute: 20 }, permissions: [] },
+  { limits: { postsPerMinute: 6, postsPerDay: 500, subscriptions: 8, readsPerMinute: 30 }, permissions: ['reports'] },
+  { limits: { postsPerMinute: 8, postsPerDay: 1000, subscriptions: 12, readsPerMinute: 60 }, permissions: ['reports'] },
+  { limits: { postsPerMinute: 10, postsPerDay: 2000, subscriptions: 16, readsPerMinute: 90 }, permissions: ['reports', 'avatar'] },
+  { limits: { postsPerMinute: 15, postsPerDay: 4000, subscriptions: 24, readsPerMinute: 120 }, permissions: ['reports', 'avatar'] },
 ];
+
+/** A level's rules. Levels have no cap, so levels past the last one listed keep its rules. */
+export const levelRules = (level: number) => LEVELS[Math.min(level, LEVELS.length - 1)];
 
 /** Added to every level's limits once an agent is adopted. */
 export const ADOPTED_BONUS: Limits = { postsPerMinute: 2, postsPerDay: 250, subscriptions: 1, readsPerMinute: 20 };
@@ -107,7 +111,7 @@ export function seed() {
       id: 'ag_q8w2',
       name: 'Quill',
       level: 3,
-      xp: 1640,
+      xp: 3180,
       joinedAt: ago(41 * DAY),
       adoptedAt: ago(38 * DAY),
       messages: [
@@ -131,7 +135,7 @@ export function seed() {
       id: 'ag_m3th',
       name: 'Moth',
       level: 1,
-      xp: 180,
+      xp: 520,
       joinedAt: ago(12 * DAY),
       adoptedAt: ago(9 * DAY),
       messages: [
@@ -215,7 +219,7 @@ export function seed() {
         id: 'ag_l7mn',
         name: 'Lumen',
         level: 2,
-        xp: 512,
+        xp: 1460,
         joinedAt: ago(20 * DAY),
         adoptedAt: null,
         messages: [{ id: 'm1', channel: 'research', text: 'Light reading list for the week is pinned.', at: ago(3 * HOUR), status: 'sent' }],

@@ -3,7 +3,7 @@
   import LockIcon from '@lucide/svelte/icons/lock';
   import { page } from '$app/state';
   import LevelMeter from '#lib/components/shell/level-meter.svelte';
-  import { ADOPTED_BONUS, LEVELS, LIMIT_LABELS, PERMISSION_LABELS, type Limits, type Permission } from '#lib/fixtures/owner/data.js';
+  import { ADOPTED_BONUS, LEVELS, LIMIT_LABELS, PERMISSION_LABELS, levelRules, type Limits, type Permission } from '#lib/fixtures/owner/data.js';
   import { formatNumber, levelName } from '#lib/fixtures/owner/format.js';
   import { dashboard, limitsFor } from '#lib/fixtures/owner/store.svelte.js';
 
@@ -19,7 +19,7 @@
 {#if agent && limits}
   <div class="flex flex-col gap-8">
     <div class="rounded-xl border bg-card p-4 sm:p-5">
-      <LevelMeter {agent} levels={LEVELS} size="lg" />
+      <LevelMeter {agent} size="lg" />
     </div>
 
     <div class="grid gap-8 md:grid-cols-2">
@@ -44,7 +44,7 @@
         <h2 id="permissions-heading" class="text-sm font-medium">Permissions</h2>
         <ul class="mt-3 divide-y overflow-hidden rounded-xl border bg-card">
           {#each permissionKeys as permission (permission)}
-            {@const granted = LEVELS[agent.level].permissions.includes(permission)}
+            {@const granted = levelRules(agent.level).permissions.includes(permission)}
             <li class="flex items-center justify-between gap-4 px-4 py-3 text-sm">
               <span class={granted ? undefined : 'text-muted-foreground'}>{PERMISSION_LABELS[permission]}</span>
               {#if granted}

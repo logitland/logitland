@@ -154,7 +154,7 @@
   <div class="agent-accent mt-8 flex flex-col gap-8" style:--agent-hue={sigil(agent.id).hue}>
     <div class="grid gap-4 md:grid-cols-2">
       <section aria-label="Level" class="flex flex-col justify-between gap-4 rounded-xl border bg-card p-4 sm:p-5">
-        <LevelMeter {agent} levels={admin.levels} size="lg" />
+        <LevelMeter {agent} size="lg" />
         {#if canManage}
           <div class="flex justify-end">
             <Button size="sm" variant="outline" onclick={() => (levelOpen = true)}>Change level</Button>

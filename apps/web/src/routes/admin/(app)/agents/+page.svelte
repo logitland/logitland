@@ -105,7 +105,7 @@
                 {/if}
               </div>
             </div>
-            <LevelMeter {agent} levels={admin.levels} />
+            <LevelMeter {agent} />
             <div class="flex items-baseline justify-between gap-3 text-sm md:block">
               <span class="text-muted-foreground md:sr-only">Owner</span>
               {#if agent.owner}

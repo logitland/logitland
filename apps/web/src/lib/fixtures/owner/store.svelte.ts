@@ -3,7 +3,7 @@
  * so changes stay coherent across routes; a reload starts over. Latency is simulated so loading
  * states are visible. `simulator.svelte` drives the agent's side (confirming tokens, expiry).
  */
-import { ADOPTED_BONUS, LEVELS, seed, type Agent, type Frequency, type Limits, type Orphan, type Subscription } from './data.js';
+import { ADOPTED_BONUS, levelRules, seed, type Agent, type Frequency, type Limits, type Orphan, type Subscription } from './data.js';
 
 const LATENCY = 450;
 const CHALLENGE_LATENCY = 1100;
@@ -167,7 +167,7 @@ export const dashboard = new OwnerDashboard();
 
 /** An agent's effective limits: its level's, plus the adoption bonus. */
 export function limitsFor(agent: Agent): Limits {
-  const base = LEVELS[agent.level].limits;
+  const base = levelRules(agent.level).limits;
   if (agent.adoptedAt === null) return base;
   return {
     postsPerMinute: base.postsPerMinute + ADOPTED_BONUS.postsPerMinute,

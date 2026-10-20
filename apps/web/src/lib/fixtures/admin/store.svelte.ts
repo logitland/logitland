@@ -5,8 +5,10 @@
  * Who acts is whoever the shared session has signed in. `simulator.svelte` drives the outside world
  * (new reports, Gateway drops) and switches who that is.
  */
-import { levelName, plural } from '#lib/fixtures/owner/format.js';
+import { levelSettings } from '#lib/fixtures/levels.svelte.js';
+import { formatNumber, levelName, plural } from '#lib/fixtures/owner/format.js';
 import { session } from '#lib/fixtures/session.svelte.js';
+import { colourName, type LevelColour, type LevelColours, type LevelCurve } from '#lib/levels.js';
 import {
   ADMINS,
   CHECKS,
@@ -36,6 +38,7 @@ import {
 } from './data.js';
 
 const LATENCY = 450;
+const DEFAULTS_TARGET = { label: 'Defaults', href: '/admin/levels/defaults' };
 const TICK = 15_000;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,6 +79,7 @@ class AdminConsole {
     this.health = data.health;
     this.audit = data.audit;
     this.defaults = data.defaults;
+    levelSettings.reset();
     this.now = Date.now();
   }
 
@@ -339,11 +343,8 @@ class AdminConsole {
     const name = levelName(level);
     const target = { label: name, href: `/admin/levels/${level}` };
     const roleName = (roleId: string | null) => (roleId ? `@${this.role(roleId)?.name}` : 'No role');
-    const changes: string[] = [];
 
-    if (next.xp !== undefined && next.xp !== rule.xp) changes.push(`XP ${rule.xp} → ${next.xp}`);
-    if (next.role !== undefined && next.role !== rule.role) changes.push(`${roleName(rule.role)} → ${roleName(next.role)}`);
-    if (changes.length) this.#log('levels', 'Changed XP and role', target, changes.join(', '));
+    if (next.role !== undefined && next.role !== rule.role) this.#log('levels', 'Changed role', target, `${roleName(rule.role)} → ${roleName(next.role)}`);
 
     if (next.limits && next.permissions) {
       const diffs = (['orphan', 'adopted'] as const).flatMap((adoption) =>
@@ -384,13 +385,38 @@ class AdminConsole {
     return this.agents.filter((a) => a.level === level && a.standing.kind !== 'banned').length;
   }
 
+  /** Sets the formula every level's XP threshold comes from. */
+  async saveCurve(next: LevelCurve) {
+    await wait(LATENCY);
+    const before = levelSettings.curve;
+    const changes = [
+      next.base !== before.base ? `Level 1 XP ${formatNumber(before.base)} → ${formatNumber(next.base)}` : '',
+      next.growth !== before.growth ? `Growth ${before.growth} → ${next.growth}` : '',
+    ].filter(Boolean);
+    this.#log('levels', 'Changed level curve', DEFAULTS_TARGET, changes.join(', '));
+    levelSettings.curve = { ...next };
+  }
+
+  /** Sets the colours assigned to levels; the rest tween between them. */
+  async saveColours(next: LevelColours) {
+    await wait(LATENCY);
+    const before = levelSettings.colours;
+    const label = (colour: LevelColour | undefined) => (colour ? (colourName(colour) ?? 'Custom') : 'Tween');
+    const changes = [...new Set([...Object.keys(before), ...Object.keys(next)].map(Number))]
+      .sort((a, b) => a - b)
+      .filter((level) => label(before[level]) !== label(next[level]))
+      .map((level) => `${levelName(level)} ${label(before[level])} → ${label(next[level])}`);
+    this.#log('levels', 'Changed level colours', DEFAULTS_TARGET, changes.join(', '));
+    levelSettings.colours = structuredClone($state.snapshot(next));
+  }
+
   async saveDefaults(next: { channel: Frequency; replies: Frequency }) {
     await wait(LATENCY);
     const show = (f: Frequency) => (f === 'live' ? 'Live' : f);
     const changes = (['channel', 'replies'] as const)
       .filter((kind) => next[kind] !== this.defaults[kind])
       .map((kind) => `${kind === 'channel' ? 'Channels' : 'Replies'} ${show(this.defaults[kind])} → ${show(next[kind])}`);
-    this.#log('levels', 'Changed subscription defaults', { label: 'Defaults', href: '/admin/levels/defaults' }, changes.join(', '));
+    this.#log('levels', 'Changed subscription defaults', DEFAULTS_TARGET, changes.join(', '));
     this.defaults = { ...next };
   }
 

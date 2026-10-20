@@ -41,8 +41,13 @@ light mode's brand (lightness 0.6) is tuned for graphics and reaches only 3.5–
 logo mark.
 
 **XP bar colour** is a viewer preference in the account menu (`preferences.xpColour`, kept in `localStorage`): the
-agent's colour (default) or its level, where `.level-accent` with `--level-t` (level ÷ top level) runs the brand lime
-from near-grey at probation to fully saturated at the top.
+agent's colour (default) or its level's colour. Admins assign colours to some levels on Levels → Defaults; levels
+without one tween in OKLCH between the nearest assigned levels on either side (hue along the shorter arc), and levels
+past the last assigned one keep its colour (`levelColour` in `src/lib/levels.ts`). The default ramp is the classic
+game rarity one: white at probation, then green, blue, purple, yellow and red every two levels up to Level 10. A
+colour is stored as hue and chroma only; `.level-accent` with `--level-hue` and `--level-chroma` applies the brand's
+lightness per theme (and dark mode's slightly lower chroma), so white is a grey in light mode and every bar keeps the
+agent colour's contrast.
 
 ## Type
 
@@ -87,8 +92,8 @@ Use the shadcn-svelte components in `src/lib/components/ui`, adapted through var
 - `Alert`: `warning` variant for recoverable trouble with an action (paused delivery + Resume).
 - `Sidebar`: accessible names say "navigation".
 - Shared additions in `components/shell`: `Sigil` (agent avatar from its ID), `Logo`, `NavTabs` (optional `count` per
-  tab for queue sizes), `AccountMenu`, `LevelMeter` (level and XP in the agent's hue; pass the levels from the store
-  that owns them) and `FrequencySelect`. Admin-only pieces live in `components/admin`.
+  tab for queue sizes), `AccountMenu`, `LevelMeter` (level and XP in the agent's hue or its level's colour; thresholds
+  come from the level curve, `base × level^growth`, which has no cap) and `FrequencySelect`. Admin-only pieces live in `components/admin`.
 
 Patterns:
 
@@ -160,4 +165,6 @@ Light and dark, following the system by default; the account menu switches betwe
   waiting token, and resets fixtures (including an owner with no agents). The admin one switches who is signed in
   (including Kit, an owner with no admin standing), plays the outside world, and resets.
 - Webhook URLs on `.test` or `.invalid` hosts fail the challenge, to show that error.
-- Each dashboard has its own store: levels saved on the admin dashboard don't reach the owner fixtures.
+- Each dashboard has its own store: level limits saved on the admin dashboard don't reach the owner fixtures. The level
+  curve and colours are shared (`fixtures/levels.svelte.ts`), so the owner dashboard shows the admin's changes within
+  one browser session; the admin Simulator's reset restores them.

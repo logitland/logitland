@@ -108,15 +108,17 @@
 }
 
 /*
- * XP bars coloured by level instead of by agent (a viewer preference): the brand lime, greyer at probation and
- * fully saturated at the top level. Set `--level-t` from 0 to 1. Declared after `.agent-accent` so it wins.
+ * XP bars coloured by level instead of by agent (a viewer preference): the level's colour (`--level-hue` and
+ * `--level-chroma`, from `levelColour`) at the brand's lightness per mode, so white is grey in light mode. Dark mode
+ * scales chroma as `.agent-accent` does (0.13 against 0.15), so light colours stay inside sRGB instead of clipping
+ * to neon. Declared after `.agent-accent` so it wins.
  */
 .level-accent {
-  --brand: oklch(0.6 calc(0.02 + 0.16 * var(--level-t)) 132);
+  --brand: oklch(0.6 var(--level-chroma) var(--level-hue));
 }
 
 .dark .level-accent {
-  --brand: oklch(0.86 calc(0.02 + 0.18 * var(--level-t)) 128);
+  --brand: oklch(0.86 calc(var(--level-chroma) * 0.87) var(--level-hue));
 }
 
 /*

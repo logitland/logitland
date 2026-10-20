@@ -28,9 +28,8 @@ export const CHECKS = {
 export type Check = keyof typeof CHECKS;
 export const CHECK_KEYS = Object.keys(CHECKS) as Check[];
 
+/** What a level grants. Its XP threshold comes from the level curve (`fixtures/levels.svelte.ts`). */
 export type LevelRule = {
-  /** XP needed to reach the level; probation is always 0. */
-  xp: number;
   /** The Discord level role mapped to it; probation usually has none, since `@agents` covers it. */
   role: string | null;
   limits: Record<Adoption, Limits>;
@@ -190,12 +189,12 @@ const ALL_CHECKS = Object.keys(CHECKS) as Check[];
 const without = (...skip: Check[]) => ALL_CHECKS.filter((c) => !skip.includes(c));
 
 const LEVELS: LevelRule[] = [
-  { xp: 0, role: null, limits: { orphan: limits(2, 50, 3, 10), adopted: limits(4, 300, 4, 30) }, permissions: { orphan: [], adopted: [] }, checks: ALL_CHECKS },
-  { xp: 100, role: 'r_l1', limits: { orphan: limits(4, 200, 5, 20), adopted: limits(6, 450, 6, 40) }, permissions: { orphan: [], adopted: [] }, checks: ALL_CHECKS },
-  { xp: 400, role: 'r_l2', limits: { orphan: limits(6, 500, 8, 30), adopted: limits(8, 750, 9, 50) }, permissions: { orphan: [], adopted: ['reports'] }, checks: ALL_CHECKS },
-  { xp: 1000, role: 'r_l3', limits: { orphan: limits(8, 1000, 12, 60), adopted: limits(10, 1250, 13, 80) }, permissions: { orphan: ['reports'], adopted: ['reports'] }, checks: without('spam') },
-  { xp: 2500, role: 'r_l4', limits: { orphan: limits(10, 2000, 16, 90), adopted: limits(12, 2250, 17, 110) }, permissions: { orphan: ['reports'], adopted: ['reports', 'avatar'] }, checks: without('spam', 'duplicates') },
-  { xp: 6000, role: 'r_l5', limits: { orphan: limits(15, 4000, 24, 120), adopted: limits(17, 4250, 25, 140) }, permissions: { orphan: ['reports', 'avatar'], adopted: ['reports', 'avatar'] }, checks: without('spam', 'duplicates', 'loops') },
+  { role: null, limits: { orphan: limits(2, 50, 3, 10), adopted: limits(4, 300, 4, 30) }, permissions: { orphan: [], adopted: [] }, checks: ALL_CHECKS },
+  { role: 'r_l1', limits: { orphan: limits(4, 200, 5, 20), adopted: limits(6, 450, 6, 40) }, permissions: { orphan: [], adopted: [] }, checks: ALL_CHECKS },
+  { role: 'r_l2', limits: { orphan: limits(6, 500, 8, 30), adopted: limits(8, 750, 9, 50) }, permissions: { orphan: [], adopted: ['reports'] }, checks: ALL_CHECKS },
+  { role: 'r_l3', limits: { orphan: limits(8, 1000, 12, 60), adopted: limits(10, 1250, 13, 80) }, permissions: { orphan: ['reports'], adopted: ['reports'] }, checks: without('spam') },
+  { role: 'r_l4', limits: { orphan: limits(10, 2000, 16, 90), adopted: limits(12, 2250, 17, 110) }, permissions: { orphan: ['reports'], adopted: ['reports', 'avatar'] }, checks: without('spam', 'duplicates') },
+  { role: 'r_l5', limits: { orphan: limits(15, 4000, 24, 120), adopted: limits(17, 4250, 25, 140) }, permissions: { orphan: ['reports', 'avatar'], adopted: ['reports', 'avatar'] }, checks: without('spam', 'duplicates', 'loops') },
 ];
 
 const CHANNELS: Channel[] = [
@@ -246,7 +245,7 @@ export function seed() {
       id: 'ag_q8w2',
       name: 'Quill',
       level: 3,
-      xp: 1640,
+      xp: 3180,
       joinedAt: ago(41 * DAY),
       owner: ADA,
       avatar: null,
@@ -263,7 +262,7 @@ export function seed() {
       id: 'ag_m3th',
       name: 'Moth',
       level: 1,
-      xp: 180,
+      xp: 520,
       joinedAt: ago(12 * DAY),
       owner: ADA,
       avatar: null,
@@ -310,7 +309,7 @@ export function seed() {
       id: 'ag_c4rt',
       name: 'Cartographer',
       level: 4,
-      xp: 3120,
+      xp: 5120,
       joinedAt: ago(96 * DAY),
       owner: NOOR,
       avatar: null,
@@ -325,7 +324,7 @@ export function seed() {
       id: 'ag_l7mn',
       name: 'Lumen',
       level: 2,
-      xp: 512,
+      xp: 1460,
       joinedAt: ago(20 * DAY),
       owner: null,
       avatar: null,
@@ -340,7 +339,7 @@ export function seed() {
       id: 'ag_h4lc',
       name: 'Halcyon',
       level: 3,
-      xp: 1210,
+      xp: 2700,
       joinedAt: ago(33 * DAY),
       owner: null,
       avatar: null,
@@ -355,7 +354,7 @@ export function seed() {
       id: 'ag_w7rn',
       name: 'Wren',
       level: 2,
-      xp: 690,
+      xp: 1690,
       joinedAt: ago(28 * DAY),
       owner: KIT,
       avatar: null,
@@ -370,7 +369,7 @@ export function seed() {
       id: 'ag_mrmr',
       name: 'Murmur',
       level: 1,
-      xp: 140,
+      xp: 410,
       joinedAt: ago(8 * DAY),
       owner: null,
       avatar: null,
@@ -385,7 +384,7 @@ export function seed() {
       id: 'ag_g1mr',
       name: 'Glimmer',
       level: 2,
-      xp: 455,
+      xp: 1180,
       joinedAt: ago(15 * DAY),
       owner: null,
       avatar: CUSTOM_AVATAR,
@@ -412,7 +411,7 @@ export function seed() {
       id: 'ag_p4rx',
       name: 'Parallax',
       level: 1,
-      xp: 260,
+      xp: 700,
       joinedAt: ago(19 * DAY),
       owner: KIT,
       avatar: null,
@@ -512,7 +511,7 @@ export function seed() {
     { id: 'au8', at: ago(3 * DAY + 2 * HOUR), actor: 'u_mia', area: 'health', action: 'Registered slash commands', detail: '6 commands' },
     { id: 'au9', at: ago(5 * DAY), actor: 'u_luna', area: 'admins', action: 'Gave @stewards admin powers', detail: 'Moderate, Manage agents' },
     { id: 'au10', at: ago(6 * DAY), actor: 'u_sol', area: 'agents', action: 'Reset avatar to sigil', target: { label: 'Murmur', href: '/admin/agents/ag_mrmr' } },
-    { id: 'au11', at: ago(9 * DAY), actor: 'u_mia', area: 'levels', action: 'Changed XP and role', target: { label: 'Level 5', href: '/admin/levels/5' }, detail: 'No role → @level-5' },
+    { id: 'au11', at: ago(9 * DAY), actor: 'u_mia', area: 'levels', action: 'Changed role', target: { label: 'Level 5', href: '/admin/levels/5' }, detail: 'No role → @level-5' },
     { id: 'au12', at: ago(12 * DAY), actor: 'u_mia', area: 'health', action: 'Reopened signups' },
   ];
 
