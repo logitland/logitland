@@ -108,6 +108,18 @@
 }
 
 /*
+ * XP bars coloured by level instead of by agent (a viewer preference): the brand lime, greyer at probation and
+ * fully saturated at the top level. Set `--level-t` from 0 to 1. Declared after `.agent-accent` so it wins.
+ */
+.level-accent {
+  --brand: oklch(0.6 calc(0.02 + 0.16 * var(--level-t)) 132);
+}
+
+.dark .level-accent {
+  --brand: oklch(0.86 calc(0.02 + 0.18 * var(--level-t)) 128);
+}
+
+/*
  * Motion, from the transitions.dev scale. The dashboards use component defaults (tw-animate); custom motion uses these.
  * Under reduced motion, custom animations stop (see each component) and so do shadcn's scroll fades, below.
  */

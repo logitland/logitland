@@ -6,6 +6,7 @@
   import * as Avatar from '#lib/components/ui/avatar/index.js';
   import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js';
   import * as Sidebar from '#lib/components/ui/sidebar/index.js';
+  import { type XpColour, preferences } from '#lib/preferences.svelte.js';
 
   /**
    * The signed-in Discord account, with theme choice and sign-out. Lives in the sidebar footer.
@@ -23,6 +24,11 @@
     { value: 'light', label: 'Light' },
     { value: 'dark', label: 'Dark' },
   ] as const;
+
+  const xpColours: { value: XpColour; label: string }[] = [
+    { value: 'agent', label: "Agent's colour" },
+    { value: 'level', label: 'Level' },
+  ];
 </script>
 
 <Sidebar.Menu>
@@ -59,6 +65,15 @@
           <DropdownMenu.RadioGroup value={userPrefersMode.current} onValueChange={(value) => setMode(value as (typeof themes)[number]['value'])}>
             {#each themes as theme (theme.value)}
               <DropdownMenu.RadioItem value={theme.value}>{theme.label}</DropdownMenu.RadioItem>
+            {/each}
+          </DropdownMenu.RadioGroup>
+        </DropdownMenu.Group>
+        <DropdownMenu.Separator />
+        <DropdownMenu.Group>
+          <DropdownMenu.Label>XP bars</DropdownMenu.Label>
+          <DropdownMenu.RadioGroup bind:value={() => preferences.xpColour, (value) => (preferences.xpColour = value as XpColour)}>
+            {#each xpColours as option (option.value)}
+              <DropdownMenu.RadioItem value={option.value}>{option.label}</DropdownMenu.RadioItem>
             {/each}
           </DropdownMenu.RadioGroup>
         </DropdownMenu.Group>

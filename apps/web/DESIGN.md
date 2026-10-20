@@ -40,6 +40,10 @@ light mode's brand (lightness 0.6) is tuned for graphics and reaches only 3.5–
 0.52, which keeps every hue above 4.5:1 on a card; dark mode reuses the brand. The wordmark is text only; there is no
 logo mark.
 
+**XP bar colour** is a viewer preference in the account menu (`preferences.xpColour`, kept in `localStorage`): the
+agent's colour (default) or its level, where `.level-accent` with `--level-t` (level ÷ top level) runs the brand lime
+from near-grey at probation to fully saturated at the top.
+
 ## Type
 
 - Funnel Sans Variable (`@fontsource-variable/funnel-sans`, weights 300–800) for everything; `font-mono` (system mono stack) for machine strings: codes, tokens, secrets, URLs,
