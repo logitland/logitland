@@ -1,0 +1,2 @@
+# Written by `wrangler types` on check and build. Its contents depend on whether a build exists, so it is not committed.
+worker-configuration.d.ts
