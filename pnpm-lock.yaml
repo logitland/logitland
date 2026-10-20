@@ -173,6 +173,9 @@ catalogs:
     '@lucide/svelte':
       specifier: 1.52.0
       version: 1.52.0
+    '@mdream/js':
+      specifier: 1.7.2
+      version: 1.7.2
     '@shadcn-svelte/primitives':
       specifier: 0.0.1
       version: 0.0.1
@@ -388,6 +391,9 @@ importers:
       '@lucide/svelte':
         specifier: 'catalog:'
         version: 1.52.0(svelte@5.57.1)
+      '@mdream/js':
+        specifier: 'catalog:'
+        version: 1.7.2
       '@shadcn-svelte/primitives':
         specifier: 'catalog:'
         version: 0.0.1(@sveltejs/kit@3.0.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)))(svelte@5.57.1)(typescript@6.0.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)))(svelte@5.57.1)(zod@4.6.5)
@@ -460,6 +466,9 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.3(@types/node@24.19.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0))
       wrangler:
         specifier: 'catalog:'
         version: 4.147.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
@@ -1239,6 +1248,10 @@ packages:
     peerDependencies:
       svelte: ^5
 
+  '@mdream/js@1.7.2':
+    resolution: {integrity: sha512-NiihQ8D6btMFN03ZRHdev/zXAQvyjf9joQsZRjwu3Z2nS9Dm03sofPWhHB5CiwKw2Z6bHdx5I9ShAgyUU6yElA==}
+    hasBin: true
+
   '@oxc-project/types@0.154.0':
     resolution: {integrity: sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA==}
 
@@ -1806,6 +1819,10 @@ packages:
 
   blake3-wasm@2.1.5:
     resolution: {integrity: sha512-F1+K8EbfOZE49dtoPtmxUQrpXaBIl3ICvasLh+nJta0xkz+9kF/7uet9fLnwKqhDrmj6g+6K3Tw9yQPUg2ka5g==}
+
+  cac@7.1.0:
+    resolution: {integrity: sha512-LMDU/U2yA4IPIY8KT0NsNPWEYZvAMkbgyspxJ6btJaYV+WMDOHAZCmB0lsTObiHaRS1V/ztKAl7+TSkTqXyeoA==}
+    engines: {node: '>=20.19.0'}
 
   camelcase@9.0.0:
     resolution: {integrity: sha512-TO9xmyXTZ9HUHI8M1OnvExxYB0eYVS/1e5s7IDMTAoIcwUd+aNcFODs6Xk83mobk0velyHFQgA1yIrvYc6wclw==}
@@ -3284,6 +3301,11 @@ snapshots:
     dependencies:
       svelte: 5.57.1
 
+  '@mdream/js@1.7.2':
+    dependencies:
+      cac: 7.1.0
+      pathe: 2.0.3
+
   '@oxc-project/types@0.154.0': {}
 
   '@polka/url@1.0.0-next.29': {}
@@ -3722,6 +3744,8 @@ snapshots:
       - '@sveltejs/kit'
 
   blake3-wasm@2.1.5: {}
+
+  cac@7.1.0: {}
 
   camelcase@9.0.0:
     optional: true

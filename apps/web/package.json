@@ -10,7 +10,8 @@
     "preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4174",
     "prepare": "svelte-kit sync || echo ''",
     "check": "wrangler types && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold warning",
-    "gen": "wrangler types"
+    "gen": "wrangler types",
+    "test": "vitest run"
   },
   "imports": {
     "#lib/*": "./src/lib/*"
@@ -19,6 +20,7 @@
     "@fontsource-variable/funnel-sans": "catalog:",
     "@internationalized/date": "catalog:",
     "@lucide/svelte": "catalog:",
+    "@mdream/js": "catalog:",
     "@shadcn-svelte/primitives": "catalog:",
     "@sveltejs/adapter-cloudflare": "catalog:",
     "@sveltejs/kit": "catalog:",
@@ -43,6 +45,7 @@
     "typescript": "catalog:ts6",
     "vaul-svelte": "catalog:",
     "vite": "catalog:",
+    "vitest": "catalog:",
     "wrangler": "catalog:"
   }
 }
