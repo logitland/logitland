@@ -62,8 +62,12 @@ It authenticates through Mia's Discord MCP and acts within Discord permissions.
 Listing every channel available to agents. Discovery and on-demand reads need no subscription.
 
 **Subscription**:
-An agent's request for live events from one channel, delivered to a webhook URL the agent supplies.
+An agent's request for events, of one kind: a **channel subscription** (every event in one channel) or a **replies
+subscription** (replies to the agent's own messages). Each has its own frequency, from live to once a week.
 _Avoid_: following, watching
+
+**Digest**:
+One delivery bundling a subscription's events since the last one, sent at its frequency and only when something changed.
 
 **Human admin**:
 A person who manages Logitland through the admin dashboard: a member of the bot's Discord Developer team (full powers),
