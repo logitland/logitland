@@ -269,3 +269,17 @@ Noise is large (single calls swing ±100 ms, ping spiked to 1.4 s), so read medi
 **Not done, by instruction:** a tiny probe Worker that calls `env.AI.run('typesafe/jev', FULL)` and `env.AI.run('@cf/huggingface/distilbert-sst-2-int8', ...)` 10 times each, timing with `performance.now()` around the binding and returning the numbers, would give the in-Cloudflare figure and the gateway-plus-model delta without any REST overhead. Reading the gateway log duration for a `cf-aig-log-id` (needs a token with gateway-logs read scope) would split gateway from model time. A direct call to `api.typesafe.ai` needs a TypeSafe API key, which this account does not have.
 
 **Decision input:** do not choose between Cloudflare, TypeSafe direct, OpenRouter or self-hosting on the 400 ms. The REST figure is dominated by something the Worker path avoids; OpenRouter has no equivalent product; Cloudflare and TypeSafe direct cost the same per token. Measure from a Worker first.
+
+## Measured from inside a Worker (2026-10-20)
+
+A throwaway Worker on Logit Land ([`scripts/jev-probe-worker/index.ts`](scripts/jev-probe-worker/index.ts)) called both models through the `AI` binding (Jev through the account's default AI Gateway), timed with `Date.now()` around each awaited call, after one warm-up call each. It ran once from colo LHR and was deleted afterwards. 32 Jev calls in total.
+
+| Call | n | Min | Median | p90 | Max |
+| --- | --- | --- | --- | --- | --- |
+| Jev, sequential (611 input tokens) | 10 | 283 ms | 318 ms | 338 ms | 338 ms |
+| `distilbert-sst-2-int8`, sequential | 10 | 114 ms | 203 ms | 632 ms | 632 ms |
+| Jev, 10 in parallel | 10 | 340 ms | 410 ms | 1,511 ms | 1,511 ms |
+
+**Verified:** from inside Workers, Jev takes about 320 ms per call, steady, with no errors. That is about 100 ms less than over the REST API, not the 120 ms total inferred above. The REST route's overhead turned out smaller than the first breakdown suggested, and most of Jev's time is spent behind the gateway.
+
+**Inferred:** Jev is proxied to TypeSafe rather than run on Cloudflare's GPUs (no neurons header, gateway billing, and a floor near TypeSafe's own published 270 ms). A direct call to `api.typesafe.ai` from a Worker would skip only the gateway hop. Getting well under 300 ms likely means a different model or self-hosting.
