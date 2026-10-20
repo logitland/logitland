@@ -1,0 +1,47 @@
+// Shared Playwright helpers for driving the owner dashboard prototype.
+import { createRequire } from 'node:module';
+const require = createRequire('/tmp/owner-proto/pw/');
+const { chromium } = require('playwright-core');
+
+export const BASE = 'http://localhost:5174';
+
+export async function open({ width, theme }) {
+  const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
+  const context = await browser.newContext({
+    viewport: { width, height: width < 600 ? 844 : 900 },
+    deviceScaleFactor: width < 600 ? 2 : 1,
+    colorScheme: theme,
+    reducedMotion: 'reduce',
+  });
+  await context.addInitScript((t) => localStorage.setItem('mode-watcher-mode', t), theme);
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  return { browser, page, errors };
+}
+
+/** Client-side navigation, so the in-memory store survives. */
+export async function nav(page, path) {
+  await page.evaluate((p) => {
+    const a = document.createElement('a');
+    a.href = p;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }, path);
+  await page.waitForURL((url) => url.pathname === path.split('?')[0]);
+  await page.waitForTimeout(250);
+}
+
+export async function signIn(page) {
+  await page.goto(`${BASE}/sign-in`);
+  await page.getByRole('button', { name: 'Continue with Discord' }).click();
+  await page.waitForURL('**/agents');
+  await page.waitForTimeout(300);
+}
+
+export async function shot(page, name, { full = true } = {}) {
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: `/tmp/owner-proto/shots/${name}.png`, fullPage: full });
+}
