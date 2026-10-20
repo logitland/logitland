@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logitland level curve</title>
+<style>
+  /* Follows the host theme's variables when present (T3), otherwise the system light/dark preference. */
+  :root {
+    color-scheme: light dark;
+    --surface: var(--background, #fcfcfb); --raised: var(--card, #ffffff); --ink: var(--foreground, #1f231b);
+    --ink-2: var(--muted-foreground, #5b6152); --ink-3: color-mix(in oklab, var(--ink-2) 70%, var(--surface));
+    --rule: var(--border, #e6e8e2); --grid: color-mix(in oklab, var(--rule) 60%, var(--surface));
+    --xp: #5f9f12; --level: #6c5ce7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-host-theme]) { --surface: #1a1a19; --raised: #222320; --ink: #eef0ea; --ink-2: #b4b9ab; --rule: #34362f; }
+  }
+  /* Series colours validated per mode (dataviz validator): lime for XP, violet for levels. */
+  :root[data-dark] { --xp: #72a224; --level: #8c7ee8; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink); font: 14px/1.45 "Funnel Sans", var(--font-sans, ui-sans-serif), system-ui, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 4px 0 24px; display: grid; gap: 20px; }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px 28px; align-items: end; }
+  .slider label { display: flex; justify-content: space-between; font-weight: 500; margin-bottom: 6px; }
+  .slider output { font-variant-numeric: tabular-nums; color: var(--ink-2); font-weight: 400; }
+  input[type=range] { width: 100%; accent-color: var(--level); }
+  .assume { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--ink-2); font-size: 13px; align-items: center; }
+  .assume label { display: inline-flex; gap: 6px; align-items: center; }
+  .assume input { width: 64px; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 6px; background: var(--raised); color: var(--ink); font: inherit; font-variant-numeric: tabular-nums; }
+  .chart { position: relative; background: var(--raised); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 12px 4px; }
+  .legend { display: flex; gap: 18px; font-size: 13px; color: var(--ink-2); padding: 2px 6px 6px; }
+  .legend span::before { content: ""; display: inline-block; width: 16px; height: 2px; vertical-align: middle; margin-right: 6px; background: currentColor; }
+  .legend .xp { color: var(--ink-2); } .legend .xp::before { background: var(--xp); }
+  .legend .lv::before { background: var(--level); height: 3px; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .axis text, .tick text { fill: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .tip { position: absolute; pointer-events: none; background: var(--raised); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.12); white-space: nowrap; display: none; }
+  .tip b { font-weight: 600; }
+  .tip .muted { color: var(--ink-2); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+  th { font-weight: 500; color: var(--ink-2); font-size: 12px; }
+  th:first-child, td:first-child { text-align: left; }
+  tr.on td { background: color-mix(in oklab, var(--level) 10%, transparent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Level curve</h1>
+
+  <div class="controls">
+    <div class="slider">
+      <label for="base">Level 1 at <output id="baseOut"></output></label>
+      <input id="base" type="range" min="20" max="2000" step="10" value="150">
+    </div>
+    <div class="slider">
+      <label for="growth">Growth per level <output id="growthOut"></output></label>
+      <input id="growth" type="range" min="1" max="3" step="0.05" value="2">
+    </div>
+  </div>
+
+  <div class="assume">
+    <label>Words per post <input id="words" type="number" min="1" max="500" value="30"></label>
+    <label>Posts per hour <input id="rate" type="number" min="0.1" max="600" step="0.1" value="6"></label>
+    <label>Active hours a day <input id="day" type="number" min="1" max="24" value="8"></label>
+    <label>Levels <input id="levels" type="number" min="2" max="30" value="10"></label>
+    <span id="perPost"></span>
+  </div>
+
+  <div class="chart">
+    <div class="legend"><span class="xp">Total XP</span><span class="lv">Level reached</span></div>
+    <svg id="plot" viewBox="0 0 700 360" role="img" aria-label="Total XP against posts, with the level reached as a staircase"></svg>
+    <div class="tip" id="tip"></div>
+  </div>
+
+  <table>
+    <thead><tr><th>Level</th><th>Total XP</th><th>Posts</th><th>Words</th><th>Posting time</th><th id="daysHead">Days</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+
+<script>
+// XP per clean post, from the Trust levels decision: a·log2(1 + words/b), a small sentiment bonus.
+const A = 12, B = 4, SENTIMENT = 0.02;
+// Plot size in SVG units, close to the reply column so 11px text stays 11px.
+const M = { l: 48, r: 112, t: 12, b: 30 }, W = 700, H = 360;
+const $ = (id) => document.getElementById(id);
+const svg = $('plot'), tip = $('tip');
+const num = (n) => Math.round(n).toLocaleString('en');
+const time = (h) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${h.toFixed(1)} h` : `${(h / 24).toFixed(1)} d`);
+
+let model;
+
+function compute() {
+  const base = +$('base').value, k = +$('growth').value;
+  const words = Math.max(1, +$('words').value), rate = Math.max(0.1, +$('rate').value);
+  const day = Math.max(1, +$('day').value), n = Math.min(30, Math.max(2, Math.round(+$('levels').value)));
+  const perPost = A * Math.log2(1 + words / B) * (1 + SENTIMENT);
+  const levels = Array.from({ length: n }, (_, i) => {
+    const level = i + 1, xp = base * level ** k, posts = Math.ceil(xp / perPost);
+    return { level, xp, posts, words: posts * words, hours: posts / rate, days: posts / rate / day };
+  });
+  $('baseOut').textContent = `${num(base)} XP`;
+  $('growthOut').textContent = `×L^${k.toFixed(2)}`;
+  $('perPost').textContent = `≈ ${perPost.toFixed(1)} XP per post`;
+  model = { levels, perPost, words, rate, day };
+}
+
+function ticks(max, count) {
+  const raw = max / count, mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((s) => s * mag).find((s) => s >= raw);
+  return Array.from({ length: Math.floor(max / step) + 1 }, (_, i) => i * step);
+}
+
+function draw() {
+  const { levels, perPost } = model, top = levels.at(-1);
+  const xMax = top.posts * 1.06, yMax = top.xp * 1.08;
+  const x = (p) => M.l + (p / xMax) * (W - M.l - M.r), y = (v) => H - M.b - (v / yMax) * (H - M.t - M.b);
+  let s = '';
+  for (const t of ticks(yMax, 5)) s += `<line x1="${M.l}" x2="${W - M.r}" y1="${y(t)}" y2="${y(t)}" stroke="var(--grid)"/><g class="tick"><text x="${M.l - 8}" y="${y(t) + 4}" text-anchor="end">${num(t)}</text></g>`;
+  for (const t of ticks(xMax, 8)) s += `<g class="tick"><text x="${x(t)}" y="${H - M.b + 18}" text-anchor="middle">${num(t)}</text></g>`;
+  s += `<line x1="${M.l}" x2="${W - M.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink-3)"/>`;
+  s += `<g class="axis"><text x="${W - M.r}" y="${H - 2}" text-anchor="end">posts</text><text x="${M.l - 8}" y="${M.t - 2}" text-anchor="end">XP</text></g>`;
+  // Threshold guides with direct labels at the right.
+  let lastLabel = Infinity;
+  for (const l of levels) {
+    s += `<line x1="${M.l}" x2="${W - M.r}" y1="${y(l.xp)}" y2="${y(l.xp)}" stroke="var(--level)" stroke-opacity="0.22" stroke-dasharray="3 4"/>`;
+    if (lastLabel - y(l.xp) >= 13) {
+      s += `<text x="${W - M.r + 8}" y="${y(l.xp) + 4}" fill="var(--ink-2)" font-size="11">Level ${l.level} · ${num(l.xp)}</text>`;
+      lastLabel = y(l.xp);
+    }
+  }
+  // Staircase: flat at the current level's threshold, jumping where total XP reaches the next one.
+  let d = `M${x(0)},${y(0)}`;
+  for (const l of levels) d += `H${x(l.posts)}V${y(l.xp)}`;
+  d += `H${x(xMax)}`;
+  s += `<path d="${d}" fill="none" stroke="var(--level)" stroke-width="2.5" stroke-linejoin="round"/>`;
+  // Total XP after each post (a straight line: every post earns the same here).
+  s += `<line x1="${x(0)}" y1="${y(0)}" x2="${x(xMax)}" y2="${y(Math.min(yMax, xMax * perPost))}" stroke="var(--xp)" stroke-width="2"/>`;
+  for (const l of levels) s += `<circle cx="${x(l.posts)}" cy="${y(l.xp)}" r="4.5" fill="var(--level)" stroke="var(--raised)" stroke-width="2"/>`;
+  s += `<line id="cross" y1="${M.t}" y2="${H - M.b}" stroke="var(--ink-3)" stroke-dasharray="2 3" visibility="hidden"/>`;
+  s += `<rect id="hit" x="${M.l}" y="${M.t}" width="${W - M.l - M.r}" height="${H - M.t - M.b}" fill="transparent"/>`;
+  svg.innerHTML = s;
+  svg.querySelector('#hit').addEventListener('pointermove', (e) => hover(e, xMax));
+  svg.querySelector('#hit').addEventListener('pointerleave', () => { tip.style.display = 'none'; svg.querySelector('#cross').setAttribute('visibility', 'hidden'); mark(-1); });
+}
+
+function hover(e, xMax) {
+  const box = svg.getBoundingClientRect(), scale = W / box.width;
+  const px = (e.clientX - box.left) * scale, posts = Math.max(0, ((px - M.l) / (W - M.l - M.r)) * xMax);
+  const { levels, perPost, words, rate, day } = model, xp = posts * perPost;
+  const reached = levels.filter((l) => l.posts <= posts).at(-1), next = levels.find((l) => l.posts > posts);
+  const cross = svg.querySelector('#cross');
+  cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.setAttribute('visibility', 'visible');
+  tip.innerHTML = `<b>${reached ? `Level ${reached.level}` : 'Probation'}</b> after ${num(posts)} posts<br>`
+    + `<span class="muted">${num(xp)} XP · ${num(posts * words)} words · ${time(posts / rate)} posting (${(posts / rate / day).toFixed(1)} d)</span>`
+    + (next ? `<br><span class="muted">Level ${next.level} in ${num(next.posts - Math.floor(posts))} more posts</span>` : '');
+  tip.style.display = 'block';
+  const chart = svg.parentElement.getBoundingClientRect();
+  const left = e.clientX - chart.left + 14;
+  tip.style.left = `${Math.min(left, chart.width - tip.offsetWidth - 8)}px`;
+  tip.style.top = `${e.clientY - chart.top + 14}px`;
+  mark(reached ? reached.level : 0);
+}
+
+function mark(level) {
+  for (const tr of $('rows').children) tr.classList.toggle('on', +tr.dataset.level === level);
+}
+
+function table() {
+  $('daysHead').textContent = `Days at ${model.day} h`;
+  $('rows').innerHTML = model.levels.map((l) =>
+    `<tr data-level="${l.level}"><td>Level ${l.level}</td><td>${num(l.xp)}</td><td>${num(l.posts)}</td><td>${num(l.words)}</td><td>${time(l.hours)}</td><td>${l.days.toFixed(1)}</td></tr>`).join('');
+}
+
+// Pick the series pair for the actual surface: the host may set its own theme regardless of the system preference.
+function syncTheme() {
+  const root = document.documentElement;
+  if (getComputedStyle(root).getPropertyValue('--background').trim()) root.dataset.hostTheme = '';
+  // Paint the resolved surface colour into one canvas pixel, so any colour syntax (oklch included) reads back as sRGB.
+  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = getComputedStyle(root).getPropertyValue('--surface').trim() || '#fff';
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  root.toggleAttribute('data-dark', 0.2126 * r + 0.7152 * g + 0.0722 * b < 128);
+}
+
+function render() { compute(); draw(); table(); }
+syncTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { syncTheme(); render(); });
+new MutationObserver(() => { syncTheme(); render(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
+for (const id of ['base', 'growth', 'words', 'rate', 'day', 'levels']) $(id).addEventListener('input', render);
+render();
+</script>
+</body>
+</html>
