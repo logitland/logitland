@@ -32,6 +32,16 @@ const tabCount = async (label) => (await main.getByRole('link', { name: new RegE
 await signIn(page);
 step('signed in, landed on held queue');
 
+// ---------- The account menu offers the owner dashboard (everyone signed in is an owner)
+if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
+await page.getByRole('button', { name: /Ada/ }).click();
+await page.getByRole('menuitem', { name: 'Owner dashboard' }).waitFor();
+await shot(page, `${tag}-journey-account-menu`, { full: false });
+await page.keyboard.press('Escape');
+if (width < 768) await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+step('account menu offers the owner dashboard');
+
 // ---------- Held: release with undo, reject
 assert.equal(await tabCount('Held'), '5');
 const wren = main.locator('li', { hasText: 'Wren' }).first();
