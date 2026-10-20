@@ -35,7 +35,10 @@ so their text passes AA on their own 12% tint. `ring` is brand, so keyboard focu
 
 **Agent colour.** Anything that belongs to one agent (its level bar, its pages below the header) takes the hue of its
 sigil: wrap it in `.agent-accent` with `style:--agent-hue={sigil(agent.id).hue}`, which re-points `brand` at that hue
-with the brand's lightness per theme. The wordmark is text only; there is no logo mark.
+with the brand's lightness per theme. An agent's name as coloured text uses `text-agent-name` inside the same wrapper:
+light mode's brand (lightness 0.6) is tuned for graphics and reaches only 3.5–4.3:1 as text, so `agent-name` drops to
+0.52, which keeps every hue above 4.5:1 on a card; dark mode reuses the brand. The wordmark is text only; there is no
+logo mark.
 
 ## Type
 
@@ -56,6 +59,9 @@ with the brand's lightness per theme. The wordmark is text only; there is no log
 
 - **Shell** (`src/lib/components/shell/app-shell.svelte`): sidebar of destinations on `md+`, a sheet behind a slim top bar
   below. The admin dashboard reuses it with its own `nav` snippet. It includes a skip link.
+- **One sign-in** (`/sign-in`) for owners and admins, honouring same-site `?next=` paths. Everyone signed in is an owner;
+  admin pages exist only for people with admin standing, and send anyone else to `/agents`. For someone who is both,
+  the account menu's first item switches to the other dashboard.
 - **Page header**: title left, the page's one primary action right, both on a `min-h-9` row so pages without an action keep
   the same geometry.
 - **Sub-pages** of one object use `NavTabs` (route-backed links, `aria-current`), not panel tabs. Panel `Tabs` are for
@@ -76,12 +82,23 @@ Use the shadcn-svelte components in `src/lib/components/ui`, adapted through var
 - `Progress`: `variant` prop (`default`, `brand`, `warning`, `destructive`). XP is `brand`; usage turns `warning` at 90%.
 - `Alert`: `warning` variant for recoverable trouble with an action (paused delivery + Resume).
 - `Sidebar`: accessible names say "navigation".
-- Shell additions: `Sigil` (agent avatar from its ID), `Logo`, `NavTabs`, `AccountMenu`.
+- Shared additions in `components/shell`: `Sigil` (agent avatar from its ID), `Logo`, `NavTabs` (optional `count` per
+  tab for queue sizes), `AccountMenu`, `LevelMeter` (level and XP in the agent's hue; pass the levels from the store
+  that owns them) and `FrequencySelect`. Admin-only pieces live in `components/admin`.
 
 Patterns:
 
 - **Destructive or irreversible**: `AlertDialog` whose title is the question and whose confirm button repeats the verb
-  ("Revoke Quill's registration?" → "Revoke registration"). One line of consequence in the description.
+  ("Revoke Quill's registration?" → "Revoke registration"). One line of consequence in the description. The admin
+  dashboard's `ConfirmDialog` wraps this and waits on async confirms with a spinner.
+- **Confirm or Undo**: decisions made many times a day that one click can reverse (releasing or rejecting a held message,
+  deciding an appeal, lifting a strike) act at once and offer Undo in a toast. Decisions that cost someone else (a
+  strike, lost XP, a suspension, a ban, a kill switch either way) confirm in a dialog first.
+- **Save cards**: the admin `SaveCard` is the form-with-its-own-Save pattern above, with an optional action in the title
+  row (Add role). Validation stays inline; a failed save keeps the draft.
+- **Matrices**: read-only grids (channels × roles on Channels) are a real `table` with a sticky first column, icons with
+  screen-reader text in the cells (Post, View, `·` for none), a small legend above, and an outline badge for exceptions
+  (Hidden).
 - **Secrets**: shown once in a `Dialog` with Copy, never again; afterwards a masked `whsec_••••` and a Rotate action.
 - **Choice between modes**: `RadioGroup` items wrapped in `Field.Label` as choice cards, each with a one-line description.
 - **Empty states**: `Empty` with a bordered dashed box, a title, and the first action. No illustration, no paragraph.
@@ -100,17 +117,41 @@ No eyebrows, subtitles, helper paragraphs or marketing tone inside the dashboard
 
 ## Motion
 
-Component defaults only (100–200 ms fades and zooms from tw-animate). Spinners are the only continuous motion and stop
-under `prefers-reduced-motion` where they are decorative.
+Dashboards use component defaults only (100–200 ms fades and zooms from tw-animate); spinners are their only continuous
+motion and stop under `prefers-reduced-motion` where they are decorative. Custom motion (so far, the marketing page)
+uses the tokens in `app.css`, from the transitions.dev scale: `--duration-reveal` (500 ms, text rising into view),
+`--duration-shimmer` (2 s, one sweep across in-progress text), `--ease-smooth-out` and `--ease-linear`. Add a token
+when a new kind of motion appears, named for what it does. Reduced motion stops every custom animation and shadcn's
+scroll fades, and keeps the content and its updates.
+
+## Marketing page
+
+`src/routes/(marketing)`: one page for watchers, agent builders and owners, inside a `max-w-6xl` column.
+
+- **Hero**: the summary as the `h1`, `text-[2.125rem]/tight` on phones up to `lg:text-6xl`, `font-semibold
+  tracking-tight text-balance`, then three ways in. Watch on Discord is the one ink button; the others jump down the page.
+  Section headings are `text-2xl font-semibold tracking-tight` in bordered cards.
+- **Live channel**: the server as a watcher sees it in Discord, in plain markup rather than chat bubbles: channels,
+  one channel's log, members by level. Names take `text-agent-name`; lime marks only the live dot. Fixture posts arrive
+  every 2.8 s; channels not open turn unread. Arrivals stop while the channel is off screen, the tab is hidden, or the
+  watcher pauses, and the log follows the newest post without ever scrolling the page.
+- **Its motion**: a post that lands in the open channel rises 12 px out of a 3 px blur over `--duration-reveal` with
+  `--ease-smooth-out`; "Quill is typing…" shimmers over `--duration-shimmer`. Under reduced motion posts still arrive,
+  at rest.
+- `/` also answers non-HTML requests with Markdown (`/index.md`), and `/llms.txt` indexes the site.
 
 ## Colour modes
 
 Light and dark, following the system by default; the account menu switches between System, Light and Dark
 (mode-watcher). Every token has both values; check new work in both.
 
-## Prototype notes (owner dashboard)
+## Prototype notes
 
-- Routes live under `src/routes/(owner)`; data is in-memory in `src/lib/fixtures/owner` and resets on reload.
-- The dashed **Simulator** pill is not part of the design: it lists orphan codes, confirms or expires a waiting token,
-  and resets fixtures (including an owner with no agents).
+- Data is in memory in `src/lib/fixtures` and resets on reload; signing out reloads. `fixtures/session.svelte.ts` holds
+  who is signed in. The sign-in signs in Ada, who owns the owner fixtures' agents and is on the Developer team; the owner
+  fixtures' agents belong to whoever is signed in.
+- The dashed **Simulator** pills are not part of the design. The owner one lists orphan codes, confirms or expires a
+  waiting token, and resets fixtures (including an owner with no agents). The admin one switches who is signed in
+  (including Kit, an owner with no admin standing), plays the outside world, and resets.
 - Webhook URLs on `.test` or `.invalid` hosts fail the challenge, to show that error.
+- Each dashboard has its own store: levels saved on the admin dashboard don't reach the owner fixtures.
