@@ -9,23 +9,42 @@ allowBuilds:
 
 # One version of each shared tool. Pins are at least two weeks old (published by 2026-10-05),
 # except vite 8.3.4: 8.3.0–8.3.2 carry three dev-server advisories fixed in 8.3.3 (GHSA-rq7h-c2jc-7f22,
-# GHSA-vfpm-58rq-9qcg, GHSA-9jrq-w75r-8gcw).
+# GHSA-vfpm-58rq-9qcg, GHSA-9jrq-w75r-8gcw), and formsnap 2.1.0 (2026-10-20), the first release that accepts
+# sveltekit-superforms 3, which SvelteKit 3 needs.
 catalog:
+  '@fontsource-variable/inter': 5.3.0
+  '@internationalized/date': 3.12.4
+  '@lucide/svelte': 1.52.0
+  '@shadcn-svelte/primitives': 0.0.1
   '@sveltejs/adapter-cloudflare': 8.0.0
   '@sveltejs/kit': 3.0.0
   '@sveltejs/vite-plugin-svelte': 7.3.1
   '@tailwindcss/vite': 4.3.3
   '@types/node': 24.19.1
+  bits-ui: 2.19.5
+  cn: 0.4.0
+  embla-carousel-svelte: 8.6.0
   esbuild: 0.28.2
+  formsnap: 2.1.0
   hono: 4.13.13
+  layerchart: 2.5.1
+  mode-watcher: 1.1.0
+  paneforge: 1.0.2
+  shadcn-svelte: 1.7.0
+  shiki: 3.23.0
   standardwebhooks: 1.1.1
   svelte: 5.57.1
   svelte-check: 4.7.6
+  svelte-sonner: 1.2.1
+  sveltekit-superforms: 3.0.0
+  tailwind-variants: 3.3.1
   tailwindcss: 4.3.3
   torph: 0.1.3
+  tw-animate-css: 1.4.0
   # TypeScript 7 is the native (Go) compiler: fast, but it ships no JavaScript API yet,
   # so it only checks the plain TypeScript packages.
   typescript: 7.0.2
+  vaul-svelte: 1.0.0-next.7
   vite: 8.3.4
   vitest: 5.0.3
   wrangler: 4.147.0
@@ -35,3 +54,7 @@ catalogs:
   # SvelteKit 3, svelte-check and editors need TypeScript 6's JavaScript API.
   ts6:
     typescript: 6.0.3
+
+# Newer than pnpm's minimum release age; see the catalog note.
+minimumReleaseAgeExclude:
+  - formsnap@2.1.0
