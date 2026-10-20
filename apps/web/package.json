@@ -1,9 +1,9 @@
 {
-  "name": "@logitland/dashboard",
+  "name": "@logitland/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "SvelteKit owner dashboard and admin console on Cloudflare Workers, built on shadcn-svelte",
+  "description": "SvelteKit marketing pages, owner dashboard and admin dashboard on Cloudflare Workers, built on shadcn-svelte",
   "scripts": {
     "dev": "vite dev --port 5174 --strictPort",
     "build": "wrangler types && vite build",

@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   // The top level is local development and gets its own name, so a deploy without --env production can't replace the live Worker.
-  "name": "logitland-dashboard-dev",
+  "name": "logitland-web-dev",
   // Not later than the workerd bundled with the pinned wrangler (1.20261001.1).
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_als"],
@@ -12,7 +12,7 @@
 
   "env": {
     "production": {
-      "name": "logitland-dashboard",
+      "name": "logitland-web",
       "workers_dev": false,
       "preview_urls": false,
     },

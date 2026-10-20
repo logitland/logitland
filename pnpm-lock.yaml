@@ -316,7 +316,68 @@ importers:
         specifier: 'catalog:'
         version: 4.147.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
 
-  apps/dashboard:
+  apps/frontend:
+    dependencies:
+      '@logitland/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@logitland/flock':
+        specifier: workspace:*
+        version: link:../../packages/flock
+      '@logitland/tokens':
+        specifier: workspace:*
+        version: link:../../packages/tokens
+      '@logitland/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
+    devDependencies:
+      '@logitland/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@sveltejs/adapter-cloudflare':
+        specifier: 'catalog:'
+        version: 8.0.0(@sveltejs/kit@3.0.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)))(svelte@5.57.1)(typescript@6.0.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)))(wrangler@4.147.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1))
+      '@sveltejs/kit':
+        specifier: 'catalog:'
+        version: 3.0.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)))(svelte@5.57.1)(typescript@6.0.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0))
+      '@sveltejs/vite-plugin-svelte':
+        specifier: 'catalog:'
+        version: 7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0))
+      svelte:
+        specifier: 'catalog:'
+        version: 5.57.1
+      svelte-check:
+        specifier: 'catalog:'
+        version: 4.7.6(picomatch@4.0.7)(svelte@5.57.1)(typescript@6.0.3)
+      typescript:
+        specifier: catalog:ts6
+        version: 6.0.3
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.3(@types/node@24.19.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0))
+      wrangler:
+        specifier: 'catalog:'
+        version: 4.147.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
+
+  apps/prototype:
+    devDependencies:
+      '@logitland/tokens':
+        specifier: workspace:*
+        version: link:../../packages/tokens
+      '@logitland/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
+
+  apps/web:
     devDependencies:
       '@fontsource-variable/inter':
         specifier: 'catalog:'
@@ -402,67 +463,6 @@ importers:
       wrangler:
         specifier: 'catalog:'
         version: 4.147.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
-
-  apps/frontend:
-    dependencies:
-      '@logitland/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@logitland/flock':
-        specifier: workspace:*
-        version: link:../../packages/flock
-      '@logitland/tokens':
-        specifier: workspace:*
-        version: link:../../packages/tokens
-      '@logitland/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      zod:
-        specifier: 'catalog:'
-        version: 4.6.5
-    devDependencies:
-      '@logitland/config':
-        specifier: workspace:*
-        version: link:../../packages/config
-      '@sveltejs/adapter-cloudflare':
-        specifier: 'catalog:'
-        version: 8.0.0(@sveltejs/kit@3.0.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)))(svelte@5.57.1)(typescript@6.0.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)))(wrangler@4.147.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1))
-      '@sveltejs/kit':
-        specifier: 'catalog:'
-        version: 3.0.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)))(svelte@5.57.1)(typescript@6.0.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0))
-      '@sveltejs/vite-plugin-svelte':
-        specifier: 'catalog:'
-        version: 7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0))
-      svelte:
-        specifier: 'catalog:'
-        version: 5.57.1
-      svelte-check:
-        specifier: 'catalog:'
-        version: 4.7.6(picomatch@4.0.7)(svelte@5.57.1)(typescript@6.0.3)
-      typescript:
-        specifier: catalog:ts6
-        version: 6.0.3
-      vite:
-        specifier: 'catalog:'
-        version: 8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.3(@types/node@24.19.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0))
-      wrangler:
-        specifier: 'catalog:'
-        version: 4.147.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
-
-  apps/prototype:
-    devDependencies:
-      '@logitland/tokens':
-        specifier: workspace:*
-        version: link:../../packages/tokens
-      '@logitland/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      esbuild:
-        specifier: 'catalog:'
-        version: 0.28.2
 
   packages/config: {}
 
