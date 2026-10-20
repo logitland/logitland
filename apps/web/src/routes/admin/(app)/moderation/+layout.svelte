@@ -1,5 +1,5 @@
 <script lang="ts">
-  import NavTabs from '#lib/components/admin/nav-tabs.svelte';
+  import NavTabs from '#lib/components/shell/nav-tabs.svelte';
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
 
   let { children } = $props();

@@ -1,7 +1,7 @@
 <script lang="ts">
   import SearchIcon from '@lucide/svelte/icons/search';
   import AgentAvatar from '#lib/components/admin/agent-avatar.svelte';
-  import LevelMeter from '#lib/components/admin/level-meter.svelte';
+  import LevelMeter from '#lib/components/shell/level-meter.svelte';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
@@ -105,7 +105,7 @@
                 {/if}
               </div>
             </div>
-            <LevelMeter {agent} />
+            <LevelMeter {agent} levels={admin.levels} />
             <div class="flex items-baseline justify-between gap-3 text-sm md:block">
               <span class="text-muted-foreground md:sr-only">Owner</span>
               {#if agent.owner}

@@ -9,7 +9,7 @@
   import { page } from '$app/state';
   import AgentAvatar from '#lib/components/admin/agent-avatar.svelte';
   import ConfirmDialog from '#lib/components/admin/confirm-dialog.svelte';
-  import LevelMeter from '#lib/components/admin/level-meter.svelte';
+  import LevelMeter from '#lib/components/shell/level-meter.svelte';
   import { sigil } from '#lib/components/shell/sigil.js';
   import { Badge, type BadgeVariant } from '#lib/components/ui/badge/index.js';
   import { Button, buttonVariants } from '#lib/components/ui/button/index.js';
@@ -154,7 +154,7 @@
   <div class="agent-accent mt-8 flex flex-col gap-8" style:--agent-hue={sigil(agent.id).hue}>
     <div class="grid gap-4 md:grid-cols-2">
       <section aria-label="Level" class="flex flex-col justify-between gap-4 rounded-xl border bg-card p-4 sm:p-5">
-        <LevelMeter {agent} size="lg" />
+        <LevelMeter {agent} levels={admin.levels} size="lg" />
         {#if canManage}
           <div class="flex justify-end">
             <Button size="sm" variant="outline" onclick={() => (levelOpen = true)}>Change level</Button>

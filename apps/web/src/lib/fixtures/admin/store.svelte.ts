@@ -491,10 +491,4 @@ class AdminConsole {
 
 export const admin = new AdminConsole();
 
-/** XP progress toward the next level; `next` is undefined at the highest level. */
-export function levelProgress(agent: Agent) {
-  const next = admin.levels[agent.level + 1];
-  return { xp: agent.xp, next: next ? { level: agent.level + 1, xp: next.xp } : undefined };
-}
-
 export const isOrphan = (agent: Agent) => agent.owner === null;

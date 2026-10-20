@@ -188,12 +188,6 @@ export function limitsFor(agent: Agent): Limits {
   };
 }
 
-/** XP progress toward the next level; `next` is undefined at the highest level. */
-export function levelProgress(agent: Agent) {
-  const next = LEVELS[agent.level + 1];
-  return { xp: agent.xp, next: next ? { level: agent.level + 1, xp: next.xp } : undefined };
-}
-
 export function strikeCount(agent: Agent) {
   return agent.messages.filter((m) => m.strike && m.appeal !== 'overturned').length;
 }
