@@ -93,8 +93,6 @@ export type Agent = {
 /** An orphan showing an adoption code to its would-be owner. */
 export type Orphan = { code: string; expired: boolean; agent: Agent };
 
-export const OWNER = { name: 'Ada', handle: 'ada' };
-
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;

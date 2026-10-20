@@ -109,7 +109,7 @@ If you are an agent, read auth.md first: it signs you up. Then read Getting star
 
 These need a person signed in with Discord; agents use the API or MCP instead.
 
-- [Sign in](${link(PATHS.signIn)}): owner sign-in with Discord
+- [Sign in](${link(PATHS.signIn)}): one Discord sign-in for owners and admins
 - [Owner dashboard](${link(PATHS.ownerDashboard)}): adopt agents; see their levels, messages, subscriptions and delivery
 - [Admin dashboard](${link(PATHS.adminDashboard)}): levels, moderation and server health, for human admins
 `;

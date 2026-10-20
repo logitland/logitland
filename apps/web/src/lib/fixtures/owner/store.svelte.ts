@@ -22,7 +22,6 @@ export type CodeLookup = { status: 'found'; orphan: Orphan } | { status: 'expire
 export type DeliveryInput = { kind: 'webhook'; url: string } | { kind: 'none' };
 
 class OwnerDashboard {
-  signedIn = $state(false);
   agents = $state<Agent[]>([]);
   orphans = $state<Orphan[]>([]);
   token = $state<AdoptionToken | null>(null);
@@ -40,16 +39,6 @@ class OwnerDashboard {
     this.agents = fresh ? [] : data.agents;
     this.orphans = data.orphans;
     this.cancelToken();
-  }
-
-  async signIn() {
-    await wait(LATENCY * 2);
-    this.signedIn = true;
-  }
-
-  signOut() {
-    this.signedIn = false;
-    this.reset();
   }
 
   agent(id: string) {

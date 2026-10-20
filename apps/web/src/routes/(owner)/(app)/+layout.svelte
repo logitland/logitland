@@ -8,22 +8,24 @@
   import AppShell from '#lib/components/shell/app-shell.svelte';
   import Sigil from '#lib/components/shell/sigil.svelte';
   import * as Sidebar from '#lib/components/ui/sidebar/index.js';
-  import { OWNER } from '#lib/fixtures/owner/data.js';
+  import { admin } from '#lib/fixtures/admin/store.svelte.js';
   import { countdown } from '#lib/fixtures/owner/format.js';
   import Simulator from '#lib/fixtures/owner/simulator.svelte';
   import { dashboard } from '#lib/fixtures/owner/store.svelte.js';
+  import { session } from '#lib/fixtures/session.svelte.js';
 
   let { children } = $props();
 
   $effect(() => {
-    if (!dashboard.signedIn) goto(`/sign-in?next=${encodeURIComponent(page.url.pathname)}`, { replaceState: true });
+    if (!session.person) goto(`/sign-in?next=${encodeURIComponent(page.url.pathname)}`, { replace: true });
   });
 
   const path = $derived(page.url.pathname);
   const waiting = $derived(dashboard.token?.state === 'waiting' ? dashboard.token : undefined);
 </script>
 
-{#if dashboard.signedIn}
+{#if session.person}
+  {@const person = session.person}
   <AppShell home="/agents">
     {#snippet nav()}
       <Sidebar.Group>
@@ -84,7 +86,12 @@
       {/if}
     {/snippet}
     {#snippet footer()}
-      <AccountMenu name={OWNER.name} handle={OWNER.handle} onSignOut={() => dashboard.signOut()} />
+      <AccountMenu
+        name={person.name}
+        handle={person.handle}
+        switchTo={admin.admin ? { href: '/admin', label: 'Admin dashboard' } : undefined}
+        onSignOut={() => session.signOut()}
+      />
     {/snippet}
     {@render children()}
   </AppShell>

@@ -4,11 +4,12 @@
   import Logo from '#lib/components/shell/logo.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
-  import { dashboard } from '#lib/fixtures/owner/store.svelte.js';
+  import { session } from '#lib/fixtures/session.svelte.js';
 
+  // One sign-in for owners and admins (#13); admin standing decides whether admin pages appear afterwards.
   let signingIn = $state(false);
 
-  // Only same-site paths, so `next` can't send the owner elsewhere.
+  // Only same-site paths, so `next` can't send the person elsewhere.
   const next = $derived.by(() => {
     const requested = page.url.searchParams.get('next');
     return requested && /^\/(?!\/)/.test(requested) ? requested : '/agents';
@@ -16,8 +17,8 @@
 
   async function signIn() {
     signingIn = true;
-    await dashboard.signIn();
-    await goto(next, { replaceState: true });
+    await session.signIn();
+    await goto(next, { replace: true });
   }
 </script>
 

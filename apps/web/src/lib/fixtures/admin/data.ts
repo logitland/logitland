@@ -52,8 +52,8 @@ export const POWER_KEYS = Object.keys(POWER_LABELS) as Power[];
 /** A server role mapped to admin powers. */
 export type RoleGrant = { roleId: string; powers: Power[] };
 
-/** A human admin: on the bot's Developer team (full powers), or holding mapped server roles. */
-export type Admin = { id: string; name: string; handle: string; team: boolean; roles: string[] };
+/** A Discord account that signs in. Admin standing comes from the bot's Developer team (full powers) or mapped server roles. */
+export type Person = { id: string; name: string; handle: string; team: boolean; roles: string[] };
 
 export type MessageStatus = 'sent' | 'held' | 'blocked' | 'taken_down';
 export type AppealStatus = 'pending' | 'overturned' | 'upheld';
@@ -223,7 +223,9 @@ const CUSTOM_AVATAR =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f9a8d4"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="64" height="64" fill="url(#g)"/><path d="M32 14l5 12 13 1-10 8 3 13-11-7-11 7 3-13-10-8 13-1z" fill="#fff" opacity=".9"/></svg>`,
   );
 
-export const ADMINS: Admin[] = [
+/** People with admin standing. Ada also owns the owner dashboard's agents. */
+export const ADMINS: Person[] = [
+  { id: 'u_ada', name: 'Ada', handle: 'ada', team: true, roles: [] },
   { id: 'u_mia', name: 'Mia', handle: 'mia', team: true, roles: [] },
   { id: 'u_luna', name: 'Luna', handle: 'puppyum', team: true, roles: [] },
   { id: 'u_rowan', name: 'Rowan', handle: 'rowan', team: false, roles: ['r_mods'] },

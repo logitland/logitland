@@ -2,9 +2,11 @@
  * PROTOTYPE in-memory state for the admin dashboard. Every admin route reads and writes this one instance,
  * so changes stay coherent across routes; a reload starts over. Latency is simulated so loading states show.
  * Every change an admin makes lands in the audit log; undoing it removes the entry again.
- * `simulator.svelte` drives the outside world (new reports, Gateway drops, who is signed in).
+ * Who acts is whoever the shared session has signed in. `simulator.svelte` drives the outside world
+ * (new reports, Gateway drops) and switches who that is.
  */
 import { levelName, plural } from '#lib/fixtures/owner/format.js';
+import { session } from '#lib/fixtures/session.svelte.js';
 import {
   ADMINS,
   CHECKS,
@@ -43,7 +45,6 @@ export type Undo = () => void;
 export type HeldMessage = { agent: Agent; message: Agent['messages'][number]; expiresAt: number };
 
 class AdminConsole {
-  adminId = $state<string | null>(null);
   agents = $state<Agent[]>([]);
   reports = $state<ReportCase[]>([]);
   appeals = $state<ReturnType<typeof seed>['appeals']>([]);
@@ -79,40 +80,22 @@ class AdminConsole {
 
   // ---------- Identity
 
-  get admin() {
-    return ADMINS.find((a) => a.id === this.adminId);
-  }
-
-  get signedIn() {
-    return this.admin !== undefined;
-  }
-
-  /** Full admins hold every power; everyone else holds the union of their roles' grants. */
+  /** The signed-in person's powers: the Developer team holds every power; everyone else, the union of their roles' grants. */
   get powers(): Power[] {
-    const admin = this.admin;
-    if (!admin) return [];
-    if (admin.team) return POWER_KEYS;
-    return POWER_KEYS.filter((power) => this.grants.some((g) => admin.roles.includes(g.roleId) && g.powers.includes(power)));
+    const person = session.person;
+    if (!person) return [];
+    if (person.team) return POWER_KEYS;
+    return POWER_KEYS.filter((power) => this.grants.some((g) => person.roles.includes(g.roleId) && g.powers.includes(power)));
+  }
+
+  /** The signed-in person, if they have admin standing (any power). Admin pages exist only for them. */
+  get admin() {
+    return this.powers.length > 0 ? session.person : undefined;
   }
 
   can(power: Power | 'admins') {
     if (power === 'admins') return this.admin?.team ?? false;
     return this.powers.includes(power);
-  }
-
-  async signIn(adminId = 'u_mia') {
-    await wait(LATENCY * 2);
-    this.adminId = adminId;
-  }
-
-  signOut() {
-    this.adminId = null;
-    this.reset();
-  }
-
-  /** Simulator: become another admin without signing out. */
-  switchAdmin(adminId: string) {
-    this.adminId = adminId;
   }
 
   adminName(actor: string) {
@@ -122,7 +105,7 @@ class AdminConsole {
   // ---------- Audit
 
   #log(area: Area, action: string, target?: AuditEntry['target'], detail?: string): Undo {
-    const entry: AuditEntry = { id: id(), at: Date.now(), actor: this.adminId ?? RELAY_ACTOR, area, action, target, detail };
+    const entry: AuditEntry = { id: id(), at: Date.now(), actor: session.personId ?? RELAY_ACTOR, area, action, target, detail };
     this.audit.unshift(entry);
     return () => {
       this.audit = this.audit.filter((e) => e.id !== entry.id);
