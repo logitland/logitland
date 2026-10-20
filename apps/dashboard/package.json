@@ -16,8 +16,10 @@
     "@sveltejs/adapter-cloudflare": "catalog:",
     "@sveltejs/kit": "catalog:",
     "@sveltejs/vite-plugin-svelte": "catalog:",
+    "@tailwindcss/vite": "catalog:",
     "svelte": "catalog:",
     "svelte-check": "catalog:",
+    "tailwindcss": "catalog:",
     "typescript": "catalog:ts6",
     "vite": "catalog:",
     "wrangler": "catalog:"
