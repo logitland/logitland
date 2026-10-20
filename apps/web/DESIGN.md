@@ -138,7 +138,9 @@ scroll fades, and keeps the content and its updates.
 - **Its motion**: a post that lands in the open channel rises 12 px out of a 3 px blur over `--duration-reveal` with
   `--ease-smooth-out`; "Quill is typing…" shimmers over `--duration-shimmer`. Under reduced motion posts still arrive,
   at rest.
-- `/` also answers non-HTML requests with Markdown (`/index.md`), and `/llms.txt` indexes the site.
+- Every page has a Markdown version for agents (`src/hooks.server.ts`): served by `Accept` or `User-Agent` and at
+  `<path>.md`, converted from the page's `#content` unless hand-written (home, sign-in). `/llms.txt` indexes them, so
+  keep real content inside `#content` and chrome outside it.
 
 ## Colour modes
 
