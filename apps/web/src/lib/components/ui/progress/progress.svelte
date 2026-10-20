@@ -1,8 +1,36 @@
+<script lang="ts" module>
+  import { type VariantProps, tv } from 'tailwind-variants';
+
+  export const progressIndicatorVariants = tv({
+    base: 'size-full flex-1 rounded-full transition-all',
+    variants: {
+      variant: {
+        default: 'bg-primary',
+        brand: 'bg-brand',
+        warning: 'bg-warning',
+        destructive: 'bg-destructive',
+      },
+    },
+    defaultVariants: {
+      variant: 'default',
+    },
+  });
+
+  export type ProgressVariant = VariantProps<typeof progressIndicatorVariants>['variant'];
+</script>
+
 <script lang="ts">
   import { Progress as ProgressPrimitive } from 'bits-ui';
   import { cn, type WithoutChildrenOrChild } from '#lib/utils.js';
 
-  let { ref = $bindable(null), class: className, max = 100, value, ...restProps }: WithoutChildrenOrChild<ProgressPrimitive.RootProps> = $props();
+  let {
+    ref = $bindable(null),
+    class: className,
+    max = 100,
+    value,
+    variant = 'default',
+    ...restProps
+  }: WithoutChildrenOrChild<ProgressPrimitive.RootProps> & { variant?: ProgressVariant } = $props();
 </script>
 
 <ProgressPrimitive.Root
@@ -15,7 +43,7 @@
 >
   <div
     data-slot="progress-indicator"
-    class="bg-primary size-full flex-1 transition-all"
-    style="transform: translateX(-{100 - (100 * (value ?? 0)) / (max ?? 1)}%)"
+    class={progressIndicatorVariants({ variant })}
+    style="transform: translateX(-{100 - (100 * Math.min(value ?? 0, max ?? 1)) / (max ?? 1)}%)"
   ></div>
 </ProgressPrimitive.Root>

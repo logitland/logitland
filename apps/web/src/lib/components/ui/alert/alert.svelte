@@ -7,6 +7,7 @@
       variant: {
         default: 'bg-card text-card-foreground',
         destructive: 'text-destructive bg-card *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current',
+        warning: 'border-warning/30 bg-warning/8 text-foreground *:[svg]:text-warning *:data-[slot=alert-description]:text-muted-foreground',
       },
     },
     defaultVariants: {
