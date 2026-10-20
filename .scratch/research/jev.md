@@ -137,11 +137,83 @@ Policy text lives in `instructions`/`criteria`, never in `state`, so agent-writt
 3. Thresholds for `confidence` and `noul`, measured on real agent text including injected instructions. TypeSafe's own docs say to expect drift on adversarial input.
 4. Whether the Llama Guard fallback stays, given `DIRECTION.md`.
 
-## Measured on our account (2026-10-20, partial)
+## Measured on our account (2026-10-20)
 
-Two calls on the "Logit Land" account through the REST API, with `scripts/jev-measure.mjs`:
+Answers [issue #16](https://github.com/logitsml/swarmcord/issues/16). Account "Logit Land", REST API (`POST /accounts/<id>/ai/run`, `{ "model": "typesafe/jev", "input": { state, questions } }`), from a machine in Europe (`cf-ray` colo AMS), with `scripts/jev-measure.mjs`. All 80 approved paid calls are spent: 3 earlier ones that returned 402, then 77 that returned 200 (see Non-200 shapes).
 
-- `POST /accounts/<id>/ai/run/typesafe/jev` returns 400, error 7000 "No route for that URI": a model id with a slash doesn't route on that path.
-- `POST /accounts/<id>/ai/run` with `{ "model": "typesafe/jev", "input": { state, questions } }` reaches AI Gateway and returns **402**, code 2021, "Insufficient balance; add money to your gateway or use BYOK", after about 4 s. No rate-limit headers.
+**Request.** A realistic moderation call: one `choice` question (policy in `instructions`; options allow, unsure, harassment, hate, sexual content involving minors, violence, spam, personal data) and `state` with channel, two prior messages and the message to judge. Every call returned `allow` with probability 1 and confidence 1. 611 input tokens and 82 output tokens per call.
 
-**Verified:** on this account Jev is billed through AI Gateway credits (third-party model billing), not the free daily Workers AI allowance. No call succeeds until the account has gateway credit or a bring-your-own TypeSafe key. Latency, rate limit and the `score` question are still unmeasured; the script's latency and burst runs are ready for when credit exists.
+### Billing: fixed
+
+With credit loaded the same request that returned 402 in rounds 1 and 2 now returns 200. It routes through the account's default gateway; no `cf-aig-gateway-id` header was needed.
+
+### Latency (Verified, 20 sequential calls, client-side wall time)
+
+| min | median | p90 | max |
+| --- | --- | --- | --- |
+| 355 ms | 396 ms | 420 ms | 558 ms |
+
+The 558 ms call was the first of the run; the other 19 sit between 355 and 437 ms. In 56 parallel calls (two bursts) the figures are min 447, median 579, p90 744, max 1,184 ms, so parallel load adds about 200 ms and a longer tail but no failures. Both sets are well inside the 4 s timeout the relay uses and match TypeSafe's own 0.4 s per-message figure.
+
+### Rate limit: not reached
+
+**77 calls, 0 rate-limited.** All 77 returned 200 within 31 seconds (18:32:30 to 18:33:01 UTC): a probe, 20 sequential, 30 parallel at 18:32:54 (all done within 2 s), then 26 parallel at 18:33:01. One-second peak: 29 calls in flight at once. **No 429 occurred, so there is no 429 body or header to report.**
+
+- **Ruled out:** the 20/min and 50/min tiers. Both are exceeded within one minute with every call succeeding. The 20/min Workers Paid tier does not apply to Jev through the REST route on this account, even with credits.
+- **Not ruled out:** 300/min (our peak was about 150/min extrapolated, 77 in 31 s) or anything higher. The budget ended before a limit appeared. **Inferred:** the 300/min Text Generation default is the likely tier, but this run cannot confirm it. Confirming needs roughly 350 calls in a minute, about $0.009 at this size.
+- No response carries `retry-after`, `x-ratelimit-*` or any limit header, so a client cannot read its remaining quota. It can only react to a 429.
+
+### Response shape (Verified)
+
+The REST route wraps the model output in a Cloudflare envelope; the binding example in section 1 shows only the inner part.
+
+```json
+{
+  "result": {
+    "state": "Completed",
+    "result": {
+      "model": "jev-1.13.0",
+      "answers": { "verdict": { "type": "choice", "choice": "allow", "probabilities": { "allow": 1, "unsure": 0, "...": 0 }, "confidence": 1 } },
+      "usage": { "input_tokens": 611, "output_tokens": 82 }
+    }
+  },
+  "success": true, "errors": [], "messages": []
+}
+```
+
+Read answers from `result.result.answers`. `result.state` is `Completed` on every call; a code that reads the binding shape directly would find `model`, `answers` and `usage` one level too deep. Probabilities are rounded: `1` and `0` appear, not 0.9993.
+
+Response headers on a 200: `api-version: 2026-10-01.epoch`, `cache-control: no-store`, `content-encoding: gzip`, `content-type: application/json`, `server: cloudflare`, `cf-ray`, `cf-auditlog-id`, a Cloudflare bot cookie, and four gateway ids (`cf-aig-log-id`, `cf-aig-event-id`, `cf-aig-request-id` all equal, plus `cf-aig-trace-id`). Every request is logged in the AI Gateway under `cf-aig-log-id`.
+
+### Non-200 shapes
+
+- **402, code 2021**, "Insufficient balance; add money to your gateway or use BYOK" (before credit was loaded; about 4 s to answer). Seen only in rounds 1 and 2; this run's 77 calls had no errors.
+- **400, code 7000**, "No route for that URI" on `/ai/run/typesafe/jev` (model id with a slash in the path). Use the body form above.
+- **429, 408, 413, 403:** not observed. Shapes stay as documented in section 3.
+
+### `score` question (Verified, 5 calls)
+
+It works next to the `choice` question in the same call. Question: "How positive or negative is the tone of `message`?" with levels very negative, negative, neutral, positive, very positive. Five calls on the identical message returned 2.56, 2.58, 2.57, 2.58, 2.61, so repeated calls are nearly deterministic but not identical. Answer shape:
+
+```json
+"sentiment": {
+  "type": "score", "score": 2.56,
+  "legend": { "0": "very negative", "1": "negative", "2": "neutral", "3": "positive", "4": "very positive" },
+  "probabilities": { "0": 0, "1": 0, "2": 0.44, "3": 0.56, "4": 0 },
+  "confidence": 0.63
+}
+```
+
+`score` is the probability-weighted level index (here 2×0.44 + 3×0.56 = 2.56), zero-based, so the 5 levels run 0 to 4. Adding it costs 56 more input tokens and 15 more output tokens (667 / 97 against 611 / 82) and no measurable latency (median 390 ms on the 5 calls with `score`, 401 ms on the 15 without). The verdict is unchanged by the second question.
+
+### Cost
+
+- Neither the response body nor any header carries a price or balance; only `usage` token counts.
+- At the published $0.042 per 1M input tokens (output free), 611 tokens is **$0.0000257 per call** (about $0.026 per 1,000 messages), and the whole 77-call run used 47,327 input tokens, about **$0.002**.
+- **Unknown:** whether billing matches the published price. The gateway log API (`/ai-gateway/gateways/default/logs/<id>`) returned 403 for the wrangler token, which has `ai:write` only, and the credit balance was not read before and after the run. Compare the AI Gateway dashboard's credit balance and the log entry for `cf-aig-log-id` 01a15a96-1830-74ab-ac2d-0d17689de86f to check.
+
+### What this changes
+
+- Section 2's open question on rate limits narrows: Jev through the gateway is not on the 20/min or 50/min tier. The design need not budget for 20 classifications a minute.
+- A relay call costs about 0.4 s and $0.00003; both are small enough that classifying every message before posting is viable.
+- Still unmeasured: the actual limit (above 77/min), the 429 shape, behaviour on non-allow content, and the real billing against the dashboard.
