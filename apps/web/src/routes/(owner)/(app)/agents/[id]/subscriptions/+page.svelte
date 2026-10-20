@@ -5,6 +5,7 @@
   import XIcon from '@lucide/svelte/icons/x';
   import { toast } from 'svelte-sonner';
   import { page } from '$app/state';
+  import FrequencySelect from '#lib/components/shell/frequency-select.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Dialog from '#lib/components/ui/dialog/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
@@ -14,7 +15,6 @@
   import { CHANNELS, DEFAULT_FREQUENCY, type Frequency, type Subscription, type SubscriptionKind } from '#lib/fixtures/owner/data.js';
   import { formatNumber, levelName, plural } from '#lib/fixtures/owner/format.js';
   import { dashboard, limitsFor } from '#lib/fixtures/owner/store.svelte.js';
-  import FrequencySelect from './frequency-select.svelte';
 
   const agent = $derived(dashboard.agent(page.params.id ?? ''));
   const limit = $derived(agent ? limitsFor(agent).subscriptions : 0);

@@ -22,7 +22,6 @@ export type CodeLookup = { status: 'found'; orphan: Orphan } | { status: 'expire
 export type DeliveryInput = { kind: 'webhook'; url: string } | { kind: 'none' };
 
 class OwnerDashboard {
-  signedIn = $state(false);
   agents = $state<Agent[]>([]);
   orphans = $state<Orphan[]>([]);
   token = $state<AdoptionToken | null>(null);
@@ -40,16 +39,6 @@ class OwnerDashboard {
     this.agents = fresh ? [] : data.agents;
     this.orphans = data.orphans;
     this.cancelToken();
-  }
-
-  async signIn() {
-    await wait(LATENCY * 2);
-    this.signedIn = true;
-  }
-
-  signOut() {
-    this.signedIn = false;
-    this.reset();
   }
 
   agent(id: string) {
@@ -186,12 +175,6 @@ export function limitsFor(agent: Agent): Limits {
     subscriptions: base.subscriptions + ADOPTED_BONUS.subscriptions,
     readsPerMinute: base.readsPerMinute + ADOPTED_BONUS.readsPerMinute,
   };
-}
-
-/** XP progress toward the next level; `next` is undefined at the highest level. */
-export function levelProgress(agent: Agent) {
-  const next = LEVELS[agent.level + 1];
-  return { xp: agent.xp, next: next ? { level: agent.level + 1, xp: next.xp } : undefined };
 }
 
 export function strikeCount(agent: Agent) {

@@ -1,7 +1,8 @@
 <script lang="ts">
   /*
    * PROTOTYPE control panel, deliberately styled apart from the product: it plays the outside world
-   * (agents reporting, the Gateway dropping, Jev failing), switches between fixture admins, and resets.
+   * (agents reporting, the Gateway dropping, Jev failing), switches who is signed in, and resets.
+   * Switching to someone without admin standing leaves the admin pages for their agents.
    * It is not part of the admin dashboard design.
    */
   import FlaskConicalIcon from '@lucide/svelte/icons/flask-conical';
@@ -9,7 +10,8 @@
   import { goto } from '$app/navigation';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Popover from '#lib/components/ui/popover/index.js';
-  import { ADMINS, POWER_LABELS } from './data.js';
+  import { PEOPLE, session } from '../session.svelte.js';
+  import { POWER_LABELS } from './data.js';
   import { admin } from './store.svelte.js';
 
   let open = $state(false);
@@ -36,16 +38,16 @@
   <Popover.Content side="top" align="end" class="w-80 gap-4 border border-dashed border-foreground/30 font-mono text-xs">
     <section class="flex flex-col gap-2">
       <h2 class="text-muted-foreground">Signed in as</h2>
-      {#each ADMINS as candidate (candidate.id)}
+      {#each PEOPLE as candidate (candidate.id)}
         <Button
           size="sm"
-          variant={admin.adminId === candidate.id ? 'secondary' : 'ghost'}
+          variant={session.personId === candidate.id ? 'secondary' : 'ghost'}
           class="h-auto justify-between py-1.5 font-mono text-xs"
-          onclick={() => admin.switchAdmin(candidate.id)}
+          onclick={() => session.switchTo(candidate.id)}
         >
           <span>{candidate.name}</span>
           <span class="truncate text-muted-foreground">
-            {candidate.team ? 'Developer team' : candidate.roles.map((r) => `@${admin.role(r)?.name}`).join(' ')}
+            {candidate.team ? 'Developer team' : candidate.roles.map((r) => `@${admin.role(r)?.name}`).join(' ') || 'Owner only'}
           </span>
         </Button>
       {/each}

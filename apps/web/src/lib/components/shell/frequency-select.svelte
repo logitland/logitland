@@ -3,6 +3,7 @@
   import { FREQUENCIES, type Frequency } from '#lib/fixtures/owner/data.js';
   import { cn } from '#lib/utils.js';
 
+  /** The subscription frequency picker: owners set it per subscription, admins set the defaults. */
   let {
     value,
     onChange,

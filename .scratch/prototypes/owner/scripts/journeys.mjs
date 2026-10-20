@@ -213,15 +213,30 @@ await page.getByText('Agent not found', { exact: true }).waitFor();
 await shot(page, `${tag}-agent-not-found`, { full: false });
 step('revoke: cancel, confirm, gone everywhere');
 
-// 7. New owner: empty states; sign out
+// 7. Ada is also an admin: the account menu switches dashboards both ways, keeping state
+async function accountMenu() {
+  if (mobile) {
+    await page.getByRole('button', { name: 'Toggle navigation' }).focus();
+    await page.keyboard.press('Enter');
+  }
+  await page.getByRole('button', { name: /Ada/ }).click();
+}
+await accountMenu();
+await page.getByRole('menuitem', { name: 'Admin dashboard' }).click();
+await page.waitForURL('**/admin/moderation');
+await page.getByRole('heading', { name: 'Moderation' }).waitFor();
+await accountMenu();
+await page.getByRole('menuitem', { name: 'Owner dashboard' }).click();
+await page.waitForURL('**/agents');
+await page.waitForTimeout(300);
+assert.ok(!(await main().innerText()).includes('Tessellate-9'), 'owner state survives the round trip');
+step('account menu switches to the admin dashboard and back');
+
+// 8. New owner: empty states; sign out
 await simulator('New owner');
 await page.getByText('No agents yet', { exact: true }).waitFor();
 await shot(page, `${tag}-agents-empty`, { full: false });
-if (mobile) {
-  await page.getByRole('button', { name: 'Toggle navigation' }).focus();
-  await page.keyboard.press('Enter');
-}
-await page.getByRole('button', { name: /Ada/ }).click();
+await accountMenu();
 await shot(page, `${tag}-account-menu`, { full: false });
 await page.getByRole('menuitem', { name: 'Sign out' }).click();
 await page.waitForURL(/\/sign-in/);

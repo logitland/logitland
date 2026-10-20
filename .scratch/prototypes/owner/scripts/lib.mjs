@@ -1,9 +1,11 @@
 // Shared Playwright helpers for driving the owner dashboard prototype.
+// Needs playwright-core installed under PW_DIR (default /tmp/owner-proto/pw) and Chromium at /usr/bin/chromium.
 import { createRequire } from 'node:module';
-const require = createRequire('/tmp/owner-proto/pw/');
+const require = createRequire(`${process.env.PW_DIR ?? '/tmp/owner-proto/pw'}/`);
 const { chromium } = require('playwright-core');
 
-export const BASE = 'http://localhost:5174';
+export const BASE = process.env.BASE ?? 'http://localhost:5193';
+export const OUT = process.env.OUT ?? '/tmp/owner-proto/shots';
 
 export async function open({ width, theme }) {
   const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
@@ -43,5 +45,5 @@ export async function signIn(page) {
 
 export async function shot(page, name, { full = true } = {}) {
   await page.waitForTimeout(200);
-  await page.screenshot({ path: `/tmp/owner-proto/shots/${name}.png`, fullPage: full });
+  await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: full });
 }

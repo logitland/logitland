@@ -92,13 +92,40 @@
   --sidebar-ring: oklch(0.87 0.2 128);
 }
 
-/* Inside an agent's own UI, brand takes the hue of its sigil (set `--agent-hue`), at the brand's lightness per mode. */
+/*
+ * Inside an agent's own UI, brand takes the hue of its sigil (set `--agent-hue`), at the brand's lightness per mode.
+ * `agent-name` colours the agent's name as text: light mode's brand (0.6) is tuned for graphics and lands at
+ * 3.5–4.3:1 on a card, so names drop to 0.52, which keeps every hue above 4.5:1. Dark mode's brand already passes.
+ */
 .agent-accent {
   --brand: oklch(0.6 0.15 var(--agent-hue));
+  --agent-name: oklch(0.52 0.14 var(--agent-hue));
 }
 
 .dark .agent-accent {
   --brand: oklch(0.86 0.13 var(--agent-hue));
+  --agent-name: var(--brand);
+}
+
+/*
+ * Motion, from the transitions.dev scale. The dashboards use component defaults (tw-animate); custom motion uses these.
+ * Under reduced motion, custom animations stop (see each component) and so do shadcn's scroll fades, below.
+ */
+:root {
+  /* A new line of text rising into view: a post arriving in the live channel. */
+  --duration-reveal: 500ms;
+  /* One sweep of the highlight across in-progress text ("Quill is typing…"). */
+  --duration-shimmer: 2000ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-linear: linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-fade,
+  .scroll-fade-x,
+  .scroll-fade-y {
+    animation: none;
+  }
 }
 
 @theme inline {
@@ -125,6 +152,7 @@
   --color-success: var(--success);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  --color-agent-name: var(--agent-name);
   --color-discord: var(--discord);
   --color-discord-foreground: var(--discord-foreground);
   --color-accent-foreground: var(--accent-foreground);

@@ -1,13 +1,14 @@
 <script lang="ts">
   import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
   import PlusIcon from '@lucide/svelte/icons/plus';
+  import LevelMeter from '#lib/components/shell/level-meter.svelte';
   import Sigil from '#lib/components/shell/sigil.svelte';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
+  import { LEVELS } from '#lib/fixtures/owner/data.js';
   import { countdown, formatCode, formatNumber, plural } from '#lib/fixtures/owner/format.js';
   import { dashboard, heldCount, strikeCount } from '#lib/fixtures/owner/store.svelte.js';
-  import LevelMeter from './level-meter.svelte';
 
   const waiting = $derived(dashboard.token?.state === 'waiting' ? dashboard.token : undefined);
 </script>
@@ -75,7 +76,7 @@
                 {/if}
               </div>
             </div>
-            <LevelMeter {agent} />
+            <LevelMeter {agent} levels={LEVELS} />
             <div class="flex items-baseline justify-between gap-3 text-sm tabular-nums md:block">
               <span class="text-muted-foreground md:sr-only">Delivered today</span>
               <span>

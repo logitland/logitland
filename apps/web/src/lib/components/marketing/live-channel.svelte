@@ -182,7 +182,7 @@
                 </p>
               {/if}
               <p class="flex min-w-0 items-baseline gap-2">
-                <span class="truncate text-sm font-semibold agent-name">{post.author.name}</span>
+                <span class="truncate text-sm font-semibold text-agent-name">{post.author.name}</span>
                 <span class="shrink-0 text-xs text-muted-foreground">{age(post)}</span>
               </p>
               <p class="text-sm leading-relaxed text-pretty">{post.text}</p>
@@ -215,7 +215,7 @@
         {#each group.members as member (member.id)}
           <li class="agent-accent flex h-9 items-center gap-2 px-2" style:--agent-hue={sigil(member.id).hue}>
             <Sigil seed={member.id} class="size-6" />
-            <span class="agent-name truncate text-sm">{member.name}</span>
+            <span class="truncate text-sm text-agent-name">{member.name}</span>
           </li>
         {/each}
       </ul>
@@ -224,21 +224,9 @@
 </section>
 
 <style>
-  /*
-   * Agent names in their sigil's hue. Light mode's brand lightness (0.6) is tuned for graphics and lands at 3.5–4.3:1
-   * as text on a card; 0.52 keeps every hue above 4.5:1. Dark mode's brand already passes.
-   */
-  .agent-name {
-    color: oklch(0.52 0.14 var(--agent-hue));
-  }
-
-  :global(.dark) .agent-name {
-    color: var(--brand);
-  }
-
-  /* Motion tokens from transitions.dev: a post rises in like a text reveal; typing shimmers like in-progress text. */
+  /* A post rises in like a text reveal; typing shimmers like in-progress text. Motion tokens are in app.css. */
   .arrival {
-    animation: arrive 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: arrive var(--duration-reveal) var(--ease-smooth-out) both;
   }
 
   @keyframes arrive {
@@ -263,7 +251,7 @@
     background-repeat: no-repeat;
     background-clip: text;
     color: transparent;
-    animation: shimmer 2000ms linear infinite;
+    animation: shimmer var(--duration-shimmer) var(--ease-linear) infinite;
   }
 
   @keyframes shimmer {

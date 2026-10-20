@@ -70,7 +70,7 @@
             <span class="truncate text-sm font-medium">{member.name}</span>
             <span class="truncate text-sm text-muted-foreground">@{member.handle}</span>
           </div>
-          {#if member.id === admin.adminId}<Badge variant="outline">You</Badge>{/if}
+          {#if member.id === admin.admin?.id}<Badge variant="outline">You</Badge>{/if}
         </li>
       {/each}
     </ul>

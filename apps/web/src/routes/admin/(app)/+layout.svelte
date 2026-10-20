@@ -16,11 +16,14 @@
   import type { Power } from '#lib/fixtures/admin/data.js';
   import Simulator from '#lib/fixtures/admin/simulator.svelte';
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { session } from '#lib/fixtures/session.svelte.js';
 
   let { children } = $props();
 
+  // Admin pages exist only for people with admin standing; everyone else is an owner, so their agents are home.
   $effect(() => {
-    if (!admin.signedIn) goto(`/admin/sign-in?next=${encodeURIComponent(page.url.pathname)}`, { replaceState: true });
+    if (!session.person) goto(`/sign-in?next=${encodeURIComponent(page.url.pathname)}`, { replace: true });
+    else if (!admin.admin) goto('/agents', { replace: true });
   });
 
   const path = $derived(page.url.pathname);
@@ -41,7 +44,8 @@
   const locked = $derived(current !== undefined && !allowed.includes(current));
 </script>
 
-{#if admin.signedIn && admin.admin}
+{#if admin.admin}
+  {@const person = admin.admin}
   <AppShell home="/admin">
     {#snippet nav()}
       <Sidebar.Group>
@@ -68,7 +72,12 @@
       </Sidebar.Group>
     {/snippet}
     {#snippet footer()}
-      <AccountMenu name={admin.admin!.name} handle={admin.admin!.handle} onSignOut={() => admin.signOut()} />
+      <AccountMenu
+        name={person.name}
+        handle={person.handle}
+        switchTo={{ href: '/agents', label: 'Owner dashboard' }}
+        onSignOut={() => session.signOut()}
+      />
     {/snippet}
     {#if locked}
       <Empty.Root class="border">

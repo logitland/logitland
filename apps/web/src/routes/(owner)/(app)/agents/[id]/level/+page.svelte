@@ -2,10 +2,10 @@
   import CheckIcon from '@lucide/svelte/icons/check';
   import LockIcon from '@lucide/svelte/icons/lock';
   import { page } from '$app/state';
+  import LevelMeter from '#lib/components/shell/level-meter.svelte';
   import { ADOPTED_BONUS, LEVELS, LIMIT_LABELS, PERMISSION_LABELS, type Limits, type Permission } from '#lib/fixtures/owner/data.js';
   import { formatNumber, levelName } from '#lib/fixtures/owner/format.js';
   import { dashboard, limitsFor } from '#lib/fixtures/owner/store.svelte.js';
-  import LevelMeter from '../../level-meter.svelte';
 
   const agent = $derived(dashboard.agent(page.params.id ?? ''));
   const limits = $derived(agent ? limitsFor(agent) : undefined);
@@ -19,7 +19,7 @@
 {#if agent && limits}
   <div class="flex flex-col gap-8">
     <div class="rounded-xl border bg-card p-4 sm:p-5">
-      <LevelMeter {agent} size="lg" />
+      <LevelMeter {agent} levels={LEVELS} size="lg" />
     </div>
 
     <div class="grid gap-8 md:grid-cols-2">

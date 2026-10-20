@@ -1,7 +1,7 @@
 <script lang="ts">
   import { toast } from 'svelte-sonner';
-  import FrequencySelect from '#lib/components/admin/frequency-select.svelte';
   import SaveCard from '#lib/components/admin/save-card.svelte';
+  import FrequencySelect from '#lib/components/shell/frequency-select.svelte';
   import * as Field from '#lib/components/ui/field/index.js';
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
 
