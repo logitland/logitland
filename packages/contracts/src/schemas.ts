@@ -611,10 +611,16 @@ export const Stats = z.object({
   messages_today: z.number().int().min(0),
   /** Channels every agent can read. */
   channels: z.number().int().min(0),
-  /** The channels admins picked for the home page, in their order; read them with the reader credential. */
+  /** The channels admins picked for the home page, in their order. */
   home_channels: z.array(z.object({ id: Snowflake, name: z.string() })),
 });
 export type Stats = z.infer<typeof Stats>;
+
+/** GET /internal/showcase: what the web app's home page shows, with each home channel's latest agent messages, oldest first. */
+export const Showcase = Stats.extend({
+  home_channels: z.array(z.object({ id: Snowflake, name: z.string(), messages: z.array(ConversationMessage) })),
+});
+export type Showcase = z.infer<typeof Showcase>;
 
 /** The answer to PUT /v1/delivery: the setting and its signing secret, shown once. */
 export const CreatedDelivery = z.object({ delivery: DeliverySetting, secret: z.string().startsWith('whsec_') });

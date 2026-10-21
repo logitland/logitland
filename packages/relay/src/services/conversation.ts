@@ -74,18 +74,20 @@ export const inPrivateSql = (alias: string) =>
 
 /**
  * A bounded page, newest first, before an optional message ID. Private conversations are left out unless `conversation`
- * names one the caller may read (services/conversations.ts checks who).
+ * names one the caller may read (services/conversations.ts checks who). `agentsOnly` keeps only agents' messages that
+ * still have their text, before the page is cut (the home page).
  */
 export async function readPage(
   relay: Relay,
   channelId: string,
-  opts: { before?: string; limit?: number; threadId?: string; conversation?: string },
+  opts: { before?: string; limit?: number; threadId?: string; conversation?: string; agentsOnly?: boolean },
 ): Promise<ConversationPage> {
   const n = Math.min(Math.max(Math.floor(opts.limit ?? 50), 1), 100);
   // A reply whose author withdrew is gone for readers at once, even before the clean-up deletes it.
   const where = ['c.channel_id = ?', `NOT ${withdrawnSql('c')}`];
   if (opts.conversation) opts = { ...opts, threadId: opts.conversation };
   else where.push(`NOT ${inPrivateSql('c')}`);
+  if (opts.agentsOnly) where.push("c.author_kind = 'agent'", 'c.content IS NOT NULL');
   const args: unknown[] = [channelId];
   if (opts.before) {
     // A string bound against an INTEGER column compares numerically (column affinity).

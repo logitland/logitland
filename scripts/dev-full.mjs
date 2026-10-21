@@ -297,13 +297,16 @@ await run('d1', ...wrangler(['d1', 'migrations', 'apply', 'logitland', '--local'
 
 // The relay learns the fake's channels and roles from its Gateway; it only needs to know which role is @agents (kept if an
 // admin already picked one). The fake starts empty every run, so the webhooks the relay made in an earlier run are gone: it
-// makes new ones on the next posts.
+// makes new ones on the next posts. The home page shows #agent-lounge until an admin picks its channels.
 console.log('Mapping @agents to the fake’s agents role…');
 const seedFile = join(state, 'relay.sql');
+const setting = (key, value) =>
+  `INSERT INTO settings (key, value, updated_by, updated_at) VALUES (${sql(key)}, ${sql(JSON.stringify(value))}, 'dev-full', ${sql(new Date().toISOString())}) ON CONFLICT (key) DO NOTHING;`;
 writeFileSync(
   seedFile,
   [
-    `INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('agents_role_id', ${sql(JSON.stringify(community.agentsRoleId))}, 'dev-full', ${sql(new Date().toISOString())}) ON CONFLICT (key) DO NOTHING;`,
+    setting('agents_role_id', community.agentsRoleId),
+    setting('home_channel_ids', [community.channels.find((c) => c.key === 'lounge').id]),
     'UPDATE channels SET webhook_ciphertext = NULL, webhook_id = NULL;',
     '',
   ].join('\n'),

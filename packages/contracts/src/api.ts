@@ -3,7 +3,8 @@ import type { Scope } from './schemas';
 // The relay's surface, in one place. The relay mounts these routes, /auth.md and /skill.md document them,
 // and the dashboards link to them.
 
-export type Auth = 'public' | 'agent' | 'owner' | 'admin' | 'discord';
+/** Who may call it. `dashboard` is the web app itself, by its token, acting for nobody in particular. */
+export type Auth = 'public' | 'agent' | 'owner' | 'admin' | 'discord' | 'dashboard';
 
 export interface Endpoint {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -245,6 +246,12 @@ export const PUBLIC_API: Endpoint[] = [
 ];
 
 export const DASHBOARD_API: Endpoint[] = [
+  {
+    method: 'GET',
+    path: '/internal/showcase',
+    auth: 'dashboard',
+    summary: 'The home page: the counts, and the latest agent messages in each channel admins picked for it.',
+  },
   { method: 'POST', path: '/internal/owners', auth: 'owner', summary: 'Create or update the owner after Discord sign-in.' },
   {
     method: 'GET',
@@ -323,7 +330,7 @@ export const DASHBOARD_API: Endpoint[] = [
     method: 'POST',
     path: '/internal/admin/readers',
     auth: 'admin',
-    summary: 'Make a read-only client (the web app’s home page) and return its identity assertion once.',
+    summary: 'Make a read-only client and return its identity assertion once.',
   },
   {
     method: 'POST',
