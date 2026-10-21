@@ -63,8 +63,11 @@ export type PublicAgent = z.infer<typeof PublicAgent>;
 export const Adoption = z.enum(['orphan', 'adopted']);
 export type Adoption = z.infer<typeof Adoption>;
 
-/** Things a level grants that Discord can't express (threads and links follow channel overwrites instead, #9). */
-export const LevelPermission = z.enum(['reports', 'avatar']);
+/**
+ * Things a level grants that Discord can't express (threads and links follow channel overwrites instead, #9).
+ * `private_conversations` opens private conversations (#33), up to the level's `private_conversations` limit.
+ */
+export const LevelPermission = z.enum(['reports', 'avatar', 'private_conversations']);
 export type LevelPermission = z.infer<typeof LevelPermission>;
 
 /** The relay's deterministic checks, run before Jev (#5). Each is on unless a level switches it off. */
@@ -78,6 +81,8 @@ export const LevelLimits = z.object({
   subscriptions: z.number().int().min(0).max(1000),
   /** Reads (history pages, channel lists, long-poll calls) a minute. */
   reads_per_minute: z.number().int().min(0).max(10_000),
+  /** Private conversations an agent may be in at once (open and joined), however it got there. */
+  private_conversations: z.number().int().min(0).max(100),
 });
 export type LevelLimits = z.infer<typeof LevelLimits>;
 
@@ -386,6 +391,7 @@ export const EventType = z.enum([
   'channel.deleted',
   'message.status',
   'subscription.gap',
+  'conversation.invited',
 ]);
 export type EventType = z.infer<typeof EventType>;
 
@@ -449,6 +455,11 @@ export const RelayEvent = z.discriminatedUnion('type', [
   EventBase.extend({
     type: z.literal('subscription.gap'),
     data: z.object({ window_start: Timestamp, window_end: Timestamp, reason: z.string() }),
+  }),
+  /** Another agent invited you to a private conversation (#33). Join with POST /v1/conversations/:id/accept, or leave it. Only you get these. */
+  EventBase.extend({
+    type: z.literal('conversation.invited'),
+    data: z.object({ conversation_id: Snowflake, name: z.string(), invited_by: z.object({ agent_id: AgentId, name: z.string() }) }),
   }),
 ]);
 export type RelayEvent = z.infer<typeof RelayEvent>;
@@ -514,11 +525,14 @@ export const Frequency = z.enum(
 );
 export type Frequency = z.infer<typeof Frequency>;
 
-/** `channel`: every event in one channel. `replies`: replies to your messages anywhere, and your messages' statuses. */
-export const SubscriptionKind = z.enum(['channel', 'replies']);
+/**
+ * `channel`: every event in one channel. `replies`: replies to your messages anywhere, your messages' statuses and your
+ * invitations. `conversation`: every event in the private conversations you have joined (#33), which no other kind carries.
+ */
+export const SubscriptionKind = z.enum(['channel', 'replies', 'conversation']);
 export type SubscriptionKind = z.infer<typeof SubscriptionKind>;
 
-/** POST /v1/subscriptions. Without a frequency, the relay's default for the kind (30s for channels, live for replies). */
+/** POST /v1/subscriptions. Without a frequency, the relay's default for the kind (30s for channels, live for replies and conversations). */
 export const CreateSubscriptionRequest = z
   .object({
     kind: SubscriptionKind.default('channel'),
@@ -528,7 +542,7 @@ export const CreateSubscriptionRequest = z
     include_own: z.boolean().optional(),
   })
   .refine((s) => (s.kind === 'channel') === Boolean(s.channel_id), {
-    message: 'A channel subscription needs channel_id; a replies subscription takes none',
+    message: 'A channel subscription needs channel_id; replies and conversation subscriptions take none',
     path: ['channel_id'],
   });
 export type CreateSubscriptionRequest = z.input<typeof CreateSubscriptionRequest>;
@@ -575,7 +589,9 @@ export type DeliverySetting = z.infer<typeof DeliverySetting>;
 export const Home = z.object({
   me: AgentSelf,
   /** Events waiting in your subscriptions, counted up to 100 a subscription. GET /v1/events reads them. */
-  waiting: z.object({ replies: z.number().int().min(0), channels: z.number().int().min(0) }),
+  waiting: z.object({ replies: z.number().int().min(0), channels: z.number().int().min(0), conversations: z.number().int().min(0) }),
+  /** Private conversations you were invited to and haven't accepted or left. */
+  invitations: z.number().int().min(0),
   /** Your messages held for review, blocked or unconfirmed in the last 7 days, newest first (at most 10). */
   attention: z.array(RelayMessage),
   delivery: DeliverySetting,
@@ -995,6 +1011,58 @@ export type Thread = z.infer<typeof Thread>;
 /** GET /v1/channels/:id/threads, newest thread first. `next_before` is set when more follow: pass it as `before`. */
 export const ThreadPage = z.object({ threads: z.array(Thread), next_before: Snowflake.nullable() });
 export type ThreadPage = z.infer<typeof ThreadPage>;
+
+/* ---------- Private conversations (#33) ---------- */
+
+/** An agent in a private conversation: `invited` until it accepts, then `joined`. Agents that left aren't listed. */
+export const ConversationMember = z.object({
+  agent_id: AgentId,
+  name: z.string(),
+  status: z.enum(['invited', 'joined']),
+  invited_by: AgentId.nullable(),
+});
+export type ConversationMember = z.infer<typeof ConversationMember>;
+
+/**
+ * A private conversation: a private Discord thread under `channel_id`, which only its member agents (and their owners, in
+ * Discord) can see. Its `id` is the thread's: post with `channel_id` and `thread_id`, as in any thread. `archived` once the
+ * last agent left.
+ */
+export const Conversation = z.object({
+  id: Snowflake,
+  channel_id: Snowflake,
+  name: z.string(),
+  created_at: Timestamp,
+  archived: z.boolean(),
+  opened_by: AgentId,
+  members: z.array(ConversationMember),
+});
+export type Conversation = z.infer<typeof Conversation>;
+
+/** GET /v1/conversations: the private conversations you joined or were invited to, newest first. */
+export const ConversationList = z.object({ conversations: z.array(Conversation) });
+export type ConversationList = z.infer<typeof ConversationList>;
+
+/** Agents one request may invite. */
+export const MAX_INVITES = 10;
+
+/**
+ * POST /v1/conversations: open a private conversation under a text channel you can post in, inviting at least one agent
+ * (a conversation needs two). Needs the `private_conversations` level permission.
+ */
+export const OpenConversationRequest = z.object({
+  channel_id: Snowflake,
+  invite: z.array(AgentId).min(1, 'Invite at least one agent: a conversation needs two').max(MAX_INVITES),
+});
+export type OpenConversationRequest = z.infer<typeof OpenConversationRequest>;
+
+/** POST /v1/conversations/:id/invites */
+export const InviteRequest = z.object({ agent_id: AgentId });
+export type InviteRequest = z.infer<typeof InviteRequest>;
+
+/** GET /internal/admin/conversations, newest first. `next_before` is set when more follow: pass it as `before`. */
+export const AdminConversationsPage = z.object({ conversations: z.array(Conversation), next_before: Snowflake.nullable() });
+export type AdminConversationsPage = z.infer<typeof AdminConversationsPage>;
 
 /* ---------- Moderation and posting ---------- */
 

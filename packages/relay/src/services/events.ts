@@ -26,6 +26,9 @@ export const compareSnowflakes = (a: string, b: string) => (BigInt(a) < BigInt(b
 /** When Discord made a snowflake: its first 42 bits are milliseconds since 2015-01-01. */
 export const snowflakeTime = (id: string) => new Date(Number(BigInt(id) >> 22n) + 1_420_070_400_000).toISOString();
 
+/** SQL over two parameters (a thread ID, a message ID): the private conversation they are in, or NULL. */
+const PRIVATE_THREAD_SQL = `(SELECT t.id FROM threads t WHERE t.private = 1 AND t.id = CAST(COALESCE(?, (SELECT c.thread_id FROM conversation c WHERE c.message_id = ?)) AS INTEGER))`;
+
 export interface PlannedEvent {
   id: string;
   stmt: Stmt;
@@ -49,6 +52,8 @@ export function planEvent(
     /** The agent that wrote the message, and the agent whose message it replies to (feed.ts). */
     authorAgentId?: string | null;
     replyAgentId?: string | null;
+    /** For this agent alone (conversation.invited): it rides the agent's replies subscription. */
+    agentId?: string | null;
     /** Record nothing if an event with this source key exists when the statement runs (a create racing its own delete). */
     unless?: string;
     /** Record nothing unless this SQL condition holds when the statement runs (a person's words after they withdrew). */
@@ -58,14 +63,35 @@ export function planEvent(
   const id = newId('event');
   const at = iso(relay.now());
   const payload = JSON.stringify({ id, schema_version: 1, type: e.type, observed_at: at, guild_id: e.guildId, channel_id: e.channelId, data: e.data });
-  const values = [id, e.sourceKey, e.type, e.guildId, e.channelId, e.messageId, payload, at, e.authorAgentId ?? null, e.replyAgentId ?? null, e.silent ? 1 : 0];
-  const columns = 'id, source_key, type, guild_id, channel_id, message_id, payload, observed_at, author_agent_id, reply_agent_id, silent';
+  // An event inside a private conversation is marked with it, so only its members get it (feed.ts). The thread is the event's
+  // own, or the thread of the message it is about (an edit or a removal names only the message).
+  const thread = typeof e.data.thread_id === 'string' ? e.data.thread_id : null;
+  const message = e.messageId ?? (Array.isArray(e.data.message_ids) ? (e.data.message_ids[0] as string) : null);
+  const values = [
+    id,
+    e.sourceKey,
+    e.type,
+    e.guildId,
+    e.channelId,
+    e.messageId,
+    payload,
+    at,
+    e.authorAgentId ?? null,
+    e.replyAgentId ?? null,
+    e.agentId ?? null,
+    e.silent ? 1 : 0,
+    thread,
+    message,
+  ];
+  const columns =
+    'id, source_key, type, guild_id, channel_id, message_id, payload, observed_at, author_agent_id, reply_agent_id, agent_id, silent, private_thread_id';
+  const row = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${PRIVATE_THREAD_SQL}`;
   const stmt =
     e.unless === undefined && e.when === undefined
-      ? relay.db.prepare(`INSERT OR IGNORE INTO events (${columns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(...values)
+      ? relay.db.prepare(`INSERT OR IGNORE INTO events (${columns}) VALUES (${row})`).bind(...values)
       : relay.db
           .prepare(
-            `INSERT OR IGNORE INTO events (${columns}) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${
+            `INSERT OR IGNORE INTO events (${columns}) SELECT ${row} WHERE ${
               e.unless === undefined ? '1' : 'NOT EXISTS (SELECT 1 FROM events WHERE source_key = ?)'
             }${e.when ? ` AND (${e.when.sql})` : ''}`,
           )

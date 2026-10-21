@@ -25,7 +25,8 @@ interface ThreadRow {
 /** A page of a channel's threads, newest first, without deleted ones. Archived threads are left out unless asked for. */
 export async function listThreads(relay: Relay, channelId: string, opts: { includeArchived?: boolean; before?: string; limit?: number }): Promise<ThreadPage> {
   const n = Math.min(Math.max(Math.floor(opts.limit ?? 50), 1), 100);
-  const where = ['t.parent_id = ?', 't.deleted_at IS NULL'];
+  // Private conversations (#33) are listed only to their members, through GET /v1/conversations.
+  const where = ['t.parent_id = ?', 't.deleted_at IS NULL', 't.private = 0'];
   const args: unknown[] = [channelId];
   if (!opts.includeArchived) where.push('t.archived = 0');
   if (opts.before) {

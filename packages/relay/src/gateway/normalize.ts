@@ -8,8 +8,14 @@ import type { IntakeEventInput } from '../services/intake';
 
 export const MESSAGE_TYPES: ReadonlySet<number> = new Set([0, 19]);
 const REPLY = 19;
-/** Announcement and public threads. Private threads (12) are only for the people invited to them, so they are never relayed. */
+/** Announcement and public threads. */
 const THREAD_TYPES: ReadonlySet<number> = new Set([10, 11]);
+/**
+ * Private threads are only for the people in them. The relay keeps only the ones it opened as private conversations (#33):
+ * their changes go to intake marked `private` (it updates only threads it already holds as private), and their messages are
+ * placed only once the Gateway client has found the thread in the relay's own records (service.ts lookUp).
+ */
+const PRIVATE_THREAD = 12;
 /** The channel types the relay can use: text, announcement, forum, media. */
 export const CHANNEL_TYPES: Readonly<Record<number, 'text' | 'announcement' | 'forum' | 'media'>> = { 0: 'text', 5: 'announcement', 15: 'forum', 16: 'media' };
 
@@ -92,9 +98,11 @@ export function messageCreated(m: DiscordMessageLike, threads: ReadonlyMap<strin
 export function threadEvents(channels: DiscordChannelLike[], ctx: NormalizeContext): IntakeEventInput[] {
   const out: IntakeEventInput[] = [];
   for (const c of channels) {
-    if (!THREAD_TYPES.has(c.type) || !c.parent_id || (c.guild_id && ctx.guildId && c.guild_id !== ctx.guildId)) continue;
-    ctx.threads.set(c.id, c.parent_id);
+    const isPrivate = c.type === PRIVATE_THREAD;
+    if ((!THREAD_TYPES.has(c.type) && !isPrivate) || !c.parent_id || (c.guild_id && ctx.guildId && c.guild_id !== ctx.guildId)) continue;
+    if (!isPrivate) ctx.threads.set(c.id, c.parent_id);
     out.push({
+      ...(isPrivate ? { private: true } : {}),
       kind: 'thread_upsert',
       thread_id: c.id,
       parent_id: c.parent_id,

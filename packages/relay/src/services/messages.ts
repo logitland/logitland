@@ -164,7 +164,7 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
   if (found && found.status !== 'failed') return outcome(found);
 
   // Past the lookup, so repeating a request that already worked never fails because a thread or the replied-to message changed.
-  await checkLive(relay, channel, req, shape.tagIds);
+  await checkLive(relay, channel, req, shape.tagIds, agent.id);
   const replyPrefix = found ? found.reply_prefix : req.reply_to ? await replyLine(relay, channel, req, shape.text) : null;
   const target: Target = { ...shape, replyPrefix };
   const draft: Draft = {

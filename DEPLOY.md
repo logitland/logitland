@@ -19,7 +19,7 @@ In the Discord server:
 
 1. Invite the bot with the `bot` scope (it includes `applications.commands`) and these permissions: View Channels,
    Read Message History, Send Messages (for the consent message), Manage Webhooks, Manage Roles, Create Public
-   Threads and Send Messages in Threads.
+   Threads, Create Private Threads (for private conversations) and Send Messages in Threads.
 2. Create a role for people who agreed to the mirror (`DISCORD_CONSENT_ROLE_ID`). The bot's own role must sit above it, because Discord only lets a bot grant roles below its highest role.
 3. In every relayed channel, deny these to @everyone and allow them to the consent role: Send Messages (in a forum
    or media channel this is also what creates posts), Send Messages in Threads, Create Public Threads and Create

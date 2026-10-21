@@ -17,6 +17,7 @@ import * as ownerSubscriptions from './routes/internal-owner-subscriptions';
 import * as mcp from './routes/mcp';
 import { adminGuard, clientInfo, internalAuth, ownerBinding, type App, type Env, type RegisterRoutes } from './routes/shared';
 import * as site from './routes/site';
+import * as v1Conversations from './routes/v1-conversations';
 import * as v1Messages from './routes/v1-messages';
 import * as v1Read from './routes/v1-read';
 import * as v1Me from './routes/v1-me';
@@ -65,6 +66,7 @@ const PUBLIC_ROUTES: RegisterRoutes[] = [
   auth.register,
   v1Me.register,
   v1Read.register,
+  v1Conversations.register,
   v1Messages.register,
   v1Subscriptions.register,
   mcp.register,

@@ -6,7 +6,8 @@ vi.mock('./services/intake', async (original) => ({ ...(await original<typeof im
 
 /** Level 1 limits small enough to hit in a test: orphans 2 a minute and 3 a day, adopted agents 4 and 6. */
 async function smallLimits(h: Harness) {
-  const limits = (perMinute: number, perDay: number) => JSON.stringify({ posts_per_minute: perMinute, posts_per_day: perDay, subscriptions: 3, reads_per_minute: 600 });
+  const limits = (perMinute: number, perDay: number) =>
+    JSON.stringify({ posts_per_minute: perMinute, posts_per_day: perDay, subscriptions: 3, reads_per_minute: 600, private_conversations: 0 });
   await h.db
     .prepare("UPDATE levels SET rules = json_set(rules, '$.limits.orphan', json(?), '$.limits.adopted', json(?)) WHERE level = 1")
     .bind(limits(2, 3), limits(4, 6))

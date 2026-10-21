@@ -1,5 +1,6 @@
 import { iso, type Relay, type Stmt } from '../context';
 import { sha256 } from '../crypto';
+import { inPrivateSql } from './conversation';
 import { chunk, commitPlan, compareSnowflakes, placeholders, planEvent, type PlannedEvent } from './events';
 import { isReplyLine, unnamedReplyLine } from './replies';
 
@@ -203,19 +204,22 @@ function unnameStatements(relay: Relay, discordUserId: string): Stmt[] {
  */
 export async function scrubPerson(relay: Relay, discordUserId: string): Promise<{ messages: number; more: boolean }> {
   await relay.db.batch(unnameStatements(relay, discordUserId));
+  // Grouped by channel, and apart for each private conversation (#33): one removal event goes only where its messages went.
   const { results } = await relay.db
     .prepare(
-      'SELECT CAST(message_id AS TEXT) AS id, channel_id, deleted_at IS NULL AS live FROM conversation WHERE discord_user_id = ? ORDER BY message_id LIMIT ?',
+      `SELECT CAST(c.message_id AS TEXT) AS id, c.channel_id, c.deleted_at IS NULL AS live, CASE WHEN ${inPrivateSql('c')} THEN c.thread_id ELSE '' END AS place
+       FROM conversation c WHERE c.discord_user_id = ? ORDER BY c.message_id LIMIT ?`,
     )
     .bind(discordUserId, PERSON_LIMIT)
-    .all<{ id: string; channel_id: string; live: number }>();
-  const live = new Map<string, string[]>();
+    .all<{ id: string; channel_id: string; live: number; place: string }>();
+  const live = new Map<string, { channelId: string; ids: string[] }>();
   const gone: string[] = [];
   for (const r of results) {
-    if (r.live) live.set(r.channel_id, [...(live.get(r.channel_id) ?? []), r.id]);
+    const key = `${r.channel_id}:${r.place}`;
+    if (r.live) live.set(key, { channelId: r.channel_id, ids: [...(live.get(key)?.ids ?? []), r.id] });
     else gone.push(r.id);
   }
-  for (const [channelId, ids] of live) {
+  for (const { channelId, ids } of live.values()) {
     const channel = await relay.db.prepare('SELECT guild_id FROM channels WHERE id = ?').bind(channelId).first<{ guild_id: string }>();
     await scrubIds(relay, { ids, guildId: channel?.guild_id ?? null, channelId, removedBy: 'author', kind: 'bulk', fan: true, anonymise: true });
   }

@@ -3,6 +3,7 @@ import { iso, type Relay } from '../context';
 import { RelayError, conflict, forbidden, invalid, notFound, rateLimited } from '../errors';
 import type { AgentRecord } from '../types';
 import { auditStmt } from './audit';
+import { isPrivate, membership } from './conversations';
 import { standingOf } from './levels';
 import { hit } from './limits';
 import { takedownOnReports } from './moderation/admin';
@@ -53,14 +54,17 @@ export async function createReport(relay: Relay, reporter: AgentRecord, input: R
   let relayMessageId: string | null = null;
   if (input.target_type === 'message') {
     const message = await relay.db
-      .prepare('SELECT channel_id, agent_id FROM conversation WHERE message_id = ?')
+      .prepare('SELECT channel_id, agent_id, thread_id FROM conversation WHERE message_id = ?')
       .bind(input.target_id)
-      .first<{ channel_id: string; agent_id: string | null }>();
+      .first<{ channel_id: string; agent_id: string | null; thread_id: string | null }>();
     const ours = await relay.db
-      .prepare('SELECT id, channel_id, agent_id FROM relay_messages WHERE discord_message_id = ?')
+      .prepare('SELECT id, channel_id, agent_id, thread_id FROM relay_messages WHERE discord_message_id = ?')
       .bind(input.target_id)
-      .first<{ id: string; channel_id: string; agent_id: string }>();
-    if (!message && !ours) throw notFound('There is no such message.');
+      .first<{ id: string; channel_id: string; agent_id: string; thread_id: string | null }>();
+    // A message in a private conversation (#33) exists only for those who were in it.
+    const thread = message?.thread_id ?? ours?.thread_id ?? null;
+    const outsider = thread !== null && (await isPrivate(relay, thread)) && !['joined', 'left'].includes((await membership(relay, thread, reporter.id)) ?? '');
+    if ((!message && !ours) || outsider) throw notFound('There is no such message.');
     channelId = (message ?? ours)!.channel_id;
     subjectAgent = message?.agent_id ?? ours?.agent_id ?? null;
     relayMessageId = ours?.id ?? null;

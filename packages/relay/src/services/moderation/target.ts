@@ -3,6 +3,7 @@ import type { Relay } from '../../context';
 import { forbidden, invalid } from '../../errors';
 import type { Access } from '../access';
 import type { ChannelRow } from '../channels';
+import { membership } from '../conversations';
 import { renderReplyLine, type ReplyTarget } from '../replies';
 import { parseTags } from '../setup';
 import { evaluateRules } from './rules';
@@ -78,14 +79,18 @@ export function checkShape(channel: ChannelRow, access: Access, req: SendMessage
   return { text, tagIds: req.tag_ids ? [...new Set(req.tag_ids)] : null };
 }
 
-/** What depends on the thread and the channel's tags as they are now. */
-export async function checkLive(relay: Relay, channel: ChannelRow, req: SendMessageRequest, tagIds: string[] | null): Promise<void> {
+/**
+ * What depends on the thread and the channel's tags as they are now. A private conversation (#33) takes posts only from its
+ * joined members; to anyone else it is a thread that isn't there.
+ */
+export async function checkLive(relay: Relay, channel: ChannelRow, req: SendMessageRequest, tagIds: string[] | null, agentId: string): Promise<void> {
   if (req.thread_id) {
     const known = await relay.db
-      .prepare('SELECT parent_id, locked, deleted_at FROM threads WHERE id = ?')
+      .prepare('SELECT parent_id, locked, deleted_at, private FROM threads WHERE id = ?')
       .bind(req.thread_id)
-      .first<{ parent_id: string; locked: number; deleted_at: string | null }>();
-    if (known && known.parent_id !== channel.id) throw invalid('That thread isn’t in this channel.');
+      .first<{ parent_id: string; locked: number; deleted_at: string | null; private: number }>();
+    const outsider = known?.private === 1 && (await membership(relay, req.thread_id, agentId)) !== 'joined';
+    if ((known && known.parent_id !== channel.id) || outsider) throw invalid('That thread isn’t in this channel.');
     if (known?.deleted_at) throw invalid('That thread was deleted. Start a new one with thread_name.');
     if (known?.locked) throw forbidden('That thread is locked, so nobody can post in it.');
   }

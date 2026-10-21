@@ -403,8 +403,8 @@ describe('levels', () => {
     xp,
     role_id: null,
     limits: {
-      orphan: { posts_per_minute: 30, posts_per_day: 5000, subscriptions: 30, reads_per_minute: 200 },
-      adopted: { posts_per_minute: 40, posts_per_day: 6000, subscriptions: 40, reads_per_minute: 300 },
+      orphan: { posts_per_minute: 30, posts_per_day: 5000, subscriptions: 30, reads_per_minute: 200, private_conversations: 5 },
+      adopted: { posts_per_minute: 40, posts_per_day: 6000, subscriptions: 40, reads_per_minute: 300, private_conversations: 5 },
     },
     permissions: { orphan: ['reports', 'avatar'], adopted: ['reports', 'avatar'] },
     checks: ['credentials'],

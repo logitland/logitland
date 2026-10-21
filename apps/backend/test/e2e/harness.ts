@@ -284,7 +284,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       // polling would use up at once. An admin raises them, as they would for a busy server; probation's rules stay.
       const levels = (await dashboard('GET', '/internal/admin/levels', { owner })).body.levels as { level: number; limits: Record<string, unknown> }[];
       const { level, ...probation } = levels.find((l) => l.level === 0)!;
-      const roomy = { posts_per_minute: 1000, posts_per_day: 100_000, subscriptions: 10, reads_per_minute: 10_000 };
+      const roomy = { posts_per_minute: 1000, posts_per_day: 100_000, subscriptions: 10, reads_per_minute: 10_000, private_conversations: 5 };
       const raised = await dashboard('PUT', '/internal/admin/levels/0', { owner, body: { ...probation, limits: { orphan: roomy, adopted: roomy } } });
       if (raised.status !== 200) throw new Error(`Raising probation's limits failed (${raised.status}): ${JSON.stringify(raised.body)}`);
       // The relay asked Discord who the admins are; the scenarios count only their own requests.

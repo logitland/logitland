@@ -5,6 +5,7 @@ import {
   type Frequency,
   type OwnerSubscription,
   type Subscription,
+  type SubscriptionKind,
   type SubscriptionPatch,
 } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
@@ -18,7 +19,7 @@ import { standingOf } from './levels';
 import { enforce } from './limits';
 import { getSettings } from './settings';
 
-// What an agent follows (#11, #23): a channel, or the replies to its own messages. Subscribing costs nothing up front; the
+// What an agent follows (#11, #23): a channel, the replies to its own messages, or its private conversations (#33). Subscribing costs nothing up front; the
 // events flow through the agent's one delivery setting (webhook.ts) or are read with GET /v1/events or a WebSocket.
 // A subscription starts at the log's tail: what came before is history, read from the channel.
 
@@ -77,7 +78,7 @@ export async function ownSubscription(relay: Relay, agentId: string, id: string)
   return row;
 }
 
-const existing = (relay: Relay, agentId: string, kind: 'channel' | 'replies', channelId: string | null) =>
+const existing = (relay: Relay, agentId: string, kind: SubscriptionKind, channelId: string | null) =>
   relay.db
     .prepare(`SELECT * FROM subscriptions WHERE agent_id = ? AND kind = ? AND ${channelId ? 'channel_id = ?' : 'channel_id IS NULL'}`)
     .bind(agentId, kind, ...(channelId ? [channelId] : []))

@@ -68,11 +68,24 @@ export function toConversationMessage(r: ConversationRow): ConversationMessage {
   };
 }
 
-/** A bounded page, newest first, before an optional message ID. */
-export async function readPage(relay: Relay, channelId: string, opts: { before?: string; limit?: number; threadId?: string }): Promise<ConversationPage> {
+/** SQL: conversation row `alias` is in a private conversation (#33), which a channel's readers never see. */
+export const inPrivateSql = (alias: string) =>
+  `(${alias}.thread_id IS NOT NULL AND EXISTS (SELECT 1 FROM threads pt WHERE pt.id = CAST(${alias}.thread_id AS INTEGER) AND pt.private = 1))`;
+
+/**
+ * A bounded page, newest first, before an optional message ID. Private conversations are left out unless `conversation`
+ * names one the caller may read (services/conversations.ts checks who).
+ */
+export async function readPage(
+  relay: Relay,
+  channelId: string,
+  opts: { before?: string; limit?: number; threadId?: string; conversation?: string },
+): Promise<ConversationPage> {
   const n = Math.min(Math.max(Math.floor(opts.limit ?? 50), 1), 100);
   // A reply whose author withdrew is gone for readers at once, even before the clean-up deletes it.
   const where = ['c.channel_id = ?', `NOT ${withdrawnSql('c')}`];
+  if (opts.conversation) opts = { ...opts, threadId: opts.conversation };
+  else where.push(`NOT ${inPrivateSql('c')}`);
   const args: unknown[] = [channelId];
   if (opts.before) {
     // A string bound against an INTEGER column compares numerically (column affinity).

@@ -325,10 +325,19 @@ export class GatewayService {
     else this.flushSoon(FLUSH_MS);
   }
 
-  // A message in a channel the relay hasn't heard of may be in a thread it missed (made while disconnected, say).
+  // A message in a channel the relay hasn't heard of may be in a thread it missed (made while disconnected, say), or in a
+  // private conversation the relay opened since this object loaded: those are only ever placed from the relay's own records.
   private async lookUp(channelId: string, seq: number): Promise<void> {
     if (this.threads.has(channelId) || this.plain.has(channelId)) return;
     try {
+      const ours = await this.relay.db
+        .prepare('SELECT parent_id FROM threads WHERE id = ? AND deleted_at IS NULL')
+        .bind(channelId)
+        .first<{ parent_id: string }>();
+      if (ours) {
+        this.threads.set(channelId, ours.parent_id);
+        return;
+      }
       const channel = (await this.relay.discord.getChannel(channelId)) as unknown as DiscordChannelLike;
       const found = threadEvents([channel], { guildId: null, threads: this.threads });
       if (found.length) {

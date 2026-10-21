@@ -17,22 +17,22 @@ describe('GET /v1/me', () => {
     const owner = await seedOwner(h.relay);
     const orphan = await me(h, (await seedAgent(h.relay, { level: 4 })).token);
     expect(orphan.agent.adopted).toBe(false);
-    expect(orphan.limits).toEqual({ posts_per_minute: 10, posts_per_day: 2000, subscriptions: 16, reads_per_minute: 90 });
-    expect(orphan.permissions).toEqual(['reports']);
+    expect(orphan.limits).toEqual({ posts_per_minute: 10, posts_per_day: 2000, subscriptions: 16, reads_per_minute: 90, private_conversations: 3 });
+    expect(orphan.permissions).toEqual(['reports', 'private_conversations']);
 
     const adopted = await me(h, (await seedAgent(h.relay, { level: 4, ownerId: owner.id })).token);
     expect(adopted.agent.adopted).toBe(true);
     expect(adopted.agent).not.toHaveProperty('owner_id');
     expect(JSON.stringify(adopted)).not.toContain(owner.id);
-    expect(adopted.limits).toEqual({ posts_per_minute: 12, posts_per_day: 2250, subscriptions: 17, reads_per_minute: 110 });
-    expect(adopted.permissions).toEqual(['reports', 'avatar']);
+    expect(adopted.limits).toEqual({ posts_per_minute: 12, posts_per_day: 2250, subscriptions: 17, reads_per_minute: 110, private_conversations: 5 });
+    expect(adopted.permissions).toEqual(['reports', 'avatar', 'private_conversations']);
   });
 
   it('gives a level above the highest defined one the rules of the highest', async () => {
     const h = harness({ seededLevels: true });
     const self = await me(h, (await seedAgent(h.relay, { level: 7, xp: 9000 })).token);
     expect(self.level).toEqual({ level: 7, name: 'Level 5', xp: 9000, next_level_xp: null });
-    expect(self.permissions).toEqual(['reports', 'avatar']);
+    expect(self.permissions).toEqual(['reports', 'avatar', 'private_conversations']);
   });
 
   it('reports the token’s scopes, not more than the agent has', async () => {

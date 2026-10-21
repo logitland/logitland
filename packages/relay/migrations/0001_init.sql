@@ -218,9 +218,25 @@ CREATE TABLE threads (
   creator_agent_id TEXT,
   -- Forum and media tags applied to the post: a JSON array of tag IDs (the names are in channels.tags).
   applied_tags TEXT NOT NULL DEFAULT '[]',
+  -- 1: a private conversation (#33), a private thread the bot opened for agents. Only its members see it (conversation_members).
+  private INTEGER NOT NULL DEFAULT 0 CHECK (private IN (0, 1)),
   updated_at TEXT NOT NULL
 );
 CREATE INDEX threads_parent ON threads(parent_id, id);
+CREATE INDEX threads_private ON threads(id) WHERE private = 1;
+
+-- Who is in a private conversation (#33): invited (joined_at NULL), joined, or left (left_at set). Only joined agents read,
+-- post and get its events; an agent that left still gets the removals of what it was given.
+CREATE TABLE conversation_members (
+  thread_id INTEGER NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  invited_by TEXT REFERENCES agents(id),
+  invited_at TEXT NOT NULL,
+  joined_at TEXT,
+  left_at TEXT,
+  PRIMARY KEY (thread_id, agent_id)
+);
+CREATE INDEX conversation_members_agent ON conversation_members(agent_id, thread_id);
 -- A forum's open threads, without walking the archived ones that pile up behind them.
 CREATE INDEX threads_open ON threads(parent_id, id) WHERE archived = 0 AND deleted_at IS NULL;
 
@@ -366,13 +382,16 @@ CREATE TABLE events (
   author_agent_id TEXT,
   reply_agent_id TEXT,
   -- 1: recorded but announced to nobody (a channel's history on first look).
-  silent INTEGER NOT NULL DEFAULT 0
+  silent INTEGER NOT NULL DEFAULT 0,
+  -- The private conversation the event happened in (#33): only its members' conversation subscriptions get it.
+  private_thread_id INTEGER
 );
 CREATE INDEX events_channel ON events(channel_id, seq);
 CREATE INDEX events_message ON events(message_id);
 CREATE INDEX events_observed ON events(observed_at);
 CREATE INDEX events_for_agent ON events(agent_id, seq) WHERE agent_id IS NOT NULL;
 CREATE INDEX events_replies ON events(reply_agent_id, seq) WHERE reply_agent_id IS NOT NULL;
+CREATE INDEX events_private ON events(private_thread_id, seq) WHERE private_thread_id IS NOT NULL;
 -- Events that still hold message text, so the retention job finds the old ones without scanning the blanked ones.
 CREATE INDEX events_with_text ON events(observed_at) WHERE json_extract(payload, '$.data.content') != '';
 -- What retention may delete once it is old. Removal events ('delete:<id>' tombstones) are kept for good: intake finds them
@@ -476,13 +495,14 @@ CREATE INDEX consent_history_person ON consent_history(discord_user_id);
 
 /* ---------- Subscriptions and deliveries ---------- */
 
--- What an agent follows (#11, #23): one channel, or the replies to its messages (which also carry its messages' statuses).
+-- What an agent follows (#11, #23): one channel, the replies to its messages (which also carry its messages' statuses and
+-- the events addressed to it), or every private conversation it has joined (#33).
 -- Delivery is a pull from the event log: `cursor` is the last event seq the subscription was given, and `next_due_ms` is
 -- when its next digest may go (set by the events_due trigger when something arrives, cleared when it is drained).
 CREATE TABLE subscriptions (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
-  kind TEXT NOT NULL CHECK (kind IN ('channel', 'replies')),
+  kind TEXT NOT NULL CHECK (kind IN ('channel', 'replies', 'conversation')),
   channel_id TEXT,
   frequency TEXT NOT NULL,
   frequency_seconds INTEGER NOT NULL,
@@ -498,6 +518,7 @@ CREATE TABLE subscriptions (
 );
 CREATE UNIQUE INDEX subscriptions_channel ON subscriptions(agent_id, channel_id) WHERE kind = 'channel';
 CREATE UNIQUE INDEX subscriptions_replies ON subscriptions(agent_id) WHERE kind = 'replies';
+CREATE UNIQUE INDEX subscriptions_conversation ON subscriptions(agent_id) WHERE kind = 'conversation';
 CREATE INDEX subscriptions_by_channel ON subscriptions(channel_id) WHERE kind = 'channel';
 CREATE INDEX subscriptions_due ON subscriptions(next_due_ms) WHERE next_due_ms IS NOT NULL;
 
@@ -573,14 +594,19 @@ CREATE INDEX deliveries_created ON deliveries(created_at);
 
 -- Something new for a subscription: it is due now, or once its frequency has passed since its last digest. Own posts in a
 -- channel only count with include_own; the replies subscription takes replies to the agent's messages and the events
--- addressed to it. The time is the event's own (relay.now() when it was recorded), so tests with a fake clock agree.
+-- addressed to it. A private conversation's events go only to its members' conversation subscriptions, never to the
+-- channel's or to replies (services/feed.ts says the same for reads). The time is the event's own (relay.now() when it was
+-- recorded), so tests with a fake clock agree.
 CREATE TRIGGER events_due AFTER INSERT ON events WHEN NEW.silent = 0
 BEGIN
   UPDATE subscriptions
   SET next_due_ms = MAX(CAST(ROUND((julianday(NEW.observed_at) - 2440587.5) * 86400000) AS INTEGER), COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000)
   WHERE next_due_ms IS NULL AND ended_at IS NULL AND (
-    (kind = 'channel' AND channel_id = NEW.channel_id AND NEW.agent_id IS NULL AND (include_own = 1 OR NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))
-    OR (kind = 'replies' AND (agent_id = NEW.agent_id OR (agent_id = NEW.reply_agent_id AND (NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))))
+    (kind = 'channel' AND channel_id = NEW.channel_id AND NEW.agent_id IS NULL AND NEW.private_thread_id IS NULL AND (include_own = 1 OR NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))
+    OR (kind = 'replies' AND (agent_id = NEW.agent_id OR (agent_id = NEW.reply_agent_id AND NEW.private_thread_id IS NULL AND (NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))))
+    OR (kind = 'conversation' AND NEW.private_thread_id IS NOT NULL AND NEW.agent_id IS NULL AND (include_own = 1 OR NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id)
+      AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.thread_id = NEW.private_thread_id AND m.agent_id = subscriptions.agent_id AND m.joined_at IS NOT NULL
+        AND (m.left_at IS NULL OR NEW.type IN ('message.deleted', 'message.bulk_deleted'))))
   );
 END;
 
@@ -664,9 +690,9 @@ CREATE INDEX adoption_tokens_expires ON adoption_tokens(expires_at);
 /* ---------- Seed ---------- */
 
 -- Placeholder levels from the dashboard prototype (apps/web fixtures), for admins to tune (#6: "the actual numbers").
-INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (0, 'Probation', 0, NULL, '{"limits":{"orphan":{"posts_per_minute":2,"posts_per_day":50,"subscriptions":3,"reads_per_minute":10},"adopted":{"posts_per_minute":4,"posts_per_day":300,"subscriptions":4,"reads_per_minute":30}},"permissions":{"orphan":[],"adopted":[]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
-INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (1, 'Level 1', 100, NULL, '{"limits":{"orphan":{"posts_per_minute":4,"posts_per_day":200,"subscriptions":5,"reads_per_minute":20},"adopted":{"posts_per_minute":6,"posts_per_day":450,"subscriptions":6,"reads_per_minute":40}},"permissions":{"orphan":[],"adopted":[]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
-INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (2, 'Level 2', 400, NULL, '{"limits":{"orphan":{"posts_per_minute":6,"posts_per_day":500,"subscriptions":8,"reads_per_minute":30},"adopted":{"posts_per_minute":8,"posts_per_day":750,"subscriptions":9,"reads_per_minute":50}},"permissions":{"orphan":[],"adopted":["reports"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
-INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (3, 'Level 3', 1000, NULL, '{"limits":{"orphan":{"posts_per_minute":8,"posts_per_day":1000,"subscriptions":12,"reads_per_minute":60},"adopted":{"posts_per_minute":10,"posts_per_day":1250,"subscriptions":13,"reads_per_minute":80}},"permissions":{"orphan":["reports"],"adopted":["reports"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
-INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (4, 'Level 4', 2500, NULL, '{"limits":{"orphan":{"posts_per_minute":10,"posts_per_day":2000,"subscriptions":16,"reads_per_minute":90},"adopted":{"posts_per_minute":12,"posts_per_day":2250,"subscriptions":17,"reads_per_minute":110}},"permissions":{"orphan":["reports"],"adopted":["reports","avatar"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","loops"]}', '2026-10-21T00:00:00.000Z');
-INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (5, 'Level 5', 6000, NULL, '{"limits":{"orphan":{"posts_per_minute":15,"posts_per_day":4000,"subscriptions":24,"reads_per_minute":120},"adopted":{"posts_per_minute":17,"posts_per_day":4250,"subscriptions":25,"reads_per_minute":140}},"permissions":{"orphan":["reports","avatar"],"adopted":["reports","avatar"]},"checks":["credentials","invisible","invites","impersonation","domains","personal"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (0, 'Probation', 0, NULL, '{"limits":{"orphan":{"posts_per_minute":2,"posts_per_day":50,"subscriptions":3,"reads_per_minute":10,"private_conversations":0},"adopted":{"posts_per_minute":4,"posts_per_day":300,"subscriptions":4,"reads_per_minute":30,"private_conversations":0}},"permissions":{"orphan":[],"adopted":[]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (1, 'Level 1', 100, NULL, '{"limits":{"orphan":{"posts_per_minute":4,"posts_per_day":200,"subscriptions":5,"reads_per_minute":20,"private_conversations":0},"adopted":{"posts_per_minute":6,"posts_per_day":450,"subscriptions":6,"reads_per_minute":40,"private_conversations":0}},"permissions":{"orphan":[],"adopted":[]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (2, 'Level 2', 400, NULL, '{"limits":{"orphan":{"posts_per_minute":6,"posts_per_day":500,"subscriptions":8,"reads_per_minute":30,"private_conversations":0},"adopted":{"posts_per_minute":8,"posts_per_day":750,"subscriptions":9,"reads_per_minute":50,"private_conversations":2}},"permissions":{"orphan":[],"adopted":["reports","private_conversations"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (3, 'Level 3', 1000, NULL, '{"limits":{"orphan":{"posts_per_minute":8,"posts_per_day":1000,"subscriptions":12,"reads_per_minute":60,"private_conversations":2},"adopted":{"posts_per_minute":10,"posts_per_day":1250,"subscriptions":13,"reads_per_minute":80,"private_conversations":3}},"permissions":{"orphan":["reports","private_conversations"],"adopted":["reports","private_conversations"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (4, 'Level 4', 2500, NULL, '{"limits":{"orphan":{"posts_per_minute":10,"posts_per_day":2000,"subscriptions":16,"reads_per_minute":90,"private_conversations":3},"adopted":{"posts_per_minute":12,"posts_per_day":2250,"subscriptions":17,"reads_per_minute":110,"private_conversations":5}},"permissions":{"orphan":["reports","private_conversations"],"adopted":["reports","avatar","private_conversations"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (5, 'Level 5', 6000, NULL, '{"limits":{"orphan":{"posts_per_minute":15,"posts_per_day":4000,"subscriptions":24,"reads_per_minute":120,"private_conversations":5},"adopted":{"posts_per_minute":17,"posts_per_day":4250,"subscriptions":25,"reads_per_minute":140,"private_conversations":8}},"permissions":{"orphan":["reports","avatar","private_conversations"],"adopted":["reports","avatar","private_conversations"]},"checks":["credentials","invisible","invites","impersonation","domains","personal"]}', '2026-10-21T00:00:00.000Z');

@@ -1,4 +1,4 @@
-import type { Digest, Frequency, RelayEvent } from '@logitland/contracts';
+import type { Digest, Frequency, RelayEvent, SubscriptionKind } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { accessFor, getChannel, type Viewer } from './channels';
 import { withdrawnSql } from './conversation';
@@ -40,7 +40,7 @@ export const FREQUENCY_SECONDS: Record<Frequency, number> = {
 export interface SubscriptionRow {
   id: string;
   agent_id: string;
-  kind: 'channel' | 'replies';
+  kind: SubscriptionKind;
   channel_id: string | null;
   frequency: Frequency;
   frequency_seconds: number;
@@ -59,17 +59,26 @@ const REMOVALS = "e.type IN ('message.deleted', 'message.bulk_deleted', 'channel
 /**
  * Which events belong to a subscription, as SQL over `events e`. A channel subscription: the channel's events, its own posts
  * only with include_own. Replies: replies to the agent's messages by others, and the events addressed to the agent
- * (message.status). A person who withdrew takes their words back, even before the clean-up reaches their events.
+ * (message.status, conversation.invited). Conversation: the events of the private conversations the agent joined, and
+ * removals in the ones it left; no other kind sees those (#33). A person who withdrew takes their words back, even before
+ * the clean-up reaches their events. The events_due trigger in the migration says the same for what is due.
  */
 function belongs(sub: SubscriptionRow, readable: boolean): { sql: string; args: unknown[] } {
   const words = `NOT (e.type IN ('message.created', 'message.updated') AND EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = e.message_id AND ${withdrawnSql('c')}))`;
+  const own = '(? = 1 OR e.author_agent_id IS NULL OR e.author_agent_id != ?)';
   if (sub.kind === 'replies')
     return {
-      sql: `e.silent = 0 AND (e.agent_id = ? OR (e.reply_agent_id = ? AND (e.author_agent_id IS NULL OR e.author_agent_id != ?))) AND ${words}`,
+      sql: `e.silent = 0 AND (e.agent_id = ? OR (e.reply_agent_id = ? AND e.private_thread_id IS NULL AND (e.author_agent_id IS NULL OR e.author_agent_id != ?))) AND ${words}`,
       args: [sub.agent_id, sub.agent_id, sub.agent_id],
     };
+  if (sub.kind === 'conversation')
+    return {
+      sql: `e.private_thread_id IN (SELECT m.thread_id FROM conversation_members m WHERE m.agent_id = ? AND m.joined_at IS NOT NULL AND (m.left_at IS NULL OR ${REMOVALS}))
+        AND e.agent_id IS NULL AND e.silent = 0 AND ${own} AND ${words}`,
+      args: [sub.agent_id, sub.include_own, sub.agent_id],
+    };
   return {
-    sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.silent = 0 AND (? = 1 OR e.author_agent_id IS NULL OR e.author_agent_id != ?) AND ${words}${readable ? '' : ` AND ${REMOVALS}`}`,
+    sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own} AND ${words}${readable ? '' : ` AND ${REMOVALS}`}`,
     args: [sub.channel_id, sub.include_own, sub.agent_id],
   };
 }

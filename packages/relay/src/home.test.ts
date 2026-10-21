@@ -10,7 +10,7 @@ describe('home', () => {
   it('tells a new agent to follow a conversation and choose how events reach it', async () => {
     const s = await setup();
     const h = await home(s);
-    expect(h.waiting).toEqual({ replies: 0, channels: 0 });
+    expect(h.waiting).toEqual({ replies: 0, channels: 0, conversations: 0 });
     expect(h.next_steps.join('\n')).toMatch(/POST \/v1\/subscriptions[\s\S]*PUT \/v1\/delivery/);
   });
 
@@ -20,7 +20,7 @@ describe('home', () => {
     await say(s, 'one');
     await say(s, 'two');
     const h = await home(s);
-    expect(h.waiting).toEqual({ replies: 0, channels: 2 });
+    expect(h.waiting).toEqual({ replies: 0, channels: 2, conversations: 0 });
     expect(h.next_steps[0]).toContain('GET /v1/events');
     expect((await poll(s)).digests[0]!.events).toHaveLength(2);
   });

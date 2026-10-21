@@ -17,7 +17,8 @@ import { awardSent } from './xp/award';
 // and only a newly recorded event fans out to subscribers.
 //
 // A person's message is kept only when it replies to an agent's message and they had agreed through /consent by the time
-// they wrote it. Every other human message is dropped here: no row, no event, no text. Backfill goes through the same path.
+// they wrote it; in a private conversation, when they own one of its joined agents and had agreed. Every other human message
+// is dropped here: no row, no event, no text. Backfill goes through the same path.
 // Agents, bots and webhooks are kept as they are.
 
 const Snowflake = z.string().regex(/^\d{17,20}$/);
@@ -70,6 +71,8 @@ export const IntakeEvent = z.discriminatedUnion('kind', [
     archived: z.boolean().nullish(),
     locked: z.boolean().nullish(),
     applied_tags: z.array(Snowflake).max(20).nullish(),
+    /** A private thread (Discord type 12): only one the relay opened as a private conversation is kept, and only updated. */
+    private: z.boolean().optional(),
   }),
   z.object({ kind: z.literal('thread_delete'), thread_id: Snowflake, parent_id: Snowflake }),
   // Every active thread Discord listed (in these channels, or everywhere): any other thread the relay knows has been archived.
@@ -311,6 +314,24 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
       .all<{ id: string; agent_id: string }>();
     for (const r of results) agentMessages.set(r.id, r.agent_id);
   }
+  // In a private conversation (#33) the people kept are the owners of its joined agents: who they are, per conversation.
+  const privateOwners = new Map<string, Set<string>>();
+  const threadIds = [...new Set(fromPeople.flatMap((e) => (e.thread_id ? [e.thread_id] : [])))];
+  for (const part of chunk(threadIds, MAX_PARAMS)) {
+    const { results: privates } = await relay.db
+      .prepare(`SELECT CAST(id AS TEXT) AS id FROM threads WHERE private = 1 AND id IN (${placeholders(part.length)})`)
+      .bind(...part)
+      .all<{ id: string }>();
+    for (const t of privates) privateOwners.set(t.id, new Set());
+    const { results } = await relay.db
+      .prepare(
+        `SELECT CAST(m.thread_id AS TEXT) AS thread_id, o.discord_user_id FROM conversation_members m JOIN agents a ON a.id = m.agent_id JOIN owners o ON o.id = a.owner_id
+         WHERE m.joined_at IS NOT NULL AND m.left_at IS NULL AND m.thread_id IN (${placeholders(part.length)})`,
+      )
+      .bind(...part)
+      .all<{ thread_id: string; discord_user_id: string }>();
+    for (const r of results) privateOwners.get(r.thread_id)?.add(r.discord_user_id);
+  }
 
   const stmts: Stmt[] = [];
   const planned: { at: number; event: PlannedEvent }[] = [];
@@ -331,6 +352,15 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
     switch (e.kind) {
       case 'thread_upsert': {
         const flag = (v: boolean | null | undefined) => (v == null ? null : Number(v));
+        if (e.private) {
+          // Only a private conversation the relay opened is kept, and Discord only tells it what became of it.
+          stmts.push(
+            relay.db
+              .prepare('UPDATE threads SET archived = COALESCE(?, archived), locked = COALESCE(?, locked), updated_at = ? WHERE id = ? AND private = 1')
+              .bind(flag(e.archived), flag(e.locked), iso(relay.now()), e.thread_id),
+          );
+          break;
+        }
         const tags = e.applied_tags ? JSON.stringify(e.applied_tags) : null;
         const now = iso(relay.now());
         const created = e.created_at ?? snowflakeTime(e.thread_id);
@@ -432,7 +462,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         seen.add(key!);
         const cursorKey = e.thread_id ?? e.channel_id;
         cursors.set(cursorKey, bigger(cursors.get(cursorKey), e.message_id));
-        const who = await resolveAuthor(relay, ch, e, sent, agreedAt, agentMessages);
+        const who = await resolveAuthor(relay, ch, e, sent, agreedAt, agentMessages, e.thread_id ? privateOwners.get(e.thread_id) : undefined);
         if (!who) {
           // A person's message that isn't a consenting reply to an agent: dropped, not stored.
           out.ignored++;
@@ -598,7 +628,10 @@ interface Who {
   reply_to: string | null;
 }
 
-/** Who wrote a message, or null for a person's message the relay doesn't keep (anything but a consenting reply to an agent). */
+/**
+ * Who wrote a message, or null for a person's message the relay doesn't keep: anything but a consenting reply to an agent,
+ * or in a private conversation (`owners` set) anything but a consenting owner of one of its joined agents.
+ */
 async function resolveAuthor(
   relay: Relay,
   channel: Relayed,
@@ -606,6 +639,7 @@ async function resolveAuthor(
   sent: Map<string, Sent>,
   agreedAt: Map<string, string>,
   agentMessages: ReadonlyMap<string, string>,
+  owners: ReadonlySet<string> | undefined,
 ): Promise<Who | null> {
   const a = e.author;
   if (a.webhook_id) {
@@ -643,7 +677,8 @@ async function resolveAuthor(
       reply_to: null,
     };
   const granted = agreedAt.get(a.id);
-  if (granted === undefined || granted > e.timestamp || !e.reply_to || !agentMessages.has(e.reply_to)) return null;
+  if (granted === undefined || granted > e.timestamp) return null;
+  if (owners ? !owners.has(a.id) : !e.reply_to || !agentMessages.has(e.reply_to)) return null;
   return {
     kind: 'human',
     agent_id: null,

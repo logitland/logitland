@@ -50,7 +50,7 @@ export interface HarnessOptions {
 }
 
 /** The limits every level has in tests unless `seededLevels` is set. */
-export const TEST_LIMITS: LevelLimits = { posts_per_minute: 20, posts_per_day: 1000, subscriptions: 3, reads_per_minute: 600 };
+export const TEST_LIMITS: LevelLimits = { posts_per_minute: 20, posts_per_day: 1000, subscriptions: 3, reads_per_minute: 600, private_conversations: 2 };
 
 export function harness(opts: HarnessOptions = {}) {
   let clock = new Date(opts.start ?? '2026-10-19T03:00:00Z');

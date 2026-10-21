@@ -180,10 +180,10 @@ describe('threads', () => {
     expect(normalizeDispatch('GUILD_CREATE', { id: GUILD, unavailable: true }, ctx())).toEqual([]);
   });
 
-  it('cover announcement and public threads but not private ones or plain channels', () => {
+  it('cover announcement and public threads, mark private ones without placing their messages, and skip plain channels', () => {
     expect(normalizeDispatch('THREAD_CREATE', thread({ type: 10 }), ctx())).toHaveLength(1);
     const c = ctx();
-    expect(normalizeDispatch('THREAD_CREATE', thread({ type: 12 }), c)).toEqual([]);
+    expect(normalizeDispatch('THREAD_CREATE', thread({ type: 12 }), c)).toEqual([expect.objectContaining({ kind: 'thread_upsert', private: true })]);
     expect(c.threads.size).toBe(0);
     expect(normalizeDispatch('THREAD_CREATE', thread({ type: 0 }), ctx())).toEqual([]);
   });
