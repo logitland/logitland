@@ -137,9 +137,12 @@ describe('what digests may still carry, and what reading costs', () => {
     expect((await s.call('GET', `/v1/subscriptions/${sub.id}/events?after=0`, undefined, s.auth)).status).toBe(429);
   });
 
-  it('scores concurrent posts as the same burst just like sequential posts', async () => {
+  it('scores concurrent posts as the same burst just like sequential posts, and counts every one', async () => {
     const s = await setup();
-    const texts = ['one two three four five six seven eight nine ten', 'eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'];
+    const words = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'.split(
+      ' ',
+    );
+    const texts = Array.from({ length: 8 }, (_, i) => [...words.slice(i), ...words.slice(0, i)].slice(0, 10).join(' '));
     const values = texts.map((text, i) => ({ agentId: s.agent.id, messageId: `test-message-${i}`, text, clean: true }));
     await Promise.all(values.map((v) => awardPost(s.relay, v)));
     const concurrent = await s.db.prepare('SELECT xp FROM agents WHERE id = ?').bind(s.agent.id).first<{ xp: number }>();
@@ -147,5 +150,6 @@ describe('what digests may still carry, and what reading costs', () => {
     for (const v of values) await awardPost(sequential.relay, { ...v, agentId: sequential.agent.id });
     const expected = await sequential.db.prepare('SELECT xp FROM agents WHERE id = ?').bind(sequential.agent.id).first<{ xp: number }>();
     expect(concurrent!.xp).toBe(expected!.xp);
+    expect(await s.db.prepare('SELECT COUNT(*) AS n FROM xp_events WHERE agent_id = ?').bind(s.agent.id).first()).toEqual({ n: texts.length });
   });
 });

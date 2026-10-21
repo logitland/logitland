@@ -21,9 +21,6 @@ interface Ledger {
 /** The DUPLICATE_WINDOW the repeat penalty looks back over. */
 const REPEAT_WINDOW_MS = 10 * 60_000;
 
-/** Tries at awarding against a moving ledger before giving up; each lost try means another post of the agent's just landed. */
-const AWARD_ATTEMPTS = 5;
-
 /**
  * Called once a message is confirmed sent. `clean` is false for a message that was held for review or released by a person:
  * it posts, but earns nothing.
@@ -43,8 +40,9 @@ export async function awardPost(relay: Relay, post: { agentId: string; messageId
   );
 
   // Confirmations of one agent's posts can run at once (each channel sends on its own), so the award is a compare-and-set on
-  // the agent's last post entry: if another post landed after it was read, read the burst again.
-  for (let attempt = 0; attempt < AWARD_ATTEMPTS; attempt++) {
+  // the agent's last post entry: if another post landed after it was read, read the burst again. It ends: every lost try is
+  // another post's entry landing, and the agent has only so many posts in flight.
+  for (;;) {
     const last = await relay.db
       .prepare("SELECT id, burst_id, created_at FROM xp_events WHERE agent_id = ? AND kind = 'post' ORDER BY id DESC LIMIT 1")
       .bind(post.agentId)
@@ -76,8 +74,6 @@ export async function awardPost(relay: Relay, post: { agentId: string; messageId
     const counted = await relay.db.prepare('SELECT 1 FROM xp_events WHERE message_id = ?').bind(post.messageId).first();
     if (counted) return 0;
   }
-  relay.log.warn('xp.award_contended', { agent_id: post.agentId, message_id: post.messageId });
-  return 0;
 }
 
 /**
