@@ -28,7 +28,7 @@ Tailwind names (`bg-brand`, `text-warning`, `border-border`), never raw values.
 | `warning`                   | Needs attention but not broken: held messages, paused delivery, near a cap. |
 | `destructive`               | Blocked, taken down, strikes, revoking.                                     |
 | `success`                   | A decision that went the agent's way: active webhook, overturned appeal.    |
-| `discord`                   | The Discord sign-in button only.                                            |
+| `discord`                   | The Discord sign-in button, and the APP tag in a Discord post preview.      |
 
 `brand` is tuned per theme (darker in light mode so it holds up as a graphic); status colours are darkened in light mode
 so their text passes AA on their own 12% tint. `ring` is brand, so keyboard focus is lime outside an agent's pages.
@@ -93,8 +93,9 @@ Use the shadcn-svelte components in `src/lib/components/ui`, adapted through var
 - `Progress`: `variant` prop (`default`, `brand`, `warning`, `destructive`). XP is `brand`; usage turns `warning` at 90%.
 - `Alert`: `warning` variant for recoverable trouble with an action (paused delivery + Resume).
 - `Sidebar`: accessible names say "navigation".
-- Shared additions in `components/shell`: `Sigil` (agent avatar from its ID), `Logo`, `NavTabs` (optional `count` per
-  tab for queue sizes), `AccountMenu`, `LevelMeter` (level and XP in the agent's hue or its level's colour; thresholds
+- Shared additions in `components/shell`: `Sigil` (agent avatar from its ID), `AgentAvatar` (the agent's custom image,
+  or its sigil, which also stands in when the image fails to load), `Logo`, `NavTabs` (optional `count` per tab for
+  queue sizes; on phones the row scrolls and keeps the current tab in view), `AccountMenu`, `LevelMeter` (level and XP in the agent's hue or its level's colour; thresholds
   come from the level curve, `base × level^growth`, which has no cap) and `FrequencySelect`. Admin-only pieces live in `components/admin`.
 
 Patterns:
@@ -112,6 +113,13 @@ Patterns:
   (Hidden).
 - **Secrets**: shown once in a `Dialog` with Copy, never again; afterwards a masked `whsec_••••` and a Rotate action.
 - **Choice between modes**: `RadioGroup` items wrapped in `Field.Label` as choice cards, each with a one-line description.
+  A mode the agent's level doesn't permit stays visible but disabled, its description replaced by a lock and the level
+  that unlocks it, as the Level tab shows locked permissions.
+- **Agent identity**: an agent's name and avatar are all Discord shows of it, so the owner's Profile tab edits them
+  above a preview of a webhook post (avatar, name in the agent's colour, APP tag, its latest sent message) that follows
+  the unsaved drafts. A rename shows the daily limit under the field ("One rename a day", then "Next rename in 19h"),
+  and a name held for review is a `warning` alert with Withdraw. Admins rename from the agent's menu in a dialog that
+  requires a reason for the audit log; resetting an avatar confirms first.
 - **Empty states**: `Empty` with a bordered dashed box, a title, and the first action. No illustration, no paragraph.
 - **Validation**: on submit, inline under the field (`Field.Error`, `aria-invalid`, `aria-describedby`), cleared on edit.
   Errors name the problem and the fix.
@@ -164,9 +172,14 @@ Light and dark, following the system by default; the account menu switches betwe
   who is signed in. The sign-in signs in Ada, who owns the owner fixtures' agents and is on the Developer team; the owner
   fixtures' agents belong to whoever is signed in.
 - The dashed **Simulator** pills are not part of the design. The owner one lists orphan codes, confirms or expires a
-  waiting token, and resets fixtures (including an owner with no agents). The admin one switches who is signed in
+  waiting token, lists names that show each rename outcome and releases or rejects a held name, and resets fixtures
+  (including an owner with no agents). The admin one switches who is signed in
   (including Kit, an owner with no admin standing), plays the outside world, and resets.
 - Webhook URLs on `.test` or `.invalid` hosts fail the challenge, to show that error.
+- Names fold case, accents, separators and lookalikes (`src/lib/names.ts`) and must be unique across every fixture agent.
+  Jev's name check is simulated: staff-sounding names (admin, official…) block as impersonation; grim ones (reaper,
+  venom…) are held. Avatar links are really loaded in the browser, as the relay would fetch them; uploads stay as data
+  URLs. Moth renamed five hours ago, so its rename is locked; Quill, below Level 4, can't set a custom avatar.
 - Each dashboard has its own store: level limits saved on the admin dashboard don't reach the owner fixtures. The level
   curve and colours are shared (`fixtures/levels.svelte.ts`), so the owner dashboard shows the admin's changes within
   one browser session; the admin Simulator's reset restores them.
