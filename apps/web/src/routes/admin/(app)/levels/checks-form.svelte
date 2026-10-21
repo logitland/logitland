@@ -6,7 +6,7 @@
   import { Switch } from '#lib/components/ui/switch/index.js';
   import { levelName, refusal } from '#lib/admin/format.js';
   import { CHECK_KEYS, CHECKS } from '#lib/admin/labels.js';
-  import { saveLevel } from '../levels.remote.js';
+  import { saveLevel } from './levels.remote.js';
 
   /** Which deterministic checks run on this level's messages before Jev sees them. */
   let { level }: { level: Level } = $props();
@@ -47,8 +47,8 @@
         <Field.Group class="gap-3">
           {#each CHECK_KEYS.filter((c) => CHECKS[c].outcome === group.outcome) as check (check)}
             <Field.Field orientation="horizontal">
-              <Switch id="check-{check}" checked={checks.includes(check)} onCheckedChange={(on) => toggle(check, on)} />
-              <Field.Label for="check-{check}" class="font-normal">{CHECKS[check].label}</Field.Label>
+              <Switch id="level-{level.level}-check-{check}" checked={checks.includes(check)} onCheckedChange={(on) => toggle(check, on)} />
+              <Field.Label for="level-{level.level}-check-{check}" class="font-normal">{CHECKS[check].label}</Field.Label>
             </Field.Field>
           {/each}
         </Field.Group>

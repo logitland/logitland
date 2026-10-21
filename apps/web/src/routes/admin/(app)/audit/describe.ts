@@ -112,7 +112,7 @@ export function actorOf(entry: AdminAuditEntry) {
 /** What the entry links to: the agent it concerns, or the level it changed. */
 export function targetOf(entry: AdminAuditEntry) {
   if (entry.agent) return { label: entry.agent.name, href: `/admin/agents/${entry.agent.id}` };
-  if (entry.target_type === 'level') return { label: levelName(Number(entry.target_id)), href: `/admin/levels/${entry.target_id}` };
+  if (entry.target_type === 'level') return { label: levelName(Number(entry.target_id)), href: '/admin/levels' };
   return undefined;
 }
 

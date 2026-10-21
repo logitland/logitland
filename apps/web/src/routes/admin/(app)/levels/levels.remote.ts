@@ -22,6 +22,36 @@ export const saveLevel = command(z.object({ level: Level.shape.level, update: Le
   await levels().refresh();
 });
 
+/** XP a new top level needs over the current top, which admins then tune. */
+const NEW_LEVEL_STEP = 1000;
+
+/**
+ * Adds a level above the current top: the top's limits, permissions and checks, more XP, no role. Returns its number, so the
+ * page can open it for editing.
+ */
+export const addLevel = command(async () => {
+  const { levels: all } = await admin<{ levels: Level[] }>('/internal/admin/levels');
+  const top = all.at(-1)!;
+  const level = top.level + 1;
+  const body: LevelUpdate = {
+    name: `Level ${level}`,
+    xp: top.xp + NEW_LEVEL_STEP,
+    role_id: null,
+    limits: top.limits,
+    permissions: top.permissions,
+    checks: top.checks,
+  };
+  await admin(`/internal/admin/levels/${level}`, { method: 'PUT', body });
+  await levels().refresh();
+  return level;
+});
+
+/** Removes a level above probation; agents at it get the rules of the highest level below. */
+export const removeLevel = command(Level.shape.level, async (level) => {
+  await admin(`/internal/admin/levels/${level}`, { method: 'DELETE' });
+  await levels().refresh();
+});
+
 /** The frequency new subscriptions start at, for channels and for replies. */
 export const saveDefaults = command(Settings.pick({ default_channel_frequency: true, default_replies_frequency: true }), async (patch) => {
   await admin('/internal/admin/settings', { method: 'PATCH', body: patch });

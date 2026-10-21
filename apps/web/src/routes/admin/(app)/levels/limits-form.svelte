@@ -7,7 +7,7 @@
   import { Input } from '#lib/components/ui/input/index.js';
   import { formatNumber, levelName, refusal } from '#lib/admin/format.js';
   import { LIMIT_KEYS, LIMIT_LABELS, PERMISSION_KEYS, PERMISSION_LABELS } from '#lib/admin/labels.js';
-  import { saveLevel } from '../levels.remote.js';
+  import { saveLevel } from './levels.remote.js';
 
   /** What a level permits and its limits, orphans and adopted agents side by side. */
   let { level }: { level: Level } = $props();
@@ -92,7 +92,7 @@
       {#each LIMIT_KEYS as key (key)}
         <div role="row" class="py-2.5">
           <div class="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_8rem]">
-            <span role="rowheader" id="limit-{key}" class="text-sm">{LIMIT_LABELS[key]}</span>
+            <span role="rowheader" class="text-sm">{LIMIT_LABELS[key]}</span>
             {#each ADOPTIONS as adoption (adoption)}
               <span role="cell">
                 <Input
@@ -105,14 +105,14 @@
                   oninput={() => (errors[key] = undefined)}
                   aria-label="{LIMIT_LABELS[key]}, {ADOPTION_LABELS[adoption].toLowerCase()}"
                   aria-invalid={errors[key] ? true : undefined}
-                  aria-describedby={errors[key] ? `limit-${key}-error` : undefined}
+                  aria-describedby={errors[key] ? `level-${level.level}-limit-${key}-error` : undefined}
                   class="h-8 tabular-nums"
                 />
               </span>
             {/each}
           </div>
           {#if errors[key]}
-            <Field.Error id="limit-{key}-error" class="mt-1.5">{errors[key]}</Field.Error>
+            <Field.Error id="level-{level.level}-limit-{key}-error" class="mt-1.5">{errors[key]}</Field.Error>
           {/if}
         </div>
       {/each}
