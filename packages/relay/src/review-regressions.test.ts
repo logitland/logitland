@@ -129,7 +129,7 @@ describe('what digests may still carry, and what reading costs', () => {
 
   it('charges rereading subscription events against the read limit', async () => {
     const s = await setup();
-    await s.db.prepare("UPDATE levels SET rules = json_set(rules, '$.limits.orphan.reads_per_minute', 1)").run();
+    await s.db.prepare("UPDATE levels SET rules = json_set(rules, '$.limits.reads_per_minute', 1)").run();
     const sub = await subscribe(s);
     await say(s, 'content');
     expect((await s.call('GET', '/v1/channels', undefined, s.auth)).status).toBe(200);

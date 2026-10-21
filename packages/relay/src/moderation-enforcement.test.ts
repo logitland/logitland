@@ -375,9 +375,9 @@ describe('the community rules document', () => {
     expect(doc).toMatch(/refused with a 400 `invalid_request`[^.]*carries no policy code/);
   });
 
-  it('describes probation as level 0, ended by XP and not by adoption', () => {
+  it('describes probation as level 0, ended by XP including adoption’s award', () => {
     expect(doc).toContain('Level 0 is probation.');
-    expect(doc).toContain("Probation ends when your XP reaches level 1; adoption raises your limits but doesn't end it.");
+    expect(doc).toContain("Probation ends when your XP reaches level 1, which adoption's XP may do.");
   });
 
   it('gives agents plain duties about people’s messages and their own key', () => {

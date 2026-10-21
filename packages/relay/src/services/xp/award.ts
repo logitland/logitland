@@ -1,6 +1,7 @@
 import { iso, type Relay } from '../../context';
 import { auditStmt } from '../audit';
 import { levelOfXp } from '@logitland/contracts';
+import { getSettings } from '../settings';
 import { compound } from './vader';
 import { XP, lengthScore, nearDuplicates, repetitionScore, wordCount } from './score';
 
@@ -99,8 +100,49 @@ async function addXp(relay: Relay, agentId: string, amount: number): Promise<voi
     .prepare('UPDATE agents SET xp = xp + ? WHERE id = ? RETURNING xp, level')
     .bind(amount, agentId)
     .first<{ xp: number; level: number }>();
-  if (!row) return;
-  // Levels only ever go up on their own: an agent an admin set higher keeps its level.
+  if (row) await raiseLevel(relay, agentId, row);
+}
+
+/** Adoption's XP (the adoption_xp setting), given once when an agent is adopted. It may raise the level. */
+export async function grantAdoptionXp(relay: Relay, agentId: string): Promise<void> {
+  const { adoption_xp } = await getSettings(relay);
+  if (!adoption_xp) return;
+  const row = await relay.db
+    .prepare('UPDATE agents SET xp = xp + ?, adoption_xp = ? WHERE id = ? AND adoption_xp = 0 RETURNING xp, level')
+    .bind(adoption_xp, adoption_xp, agentId)
+    .first<{ xp: number; level: number }>();
+  if (row) await raiseLevel(relay, agentId, row);
+}
+
+/** Takes back the adoption XP agents hold, because they lost their owner, and any level it brought them. */
+export async function revokeAdoptionXp(relay: Relay, agentIds: string[]): Promise<void> {
+  for (const agentId of agentIds) {
+    const row = await relay.db
+      .prepare('UPDATE agents SET xp = MAX(0, xp - adoption_xp), adoption_xp = 0 WHERE id = ? AND adoption_xp > 0 RETURNING xp, level')
+      .bind(agentId)
+      .first<{ xp: number; level: number }>();
+    if (!row) continue;
+    const reached = levelOfXp(row.xp);
+    if (reached >= row.level) continue;
+    const down = await relay.db
+      .prepare('UPDATE agents SET level = ?, updated_at = ? WHERE id = ? AND level = ?')
+      .bind(reached, iso(relay.now()), agentId, row.level)
+      .run();
+    if (down.meta.changes > 0)
+      await auditStmt(relay, {
+        actor_type: 'system',
+        actor_id: 'xp',
+        action: 'agent.level_down',
+        target_type: 'agent',
+        target_id: agentId,
+        reason: 'lost its owner',
+        diff: { level: { from: row.level, to: reached } },
+      }).run();
+  }
+}
+
+/** Raises the level to what the XP reaches. Levels only ever go up on their own: an agent an admin set higher keeps its level. */
+async function raiseLevel(relay: Relay, agentId: string, row: { xp: number; level: number }): Promise<void> {
   const reached = levelOfXp(row.xp);
   if (reached <= row.level) return;
   const up = await relay.db

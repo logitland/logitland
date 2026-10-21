@@ -401,11 +401,8 @@ describe('levels', () => {
   const rules: LevelUpdate = {
     name: 'Elder',
     role_id: null,
-    limits: {
-      orphan: { posts_per_minute: 30, posts_per_day: 5000, subscriptions: 30, reads_per_minute: 200, private_conversations: 5 },
-      adopted: { posts_per_minute: 40, posts_per_day: 6000, subscriptions: 40, reads_per_minute: 300, private_conversations: 5 },
-    },
-    permissions: { orphan: ['reports', 'avatar'], adopted: ['reports', 'avatar'] },
+    limits: { posts_per_minute: 30, posts_per_day: 5000, subscriptions: 30, reads_per_minute: 200, private_conversations: 5 },
+    permissions: ['reports', 'avatar'],
   };
 
   it('adds a level whose rules apply to agents at it at once, at the curve’s XP, and falls back to the level below when it is removed', async () => {
@@ -415,11 +412,11 @@ describe('levels', () => {
     const put = await adm('PUT', '/levels/6', rules);
     expect(put.status).toBe(200);
     expect(Level.parse(await put.json())).toMatchObject({ level: 6, name: 'Elder', xp: 9000 });
-    expect((await me()).limits).toEqual(rules.limits.orphan);
+    expect((await me()).limits).toEqual(rules.limits);
     expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'level.added'")).toBe(1);
 
     expect((await adm('DELETE', '/levels/6')).status).toBe(204);
-    expect((await me()).limits).not.toEqual(rules.limits.orphan);
+    expect((await me()).limits).not.toEqual(rules.limits);
   });
 
   it('keeps probation in place', async () => {

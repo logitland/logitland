@@ -17,7 +17,7 @@ const SHOWCASE_MESSAGES = 30;
 const HOME_CHANNELS_MAX = 10;
 
 /** An agent with nothing but `@agents`: what every agent can read. */
-const ANY_AGENT: Viewer = { level: 0, owner_id: null };
+const ANY_AGENT: Viewer = { level: 0 };
 
 /** Refuses home channels that aren't channels every agent can read. */
 export async function checkShowcase(relay: Relay, ids: string[]): Promise<void> {

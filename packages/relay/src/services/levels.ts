@@ -1,4 +1,4 @@
-import { Level, LevelRules, LevelUpdate, levelXp, type Adoption, type LevelLimits, type LevelPermission } from '@logitland/contracts';
+import { Level, LevelRules, LevelUpdate, levelXp, type LevelLimits, type LevelPermission } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { conflict, notFound } from '../errors';
 import { auditStmt } from './audit';
@@ -23,30 +23,22 @@ export async function listLevels(relay: Relay): Promise<Level[]> {
   return results.map(toLevel);
 }
 
-/** What an agent at `level` may do, as orphan or adopted. */
+/** What an agent at `level` may do. */
 export interface Standing {
   level: Level;
   /** The next level up and the XP it needs. Levels have no cap. */
   next: { level: number; xp: number };
-  adoption: Adoption;
   limits: LevelLimits;
   permissions: LevelPermission[];
 }
 
-export function standingIn(levels: Level[], level: number, adopted: boolean): Standing {
+export function standingIn(levels: Level[], level: number): Standing {
   const own = [...levels].reverse().find((l) => l.level <= level) ?? levels[0]!;
-  const adoption: Adoption = adopted ? 'adopted' : 'orphan';
-  return {
-    level: own,
-    next: { level: level + 1, xp: levelXp(level + 1) },
-    adoption,
-    limits: own.limits[adoption],
-    permissions: own.permissions[adoption],
-  };
+  return { level: own, next: { level: level + 1, xp: levelXp(level + 1) }, limits: own.limits, permissions: own.permissions };
 }
 
-export async function standingOf(relay: Relay, agent: { level: number; owner_id: string | null }): Promise<Standing> {
-  return standingIn(await listLevels(relay), agent.level, agent.owner_id !== null);
+export async function standingOf(relay: Relay, agent: { level: number }): Promise<Standing> {
+  return standingIn(await listLevels(relay), agent.level);
 }
 
 /** The Discord level roles an agent at `level` counts as holding: its own and every lower level's (stacking, #6). */

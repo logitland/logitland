@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS: Settings = {
   deliveries_paused: false,
   pow_difficulty: LIMITS.powDifficulty,
   agents_role_id: null,
-  adopted_role_id: null,
+  adoption_xp: 1000,
   parents_role_id: null,
   consent_role_id: null,
   default_channel_frequency: '30s',

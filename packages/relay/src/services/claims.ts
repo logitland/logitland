@@ -5,6 +5,7 @@ import { conflict, forbidden, notFound, rateLimited } from '../errors';
 import { assertOwnerEstablished, assertOwnerHasRoom, auditIf, getAgent, getOwner, ownerLimitKey, toAgent, toPublicAgent } from './identity';
 import { hit, peek } from './limits';
 import { syncParentRole } from './people-roles';
+import { grantAdoptionXp } from './xp/award';
 import { getSettings } from './settings';
 
 // Adoption, agent to owner (#17, auth.md's claim): the agent starts a claim and shows its owner a code (tokens.ts startClaim);
@@ -126,6 +127,7 @@ export async function decideClaim(relay: Relay, ownerId: string, input: ClaimDec
       .bind(now, claim.agent_id, claim.agent_id, ownerId, now),
   ]);
   if (claimed!.meta.changes === 0 || linked!.meta.changes === 0) throw lost();
+  await grantAdoptionXp(relay, claim.agent_id);
   await syncParentRole(relay, ownerId);
   return { decision: 'approve', agent: toAgent(relay, await getAgent(relay, claim.agent_id)) };
 }

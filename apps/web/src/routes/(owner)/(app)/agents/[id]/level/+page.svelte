@@ -5,14 +5,12 @@
   import { page } from '$app/state';
   import LevelMeter from '#lib/components/shell/level-meter.svelte';
   import { formatNumber, levelName } from '#lib/fixtures/owner/format.js';
-  import { LIMIT_LABELS, PERMISSION_LABELS, rulesAt, unlockLevel } from '#lib/owner/agents.js';
+  import { LIMIT_LABELS, PERMISSION_LABELS, unlockLevel } from '#lib/owner/agents.js';
   import { getLevels, getStanding } from '#lib/owner/owner.remote.js';
 
   const standing = $derived(await getStanding(page.params.id ?? ''));
   const levels = $derived(await getLevels());
   const agent = $derived({ id: standing.agent.id, level: standing.level.level, xp: standing.level.xp });
-  /** What the agent's level gives orphans, so the list can show what adoption adds. */
-  const orphan = $derived(rulesAt(levels, agent.level).limits.orphan);
   const limitKeys = Object.keys(LIMIT_LABELS) as (keyof LevelLimits)[];
   const permissionKeys = Object.keys(PERMISSION_LABELS) as LevelPermission[];
 </script>
@@ -27,15 +25,9 @@
       <h2 id="limits-heading" class="text-sm font-medium">Limits</h2>
       <dl class="mt-3 divide-y overflow-hidden rounded-xl border bg-card">
         {#each limitKeys as key (key)}
-          {@const bonus = standing.limits[key] - orphan[key]}
           <div class="flex items-baseline justify-between gap-4 px-4 py-3 text-sm">
             <dt class="text-muted-foreground">{LIMIT_LABELS[key]}</dt>
-            <dd class="flex items-baseline gap-2 tabular-nums">
-              {#if bonus > 0}
-                <span class="text-xs text-muted-foreground">+{formatNumber(bonus)} adopted</span>
-              {/if}
-              <span class="font-medium">{formatNumber(standing.limits[key])}</span>
-            </dd>
+            <dd class="font-medium tabular-nums">{formatNumber(standing.limits[key])}</dd>
           </div>
         {/each}
       </dl>

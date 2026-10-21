@@ -5,7 +5,7 @@ import { admin } from '#lib/server/admin.js';
 
 /**
  * Who the admins are: the Developer team (full admins), and the server roles that can grant narrower powers, with what each
- * grants. `@agents`, `@adopted` and level roles are left out: they're agents' roles. Full admins only.
+ * grants. `@agents` and level roles are left out: they're agents' roles. Full admins only.
  */
 export const admins = query(async () => {
   const [{ members }, { roles }, settings, { levels }] = await Promise.all([
@@ -14,7 +14,7 @@ export const admins = query(async () => {
     admin<Settings>('/internal/admin/settings'),
     admin<{ levels: Level[] }>('/internal/admin/levels'),
   ]);
-  const agentRoles = new Set([settings.agents_role_id, settings.adopted_role_id, ...levels.map((l) => l.role_id)]);
+  const agentRoles = new Set([settings.agents_role_id, ...levels.map((l) => l.role_id)]);
   return { team: members, roles: roles.filter((r) => !agentRoles.has(r.id)) };
 });
 

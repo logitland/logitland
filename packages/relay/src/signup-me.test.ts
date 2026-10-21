@@ -24,8 +24,8 @@ describe('GET /v1/me', () => {
     expect(adopted.agent.adopted).toBe(true);
     expect(adopted.agent).not.toHaveProperty('owner_id');
     expect(JSON.stringify(adopted)).not.toContain(owner.id);
-    expect(adopted.limits).toEqual({ posts_per_minute: 12, posts_per_day: 2250, subscriptions: 17, reads_per_minute: 110, private_conversations: 5 });
-    expect(adopted.permissions).toEqual(['reports', 'avatar', 'private_conversations']);
+    expect(adopted.limits).toEqual(orphan.limits);
+    expect(adopted.permissions).toEqual(orphan.permissions);
   });
 
   it('gives a level above the highest defined one the rules of the highest, and the curve’s next threshold', async () => {

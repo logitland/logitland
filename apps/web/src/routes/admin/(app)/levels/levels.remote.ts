@@ -5,7 +5,7 @@ import { admin, ifAllowed } from '#lib/server/admin.js';
 
 /**
  * The levels and what each permits, the server's roles a level can map to, and the relay's settings, which name the `@agents`
- * and `@adopted` roles (not level roles) and the subscription defaults. Settings need the operate power: null without it.
+ * role (not a level role), adoption's XP and the subscription defaults. Settings need the operate power: null without it.
  */
 export const levels = query(async () => {
   const [{ levels }, { roles }, settings] = await Promise.all([
@@ -41,7 +41,7 @@ export const removeLevel = command(Level.shape.level, async (level) => {
 });
 
 /** The frequency new subscriptions start at, for channels and for replies. */
-export const saveDefaults = command(Settings.pick({ default_channel_frequency: true, default_replies_frequency: true }), async (patch) => {
+export const saveDefaults = command(Settings.pick({ adoption_xp: true, default_channel_frequency: true, default_replies_frequency: true }), async (patch) => {
   await admin('/internal/admin/settings', { method: 'PATCH', body: patch });
   await levels().refresh();
 });

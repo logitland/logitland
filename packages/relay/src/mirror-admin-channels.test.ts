@@ -2,11 +2,9 @@ import type { AdminChannel } from '@logitland/contracts';
 import { Permission } from '@logitland/discord';
 import { describe, expect, it } from 'vitest';
 import { ingest } from './services/intake';
-import { updateSettings } from './services/settings';
 import { ADMIN_DISCORD, BENCH, GUILD, LOUNGE, harness, seedChannel, seedOwner } from './testing';
 
 const P = Permission;
-const ADOPTED = '130000000000000002';
 const LEVEL_3 = '130000000000000003';
 const TOKEN = 'wh-secret-token-ZZZ';
 
@@ -17,23 +15,20 @@ async function setup() {
 }
 
 describe('GET /internal/admin/channels', () => {
-  it('shows what each level may do in each channel as an orphan and adopted, and whether it has a webhook, never the webhook', async () => {
+  it('shows each level’s channel access and whether it has a webhook, never the webhook', async () => {
     const { h, as } = await setup();
-    for (const id of [ADOPTED, LEVEL_3])
-      await h.db
-        .prepare("INSERT INTO guild_roles (id, guild_id, name, permissions, updated_at) VALUES (?, ?, 'role', '0', ?)")
-        .bind(id, GUILD, h.now().toISOString())
-        .run();
-    await updateSettings(h.relay, 'adm_test', { adopted_role_id: ADOPTED });
+    await h.db
+      .prepare("INSERT INTO guild_roles (id, guild_id, name, permissions, updated_at) VALUES (?, ?, 'role', '0', ?)")
+      .bind(LEVEL_3, GUILD, h.now().toISOString())
+      .run();
     await h.db.prepare('UPDATE levels SET role_id = ? WHERE level = 3').bind(LEVEL_3).run();
-    // Everyone reads #lounge; adopted agents and level 3 may post there.
+    // Everyone reads #lounge; level 3 may post there.
     await seedChannel(h.relay, {
       id: LOUNGE,
       name: 'lounge',
       webhookUrl: `https://discord.com/api/webhooks/600000000000000009/${TOKEN}`,
       overwrites: [
         { id: GUILD, type: 0, allow: '0', deny: String(P.SEND_MESSAGES | P.SEND_MESSAGES_IN_THREADS) },
-        { id: ADOPTED, type: 0, allow: String(P.SEND_MESSAGES), deny: '0' },
         { id: LEVEL_3, type: 0, allow: String(P.SEND_MESSAGES), deny: '0' },
       ],
     });
@@ -58,8 +53,8 @@ describe('GET /internal/admin/channels', () => {
         has_webhook: false,
         position: 0,
         levels: [
-          { level: 0, orphan: nothing, adopted: nothing },
-          { level: 3, orphan: nothing, adopted: nothing },
+          { level: 0, ...nothing },
+          { level: 3, ...nothing },
         ],
       },
       {
@@ -73,8 +68,8 @@ describe('GET /internal/admin/channels', () => {
         has_webhook: true,
         position: 0,
         levels: [
-          { level: 0, orphan: { view: true, post: false }, adopted: { view: true, post: true } },
-          { level: 3, orphan: { view: true, post: true }, adopted: { view: true, post: true } },
+          { level: 0, view: true, post: false },
+          { level: 3, view: true, post: true },
         ],
       },
     ]);

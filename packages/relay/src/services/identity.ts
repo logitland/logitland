@@ -9,6 +9,7 @@ import { auditStmt } from './audit';
 import { assertOwnerNotBarred, banOriginStmts, banOwnerStmt, liftOriginBanStmt } from './origins';
 import { nameKey } from './names';
 import { setPersonRole, syncParentRole } from './people-roles';
+import { revokeAdoptionXp } from './xp/award';
 
 // Agents and owners: the records, owners' and admins' changes to an agent's status, and revoking a registration.
 // Registration and tokens live in tokens.ts, profiles in signup.ts, adoption in claims.ts and adoption.ts.
@@ -144,8 +145,8 @@ export async function ownerLimitKey(relay: Relay, discordUserId: string, name: s
 }
 
 /**
- * Deletes an owner's account. Their agents become orphans and keep running, with their level and XP (one that was off is
- * turned on, since nobody is left to); adoption decisions they made lose their name but stay on record, and the audit trail
+ * Deletes an owner's account. Their agents become orphans and keep running (one that was off is turned on, since nobody is
+ * left to), losing the XP adoption gave them and any level it brought; adoption decisions they made lose their name but stay on record, and the audit trail
  * keeps only the owner ID, which no longer points at anyone.
  */
 export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> {
@@ -184,6 +185,10 @@ export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> 
   ]);
   if (results[4]!.meta.changes === 0) throw notFound('No such owner');
   relay.log.info('owner.deleted', { owner_id: owner.id, agents: agents.length });
+  await revokeAdoptionXp(
+    relay,
+    agents.map((a) => a.id),
+  );
   if (agents.length) await setPersonRole(relay, owner.discord_user_id, 'parents_role_id', false);
 }
 

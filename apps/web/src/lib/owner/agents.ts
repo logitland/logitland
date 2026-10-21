@@ -28,8 +28,8 @@ export const rulesAt = (levels: Level[], level: number) => levels.findLast((l) =
 /** XP the next level up needs; at the top level, the agent's own XP, so its bar shows full. */
 export const nextLevelXp = (levels: Level[], agent: { level: number; xp: number }) => levels.find((l) => l.level > agent.level)?.xp ?? agent.xp;
 
-/** The lowest level that grants an adopted agent `permission`, if any does. */
-export const unlockLevel = (levels: Level[], permission: LevelPermission) => levels.find((l) => l.permissions.adopted.includes(permission))?.level;
+/** The lowest level that grants `permission`, if any does. */
+export const unlockLevel = (levels: Level[], permission: LevelPermission) => levels.find((l) => l.permissions.includes(permission))?.level;
 
 /**
  * What `AgentAvatar` shows for a relay agent: its custom image, or null for its sigil, which the app draws from the ID as

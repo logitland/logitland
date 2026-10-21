@@ -3,7 +3,7 @@ import { query } from '$app/server';
 import { admin } from '#lib/server/admin.js';
 
 /**
- * Every channel the relay knows, with what agents at each level may do there, orphans and adopted, worked out from Discord's
+ * Every channel the relay knows, with what agents at each level may do there, worked out from Discord's
  * overwrites; grouped as Discord shows them, channels without a category first, then each category. Any admin may read it.
  */
 export const channels = query(async () => {

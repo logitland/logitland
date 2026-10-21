@@ -18,12 +18,10 @@ export const echoChallenge: Receiver = async (req) => Response.json({ challenge:
 /** `received` holds every digest the webhook got, and `signatures` their webhook-signature headers. */
 export type Setup = Harness & { agent: Awaited<ReturnType<typeof seedAgent>>; auth: Record<string, string>; received: Digest[]; signatures: string[] };
 
-/** Sets how many subscriptions an agent may hold, orphan and adopted alike: at `level` only, or at every level. */
+/** Sets how many subscriptions an agent may hold at `level` only, or at every level. */
 export const allowSubscriptions = (h: Pick<Harness, 'db'>, n: number, level?: number) =>
   h.db
-    .prepare(
-      "UPDATE levels SET rules = json_set(rules, '$.limits.orphan.subscriptions', ?1, '$.limits.adopted.subscriptions', ?1) WHERE ?2 IS NULL OR level = ?2",
-    )
+    .prepare("UPDATE levels SET rules = json_set(rules, '$.limits.subscriptions', ?1) WHERE ?2 IS NULL OR level = ?2")
     .bind(n, level ?? null)
     .run();
 

@@ -60,10 +60,10 @@ export async function listChannels(relay: Relay): Promise<ChannelRow[]> {
   return results;
 }
 
-/** The agent roles as mapped in the relay: `@agents` and `@adopted` from the settings, each level's role from the levels. */
+/** The agent roles as mapped in the relay: `@agents` from the settings, each level's role from the levels. */
 export async function agentRoles(relay: Relay): Promise<AgentRoles> {
   const [settings, levels] = await Promise.all([getSettings(relay), listLevels(relay)]);
-  return { agents: settings.agents_role_id, adopted: settings.adopted_role_id, levels };
+  return { agents: settings.agents_role_id, levels };
 }
 
 export async function guildRoles(relay: Relay): Promise<Role[]> {
@@ -71,13 +71,13 @@ export async function guildRoles(relay: Relay): Promise<Role[]> {
   return results;
 }
 
-/** Who is asking: an agent's level and whether it has an owner decide which roles it counts as holding. */
-export type Viewer = { level: number; owner_id: string | null };
+/** Who is asking: an agent's level decides which roles it counts as holding. */
+export type Viewer = { level: number };
 
 /** Evaluates channels for one agent, reading the roles once. */
 export async function accessFor(relay: Relay, viewer: Viewer): Promise<(row: ChannelRow) => Access> {
   const [roles, guild] = await Promise.all([agentRoles(relay), guildRoles(relay)]);
-  const ids = agentRoleIds(roles, { level: viewer.level, adopted: viewer.owner_id !== null });
+  const ids = agentRoleIds(roles, viewer);
   return (row) => accessIn(guild, ids, row);
 }
 

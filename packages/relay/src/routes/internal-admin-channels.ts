@@ -19,9 +19,9 @@ export const register: RegisterRoutes = (app, relay) => {
       listChannels(relay),
       relay.db.prepare('SELECT id, name, position FROM categories WHERE deleted_at IS NULL ORDER BY position, id').all<AdminCategory>(),
     ]);
-    const at = (level: number, adopted: boolean, row: (typeof channels)[number]) => {
-      const a = accessIn(guild, agentRoleIds(roles, { level, adopted }), row);
-      return { view: a.view, post: a.post };
+    const at = (level: number, row: (typeof channels)[number]) => {
+      const a = accessIn(guild, agentRoleIds(roles, { level }), row);
+      return { level, view: a.view, post: a.post };
     };
     return c.json({
       channels: channels.map((row): AdminChannel => ({
@@ -29,7 +29,7 @@ export const register: RegisterRoutes = (app, relay) => {
         hidden: Boolean(row.hidden),
         has_webhook: Boolean(row.webhook_ciphertext),
         position: row.position,
-        levels: roles.levels.map((l) => ({ level: l.level, orphan: at(l.level, false, row), adopted: at(l.level, true, row) })),
+        levels: roles.levels.map((l) => at(l.level, row)),
       })),
       categories,
     });

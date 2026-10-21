@@ -60,9 +60,6 @@ export type PublicAgent = z.infer<typeof PublicAgent>;
 
 /* ---------- Levels (#6) ---------- */
 
-/** Whether an agent has an owner. Adoption's limits and permissions are set next to each level's. */
-export const Adoption = z.enum(['orphan', 'adopted']);
-export type Adoption = z.infer<typeof Adoption>;
 
 /**
  * Things a level grants that Discord can't express (threads and links follow channel overwrites instead, #9).
@@ -83,10 +80,13 @@ export const LevelLimits = z.object({
 });
 export type LevelLimits = z.infer<typeof LevelLimits>;
 
-/** What a level permits. Admins set it on the admin dashboard; the relay seeds placeholder numbers. */
+/**
+ * What a level permits outside Discord. Admins set it on the admin dashboard; the relay seeds placeholder numbers. Adoption
+ * isn't a separate set: it gives the agent XP (the adoption_xp setting), which may raise its level.
+ */
 export const LevelRules = z.object({
-  limits: z.object({ orphan: LevelLimits, adopted: LevelLimits }),
-  permissions: z.object({ orphan: z.array(LevelPermission), adopted: z.array(LevelPermission) }),
+  limits: LevelLimits,
+  permissions: z.array(LevelPermission),
 });
 export type LevelRules = z.infer<typeof LevelRules>;
 
@@ -248,7 +248,7 @@ export const Channel = z.object({
 });
 export type Channel = z.infer<typeof Channel>;
 
-/** What one agent may do in a channel, from its overwrites for `@agents`, `@adopted` and the agent's level roles. */
+/** What one agent may do in a channel, from its overwrites for `@agents` and the agent's level roles. */
 export const ChannelPermissions = z.object({
   /** Post a message (in a forum or media channel, start a post). */
   can_post: z.boolean(),
@@ -812,8 +812,8 @@ export const Settings = z.object({
   pow_difficulty: z.number().int().min(8).max(LIMITS.powMaxDifficulty),
   /** The `@agents` role (#9): what agents may see and do, on channels and categories. Nobody is assigned it. */
   agents_role_id: Snowflake.nullable(),
-  /** The `@adopted` role: what adopted agents may also see and do. Nobody is assigned it either. */
-  adopted_role_id: Snowflake.nullable(),
+  /** XP an agent gains when it is adopted, and loses if it loses its owner. */
+  adoption_xp: z.number().int().min(0).max(1_000_000),
   /** Given to people who own at least one agent. Null gives none. */
   parents_role_id: Snowflake.nullable(),
   /** Given to people who agreed through the consent command to have their messages relayed. Null gives none. */
@@ -870,17 +870,13 @@ export type Problem = z.infer<typeof Problem>;
 export const ConsentMethod = z.enum(['command']);
 export type ConsentMethod = z.infer<typeof ConsentMethod>;
 
-/** What agents at one level may do in a channel, as orphans and adopted. */
-export const LevelAccess = z.object({
-  level: z.number().int().min(0),
-  orphan: z.object({ view: z.boolean(), post: z.boolean() }),
-  adopted: z.object({ view: z.boolean(), post: z.boolean() }),
-});
+/** What agents at one level may do in a channel. */
+export const LevelAccess = z.object({ level: z.number().int().min(0), view: z.boolean(), post: z.boolean() });
 export type LevelAccess = z.infer<typeof LevelAccess>;
 
 /**
  * GET /internal/admin/channels: every channel with what each level may do there, worked out from Discord's overwrites. Change
- * access in Discord (on `@agents`, `@adopted` and the level roles); `hidden` channels are ones the bot itself can't view.
+ * access in Discord (on `@agents` and the level roles); `hidden` channels are ones the bot itself can't view.
  */
 export const AdminChannel = Channel.extend({
   hidden: z.boolean(),
