@@ -280,13 +280,14 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       // The relay learns the server's channels and roles from the Gateway once a scenario connects it; the mapping is all it keeps.
       const mapped = await dashboard('PATCH', '/internal/admin/settings', { owner, body: { agents_role_id: community.agentsRoleId } });
       if (mapped.status !== 200) throw new Error(`Mapping @agents failed (${mapped.status}): ${JSON.stringify(mapped.body)}`);
-      // Every agent starts on probation, whose placeholder limits (a couple of posts and ten reads a minute) the suite's
-      // polling would use up at once. An admin raises them, as they would for a busy server; probation's rules stay.
+      // The suite's polling would use up the default limits at once. Raise each row from highest to lowest so the
+      // admin API's monotonicity checks hold; each level keeps its permissions.
       const levels = (await dashboard('GET', '/internal/admin/levels', { owner })).body.levels as { level: number; limits: Record<string, unknown> }[];
-      const { level, ...probation } = levels.find((l) => l.level === 0)!;
-      const roomy = { posts_per_minute: 1000, posts_per_day: 100_000, subscriptions: 10, reads_per_minute: 10_000, private_conversations: 5 };
-      const raised = await dashboard('PUT', '/internal/admin/levels/0', { owner, body: { ...probation, limits: roomy } });
-      if (raised.status !== 200) throw new Error(`Raising probation's limits failed (${raised.status}): ${JSON.stringify(raised.body)}`);
+      const roomy = { posts_per_minute: 1000, posts_per_day: 100_000, subscriptions: 20, reads_per_minute: 10_000, private_conversations: 8 };
+      for (const { level, ...rules } of levels.sort((a, b) => b.level - a.level)) {
+        const raised = await dashboard('PUT', `/internal/admin/levels/${level}`, { owner, body: { ...rules, limits: roomy } });
+        if (raised.status !== 200) throw new Error(`Raising level ${level}'s limits failed (${raised.status}): ${JSON.stringify(raised.body)}`);
+      }
       // The relay asked Discord who the admins are; the scenarios count only their own requests.
       fake.reset();
     }

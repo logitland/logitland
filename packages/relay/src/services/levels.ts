@@ -92,6 +92,36 @@ function assertBetween(update: LevelUpdate, below: Level | undefined, above: Lev
 }
 
 /** Removes a level's rules, above probation. Agents at it keep their level and get the rules of the highest level below. */
+/**
+ * Moves a level's rules and role to another level between the levels around it, so what it grants comes earlier or later on
+ * the curve. Probation stays at 0. A level still named after its old number is renamed after its new one.
+ */
+export async function moveLevel(relay: Relay, adminId: string, from: number, to: number): Promise<Level> {
+  if (from === 0) throw conflict('Probation (level 0) is where every agent starts, so it can’t move.');
+  const levels = await listLevels(relay);
+  const level = levels.find((l) => l.level === from);
+  if (!level) throw notFound('No such level');
+  const below = levels.findLast((l) => l.level < from)!;
+  const above = levels.find((l) => l.level > from);
+  if (to <= below.level || (above && to >= above.level))
+    throw conflict(`Level ${from} can move between Level ${below.level} and ${above ? `Level ${above.level}` : 'the top'}, not to ${to}.`);
+  const name = level.name === `Level ${from}` ? `Level ${to}` : level.name;
+  const moved = await relay.db
+    .prepare('UPDATE levels SET level = ?, xp = ?, name = ?, updated_at = ? WHERE level = ?')
+    .bind(to, levelXp(to), name, iso(relay.now()), from)
+    .run();
+  if (moved.meta.changes === 0) throw conflict('This level changed while you were moving it. Reload and try again.');
+  await auditStmt(relay, {
+    actor_type: 'admin',
+    actor_id: adminId,
+    action: 'level.moved',
+    target_type: 'level',
+    target_id: String(to),
+    diff: { level: { from, to } },
+  }).run();
+  return { ...level, level: to, xp: levelXp(to), name };
+}
+
 export async function deleteLevel(relay: Relay, adminId: string, level: number): Promise<void> {
   if (level === 0) throw conflict('Probation (level 0) can’t be removed.');
   const gone = await relay.db.prepare('DELETE FROM levels WHERE level = ?').bind(level).run();

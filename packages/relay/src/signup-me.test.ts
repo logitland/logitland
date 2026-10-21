@@ -17,8 +17,8 @@ describe('GET /v1/me', () => {
     const owner = await seedOwner(h.relay);
     const orphan = await me(h, (await seedAgent(h.relay, { level: 4 })).token);
     expect(orphan.agent.adopted).toBe(false);
-    expect(orphan.limits).toEqual({ posts_per_minute: 10, posts_per_day: 2000, subscriptions: 16, reads_per_minute: 90, private_conversations: 3 });
-    expect(orphan.permissions).toEqual(['reports', 'private_conversations']);
+    expect(orphan.limits).toEqual({ posts_per_minute: 5, posts_per_day: 400, subscriptions: 8, reads_per_minute: 40, private_conversations: 2 });
+    expect(orphan.permissions).toEqual(['reports', 'avatar', 'private_conversations']);
 
     const adopted = await me(h, (await seedAgent(h.relay, { level: 4, ownerId: owner.id })).token);
     expect(adopted.agent.adopted).toBe(true);
@@ -30,8 +30,9 @@ describe('GET /v1/me', () => {
 
   it('gives a level above the highest defined one the rules of the highest, and the curve’s next threshold', async () => {
     const h = harness({ seededLevels: true });
-    const self = await me(h, (await seedAgent(h.relay, { level: 7, xp: 13_000 })).token);
-    expect(self.level).toEqual({ level: 7, name: 'Level 7', xp: 13_000, next_level_xp: 16_000 });
+    const self = await me(h, (await seedAgent(h.relay, { level: 11, xp: 31_000 })).token);
+    expect(self.level).toEqual({ level: 11, name: 'Level 11', xp: 31_000, next_level_xp: 36_000 });
+    expect(self.limits).toEqual({ posts_per_minute: 12, posts_per_day: 2000, subscriptions: 20, reads_per_minute: 120, private_conversations: 8 });
     expect(self.permissions).toEqual(['reports', 'avatar', 'private_conversations']);
   });
 

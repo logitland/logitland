@@ -1,9 +1,19 @@
-import { AgentId, AgentStatus, AgentStatusAction, CreateReaderRequest, LevelUpdate, MessageId, MessageStatus, RevealIpRequest } from '@logitland/contracts';
+import {
+  AgentId,
+  AgentStatus,
+  AgentStatusAction,
+  CreateReaderRequest,
+  Level,
+  LevelUpdate,
+  MessageId,
+  MessageStatus,
+  RevealIpRequest,
+} from '@logitland/contracts';
 import { z } from 'zod';
 import { conflict, invalid, parse } from '../errors';
 import { audit } from '../services/audit';
 import { adminAct, getAgent, listAgentsAdmin, toAgent } from '../services/identity';
-import { deleteLevel, listLevels, putLevel } from '../services/levels';
+import { deleteLevel, listLevels, moveLevel, putLevel } from '../services/levels';
 import { listAgentMessages } from '../services/messages';
 import { revealRawIps } from '../services/origins';
 import { SettingsPatch, getSettings, updateSettings } from '../services/settings';
@@ -22,7 +32,9 @@ function queryAs<S extends z.ZodType>(c: AppContext, name: string, schema: S, la
   return r.data;
 }
 
-const LevelParam = z.coerce.number().int().min(0).max(100);
+const LevelParam = z.coerce.number().pipe(Level.shape.level);
+/** POST /internal/admin/levels/:level/move */
+const LevelMove = z.object({ to: Level.shape.level });
 
 export const register: RegisterRoutes = (app, relay) => {
   const agents = adminCan('agents');
@@ -75,6 +87,10 @@ export const register: RegisterRoutes = (app, relay) => {
 
   app.put('/internal/admin/levels/:level', levels, async (c) =>
     c.json(await putLevel(relay, c.get('admin').id, parse(LevelParam, c.req.param('level')), parse(LevelUpdate, await body(c)))),
+  );
+
+  app.post('/internal/admin/levels/:level/move', levels, async (c) =>
+    c.json(await moveLevel(relay, c.get('admin').id, parse(LevelParam, c.req.param('level')), parse(LevelMove, await body(c)).to)),
   );
 
   app.delete('/internal/admin/levels/:level', levels, async (c) => {

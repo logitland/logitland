@@ -14,7 +14,7 @@
   import { cn } from '#lib/utils.js';
   import DefaultsForm from './defaults-form.svelte';
   import LevelForm from './level-form.svelte';
-  import { addLevel, levels, removeLevel } from './levels.remote.js';
+  import { addLevel, levels, moveLevel, removeLevel } from './levels.remote.js';
 
   // Every agent's level comes from its XP on the curve, with no cap. The timeline lists the levels with overrides, probation
   // first: each opens to its level role (whose overwrites set its Discord permissions) and its limits and permissions outside
@@ -76,6 +76,38 @@
     removing = level;
     removeOpen = true;
   }
+
+  /** The level being moved, and the range it may move within: strictly between the levels around it. */
+  let moving = $state<{ from: number; min: number; max: number }>();
+  let moveOpen = $state(false);
+  let moveTo = $state('');
+  let moveError = $state<string>();
+  const moveLevelTo = $derived(Number(moveTo));
+
+  function askMove(from: number) {
+    const min = above(from).level + 1;
+    const max = (data.levels.find((l) => l.level > from)?.level ?? MAX_LEVEL + 1) - 1;
+    moving = { from, min, max };
+    moveTo = String(from);
+    moveError = undefined;
+    moveOpen = true;
+  }
+
+  /** Moves the level's overrides; false keeps the dialog open to fix the number. */
+  async function move() {
+    const target = moving!;
+    if (!Number.isInteger(moveLevelTo) || moveLevelTo < target.min || moveLevelTo > target.max || moveLevelTo === target.from) {
+      moveError = `Enter a level from ${formatNumber(target.min)} to ${formatNumber(target.max)}, other than ${target.from}.`;
+      return false;
+    }
+    try {
+      await moveLevel({ from: target.from, to: moveLevelTo });
+      if (expanded.delete(target.from)) expanded.add(moveLevelTo);
+      toast.success(`Moved ${levelName(target.from)}’s overrides to ${levelName(moveLevelTo)}`);
+    } catch (e) {
+      toast.error(refusal(e));
+    }
+  }
 </script>
 
 <svelte:head><title>Levels · Logitland</title></svelte:head>
@@ -122,6 +154,7 @@
             levels={data.levels}
             roles={data.roles}
             settings={data.settings}
+            onMove={level.level === 0 ? undefined : () => askMove(level.level)}
             onRemove={level.level === 0 ? undefined : () => askRemove(level.level)}
           />
         </div>
@@ -173,6 +206,38 @@
     {/if}
   </Field.Field>
 </ConfirmDialog>
+
+{#if moving}
+  {@const target = moving}
+  <ConfirmDialog
+    bind:open={moveOpen}
+    title="Move {levelName(target.from)}’s overrides?"
+    description="Its limits, permissions and role arrive at the new level instead."
+    confirm="Move overrides"
+    onConfirm={move}
+  >
+    <Field.Field data-invalid={moveError ? true : undefined}>
+      <Field.Label for="move-level">Level</Field.Label>
+      <Input
+        id="move-level"
+        type="number"
+        inputmode="numeric"
+        min={target.min}
+        max={target.max}
+        step="1"
+        bind:value={() => moveTo, (next) => ((moveTo = String(next ?? '')), (moveError = undefined))}
+        aria-invalid={moveError ? true : undefined}
+        aria-describedby={moveError ? 'move-level-error' : 'move-level-xp'}
+        class="tabular-nums"
+      />
+      {#if moveError}
+        <Field.Error id="move-level-error">{moveError}</Field.Error>
+      {:else if Number.isInteger(moveLevelTo) && moveLevelTo >= target.min && moveLevelTo <= target.max}
+        <Field.Description id="move-level-xp">Reached at {formatNumber(levelXp(moveLevelTo))} XP</Field.Description>
+      {/if}
+    </Field.Field>
+  </ConfirmDialog>
+{/if}
 
 {#if removing !== undefined}
   {@const target = removing}

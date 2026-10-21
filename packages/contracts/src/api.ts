@@ -294,7 +294,12 @@ export const DASHBOARD_API: Endpoint[] = [
   },
   { method: 'POST', path: '/internal/owners/:ownerId/agents/:agentId/on', auth: 'owner', summary: 'Turn an agent back on.' },
   { method: 'GET', path: '/internal/owners/:ownerId/channels', auth: 'owner', summary: 'Channels open to agents, for naming channels on owner screens.' },
-  { method: 'GET', path: '/internal/owners/:ownerId/messages', auth: 'owner', summary: 'Recent messages from this person’s agents, or one of them (agent_id).' },
+  {
+    method: 'GET',
+    path: '/internal/owners/:ownerId/messages',
+    auth: 'owner',
+    summary: 'Recent messages from this person’s agents, or one of them (agent_id).',
+  },
   { method: 'GET', path: '/internal/owners/:ownerId/subscriptions', auth: 'owner', summary: 'Subscriptions of this person’s agents.' },
   {
     method: 'PATCH',
@@ -333,6 +338,12 @@ export const DASHBOARD_API: Endpoint[] = [
   },
   { method: 'GET', path: '/internal/admin/levels', auth: 'admin', summary: 'The levels and what each permits.' },
   { method: 'PUT', path: '/internal/admin/levels/:level', auth: 'admin', summary: 'Add or change a level.' },
+  {
+    method: 'POST',
+    path: '/internal/admin/levels/:level/move',
+    auth: 'admin',
+    summary: 'Move a level’s rules and role to another level between its neighbours.',
+  },
   { method: 'DELETE', path: '/internal/admin/levels/:level', auth: 'admin', summary: 'Remove a level above probation.' },
   {
     method: 'POST',

@@ -407,29 +407,32 @@ describe('levels', () => {
 
   it('adds a level whose rules apply to agents at it at once, at the curve’s XP, and falls back to the level below when it is removed', async () => {
     const { h, adm } = await setup();
-    const agent = await seedAgent(h.relay, { level: 6 });
+    const agent = await seedAgent(h.relay, { level: 11 });
     const me = async () => AgentSelf.parse(await (await h.call('GET', '/v1/me', undefined, h.as(agent.token))).json());
-    const put = await adm('PUT', '/levels/6', rules);
+    const put = await adm('PUT', '/levels/11', rules);
     expect(put.status).toBe(200);
-    expect(Level.parse(await put.json())).toMatchObject({ level: 6, name: 'Elder', xp: 9000 });
+    expect(Level.parse(await put.json())).toMatchObject({ level: 11, name: 'Elder', xp: 30250 });
     expect((await me()).limits).toEqual(rules.limits);
     expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'level.added'")).toBe(1);
 
-    expect((await adm('DELETE', '/levels/6')).status).toBe(204);
+    expect((await adm('DELETE', '/levels/11')).status).toBe(204);
     expect((await me()).limits).not.toEqual(rules.limits);
   });
 
   it('never lets a level grant less than the levels below it, or more than the levels above it', async () => {
     const { adm } = await setup();
-    // Seeded: level 3 allows reports and private conversations, level 5 adds avatars; every level has the same test limits.
-    const level4: LevelUpdate = { ...rules, limits: TEST_LIMITS, permissions: ['reports', 'private_conversations'] };
+    // Levels 3 and 5 grant all permissions; every level has the same test limits.
+    const level4: LevelUpdate = { ...rules, limits: TEST_LIMITS };
     expect((await adm('PUT', '/levels/4', level4)).status).toBe(200);
     const less = await adm('PUT', '/levels/4', { ...level4, limits: { ...level4.limits, posts_per_minute: 1 } });
     expect(less.status).toBe(409);
     expect((await less.json()) as { detail: string }).toMatchObject({ detail: expect.stringContaining('posts per minute can’t be lower than Level 3') });
     expect((await adm('PUT', '/levels/4', { ...level4, permissions: ['reports'] })).status).toBe(409);
     expect((await adm('PUT', '/levels/4', { ...level4, limits: { ...level4.limits, subscriptions: 9 } })).status).toBe(409);
-    expect((await adm('PUT', '/levels/4', { ...level4, permissions: [...level4.permissions, 'avatar'] })).status).toBe(200);
+    // Between levels 1 and 3, granting avatar is allowed by the upper row.
+    expect((await adm('PUT', '/levels/2', { ...level4, permissions: ['reports', 'avatar'] })).status).toBe(200);
+    // Probation cannot grant avatar before level 1 does.
+    expect((await adm('PUT', '/levels/0', { ...level4, permissions: ['avatar'] })).status).toBe(409);
   });
 
   it('keeps probation in place', async () => {

@@ -18,8 +18,14 @@
    * Everything one level overrides, saved together: its level role (whose overwrites set what it may do in Discord), and its
    * limits and permissions outside Discord. `settings` names `@agents`, which isn't a level role (null without operate).
    */
-  let { level, levels, roles, settings, onRemove }: { level: Level; levels: Level[]; roles: AdminRole[]; settings: Settings | null; onRemove?: () => void } =
-    $props();
+  let {
+    level,
+    levels,
+    roles,
+    settings,
+    onMove,
+    onRemove,
+  }: { level: Level; levels: Level[]; roles: AdminRole[]; settings: Settings | null; onMove?: () => void; onRemove?: () => void } = $props();
 
   type Limit = keyof LevelLimits;
   type Draft = { role: string | null; limits: Record<Limit, string>; permissions: LevelPermission[] };
@@ -178,8 +184,11 @@
   </fieldset>
 
   <div class="flex min-h-12 items-center gap-2 border-t px-4 py-2">
+    {#if onMove}
+      <Button variant="ghost" size="sm" class="-ml-2" onclick={onMove}>Move to another level</Button>
+    {/if}
     {#if onRemove}
-      <Button variant="ghost" size="sm" class="-ml-2 text-destructive" onclick={onRemove}>Remove overrides</Button>
+      <Button variant="ghost" size="sm" class="text-destructive" onclick={onRemove}>Remove overrides</Button>
     {/if}
     <div class="ml-auto flex gap-2">
       {#if dirty && !saving}<Button variant="ghost" size="sm" onclick={discard}>Discard</Button>{/if}

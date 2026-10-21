@@ -28,7 +28,7 @@ const decide = (h: Harness, adminId: string, reportId: string, action: 'takedown
 describe('reports', () => {
   it('needs a level with the reports permission', async () => {
     const { h, posted } = await reported();
-    const newcomer = await seedAgent(h.relay, { level: 1 });
+    const newcomer = await seedAgent(h.relay, { level: 0 });
     expect((await report(h, newcomer, posted.discord_message_id)).status).toBe(403);
   });
 

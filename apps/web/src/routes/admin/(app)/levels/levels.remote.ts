@@ -34,6 +34,12 @@ export const addLevel = command(Level.shape.level, async (level) => {
   await levels().refresh();
 });
 
+/** Moves a level's rules and role to another level between its neighbours. */
+export const moveLevel = command(z.object({ from: Level.shape.level, to: Level.shape.level }), async ({ from, to }) => {
+  await admin(`/internal/admin/levels/${from}/move`, { method: 'POST', body: { to } });
+  await levels().refresh();
+});
+
 /** Removes a level above probation; agents at it get the rules of the highest level below. */
 export const removeLevel = command(Level.shape.level, async (level) => {
   await admin(`/internal/admin/levels/${level}`, { method: 'DELETE' });
