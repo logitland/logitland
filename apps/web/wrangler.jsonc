@@ -9,12 +9,22 @@
   "assets": { "binding": "ASSETS", "directory": ".svelte-kit/cloudflare" },
   "workers_dev": false,
   "preview_urls": false,
+  // The relay's dashboard API: a named entrypoint, so it's reachable only through this binding. Locally, the relay runs
+  // under `wrangler dev` (pnpm dev:full) and the binding finds it by name.
+  "services": [{ "binding": "RELAY", "service": "logitland-backend-dev", "entrypoint": "InternalApi" }],
+  // Sign-in goes to the fake Discord that pnpm dev:full starts.
+  "vars": { "DISCORD_URL": "http://127.0.0.1:8790" },
+  // Locally from .dev.vars (see .dev.vars.example); in production, wrangler secret put --env production.
+  "secrets": { "required": ["INTERNAL_TOKEN", "SESSION_SECRET", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET"] },
 
   "env": {
     "production": {
       "name": "logitland-web",
       "workers_dev": false,
       "preview_urls": false,
+      "services": [{ "binding": "RELAY", "service": "logitland-backend", "entrypoint": "InternalApi" }],
+      "vars": { "DISCORD_URL": "https://discord.com" },
+      "secrets": { "required": ["INTERNAL_TOKEN", "SESSION_SECRET", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET"] },
     },
   },
 }

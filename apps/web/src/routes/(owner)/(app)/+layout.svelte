@@ -2,7 +2,6 @@
   import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
   import PlusIcon from '@lucide/svelte/icons/plus';
   import UsersIcon from '@lucide/svelte/icons/users';
-  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import AccountMenu from '#lib/components/shell/account-menu.svelte';
   import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
@@ -12,13 +11,9 @@
   import { countdown } from '#lib/fixtures/owner/format.js';
   import Simulator from '#lib/fixtures/owner/simulator.svelte';
   import { dashboard } from '#lib/fixtures/owner/store.svelte.js';
-  import { session } from '#lib/fixtures/session.svelte.js';
+  import { session } from '#lib/session.js';
 
   let { children } = $props();
-
-  $effect(() => {
-    if (!session.person) goto(`/sign-in?next=${encodeURIComponent(page.url.pathname)}`, { replace: true });
-  });
 
   const path = $derived(page.url.pathname);
   const waiting = $derived(dashboard.token?.state === 'waiting' ? dashboard.token : undefined);

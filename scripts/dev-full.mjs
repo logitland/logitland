@@ -3,10 +3,10 @@
 //
 //   fake Discord  127.0.0.1:8790   packages/discord-fake, seeded with a small server (text, announcement, forum, media, a consent role, an agents role, an admin)
 //   relay         localhost:8787   apps/backend under `wrangler dev`, pointed at the fake (RELAY_MODE=development + DISCORD_API_BASE)
+//   web           localhost:5174   apps/web under `vite dev`, bound to the relay, signing in through the fake's OAuth2
 //
 //   pnpm dev:full [--reset] [--fake-port 8790] [--relay-port 8787] [--web-port 5174]
 //
-// --web-port is where the relay's dashboard links point (apps/web's `pnpm dev`, which runs on its own fixtures).
 // --reset forgets the relay's local database first. Ctrl-C stops everything this script started, by process ID.
 // Nothing in the repository is edited: generated files live under apps/backend/.wrangler/dev-full, which git ignores.
 
@@ -201,6 +201,7 @@ mkdirSync(state, { recursive: true });
 for (const [what, port] of [
   ['the fake Discord', FAKE_PORT],
   ['the relay', RELAY_PORT],
+  ['the web app', WEB_PORT],
 ]) {
   if (!(await portFree(port))) {
     console.error(
@@ -265,6 +266,8 @@ const secretFor = (name, given, make) => given || (generated[name] ??= make());
 const secrets = {
   RELAY_SECRET_KEY: secretFor('RELAY_SECRET_KEY', devVars.RELAY_SECRET_KEY, () => random(32)),
   INTERNAL_TOKEN: secretFor('INTERNAL_TOKEN', devVars.INTERNAL_TOKEN, () => `dev-${random(18).replace(/[^A-Za-z0-9]/g, '')}`),
+  // The web app's: sessions survive restarts.
+  SESSION_SECRET: secretFor('SESSION_SECRET', undefined, () => random(32)),
 };
 if (Object.keys(generated).length) {
   writeFileSync(stateFile, JSON.stringify(generated, null, 2));
@@ -333,7 +336,28 @@ const runCron = () => fetch(`${relayUrl}/cdn-cgi/handler/scheduled?cron=*+*+*+*+
 cronTimer = setInterval(runCron, 60_000);
 await runCron();
 
-/* ---------- 6. What to open ---------- */
+/* ---------- 6. The web app ---------- */
+
+console.log('Starting the web app…');
+// It finds the relay through the same dev registry, and reads its settings from a file this script writes, never from
+// apps/web/.dev.vars, so its token and Discord always match what this script started.
+const web = join(root, 'apps/web');
+const webEnvFile = join(state, 'web.env');
+generatedFiles.push(webEnvFile);
+writeEnv(webEnvFile, {
+  INTERNAL_TOKEN: secrets.INTERNAL_TOKEN,
+  SESSION_SECRET: secrets.SESSION_SECRET,
+  DISCORD_URL: fakeUrl,
+  DISCORD_CLIENT_ID: fakeInfo.application_id,
+  DISCORD_CLIENT_SECRET: 'fake',
+});
+start('web', 'node', [join(web, 'node_modules/vite/bin/vite.js'), 'dev', '--port', String(WEB_PORT), '--strictPort'], {
+  cwd: web,
+  env: { WRANGLER_REGISTRY_PATH: join(state, 'registry'), LOGITLAND_WEB_ENV_FILE: webEnvFile },
+});
+await waitFor('the web app to answer', async () => (await fetch(`${webUrl}/sign-in`)).ok);
+
+/* ---------- 7. What to open ---------- */
 
 const gateway = await waitFor(
   'the relay’s Gateway to connect',
@@ -345,6 +369,7 @@ console.log(`
 Logitland is running against a fake Discord${gateway ? ' (the relay has connected to its Gateway)' : ' (the relay has not connected to the Gateway yet: check the [relay] log)'}.
 
 Open these:
+  ${webUrl}/sign-in            the dashboards: sign in as the fake's admin (all admin pages) or its visitor (owner only)
   ${relayUrl}/skill.md          how an agent joins (proof of work, no Discord)
   ${fakeUrl}/_fake/state      the fake Discord: its server, channels, webhooks, requests
 
@@ -357,14 +382,14 @@ Try:
   curl -s ${fakeUrl}/_fake/requests
 
 Known limits:
-  - No dashboard runs against this relay yet: apps/web shows its own fixtures. The fake's admin is ${community.adminId}.
+  - Sign-in and admin standing are real; the dashboards' pages still show their own fixtures (#36).
   - Messages and sessions in the fake live in memory: restarting this script starts a fresh server (use --reset for a fresh database too).
 
 Ctrl-C stops everything.
 `);
 console.log(
   `Started: ${children
-    .filter((c) => !c.exited && ['fake', 'relay'].includes(c.name))
+    .filter((c) => !c.exited && ['fake', 'relay', 'web'].includes(c.name))
     .map((c) => `${c.name} (pid ${c.pid})`)
     .join(', ')}`,
 );

@@ -1,9 +1,11 @@
-import type { RequestEvent } from '@sveltejs/kit';
-import { describe, expect, it } from 'vitest';
+import type { Cookies, RequestEvent } from '@sveltejs/kit';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { handle } from '../src/hooks.server.ts';
+import { env } from './cloudflare-workers.ts';
 import { llmsTxt } from '../src/lib/fixtures/marketing/site.ts';
 import { markdownPath } from '../src/lib/markdown-paths.ts';
 import { MARKDOWN_USER_AGENTS } from '../src/lib/server/markdown/negotiate.ts';
+import { writeSession } from '../src/lib/server/session.ts';
 
 const ORIGIN = 'https://logit.land';
 const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
@@ -11,8 +13,14 @@ const BROWSER_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/
 const PAGE = `<!doctype html><html><body><nav><a href="/agents">All agents</a></nav>
   <div id="content"><h1>Health</h1><ul><li><a href="/admin/moderation">Held queue</a> 5</li></ul></div></body></html>`;
 
-/** Runs a GET through the hook; the page it renders is PAGE, standing in for SvelteKit's renderer. */
-async function get(path: string, headers: Record<string, string>, { route = '/admin/(app)/health', cookie = 'u_ada' } = {}) {
+let signedIn = '';
+beforeAll(async () => {
+  env.SESSION_SECRET = 'test-session-secret';
+  await writeSession({ set: (_name: string, value: string) => (signedIn = value) } as unknown as Cookies, { id: 'own_ada', username: 'ada' });
+});
+
+/** Runs a GET through the hook, signed in unless `cookie` says otherwise; the page it renders is PAGE, standing in for SvelteKit's renderer. */
+async function get(path: string, headers: Record<string, string>, { route = '/admin/(app)/health', cookie = signedIn } = {}) {
   const url = new URL(path, ORIGIN);
   const event = {
     url,
@@ -32,7 +40,9 @@ describe('Markdown for agents', () => {
     ['a browser', { 'user-agent': CHROME, accept: BROWSER_ACCEPT }, 'text/html'],
     ['a browser that ranks Markdown below HTML', { 'user-agent': CHROME, accept: 'text/markdown;q=0.5, text/html' }, 'text/html'],
     ['Accept preferring Markdown', { 'user-agent': CHROME, accept: 'text/markdown, text/html;q=0.9' }, 'text/markdown'],
-    ...MARKDOWN_USER_AGENTS.map((agent) => [`${agent}, even asking for HTML`, { 'user-agent': `${agent}/1.0`, accept: BROWSER_ACCEPT }, 'text/markdown'] as const),
+    ...MARKDOWN_USER_AGENTS.map(
+      (agent) => [`${agent}, even asking for HTML`, { 'user-agent': `${agent}/1.0`, accept: BROWSER_ACCEPT }, 'text/markdown'] as const,
+    ),
   ])('answers %s with %s, and varies on the headers that decided it', async (_, headers, type) => {
     const response = await get('/admin/health', headers);
     expect(response.type).toContain(type);
@@ -64,15 +74,25 @@ describe('Markdown for agents', () => {
   it('lists every page in llms.txt by its Markdown URL', () => {
     const routes = Object.keys(import.meta.glob('../src/routes/**/+page.svelte'));
     const paths = routes
-      .map((file) => file.replace('../src/routes', '').replace('/+page.svelte', '').replace(/\/\([^)]+\)/g, '').replace(/\[(\w+)\]/g, '{$1}') || '/')
+      .map(
+        (file) =>
+          file
+            .replace('../src/routes', '')
+            .replace('/+page.svelte', '')
+            .replace(/\/\([^)]+\)/g, '')
+            .replace(/\[(\w+)\]/g, '{$1}') || '/',
+      )
       .filter((path) => !path.startsWith('/dev/'));
     const index = llmsTxt(ORIGIN);
     expect(paths).toContain('/agents/{id}/delivery');
     for (const path of paths) expect(index).toContain(`${ORIGIN}${markdownPath(path)}`);
   });
 
-  it('tells a signed-out agent how to sign in instead of rendering a dashboard page', async () => {
-    const { type, body } = await get('/admin/health', { 'user-agent': 'ClaudeBot/1.0' }, { cookie: '' });
+  it.each([
+    ['no session', ''],
+    ['a session it edited', () => signedIn.replace(/^[^.]+/, btoa(JSON.stringify({ id: 'own_mallory', username: 'mallory', exp: 9e15 })))],
+  ])('tells an agent with %s how to sign in instead of rendering a dashboard page', async (_, cookie) => {
+    const { type, body } = await get('/admin/health', { 'user-agent': 'ClaudeBot/1.0' }, { cookie: typeof cookie === 'function' ? cookie() : cookie });
     expect(type).toContain('text/markdown');
     expect(body).toContain(`[Sign in with Discord](${ORIGIN}/sign-in?next=%2Fadmin%2Fhealth)`);
   });

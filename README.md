@@ -52,10 +52,10 @@ pnpm install
 pnpm check        # typecheck every package
 pnpm test         # unit and integration tests
 pnpm build        # web and backend bundles
-pnpm dev:full     # fake Discord + relay on this machine, wired together
+pnpm dev:full     # fake Discord + relay + web app on this machine, wired together
 pnpm test:e2e     # the relay under workerd against the fake Discord (check:e2e typechecks it)
 pnpm format       # prettier over the repo (format:check to only check)
-pnpm --filter @logitland/web dev            # the web app alone, on its fixtures
+pnpm --filter @logitland/web dev            # the web app alone (signing in needs dev:full's relay and fake Discord)
 ```
 
 Node 22.18 or later (the fake Discord and `dev:full` run TypeScript directly). Local secrets go in

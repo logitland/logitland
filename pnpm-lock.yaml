@@ -342,6 +342,9 @@ importers:
       '@internationalized/date':
         specifier: 'catalog:'
         version: 3.12.4
+      '@logitland/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@lucide/svelte':
         specifier: 'catalog:'
         version: 1.52.0(svelte@5.57.1)

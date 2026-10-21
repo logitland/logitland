@@ -1,0 +1,8 @@
+# Copy to .dev.vars for `pnpm dev`. Never commit .dev.vars, and never copy it into production secrets.
+# The relay's dashboard token: the same value as INTERNAL_TOKEN in apps/backend/.dev.vars.
+INTERNAL_TOKEN=dev-internal-token
+# Signs the session cookie. 32 random bytes, base64: node -e "console.log(crypto.getRandomValues(Buffer.alloc(32)).toString('base64'))"
+SESSION_SECRET=
+# The Discord application's OAuth2 client. Any values work against the fake Discord.
+DISCORD_CLIENT_ID=fake
+DISCORD_CLIENT_SECRET=fake

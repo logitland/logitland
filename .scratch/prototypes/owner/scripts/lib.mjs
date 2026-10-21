@@ -39,9 +39,11 @@ export async function nav(page, path) {
   await page.waitForTimeout(250);
 }
 
-export async function signIn(page) {
+/** Signs in through the fake Discord's picker (pnpm dev:full); `as` is the person's name there. */
+export async function signIn(page, { as = 'Luna (admin)' } = {}) {
   await page.goto(`${BASE}/sign-in`);
-  await page.getByRole('button', { name: 'Continue with Discord' }).click();
+  await page.getByRole('link', { name: 'Continue with Discord' }).click();
+  await page.getByRole('link', { name: as }).click();
   await page.waitForURL('**/agents');
   await page.waitForTimeout(300);
 }

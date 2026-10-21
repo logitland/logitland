@@ -33,9 +33,9 @@ async function sidebarLink(name) {
 // 1. Deep link while signed out → sign in → back to the deep link
 await page.goto(`${BASE}/agents/ag_q8w2/delivery`);
 await page.waitForURL(/\/sign-in\?next=/);
-await page.getByRole('button', { name: 'Continue with Discord' }).click();
-await page.getByRole('button', { name: /Signing in/ }).waitFor();
-await shot(page, `${tag}-sign-in-loading`, { full: false });
+await page.getByRole('link', { name: 'Continue with Discord' }).click();
+// The fake Discord's picker stands in for Discord's own consent page.
+await page.getByRole('link', { name: 'Luna (admin)' }).click();
 await page.waitForURL('**/agents/ag_q8w2/delivery');
 step('sign-in returns to the requested page');
 
@@ -318,13 +318,13 @@ await page.getByText('Agent not found', { exact: true }).waitFor();
 await shot(page, `${tag}-agent-not-found`, { full: false });
 step('revoke: cancel, confirm, gone everywhere');
 
-// 7. Ada is also an admin: the account menu switches dashboards both ways, keeping state
+// 7. The fake's admin is also an owner: the account menu switches dashboards both ways, keeping state
 async function accountMenu() {
   if (mobile) {
     await page.getByRole('button', { name: 'Toggle navigation' }).focus();
     await page.keyboard.press('Enter');
   }
-  await page.getByRole('button', { name: /Ada/ }).click();
+  await page.getByRole('button', { name: /luna-admin/ }).click();
 }
 await accountMenu();
 await page.getByRole('menuitem', { name: 'Admin dashboard' }).click();

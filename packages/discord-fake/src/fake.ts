@@ -8,6 +8,7 @@ import { handleControl } from './control.ts';
 import { Gateway, type GatewayOptions } from './gateway.ts';
 import { snowflakeGenerator } from './ids.ts';
 import { Interactions, type InteractionSpec, type InteractionResult } from './interactions.ts';
+import { OAuth } from './oauth.ts';
 import {
   AppFlag,
   DiscordHttpError,
@@ -138,6 +139,8 @@ export class DiscordFake {
   readonly world: World;
   readonly gateway: Gateway;
   readonly interactions: Interactions;
+  /** Sign in with Discord: the authorize page, the code exchange and the user's `/users/@me`. */
+  readonly oauth = new OAuth(this);
   readonly requests: RecordedRequest[] = [];
   readonly botToken: string;
   /** `team`: the user IDs on the Developer Portal team that owns the application, or null when one person (`owner_id`) does. */
@@ -499,6 +502,7 @@ export class DiscordFake {
     try {
       const url = new URL(req.url ?? '/', 'http://fake');
       if (url.pathname === '/_fake' || url.pathname.startsWith('/_fake/')) return await handleControl(this, req, res, url);
+      if (await this.oauth.handle(req, res, url)) return;
       await this.rest(req, res, url);
     } catch (err) {
       if (!res.headersSent) {

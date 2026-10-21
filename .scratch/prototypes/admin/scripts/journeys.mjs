@@ -1,7 +1,7 @@
 // Performs every admin journey end to end and asserts what each one changes.
 // Usage: node journeys.mjs <width> <light|dark>. Screenshots of interesting states go to OUT.
 import assert from 'node:assert/strict';
-import { open, nav, signIn, shot } from './lib.mjs';
+import { open, nav, revokeTeam, signIn, signOut, shot } from './lib.mjs';
 
 const width = Number(process.argv[2] ?? 1440);
 const theme = process.argv[3] ?? 'light';
@@ -34,7 +34,7 @@ step('signed in, landed on held queue');
 
 // ---------- The account menu offers the owner dashboard (everyone signed in is an owner)
 if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
-await page.getByRole('button', { name: /Ada/ }).click();
+await page.getByRole('button', { name: /luna-admin/ }).click();
 await page.getByRole('menuitem', { name: 'Owner dashboard' }).waitFor();
 await shot(page, `${tag}-journey-account-menu`, { full: false });
 await page.keyboard.press('Escape');
@@ -251,7 +251,7 @@ step('levels: curve validation and save, colours, limits validation, discard, sa
 await nav(page, '/admin/agents/ag_q8w2');
 assert.ok(await main.getByText('3,160 / 4,800 XP').isVisible(), 'admin meter follows the new curve');
 if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
-await page.getByRole('button', { name: /Ada/ }).click();
+await page.getByRole('button', { name: /luna-admin/ }).click();
 await page.getByRole('menuitemradio', { name: 'Level' }).click();
 await page.keyboard.press('Escape');
 if (width < 768) await page.keyboard.press('Escape');
@@ -322,24 +322,19 @@ await main.getByRole('searchbox', { name: 'Search changes' }).fill('nothing like
 await main.getByRole('button', { name: 'Clear filters' }).click();
 step('audit: every change logged, filter, empty, clear');
 
-// ---------- A narrower admin (@moderators gained Edit levels above)
-await simulator('Rowan');
-await page.waitForTimeout(200);
-// Below md the destinations live in a sheet behind the top bar's trigger.
+// ---------- Standing taken away mid-session applies on the next page
+await revokeTeam();
 if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
-await page.getByRole('link', { name: 'Audit', exact: true }).waitFor();
-assert.equal(await page.getByRole('link', { name: 'Levels', exact: true }).count(), 1);
-assert.equal(await page.getByRole('link', { name: 'Health', exact: true }).count(), 0);
-if (width < 768) await page.keyboard.press('Escape');
-await nav(page, '/admin/health');
-assert.ok(await main.getByText('You don’t have access to Health').isVisible());
-await shot(page, `${tag}-journey-no-access`, { full: false });
-await nav(page, '/admin/agents/ag_m3th');
-assert.equal(await main.getByRole('button', { name: 'Change level' }).count(), 0);
-step('moderator role: granted Levels shows, Health hidden and locked, agent actions hidden');
+await page.getByRole('link', { name: 'Health', exact: true }).click();
+await page.waitForURL('**/agents');
+step('removed from the Developer team: the next admin page sends them to their agents');
 
 // ---------- Someone without admin standing has no admin pages
-await simulator('Kit');
+// (A narrower admin, with a server role's powers, needs the role mapped on the relay; it returns with the real Admins page.)
+if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
+await signOut(page, 'luna-admin');
+await page.getByRole('link', { name: 'Continue with Discord' }).click();
+await page.getByRole('link', { name: 'A visitor' }).click();
 await page.waitForURL('**/agents');
 await page.evaluate(() => {
   const a = Object.assign(document.createElement('a'), { href: '/admin/audit' });
@@ -350,7 +345,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(500);
 assert.equal(new URL(page.url()).pathname, '/agents');
 if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
-await page.getByRole('button', { name: /Kit/ }).click();
+await page.getByRole('button', { name: /visitor/ }).click();
 assert.equal(await page.getByRole('menuitem', { name: 'Admin dashboard' }).count(), 0);
 step('owner without admin standing: admin pages send them to their agents, no dashboard switch');
 
