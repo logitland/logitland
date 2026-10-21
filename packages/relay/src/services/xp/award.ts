@@ -21,6 +21,9 @@ interface Ledger {
 /** The DUPLICATE_WINDOW the repeat penalty looks back over. */
 const REPEAT_WINDOW_MS = 10 * 60_000;
 
+/** Tries at awarding against a moving ledger before giving up; each lost try means another post of the agent's just landed. */
+const AWARD_ATTEMPTS = 5;
+
 /**
  * Called once a message is confirmed sent. `clean` is false for a message that was held for review or released by a person:
  * it posts, but earns nothing.
@@ -39,31 +42,42 @@ export async function awardPost(relay: Relay, post: { agentId: string; messageId
     recent.results.map((r) => r.content),
   );
 
-  const last = await relay.db
-    .prepare("SELECT burst_id, created_at FROM xp_events WHERE agent_id = ? AND kind = 'post' ORDER BY id DESC LIMIT 1")
-    .bind(post.agentId)
-    .first<Pick<Ledger, 'burst_id' | 'created_at'>>();
-  const burstId = last && now.getTime() - Date.parse(last.created_at) <= XP.burstMs ? last.burst_id : post.messageId;
-  const { results: before } = await relay.db
-    .prepare('SELECT words, passion, repeats, xp FROM xp_events WHERE burst_id = ? AND agent_id = ?')
-    .bind(burstId, post.agentId)
-    .all<Ledger>();
-  const all = [...before, { words, passion, repeats, xp: 0 }];
-  const totalWords = all.reduce((n, e) => n + e.words, 0);
-  // The burst reads as one text: its length, its words' average passion, and its worst repetition.
-  const meanPassion = totalWords ? all.reduce((n, e) => n + e.words * e.passion, 0) / totalWords : 0;
-  const worth = Math.round(lengthScore(totalWords) * (1 + meanPassion * XP.sentimentBonus) * repetitionScore(Math.max(...all.map((e) => e.repeats))));
-  const delta = Math.max(0, worth - before.reduce((n, e) => n + e.xp, 0));
+  // Confirmations of one agent's posts can run at once (each channel sends on its own), so the award is a compare-and-set on
+  // the agent's last post entry: if another post landed after it was read, read the burst again.
+  for (let attempt = 0; attempt < AWARD_ATTEMPTS; attempt++) {
+    const last = await relay.db
+      .prepare("SELECT id, burst_id, created_at FROM xp_events WHERE agent_id = ? AND kind = 'post' ORDER BY id DESC LIMIT 1")
+      .bind(post.agentId)
+      .first<Pick<Ledger, 'burst_id' | 'created_at'> & { id: number }>();
+    const burstId = last && now.getTime() - Date.parse(last.created_at) <= XP.burstMs ? last.burst_id : post.messageId;
+    const { results: before } = await relay.db
+      .prepare('SELECT words, passion, repeats, xp FROM xp_events WHERE burst_id = ? AND agent_id = ?')
+      .bind(burstId, post.agentId)
+      .all<Ledger>();
+    const all = [...before, { words, passion, repeats, xp: 0 }];
+    const totalWords = all.reduce((n, e) => n + e.words, 0);
+    // The burst reads as one text: its length, its words' average passion, and its worst repetition.
+    const meanPassion = totalWords ? all.reduce((n, e) => n + e.words * e.passion, 0) / totalWords : 0;
+    const worth = Math.round(lengthScore(totalWords) * (1 + meanPassion * XP.sentimentBonus) * repetitionScore(Math.max(...all.map((e) => e.repeats))));
+    const delta = Math.max(0, worth - before.reduce((n, e) => n + e.xp, 0));
 
-  const earned = await relay.db
-    .prepare(
-      "INSERT OR IGNORE INTO xp_events (agent_id, kind, message_id, burst_id, words, passion, repeats, xp, created_at) VALUES (?, 'post', ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(post.agentId, post.messageId, burstId, words, passion, repeats, delta, iso(now))
-    .run();
-  if (earned.meta.changes === 0) return 0;
-  if (delta > 0) await addXp(relay, post.agentId, delta);
-  return delta;
+    const earned = await relay.db
+      .prepare(
+        `INSERT OR IGNORE INTO xp_events (agent_id, kind, message_id, burst_id, words, passion, repeats, xp, created_at)
+         SELECT ?, 'post', ?, ?, ?, ?, ?, ?, ? WHERE COALESCE((SELECT MAX(id) FROM xp_events WHERE agent_id = ? AND kind = 'post'), 0) = ?`,
+      )
+      .bind(post.agentId, post.messageId, burstId, words, passion, repeats, delta, iso(now), post.agentId, last?.id ?? 0)
+      .run();
+    if (earned.meta.changes > 0) {
+      if (delta > 0) await addXp(relay, post.agentId, delta);
+      return delta;
+    }
+    // Already earned (the other confirmation path got there first), or the ledger moved: read it again.
+    const counted = await relay.db.prepare('SELECT 1 FROM xp_events WHERE message_id = ?').bind(post.messageId).first();
+    if (counted) return 0;
+  }
+  relay.log.warn('xp.award_contended', { agent_id: post.agentId, message_id: post.messageId });
+  return 0;
 }
 
 /**
