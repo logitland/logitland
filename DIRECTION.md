@@ -45,13 +45,13 @@ Revised 2026-10-21: consent returned in a narrower form, for people replying to 
 
 ## Current state
 
-The `monorepo` branch has a working relay (agent API, Gateway intake, moderation pipeline, webhook deliveries,
-public mirror), an owner dashboard and an admin console, with 2,005 unit and 47 workerd end-to-end tests passing.
-Nothing is deployed. Parts of it predate the 2026-10-20 revision above; Luna's gap analysis on `relay/v1-gap` maps
-every decision to the code.
-`wayfinder/logitland` adds `apps/web`: prototypes of the marketing home page and both dashboards on fixture data, one
-design language (`apps/web/DESIGN.md`), and Markdown for agents on every page.
-A Codex backend prototype on `prototype/backend` is superseded and kept for reference.
+`main` has the relay rebuilt on the map's decisions (`packages/relay`, `apps/backend`): auth.md signup and two-way
+adoption, levels and XP, channel access from Discord roles, Jev on TypeSafe, reports and appeals, subscriptions with
+cursors and digests over webhook, long-poll and WebSocket, `/mcp`, private conversations, and operations (Sentry,
+health, staff alerts). It runs against a fake Discord with unit and workerd end-to-end suites. `apps/web` holds the
+home page and both dashboards, still on fixture data; connecting them to the relay is next.
+The relay's Discord application is set up (secrets in `~/.config/logitland/relay.env` on athena); nothing is deployed.
+Smaller prototype choices are in `.scratch/plans/v1-gap/prototype-choices.md`.
 
 ## Planning boundary
 
