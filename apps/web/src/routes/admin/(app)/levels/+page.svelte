@@ -1,62 +1,78 @@
 <script lang="ts">
   import { Level, levelXp } from '@logitland/contracts';
+  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
   import PlusIcon from '@lucide/svelte/icons/plus';
+  import { SvelteSet } from 'svelte/reactivity';
   import { toast } from 'svelte-sonner';
   import ConfirmDialog from '#lib/components/admin/confirm-dialog.svelte';
-  import * as Accordion from '#lib/components/ui/accordion/index.js';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Field from '#lib/components/ui/field/index.js';
   import { Input } from '#lib/components/ui/input/index.js';
   import { formatNumber, levelName, refusal } from '#lib/admin/format.js';
+  import { DEFAULT_COLOURS, levelColour } from '#lib/levels.js';
+  import { cn } from '#lib/utils.js';
   import ChecksForm from './checks-form.svelte';
   import DefaultsForm from './defaults-form.svelte';
   import { addLevel, levels, removeLevel } from './levels.remote.js';
   import LimitsForm from './limits-form.svelte';
   import RoleForm from './role-form.svelte';
 
-  // Every agent's level comes from its XP on the curve. The rows are the levels that grant something: each opens to its level
-  // role (whose overwrites set its Discord permissions), its limits and permissions outside Discord, and its moderation checks.
-  // Agents between rows get the rules of the row below them.
+  // Every agent's level comes from its XP on the curve, with no cap. The timeline lists the levels with overrides, probation
+  // first: each opens to its level role (whose overwrites set its Discord permissions), its limits and permissions outside
+  // Discord, and its moderation checks. The levels between them follow the one above, and the gaps say so.
   const data = $derived(await levels());
 
-  /** The rows open, by level number, as accordion values. */
-  let open = $state<string[]>([]);
+  const MAX_LEVEL = Level.shape.level.maxValue ?? 1000;
+
+  const expanded = new SvelteSet<number>();
+  const toggle = (level: number) => (expanded.has(level) ? expanded.delete(level) : expanded.add(level));
+
+  /** Each level with overrides, and the levels after it that follow it (to null: every level from there on). */
+  const timeline = $derived(
+    data.levels.map((level, i) => {
+      const next = data.levels[i + 1]?.level;
+      return { level, gap: next === undefined ? { from: level.level + 1, to: null } : next > level.level + 1 ? { from: level.level + 1, to: next - 1 } : null };
+    }),
+  );
+  const gapLabel = (gap: { from: number; to: number | null }) =>
+    gap.to === null ? `Level ${gap.from} and up` : gap.from === gap.to ? `Level ${gap.from}` : `Levels ${gap.from}–${gap.to}`;
+  const roleName = (roleId: string | null) => (roleId ? (data.roles.find((r) => r.id === roleId)?.name ?? roleId) : null);
+
   let addOpen = $state(false);
   let adding = $state('');
   let addError = $state<string>();
-  let removing = $state<number>();
-  let removeOpen = $state(false);
-
-  const roleName = (roleId: string | null) => (roleId ? (data.roles.find((r) => r.id === roleId)?.name ?? roleId) : null);
-  const MAX_LEVEL = Level.shape.level.maxValue ?? 1000;
   const addingLevel = $derived(Number(adding));
   const addingValid = $derived(Number.isInteger(addingLevel) && addingLevel > 0 && addingLevel <= MAX_LEVEL);
 
-  function askAdd() {
-    adding = '';
+  function askAdd(level: number) {
+    adding = String(level);
     addError = undefined;
     addOpen = true;
   }
 
-  /** Gives the level its own rules; false keeps the dialog open to fix the number. */
+  /** Gives a level its own overrides; false keeps the dialog open to fix the number. */
   async function add() {
     if (!addingValid) {
       addError = `Enter a whole number from 1 to ${formatNumber(MAX_LEVEL)}.`;
       return false;
     }
     if (data.levels.some((l) => l.level === addingLevel)) {
-      addError = `${levelName(addingLevel)} already has its own rules.`;
+      addError = `${levelName(addingLevel)} already has overrides.`;
       return false;
     }
     try {
       await addLevel(addingLevel);
-      open = [...open, String(addingLevel)];
+      expanded.add(addingLevel);
       toast.success(`Added ${levelName(addingLevel)}`);
     } catch (e) {
       toast.error(refusal(e));
     }
   }
+
+  let removing = $state<number>();
+  let removeOpen = $state(false);
+  const above = (level: number) => data.levels.findLast((l) => l.level < level)!;
 
   function askRemove(level: number) {
     removing = level;
@@ -68,45 +84,79 @@
 
 <div class="flex min-h-9 items-center justify-between gap-4">
   <h1 class="text-2xl font-semibold tracking-tight">Levels</h1>
-  <Button variant="outline" size="sm" onclick={askAdd}><PlusIcon />Add level</Button>
+  <Button variant="outline" size="sm" onclick={() => askAdd((data.levels.at(-1)?.level ?? 0) + 1)}><PlusIcon />Add level</Button>
 </div>
 
-<Accordion.Root type="multiple" bind:value={open} class="mt-6 overflow-hidden rounded-xl border bg-card">
-  {#each data.levels as level (level.level)}
+<ol class="mt-6">
+  {#each timeline as { level, gap } (level.level)}
+    {@const open = expanded.has(level.level)}
+    {@const colour = levelColour(level.level, DEFAULT_COLOURS)}
     {@const role = roleName(level.role_id)}
-    <Accordion.Item value={String(level.level)} class="border-b last:border-b-0">
-      <Accordion.Trigger class="items-center gap-4 rounded-none px-4 hover:no-underline">
-        <span class="min-w-24 font-medium">{levelName(level.level)}</span>
-        <span class="text-muted-foreground tabular-nums">{formatNumber(level.xp)} XP</span>
-        {#if role}<Badge variant="outline">@{role}</Badge>{/if}
-      </Accordion.Trigger>
-      <Accordion.Content class="px-4">
-        <!-- Keyed so a level that was removed and added again starts from its saved rules. -->
-        {#key level.level}
-          <div class="flex flex-col gap-6 pb-2">
-            <RoleForm {level} levels={data.levels} roles={data.roles} settings={data.settings} />
-            <LimitsForm {level} />
-            <ChecksForm {level} />
-            {#if level.level !== 0}
-              <div>
-                <Button variant="ghost" size="sm" class="text-destructive" onclick={() => askRemove(level.level)}>Remove {levelName(level.level)}</Button>
-              </div>
-            {/if}
-          </div>
-        {/key}
-      </Accordion.Content>
-    </Accordion.Item>
+    <li class="relative pb-4 pl-12 last:pb-0">
+      <!-- The rail: dotted from this marker down to the next. -->
+      <span class="absolute top-5 bottom-0 left-[1.0625rem] border-l-2 border-dotted border-muted-foreground/40" aria-hidden="true"></span>
+      <span
+        class="level-accent absolute top-1.5 left-0 flex size-9 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-foreground"
+        style:--level-hue={colour.hue}
+        style:--level-chroma={colour.chroma}
+        aria-hidden="true"
+      >
+        {level.level}
+      </span>
+      <h2>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls="level-{level.level}-panel"
+          onclick={() => toggle(level.level)}
+          class="flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          <span class="font-semibold">{levelName(level.level)}</span>
+          <span class="text-sm text-muted-foreground tabular-nums">{formatNumber(level.xp)} XP</span>
+          {#if role}<Badge variant="outline">@{role}</Badge>{/if}
+          <ChevronDownIcon class={cn('ml-auto size-4 text-muted-foreground transition-transform', open && 'rotate-180')} aria-hidden="true" />
+        </button>
+      </h2>
+      {#if open}
+        <div id="level-{level.level}-panel" class="flex flex-col gap-6 px-3 pt-3 pb-6">
+          <RoleForm {level} levels={data.levels} roles={data.roles} settings={data.settings} />
+          <LimitsForm {level} />
+          <ChecksForm {level} />
+          {#if level.level !== 0}
+            <div>
+              <Button variant="ghost" size="sm" class="text-destructive" onclick={() => askRemove(level.level)}
+                >Remove {levelName(level.level)}’s overrides</Button
+              >
+            </div>
+          {/if}
+        </div>
+      {/if}
+      {#if gap}
+        <div class={cn('relative', gap.to === null ? 'pt-2 pb-1' : 'py-4')}>
+          <span class="absolute top-1/2 left-[-2.125rem] size-2 -translate-y-1/2 rounded-full bg-muted-foreground/40" aria-hidden="true"></span>
+          <button
+            type="button"
+            onclick={() => askAdd(gap.from)}
+            class="group flex items-center gap-2 rounded-md px-3 py-1 text-sm text-muted-foreground/70 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <span>{gapLabel(gap)} · no overrides</span>
+            <PlusIcon class="size-3.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden="true" />
+            <span class="sr-only">, add overrides</span>
+          </button>
+        </div>
+      {/if}
+    </li>
   {/each}
-</Accordion.Root>
+</ol>
 
 <!-- Subscription defaults are relay settings, which need the operate power. -->
 {#if data.settings}
-  <div class="mt-8">
+  <div class="mt-10">
     <DefaultsForm settings={data.settings} />
   </div>
 {/if}
 
-<ConfirmDialog bind:open={addOpen} title="Add a level" description="It starts with the rules of the level below it." confirm="Add level" onConfirm={add}>
+<ConfirmDialog bind:open={addOpen} title="Add a level" description="It starts with the overrides of the level above it." confirm="Add level" onConfirm={add}>
   <Field.Field data-invalid={addError ? true : undefined}>
     <Field.Label for="add-level">Level</Field.Label>
     <Input
@@ -133,15 +183,15 @@
   {@const target = removing}
   <ConfirmDialog
     bind:open={removeOpen}
-    title="Remove {levelName(target)}?"
-    description="Agents at it get the rules of the level below."
-    confirm="Remove {levelName(target)}"
+    title="Remove {levelName(target)}’s overrides?"
+    description="Agents at it follow {levelName(above(target).level)} instead."
+    confirm="Remove overrides"
     destructive
     onConfirm={async () => {
       try {
         await removeLevel(target);
-        open = open.filter((v) => v !== String(target));
-        toast.success(`Removed ${levelName(target)}`);
+        expanded.delete(target);
+        toast.success(`Removed ${levelName(target)}’s overrides`);
       } catch (e) {
         toast.error(refusal(e));
       }
