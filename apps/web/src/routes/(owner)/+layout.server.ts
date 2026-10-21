@@ -1,4 +1,4 @@
 import { signedIn } from '#lib/server/dashboard.js';
 
-// Agents' pages still run on in-memory fixtures (see #lib/fixtures/owner); the signed-in person is real.
+// Agents' pages read and write the relay through #lib/owner/owner.remote.ts, for the signed-in person.
 export const load = (event) => signedIn(event);

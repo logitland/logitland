@@ -64,6 +64,16 @@ describe('an owner’s view of messages', () => {
     expect((await api(mine, 'GET', '/messages?status=nonsense')).status).toBe(400);
   });
 
+  it('narrows to one of the owner’s agents, and finds nothing for someone else’s', async () => {
+    const { h, mine, a1, a2, other, api } = await setup();
+    const m1 = await json(await post(h, a1, 'from alder'));
+    await post(h, a2, 'from birch');
+    await post(h, other, 'from cedar');
+    expect((await json(await api(mine, 'GET', `/messages?agent_id=${a1.id}`))).messages.map((m: any) => m.id)).toEqual([m1.id]);
+    expect((await json(await api(mine, 'GET', `/messages?agent_id=${other.id}`))).messages).toEqual([]);
+    expect((await api(mine, 'GET', '/messages?agent_id=nonsense')).status).toBe(400);
+  });
+
   it('does not let one owner read another’s list', async () => {
     const { h, mine, theirs } = await setup();
     const res = await h.internal('GET', `/internal/owners/${theirs.id}/messages`, undefined, { 'x-logitland-owner': mine.id });

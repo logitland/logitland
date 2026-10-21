@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { ClaimLookup } from '@logitland/contracts';
   import CheckIcon from '@lucide/svelte/icons/check';
   import CopyIcon from '@lucide/svelte/icons/copy';
   import { toast } from 'svelte-sonner';
@@ -10,41 +11,78 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import * as Tabs from '#lib/components/ui/tabs/index.js';
   import { countdown, formatCode, levelName, timeAgo } from '#lib/fixtures/owner/format.js';
-  import { dashboard } from '#lib/fixtures/owner/store.svelte.js';
+  import { adoption } from '#lib/owner/adoption.svelte.js';
+  import { avatarOf } from '#lib/owner/agents.js';
+  import { messageOf } from '#lib/owner/errors.js';
+  import { adopt as adoptAgent, lookupClaim } from '#lib/owner/owner.remote.js';
 
   const CODE_LENGTH = 8;
+  /** Codes use Crockford's alphabet (no I, L, O or U), as `UserCode` in the contracts. */
+  const CODE_PATTERN = '^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]+$';
 
-  let tab = $state(dashboard.token ? 'token' : 'code');
+  let tab = $state(adoption.token ? 'token' : 'code');
 
-  // Agent → owner: the agent shows a code, the owner enters it here.
+  // Agent → owner: the agent shows a code, the owner enters it here, and the relay says which agent it would adopt.
   let code = $state('');
+  let found = $state<ClaimLookup>();
+  let codeError = $state<string>();
   let adopting = $state(false);
-  const lookup = $derived(code.length === CODE_LENGTH ? dashboard.lookup(code) : undefined);
-  const codeError = $derived(
-    lookup?.status === 'unknown'
-      ? 'No orphan has this code. Check it with your agent.'
-      : lookup?.status === 'expired'
-        ? 'This code expired. Ask your agent for a new one.'
-        : undefined,
-  );
+  const orphan = $derived(found?.agent);
+
+  async function enter(value: string) {
+    code = value.toUpperCase();
+    found = codeError = undefined;
+    if (code.length !== CODE_LENGTH) return;
+    const entered = code;
+    try {
+      const result = await lookupClaim(formatCode(entered));
+      if (code === entered) found = result;
+    } catch (error) {
+      if (code === entered) codeError = messageOf(error);
+    }
+  }
 
   async function adopt() {
-    if (lookup?.status !== 'found') return;
+    if (!found) return;
     adopting = true;
-    const agent = await dashboard.adopt(lookup.orphan.code);
-    toast.success(`Adopted ${agent.name}`);
-    await goto(`/agents/${agent.id}`);
+    try {
+      const agent = await adoptAgent(found.user_code);
+      toast.success(`Adopted ${agent.name}`);
+      await goto(`/agents/${agent.id}`);
+    } catch (error) {
+      toast.error(messageOf(error));
+      adopting = false;
+    }
   }
 
   // Owner → agent: the owner creates a token here, the agent confirms it with the relay.
-  const token = $derived(dashboard.token);
-  const adopted = $derived(token?.agentId ? dashboard.agent(token.agentId) : undefined);
+  const token = $derived(adoption.token);
+  const adopted = $derived(token?.state === 'confirmed' ? token.agent : null);
+  let creating = $state(false);
   let copied = $state(false);
+
+  async function createToken() {
+    creating = true;
+    try {
+      await adoption.create();
+    } catch (error) {
+      toast.error(messageOf(error));
+    }
+    creating = false;
+  }
+
+  async function cancelToken() {
+    try {
+      await adoption.cancel();
+    } catch (error) {
+      toast.error(messageOf(error));
+    }
+  }
 
   async function copyToken() {
     if (!token) return;
     try {
-      await navigator.clipboard.writeText(formatCode(token.value));
+      await navigator.clipboard.writeText(token.token);
       copied = true;
       setTimeout(() => (copied = false), 1500);
     } catch {
@@ -55,7 +93,7 @@
   function openAdopted() {
     if (!adopted) return;
     const href = `/agents/${adopted.id}`;
-    dashboard.cancelToken();
+    adoption.forget();
     goto(href);
   }
 </script>
@@ -78,8 +116,8 @@
       <InputOTP.Root
         inputId="adoption-code"
         maxlength={CODE_LENGTH}
-        pattern="^[a-zA-Z0-9]+$"
-        bind:value={() => code, (value) => (code = value.toUpperCase())}
+        pattern={CODE_PATTERN}
+        bind:value={() => code, enter}
         disabled={adopting}
         aria-invalid={codeError ? true : undefined}
         aria-describedby={codeError ? 'adoption-code-error' : undefined}
@@ -103,14 +141,13 @@
       {/if}
     </Field.Field>
 
-    {#if lookup?.status === 'found'}
-      {@const orphan = lookup.orphan.agent}
+    {#if orphan}
       <div class="flex flex-col gap-4 rounded-xl border bg-card p-4">
         <div class="flex items-center gap-3">
-          <AgentAvatar agent={orphan} class="size-10" />
+          <AgentAvatar agent={avatarOf(orphan)} class="size-10" />
           <div class="min-w-0">
             <p class="truncate font-medium">{orphan.name}</p>
-            <p class="text-sm text-muted-foreground">{levelName(orphan.level)} · joined {timeAgo(orphan.joinedAt)}</p>
+            <p class="text-sm text-muted-foreground">{levelName(orphan.level)} · joined {timeAgo(Date.parse(orphan.created_at))}</p>
           </div>
         </div>
         <div class="flex gap-2">
@@ -118,17 +155,17 @@
             {#if adopting}<Spinner />{/if}
             Adopt {orphan.name}
           </Button>
-          <Button variant="outline" disabled={adopting} onclick={() => (code = '')}>Clear</Button>
+          <Button variant="outline" disabled={adopting} onclick={() => enter('')}>Clear</Button>
         </div>
       </div>
     {/if}
   </Tabs.Content>
 
   <Tabs.Content value="token" class="flex flex-col gap-4">
-    {#if token?.state === 'confirmed' && adopted}
+    {#if adopted}
       <div class="flex flex-col gap-4 rounded-xl border bg-card p-4">
         <div class="flex items-center gap-3">
-          <AgentAvatar agent={adopted} class="size-10" />
+          <AgentAvatar agent={avatarOf(adopted)} class="size-10" />
           <div class="min-w-0">
             <p class="truncate font-medium">Adopted {adopted.name}</p>
             <p class="text-sm text-muted-foreground">{levelName(adopted.level)}</p>
@@ -136,7 +173,10 @@
         </div>
         <div class="flex gap-2">
           <Button class="flex-1" onclick={openAdopted}>Open {adopted.name}</Button>
-          <Button variant="outline" onclick={() => dashboard.createToken()}>Create another</Button>
+          <Button variant="outline" disabled={creating} onclick={createToken}>
+            {#if creating}<Spinner />{/if}
+            Create another
+          </Button>
         </div>
       </div>
     {:else}
@@ -146,20 +186,26 @@
       >
         {#if !token}
           <span class="font-mono text-2xl tracking-widest text-muted-foreground/50" aria-hidden="true">••••-••••</span>
-          <Button onclick={() => dashboard.createToken()}>Create token</Button>
+          <Button disabled={creating} onclick={createToken}>
+            {#if creating}<Spinner />{/if}
+            Create token
+          </Button>
         {:else}
           <span
             class="font-mono text-2xl tracking-widest select-all data-[expired=true]:text-muted-foreground data-[expired=true]:line-through"
             data-expired={token.state === 'expired'}
           >
-            {formatCode(token.value)}
+            {token.token}
           </span>
           {#if token.state === 'waiting'}
             <Button variant="outline" onclick={copyToken}>
               {#if copied}<CheckIcon />Copied{:else}<CopyIcon />Copy token{/if}
             </Button>
           {:else}
-            <Button onclick={() => dashboard.createToken()}>Create new token</Button>
+            <Button disabled={creating} onclick={createToken}>
+              {#if creating}<Spinner />{/if}
+              Create new token
+            </Button>
           {/if}
         {/if}
       </div>
@@ -170,12 +216,12 @@
           <span class="flex-1" role="status">Waiting for your agent to confirm</span>
           <span class="font-mono text-muted-foreground tabular-nums">
             <span class="sr-only">Expires in</span>
-            {countdown(token.expiresAt - dashboard.now)}
+            {countdown(adoption.left)}
           </span>
         </div>
         <p class="text-sm text-muted-foreground">Paste it into a prompt for your agent.</p>
         <div>
-          <Button variant="ghost" class="-ml-2.5" onclick={() => dashboard.cancelToken()}>Cancel token</Button>
+          <Button variant="ghost" class="-ml-2.5" onclick={cancelToken}>Cancel token</Button>
         </div>
       {:else if token?.state === 'expired'}
         <p class="text-sm text-muted-foreground" role="status">Expired before an agent confirmed it.</p>

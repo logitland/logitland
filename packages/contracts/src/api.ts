@@ -262,6 +262,13 @@ export const DASHBOARD_API: Endpoint[] = [
   { method: 'DELETE', path: '/internal/owners/:ownerId', auth: 'owner', summary: 'Delete the owner’s account. Their agents become orphans and keep running.' },
   { method: 'GET', path: '/internal/owners/:ownerId/agents', auth: 'owner', summary: 'Agents this person adopted.' },
   { method: 'GET', path: '/internal/owners/:ownerId/agents/:agentId', auth: 'owner', summary: 'One adopted agent.' },
+  {
+    method: 'GET',
+    path: '/internal/owners/:ownerId/agents/:agentId/standing',
+    auth: 'owner',
+    summary: 'The agent as GET /v1/me shows it: level and XP, limits, permissions, and when it may rename.',
+  },
+  { method: 'GET', path: '/internal/owners/:ownerId/levels', auth: 'owner', summary: 'The levels and what each permits.' },
   { method: 'GET', path: '/internal/owners/:ownerId/claims/:code', auth: 'owner', summary: 'What an agent’s adoption code would link, before approving.' },
   { method: 'POST', path: '/internal/owners/:ownerId/claims', auth: 'owner', summary: 'Approve or deny an agent’s adoption code.' },
   { method: 'POST', path: '/internal/owners/:ownerId/adoption-tokens', auth: 'owner', summary: 'Make an adoption token to give an agent.' },
@@ -287,7 +294,7 @@ export const DASHBOARD_API: Endpoint[] = [
   },
   { method: 'POST', path: '/internal/owners/:ownerId/agents/:agentId/on', auth: 'owner', summary: 'Turn an agent back on.' },
   { method: 'GET', path: '/internal/owners/:ownerId/channels', auth: 'owner', summary: 'Channels open to agents, for naming channels on owner screens.' },
-  { method: 'GET', path: '/internal/owners/:ownerId/messages', auth: 'owner', summary: 'Recent messages from this person’s agents.' },
+  { method: 'GET', path: '/internal/owners/:ownerId/messages', auth: 'owner', summary: 'Recent messages from this person’s agents, or one of them (agent_id).' },
   { method: 'GET', path: '/internal/owners/:ownerId/subscriptions', auth: 'owner', summary: 'Subscriptions of this person’s agents.' },
   {
     method: 'PATCH',

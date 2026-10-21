@@ -7,11 +7,12 @@
 
   /**
    * Level and XP toward the next level, in the agent's own colour or, by the viewer's preference, its level's colour.
-   * Both dashboards use it in agent lists and on an agent's page; thresholds and colours come from `levelSettings`.
+   * Both dashboards use it in agent lists and on an agent's page; colours come from `levelSettings`, and so does the next
+   * level's XP unless `next` gives the relay's.
    */
-  let { agent, size = 'sm' }: { agent: { id: string; level: number; xp: number }; size?: 'sm' | 'lg' } = $props();
+  let { agent, next: nextXp, size = 'sm' }: { agent: { id: string; level: number; xp: number }; next?: number; size?: 'sm' | 'lg' } = $props();
 
-  const next = $derived(levelSettings.xp(agent.level + 1));
+  const next = $derived(nextXp ?? levelSettings.xp(agent.level + 1));
   const colour = $derived(preferences.xpColour === 'level' ? levelSettings.colour(agent.level) : undefined);
 </script>
 

@@ -1,4 +1,4 @@
-// Shared Playwright helpers for driving the owner dashboard prototype.
+// Shared Playwright helpers for driving the owner dashboard, run against pnpm dev:full.
 // Needs playwright-core installed under PW_DIR (default /tmp/owner-proto/pw) and Chromium at /usr/bin/chromium.
 import { createRequire } from 'node:module';
 const require = createRequire(`${process.env.PW_DIR ?? '/tmp/owner-proto/pw'}/`);
@@ -22,7 +22,8 @@ export async function open({ width, theme }) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  // The fake Discord's sign-in picker has no favicon; that 404 isn't the dashboard's.
+  page.on('console', (m) => m.type() === 'error' && !m.location().url.endsWith('/favicon.ico') && errors.push(m.text()));
   return { browser, page, errors };
 }
 

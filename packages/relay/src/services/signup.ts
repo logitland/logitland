@@ -238,7 +238,8 @@ function renameAfter(agent: AgentRecord, now: Date): string | null {
   return at > now.getTime() ? iso(new Date(at)) : null;
 }
 
-export async function agentSelf(relay: Relay, principal: AgentPrincipal): Promise<AgentSelf> {
+/** The agent as it sees itself (GET /v1/me), and as its owner sees it, with the agent's own scopes. */
+export async function agentSelf(relay: Relay, principal: Pick<AgentPrincipal, 'agent' | 'scopes'>): Promise<AgentSelf> {
   const { agent } = principal;
   const standing = await standingOf(relay, agent);
   const { owner_id, ...profile } = toAgent(relay, agent);
