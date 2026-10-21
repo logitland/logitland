@@ -284,6 +284,29 @@ export class DiscordRest {
     return this.send<GuildChannel>('POST', `/channels/${channelId}/messages/${messageId}/threads`, thread, true);
   }
 
+  /**
+   * A private thread (type 12) in a text channel, with no starter message. Needs Create Private Threads. The bot is its first
+   * member; only members and moderators see it, and `invitable: false` keeps members from adding others.
+   */
+  createPrivateThread(channelId: string, thread: { name: string; auto_archive_duration?: 60 | 1440 | 4320 | 10080 }): Promise<GuildChannel> {
+    return this.send<GuildChannel>('POST', `/channels/${channelId}/threads`, { ...thread, type: 12, invitable: false }, true);
+  }
+
+  /** Adds someone to a thread. Fails on an archived thread, so unarchive it first. */
+  addThreadMember(threadId: string, userId: string): Promise<void> {
+    return this.send<void>('PUT', `/channels/${threadId}/thread-members/${userId}`, undefined, true);
+  }
+
+  /** Removes someone from a thread. Fails on an archived thread, so unarchive it first. */
+  removeThreadMember(threadId: string, userId: string): Promise<void> {
+    return this.send<void>('DELETE', `/channels/${threadId}/thread-members/${userId}`, undefined, true);
+  }
+
+  /** Archives or unarchives a thread the bot made. */
+  setThreadArchived(threadId: string, archived: boolean): Promise<GuildChannel> {
+    return this.send<GuildChannel>('PATCH', `/channels/${threadId}`, { archived }, true);
+  }
+
   /** A message from the bot itself, for example an alert in the staff channel. Mentions are off. */
   createMessage(channelId: string, body: { content: string }): Promise<DiscordMessage> {
     return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions: { parse: [] } }, true);

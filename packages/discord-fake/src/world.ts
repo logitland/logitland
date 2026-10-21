@@ -89,6 +89,8 @@ export class World {
   readonly webhooks = new Map<string, Webhook>();
   readonly messages = new Map<string, Message[]>();
   readonly commands = new Map<string, ApplicationCommand[]>();
+  /** Who has joined or been added to each thread, by user ID. Its creator is the first. */
+  readonly threadMembers = new Map<string, Set<string>>();
   readonly botUser: User;
   private readonly now: () => number;
   private readonly ids: () => string;
@@ -555,7 +557,43 @@ export class World {
     };
     this.channels.set(id, thread);
     this.guild(parent.guild_id).channelIds.add(id);
+    this.threadMembers.set(id, new Set([t.ownerId]));
     return thread;
+  }
+
+  /**
+   * A thread with no starter message (POST /channels/:id/threads): public (11) or private (12) in a text channel, or an
+   * announcement thread (10) in an announcement channel. Only members and moderators see a private one.
+   */
+  createThread(parentId: string, t: { name: string; type: number; ownerId: string; autoArchive?: number; invitable?: boolean }): Channel {
+    const parent = this.channel(parentId);
+    const fits =
+      parent.type === ChannelType.text
+        ? t.type === ChannelType.publicThread || t.type === ChannelType.privateThread
+        : parent.type === ChannelType.announcement && t.type === ChannelType.announcementThread;
+    if (!fits) throw errors.wrongChannelType();
+    const thread = this.newThread(this.ids(), parent, {
+      name: t.name,
+      type: t.type,
+      ownerId: t.ownerId,
+      autoArchive: t.autoArchive ?? parent.default_auto_archive_duration ?? 1440,
+    });
+    if (t.type === ChannelType.privateThread) thread.thread_metadata!.invitable = t.invitable ?? true;
+    this.emit(parent.guild_id, 'THREAD_CREATE', { ...thread, newly_created: true });
+    return thread;
+  }
+
+  /** Adds or removes a thread member. Discord refuses either on an archived thread, and adds only members of the server. */
+  setThreadMember(threadId: string, userId: string, on: boolean): void {
+    const thread = this.channel(threadId);
+    if (!isThread(thread.type)) throw errors.wrongChannelType();
+    if (thread.thread_metadata?.archived) throw errors.threadArchived();
+    if (on && !this.guild(thread.guild_id).members.has(userId)) throw errors.unknownMember();
+    const members = this.threadMembers.get(threadId) ?? new Set<string>();
+    if (on) members.add(userId);
+    else members.delete(userId);
+    this.threadMembers.set(threadId, members);
+    thread.member_count = members.size;
   }
 
   /** A thread started from a message in a text or announcement channel. Its ID is the message's ID. */
@@ -622,6 +660,7 @@ export class World {
     if (!isThread(thread.type)) throw errors.wrongChannelType();
     this.channels.delete(threadId);
     this.messages.delete(threadId);
+    this.threadMembers.delete(threadId);
     this.guilds.get(thread.guild_id)?.channelIds.delete(threadId);
     this.emit(thread.guild_id, 'THREAD_DELETE', { id: thread.id, guild_id: thread.guild_id, parent_id: thread.parent_id, type: thread.type });
   }
@@ -645,6 +684,7 @@ export class World {
     for (const c of [...this.channels.values()]) if (isThread(c.type)) this.channels.delete(c.id);
     for (const g of this.guilds.values()) for (const id of [...g.channelIds]) if (!this.channels.has(id)) g.channelIds.delete(id);
     this.messages.clear();
+    this.threadMembers.clear();
     for (const c of this.channels.values()) c.last_message_id = null;
   }
 }

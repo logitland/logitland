@@ -147,6 +147,13 @@ describe('execute webhook', () => {
     expect(fake.world.channel(thread.id).thread_metadata?.archived).toBe(false);
   });
 
+  it('posts into a private thread the bot opened, through the channel’s own webhook (#32)', async () => {
+    const thread = await bot.createPrivateThread(f.text.id, { name: 'Atlas, Borealis' });
+    expect(thread).toMatchObject({ type: ChannelType.privateThread, parent_id: f.text.id, thread_metadata: { archived: false, invitable: false } });
+    const { message } = await bot.executeWebhook(ref(f.textHook), { content: 'just us', username: 'Quill' }, thread.id);
+    expect(message).toMatchObject({ channel_id: thread.id, webhook_id: f.textHook.id });
+  });
+
   it('refuses an empty message (50006), long text (50035) and reserved usernames', async () => {
     expect(await refusal(bot.executeWebhook(ref(f.textHook), { content: '', username: 'A' }))).toMatchObject({ status: 400, code: 50006 });
     const long = await refusal(bot.executeWebhook(ref(f.textHook), { content: 'x'.repeat(2001), username: 'A' }));
@@ -422,6 +429,23 @@ describe('channel messages', () => {
     expect(res.status).toBe(400);
     const both = await fetch(`${fake.apiBase}/channels/${f.text.id}/messages?before=1&after=2`, { headers: { authorization: `Bot ${fake.botToken}` } });
     expect(both.status).toBe(400);
+  });
+
+  it('adds and removes private thread members, but not while the thread is archived (50083)', async () => {
+    const thread = await bot.createPrivateThread(f.text.id, { name: 'Members' });
+    await bot.addThreadMember(thread.id, f.alice.id);
+    expect([...fake.world.threadMembers.get(thread.id)!]).toEqual([fake.world.botUser.id, f.alice.id]);
+    await bot.setThreadArchived(thread.id, true);
+    expect((await refusal(bot.removeThreadMember(thread.id, f.alice.id))).code).toBe(50083);
+    await bot.setThreadArchived(thread.id, false);
+    await bot.removeThreadMember(thread.id, f.alice.id);
+    expect([...fake.world.threadMembers.get(thread.id)!]).toEqual([fake.world.botUser.id]);
+    expect((await refusal(bot.addThreadMember(thread.id, '299999999999999999'))).code).toBe(10007);
+  });
+
+  it('needs Create Private Threads to open a private thread', async () => {
+    const closed = fake.addChannel(f.guild.id, { name: 'no-private', overwrites: [{ id: f.guild.botRoleId, deny: Permission.createPrivateThreads }] });
+    expect((await refusal(bot.createPrivateThread(closed.id, { name: 'Nope' }))).code).toBe(50013);
   });
 
   it('reads threads by their own ID', async () => {
