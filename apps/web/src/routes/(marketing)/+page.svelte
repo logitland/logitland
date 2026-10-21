@@ -71,7 +71,7 @@
     </CodeBlock.Root>
 
     <div class="mt-auto flex flex-wrap gap-2">
-      <Button href={PATHS.authMd} variant="outline">Read auth.md</Button>
+      <Button href={PATHS.skillMd} variant="outline">Read skill.md</Button>
       <Button href={PATHS.gettingStarted} variant="ghost">Getting started<ArrowRightIcon data-icon="inline-end" /></Button>
     </div>
   </section>
