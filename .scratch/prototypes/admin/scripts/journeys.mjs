@@ -152,14 +152,47 @@ await main.getByRole('button', { name: 'More for Moth' }).click();
 await page.getByRole('menuitem', { name: 'Ban' }).click();
 await dialog.getByRole('button', { name: 'Cancel' }).click();
 assert.equal(await main.getByText('Banned').count(), 0);
+// Rename past the daily limit: the reason is required and names stay unique
+const renameDialog = page.getByRole('dialog');
+await main.getByRole('button', { name: 'More for Moth' }).click();
+await page.getByRole('menuitem', { name: 'Rename' }).click();
+await renameDialog.getByLabel('Name').fill('Qu1ll');
+await renameDialog.getByRole('button', { name: 'Rename agent' }).click();
+await renameDialog.getByText('Add a reason for the audit log.').waitFor();
+await renameDialog.getByLabel('Reason').fill('Owner asked by email; the agent is rate limited');
+await renameDialog.getByRole('button', { name: 'Rename agent' }).click();
+await renameDialog.getByText('Too close to Quill, which is taken.').waitFor();
+await shot(page, `${tag}-journey-rename-error`, { full: false });
+await renameDialog.getByRole('button', { name: 'Cancel' }).click();
+await renameDialog.waitFor({ state: 'hidden' });
+assert.equal((await main.locator('h1').innerText()).trim(), 'Moth', 'cancel keeps the name');
+await main.getByRole('button', { name: 'More for Moth' }).click();
+await page.getByRole('menuitem', { name: 'Rename' }).click();
+assert.equal(await renameDialog.getByLabel('Reason').inputValue(), '', 'reopening starts clean');
+await renameDialog.getByLabel('Name').fill('Mothlight');
+await renameDialog.getByLabel('Reason').fill('Owner asked by email; the agent is rate limited');
+await shot(page, `${tag}-journey-rename`, { full: false });
+await renameDialog.getByRole('button', { name: 'Rename agent' }).click();
+await toast('Renamed Moth to Mothlight');
+await dismissToasts();
+assert.equal((await main.locator('h1').innerText()).trim(), 'Mothlight');
+// Reset a custom avatar to the sigil: cancel keeps it, confirm removes it
 await nav(page, '/admin/agents/ag_g1mr');
+await main.getByRole('button', { name: 'More for Glimmer' }).click();
+await page.getByRole('menuitem', { name: 'Reset avatar' }).click();
+await shot(page, `${tag}-journey-reset-avatar`, { full: false });
+await dialog.getByRole('button', { name: 'Cancel' }).click();
+await dialog.waitFor({ state: 'hidden' });
+assert.equal(await main.locator('header img').count(), 1, 'cancel keeps the avatar');
 await main.getByRole('button', { name: 'More for Glimmer' }).click();
 await page.getByRole('menuitem', { name: 'Reset avatar' }).click();
 await confirmDialog('Reset avatar');
 await toast('Avatar reset');
 await dismissToasts();
 assert.equal(await main.locator('header img').count(), 0);
-step('agent: change level, suspend, lift, cancel ban, reset avatar');
+await nav(page, '/admin/agents');
+assert.ok((await main.getByText('Mothlight', { exact: true }).count()) > 0, 'agents list shows the new name');
+step('agent: change level, suspend, lift, cancel ban, rename, reset avatar');
 
 // ---------- Levels
 await nav(page, '/admin/levels/3');
@@ -275,7 +308,9 @@ step('health: kill switch cancel and confirm, re-check, slash commands, Gateway 
 
 // ---------- Audit sees all of it
 await nav(page, '/admin/audit');
-for (const text of ['Released a held message', 'Restored a taken-down message', 'Overturned a strike on appeal', 'Changed level', 'Changed level curve', 'Changed level colours', 'Changed limits', 'Changed admin powers for @moderators', 'Closed signups', 'Changed subscription defaults']) {
+// The journey logs more than one page of changes.
+while (await main.getByRole('button', { name: 'Show more' }).count()) await main.getByRole('button', { name: 'Show more' }).click();
+for (const text of ['Released a held message', 'Restored a taken-down message', 'Overturned a strike on appeal', 'Changed level', 'Changed level curve', 'Changed level colours', 'Changed limits', 'Changed admin powers for @moderators', 'Closed signups', 'Changed subscription defaults', 'Moth → Mothlight. Owner asked by email; the agent is rate limited']) {
   assert.ok((await main.getByText(text).count()) > 0, `audit has “${text}”`);
 }
 // Rowan's fixture release is the only one: the undone release left no entry.

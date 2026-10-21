@@ -14,7 +14,7 @@ const BROWSER = { 'user-agent': CHROME, accept: 'text/html,application/xhtml+xml
 const SIGNED_IN = { cookie: 'session=u_ada' };
 
 const MARKETING = ['/', '/sign-in'];
-const OWNER = ['/agents', '/agents/adopt', '/agents/ag_q8w2', '/agents/ag_q8w2/subscriptions', '/agents/ag_q8w2/delivery', '/agents/ag_q8w2/level'];
+const OWNER = ['/agents', '/agents/adopt', '/agents/ag_q8w2', '/agents/ag_q8w2/subscriptions', '/agents/ag_q8w2/delivery', '/agents/ag_q8w2/level', '/agents/ag_q8w2/profile'];
 const ADMIN = [
   '/admin/moderation',
   '/admin/moderation/reports',

@@ -191,7 +191,112 @@ await page.getByText('Deliveries resumed').waitFor();
 assert.ok(await page.getByText('Active', { exact: true }).isVisible());
 step('paused delivery resumes');
 
+// Profile on Quill: avatar locked below Level 4; rename taken, blocked, held (withdraw, reject), then renamed
+const nameInput = page.locator('#agent-name');
+const saveName = () => main().getByRole('button', { name: 'Save' }).first().click();
+const toast = (s) => page.locator('[data-sonner-toast]').filter({ hasText: s }).first().waitFor();
+await nav(page, '/agents/ag_q8w2/profile');
+assert.ok(await page.locator('#avatar-mode-upload').isDisabled(), 'upload locked below Level 4');
+assert.ok(await page.locator('#avatar-mode-url').isDisabled(), 'URL locked below Level 4');
+assert.equal(await main().getByText('Level 4').count(), 2, 'locked options name the level that unlocks them');
+for (const [value, error] of [
+  ['M0th', 'Too close to Moth, which is taken.'],
+  ['ostrakon', 'Ostrakon is taken.'],
+  ['Official Quill', 'Blocked as impersonation.'],
+]) {
+  await nameInput.fill(value);
+  await saveName();
+  await page.getByText(error).waitFor();
+}
+await shot(page, `${tag}-profile-name-taken`, { full: false });
+await nameInput.fill('Reaper');
+assert.ok(await main().getByText('Reaper', { exact: true }).first().isVisible(), 'preview follows the draft');
+await saveName();
+await page.getByText('Reaper is held for review').waitFor();
+assert.ok(await nameInput.isDisabled(), 'no second rename while one is held');
+await shot(page, `${tag}-profile-name-held`, { full: false });
+await page.getByRole('button', { name: 'Withdraw' }).click();
+await nameInput.fill('Reaper');
+await saveName();
+await page.getByText('Reaper is held for review').waitFor();
+await simulator('Reject name');
+await toast('An admin rejected Reaper');
+assert.equal(await page.getByText('Reaper is held for review').count(), 0);
+await nameInput.fill('Quillon');
+await saveName();
+await toast('Renamed to Quillon');
+await page.getByText(/^Next rename in 2[34]h$/).waitFor();
+assert.ok(await nameInput.isDisabled(), 'renamed once today');
+assert.equal((await page.locator('h1').innerText()).trim(), 'Quillon');
+await shot(page, `${tag}-profile-renamed`, { full: false });
+await nav(page, '/agents');
+assert.ok(await text('Quillon'), 'agents list shows the new name');
+step('profile name: locked avatar, taken, blocked, held, withdraw, reject, rename, daily limit');
+
+// Profile on Ostrakon (Level 5): upload with type and size checks, URL with a failed load, back to the sigil
+const avatarPng = Buffer.from(
+  (
+    await page.evaluate(() => {
+      const canvas = Object.assign(document.createElement('canvas'), { width: 128, height: 128 });
+      const g = canvas.getContext('2d');
+      const fill = g.createLinearGradient(0, 0, 128, 128);
+      fill.addColorStop(0, '#fde68a');
+      fill.addColorStop(1, '#b45309');
+      g.fillStyle = fill;
+      g.fillRect(0, 0, 128, 128);
+      g.fillStyle = '#fff';
+      g.beginPath();
+      g.arc(64, 64, 26, 0, Math.PI * 2);
+      g.fill();
+      return canvas.toDataURL('image/png');
+    })
+  ).split(',')[1],
+  'base64',
+);
+await page.route('https://images.example.com/**', (route) => route.fulfill({ contentType: 'image/png', body: avatarPng }));
+await page.route('https://broken.example.com/**', (route) => route.abort());
+await nav(page, '/agents/ag_0str/profile');
+const picker = page.locator('input[type=file]');
+await main().getByText('Upload image', { exact: true }).click();
+await main().getByRole('button', { name: 'Save' }).last().click();
+await page.getByText('Choose an image to upload.').waitFor();
+await picker.setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hi') });
+await page.getByText('Choose a PNG, JPEG, GIF or WebP image.').waitFor();
+await picker.setInputFiles({ name: 'huge.png', mimeType: 'image/png', buffer: Buffer.alloc(3 * 1024 * 1024) });
+await page.getByText('Choose an image under 2 MB.').waitFor();
+await shot(page, `${tag}-profile-avatar-too-big`, { full: false });
+await picker.setInputFiles({ name: 'ostrakon.png', mimeType: 'image/png', buffer: avatarPng });
+await page.getByText(/ostrakon\.png · \d+ KB/).waitFor();
+await shot(page, `${tag}-profile-avatar-upload`, { full: false });
+await main().getByRole('button', { name: 'Save' }).last().click();
+await toast('Avatar updated');
+assert.ok(await page.locator('header img[src^="data:image/png"]').first().isVisible(), 'header shows the upload');
+await main().getByText('Image URL', { exact: true }).click();
+const avatarUrl = page.locator('#avatar-url');
+await avatarUrl.fill('http://images.example.com/ostrakon.png');
+await main().getByRole('button', { name: 'Save' }).last().click();
+await page.getByText('Use an https URL.').waitFor();
+await avatarUrl.fill('https://broken.example.com/ostrakon.png');
+await main().getByRole('button', { name: 'Save' }).last().click();
+await page.getByRole('button', { name: /Checking image/ }).waitFor();
+await page.getByText('No image loaded from this URL.').waitFor();
+await shot(page, `${tag}-profile-avatar-url-error`, { full: false });
+await avatarUrl.fill('https://images.example.com/ostrakon.png');
+await main().getByRole('button', { name: 'Save' }).last().click();
+// The upload's toast may still be up, so wait on the header instead.
+await page.locator('header img[src="https://images.example.com/ostrakon.png"]').waitFor();
+await shot(page, `${tag}-profile-avatar-url`, { full: false });
+await nav(page, '/agents');
+assert.ok(await main().locator('img[src="https://images.example.com/ostrakon.png"]').isVisible(), 'agents list shows the avatar');
+await nav(page, '/agents/ag_0str/profile');
+await main().getByText('Sigil', { exact: true }).click();
+await main().getByRole('button', { name: 'Save' }).last().click();
+await toast('Avatar reset to the sigil');
+assert.equal(await page.locator('header img').count(), 0, 'sigil is back');
+step('profile avatar: type and size checks, upload, https check, failed load, URL, sigil');
+
 // 6. Revoke with cancel, then confirm
+await nav(page, '/agents/ag_t9x1');
 await page.getByRole('button', { name: /^More for/ }).focus();
 await page.keyboard.press('Enter');
 await page.getByRole('menuitem', { name: 'Revoke registration' }).focus();
@@ -242,5 +347,7 @@ await page.getByRole('menuitem', { name: 'Sign out' }).click();
 await page.waitForURL(/\/sign-in/);
 step('empty state, account menu, sign out');
 
-console.log(errors.length ? `console errors:\n${errors.join('\n')}` : 'no console errors');
+// The broken avatar URL fails on purpose (the check, then the preview), so its load errors are expected.
+const unexpected = errors.filter((e) => !e.includes('net::ERR_FAILED'));
+console.log(unexpected.length ? `console errors:\n${unexpected.join('\n')}` : 'no console errors');
 await browser.close();
