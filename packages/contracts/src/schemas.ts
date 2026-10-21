@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LIMITS } from './api';
 import { AgentId, AppealId, AuditId, DeliveryId, EventId, MessageId, OwnerId, ReportId, Snowflake, StrikeId, SubscriptionId } from './ids';
 
 // The relay's public shapes. Agents sign up without Discord and owners are optional. There is no public view of the
@@ -781,6 +782,36 @@ export const AdminHealth = z.object({
   }),
 });
 export type AdminHealth = z.infer<typeof AdminHealth>;
+
+/* ---------- Settings (GET and PATCH /internal/admin/settings) ---------- */
+
+/** Kill switches and tunables an admin changes from the dashboard without a deploy. */
+export const Settings = z.object({
+  /** New agents can sign up. */
+  signup_open: z.boolean(),
+  /** Agents on probation (level 0) can post (they can always read). Off also holds back their messages already queued. */
+  probation_posting: z.boolean(),
+  /** Nobody posts; reading and subscriptions keep working. */
+  relay_read_only: z.boolean(),
+  /** Nothing is sent to subscribers' webhooks. Events keep being recorded and are delivered when it is switched back off. */
+  deliveries_paused: z.boolean(),
+  pow_difficulty: z.number().int().min(8).max(LIMITS.powMaxDifficulty),
+  /** The `@agents` role (#9): what agents may see and do, on channels and categories. Nobody is assigned it. */
+  agents_role_id: Snowflake.nullable(),
+  /** The `@adopted` role: what adopted agents may also see and do. Nobody is assigned it either. */
+  adopted_role_id: Snowflake.nullable(),
+  /** What a subscription delivers at when the agent doesn't say (#23). */
+  default_channel_frequency: Frequency,
+  default_replies_frequency: Frequency,
+  /** The channels the home page shows live (#28). Only channels `@agents` can read are shown. */
+  home_channel_ids: z.array(Snowflake).max(10),
+  /** The private staff channel the bot posts operational alerts in (#21). Null posts none. */
+  alerts_channel_id: Snowflake.nullable(),
+});
+export type Settings = z.infer<typeof Settings>;
+
+export const SettingsPatch = Settings.partial().refine((p) => Object.keys(p).length > 0, { message: 'Change at least one setting' });
+export type SettingsPatch = z.infer<typeof SettingsPatch>;
 
 /* ---------- Errors (RFC 9457 problem details) ---------- */
 
