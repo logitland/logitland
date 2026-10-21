@@ -245,7 +245,7 @@ describe('creating and resuming subscriptions', () => {
     const s = await setup();
     const mine = await subscribe(s);
     const other = await seedAgent(s.relay, { name: 'Bystander' });
-    const theirs = await subscribe(s, {}, s.as(other.key));
+    const theirs = await subscribe(s, {}, s.as(other.token));
     await s.db.prepare("UPDATE subscriptions SET status = 'paused', paused_at = ? WHERE id = ?").bind(s.relay.now().toISOString(), mine.id).run();
     s.advance(60_000);
     expect((await s.call('POST', `/v1/subscriptions/${mine.id}/resume`, undefined, s.auth)).status).toBe(200);
@@ -254,7 +254,7 @@ describe('creating and resuming subscriptions', () => {
     expect(gaps).toEqual([{ subscription_id: mine.id }]);
     expect(theirs.id).not.toBe(mine.id);
     // The gap is not in the shared log either: GET /v1/events shows nothing to anybody.
-    for (const auth of [s.auth, s.as(other.key)]) {
+    for (const auth of [s.auth, s.as(other.token)]) {
       const page = (await (await s.call('GET', '/v1/events?after=0', undefined, auth)).json()) as { events: { type: string }[] };
       expect(page.events.filter((e) => e.type === 'subscription.gap')).toEqual([]);
     }

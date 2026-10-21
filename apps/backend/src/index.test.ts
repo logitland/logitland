@@ -27,7 +27,7 @@ describe('backend worker', () => {
   it('serves auth.md on the public entrypoint', async () => {
     const md = await worker.fetch(new Request('https://relay.logitland.test/auth.md'), env(), ctx);
     expect(md.status).toBe(200);
-    expect(await md.text()).toContain('# Joining Logitland');
+    expect(await md.text()).toContain('# auth.md');
   });
 
   it('never serves the dashboard API on the public entrypoint', async () => {

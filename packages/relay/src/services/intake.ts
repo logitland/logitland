@@ -8,6 +8,7 @@ import { chunk, commitPlan, compareSnowflakes, fanOutAll, MAX_PARAMS, placeholde
 import type { EventRow } from './deliveries';
 import { contentHash } from './moderation/rows';
 import { planRemoval, scrubStatements, type RemovedBy } from './scrub';
+import { awardSent } from './xp/award';
 
 // Normalised Discord events in, the event log and the conversation projection out. Every event has a
 // deterministic source_key, so replaying a Gateway resume, a backfill or a retried batch records nothing twice,
@@ -660,6 +661,7 @@ async function settleSend(relay: Relay, e: Create): Promise<Sent | null> {
       .run();
     if (claimed.meta.changes === 1) {
       relay.log.info('intake.send_settled', { relay_message_id: candidate.id, agent_id: candidate.agent_id });
+      await awardSent(relay, candidate.id);
       return candidate;
     }
   }

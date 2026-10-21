@@ -7,7 +7,7 @@ import { ADMIN_DISCORD, seedAgent, seedOwner, type Harness } from './testing';
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
 const status = async (res: Response) => (await json(res)).status as string;
-const held = (h: Harness, agent: { key: string }, tag: string) => post(h, agent, say(`write to ${tag}@example.com about it`));
+const held = (h: Harness, agent: { token: string }, tag: string) => post(h, agent, say(`write to ${tag}@example.com about it`));
 const heldCount = async (h: Harness, agentId: string) =>
   (await h.db.prepare("SELECT COUNT(*) AS n FROM relay_messages WHERE agent_id = ? AND status = 'held'").bind(agentId).first<{ n: number }>())!.n;
 const adminCall = async (h: Harness, method: string, path: string, body: unknown = {}) =>
@@ -16,11 +16,7 @@ const adminCall = async (h: Harness, method: string, path: string, body: unknown
   });
 
 describe('the cross-agent copy hold has a minimum length', () => {
-  const agents = async (w: Awaited<ReturnType<typeof world>>) => [
-    w.a,
-    await seedAgent(w.h.relay, { tier: 'claimed' }),
-    await seedAgent(w.h.relay, { tier: 'claimed' }),
-  ];
+  const agents = async (w: Awaited<ReturnType<typeof world>>) => [w.a, await seedAgent(w.h.relay), await seedAgent(w.h.relay)];
 
   it('lets three agents say "thanks" in the same ten minutes', async () => {
     const w = await world();
@@ -92,7 +88,7 @@ describe('the cap on messages waiting for a reviewer', () => {
   it('is per agent', async () => {
     const w = await world();
     await fill(w);
-    const other = await seedAgent(w.h.relay, { tier: 'claimed' });
+    const other = await seedAgent(w.h.relay);
     expect(await status(await held(w.h, other, 'someoneelse'))).toBe('held');
   });
 
@@ -105,7 +101,7 @@ describe('the cap on messages waiting for a reviewer', () => {
     expect((await adminCall(w.h, 'POST', `/internal/admin/messages/${ids[0]}/release`)).status).toBe(200);
     expect(await status(await held(w.h, w.a, 'after-release'))).toBe('held');
     expect((await held(w.h, w.a, 'full-again')).status).toBe(429);
-    expect((await w.h.call('DELETE', `/v1/messages/${ids[1]}`, undefined, w.h.as(w.a.key))).status).toBe(200);
+    expect((await w.h.call('DELETE', `/v1/messages/${ids[1]}`, undefined, w.h.as(w.a.token))).status).toBe(200);
     expect(await status(await held(w.h, w.a, 'after-delete'))).toBe('held');
     expect((await held(w.h, w.a, 'full-once-more')).status).toBe(429);
     w.h.advance(73 * 3_600_000);
@@ -116,7 +112,7 @@ describe('the cap on messages waiting for a reviewer', () => {
   it('applies to holds that come from the duplicate check, too', async () => {
     const w = await world();
     await fill(w);
-    const [b, c] = [await seedAgent(w.h.relay, { tier: 'claimed' }), await seedAgent(w.h.relay, { tier: 'claimed' })];
+    const [b, c] = [await seedAgent(w.h.relay), await seedAgent(w.h.relay)];
     const text = 'a text that will be copied by several agents';
     // w.a is at the cap, so when it becomes the third copy its hold is refused instead.
     expect(await status(await post(w.h, b, say(text)))).toBe('sent');

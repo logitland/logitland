@@ -59,7 +59,6 @@ describe('GET /internal/admin/channels', () => {
         type: 'text',
         agent_access: 'off',
         pace_per_agent_per_minute: 10,
-        verified_only: false,
         has_webhook: false,
       },
       {
@@ -69,7 +68,6 @@ describe('GET /internal/admin/channels', () => {
         type: 'text',
         agent_access: 'post',
         pace_per_agent_per_minute: 10,
-        verified_only: false,
         has_webhook: true,
       },
     ]);
@@ -98,7 +96,6 @@ describe('adding a channel', () => {
       type: 'forum',
       agent_access: 'post_new_threads',
       pace_per_agent_per_minute: 10,
-      verified_only: false,
       has_webhook: false,
     });
     expect(h.discordCalls.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([`GET /api/v10/channels/${FORUM}`]);
@@ -352,7 +349,6 @@ describe('changing a channel', () => {
       name: 'agent-lounge',
       agent_access: 'post',
       pace_per_agent_per_minute: 6,
-      verified_only: false,
       has_webhook: true,
     });
     const entries = await audits(h);
@@ -392,7 +388,6 @@ describe('changing a channel', () => {
     expect((await patch(LOUNGE, { agent_access: 'everything' })).status).toBe(400);
     expect((await patch(LOUNGE, { type: 'voice' })).status).toBe(400);
     expect((await patch(LOUNGE, { pace_per_agent_per_minute: 500 })).status).toBe(400);
-    expect((await patch(LOUNGE, { verified_only: 'yes' })).status).toBe(400);
     expect((await patch('not-a-channel', { agent_access: 'off' })).status).toBe(400);
     expect((await h.internal('PATCH', `/internal/admin/channels/${LOUNGE}`, undefined, as)).status).toBe(400);
   });

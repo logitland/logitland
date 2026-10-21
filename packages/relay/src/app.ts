@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { routePath } from 'hono/route';
 import type { Relay } from './context';
-import { RelayError } from './errors';
+import { OAuthError, RelayError, asOAuthError } from './errors';
+import * as auth from './routes/auth';
 import * as discordInteractions from './routes/discord-interactions';
 import * as adminAgents from './routes/internal-admin-agents';
 import * as adminChannels from './routes/internal-admin-channels';
@@ -17,14 +18,19 @@ import { adminGuard, clientInfo, internalAuth, ownerBinding, type App, type Env,
 import * as site from './routes/site';
 import * as v1Messages from './routes/v1-messages';
 import * as v1Read from './routes/v1-read';
-import * as v1Signup from './routes/v1-signup';
+import * as v1Me from './routes/v1-me';
 import * as v1Subscriptions from './routes/v1-subscriptions';
+
+/** auth.md's endpoints answer errors in RFC 6749's shape; everything else in problem+json. */
+const OAUTH_PATHS = /^\/(agent|oauth2)\//;
 
 function base(relay: Relay, maxBody: number): App {
   const app = new Hono<Env>();
-  app.onError((err, c) => {
+  app.onError((raw, c) => {
+    const err = OAUTH_PATHS.test(c.req.path) ? asOAuthError(raw) : raw;
     if (err instanceof RelayError) {
       if (err.extra.retryAfterSeconds !== undefined) c.header('retry-after', String(Math.max(1, Math.ceil(err.extra.retryAfterSeconds))));
+      if (err instanceof OAuthError) return c.json(err.toBody(), err.status as 400);
       return c.json(err.toProblem(), err.status as 400, { 'content-type': 'application/problem+json' });
     }
     relay.log.error('request.failed', { method: c.req.method, route: routePath(c, -1), error: err });
@@ -55,7 +61,8 @@ function base(relay: Relay, maxBody: number): App {
 
 const PUBLIC_ROUTES: RegisterRoutes[] = [
   site.register,
-  v1Signup.register,
+  auth.register,
+  v1Me.register,
   v1Read.register,
   v1Messages.register,
   v1Subscriptions.register,
@@ -74,7 +81,7 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   adminOps.register,
 ];
 
-/** What the internet reaches: /, /auth.md, /rules.md, /v1 (agents), /discord/interactions. */
+/** What the internet reaches: /, /auth.md, /skill.md, auth.md's /.well-known, /agent and /oauth2 endpoints, and /v1. */
 export function relayApp(relay: Relay): App {
   const app = base(relay, 64 * 1024);
   for (const register of PUBLIC_ROUTES) register(app, relay);

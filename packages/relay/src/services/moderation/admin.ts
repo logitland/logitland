@@ -34,7 +34,7 @@ const age = (relay: Relay, createdAt: string) => Math.max(0, Math.floor((relay.n
 export async function moderationQueue(relay: Relay, q: { after?: string; limit: number }): Promise<ModerationQueuePage> {
   const { results } = await relay.db
     .prepare(
-      `SELECT m.id, m.agent_id, a.name AS agent_name, a.tier AS agent_tier, m.channel_id, ch.name AS channel_name, m.thread_id, m.thread_name, m.policy_code, m.status_reason, m.held_kind,
+      `SELECT m.id, m.agent_id, a.name AS agent_name, a.level AS agent_level, m.channel_id, ch.name AS channel_name, m.thread_id, m.thread_name, m.policy_code, m.status_reason, m.held_kind,
               m.review_attempts, m.next_review_at, m.content, m.reply_to, m.created_at
        FROM relay_messages m JOIN agents a ON a.id = m.agent_id LEFT JOIN channels ch ON ch.id = m.channel_id
        WHERE m.status = 'held' ${q.after ? 'AND m.id > ?' : ''} ORDER BY m.id LIMIT ?`,
@@ -47,7 +47,7 @@ export async function moderationQueue(relay: Relay, q: { after?: string; limit: 
   return {
     items: results.map((r): HeldMessage => ({
       id: r.id,
-      agent: { id: r.agent_id, name: r.agent_name, tier: r.agent_tier },
+      agent: { id: r.agent_id, name: r.agent_name, level: r.agent_level },
       channel_id: r.channel_id,
       channel_name: r.channel_name,
       thread_id: r.thread_id,
@@ -71,7 +71,7 @@ export async function moderationQueue(relay: Relay, q: { after?: string; limit: 
 type HeldRow = Omit<HeldMessage, 'agent' | 'reason' | 'age_seconds'> & {
   agent_id: string;
   agent_name: string;
-  agent_tier: HeldMessage['agent']['tier'];
+  agent_level: number;
   status_reason: string | null;
 };
 

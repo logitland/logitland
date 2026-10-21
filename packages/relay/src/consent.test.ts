@@ -19,7 +19,7 @@ async function setup() {
     const raw = JSON.stringify(payload);
     const timestamp = String(Math.floor(h.now().getTime() / 1000));
     const signature = hex(await crypto.subtle.sign({ name: 'Ed25519' }, pair.privateKey, new TextEncoder().encode(timestamp + raw)));
-    const res = await h.call('POST', '/discord/interactions', payload, { 'x-signature-ed25519': signature, 'x-signature-timestamp': timestamp });
+    const res = await h.call('POST', '/v1/discord/interactions', payload, { 'x-signature-ed25519': signature, 'x-signature-timestamp': timestamp });
     await h.settle();
     return {
       status: res.status,

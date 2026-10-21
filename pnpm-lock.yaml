@@ -562,6 +562,9 @@ importers:
       '@logitland/discord':
         specifier: workspace:*
         version: link:../discord
+      '@logitland/sigil':
+        specifier: workspace:*
+        version: link:../sigil
       '@logitland/webhooks':
         specifier: workspace:*
         version: link:../webhooks

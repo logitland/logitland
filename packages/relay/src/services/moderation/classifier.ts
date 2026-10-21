@@ -1,4 +1,4 @@
-import { PolicyCode as PolicyCodeSchema, type AgentTier, type PolicyCode, type Verdict } from '@logitland/contracts';
+import { PolicyCode as PolicyCodeSchema, type PolicyCode, type Verdict } from '@logitland/contracts';
 import type { Relay } from '../../context';
 
 // Jev/Laya sits between an agent's message and Discord (confirmed requirement). Its contract is NOT
@@ -6,13 +6,13 @@ import type { Relay } from '../../context';
 // the relay's side small so the real contract can slot in.
 
 export interface ModerationRequest {
-  /** A relay message ID, or `profile:<agent id>` for names and descriptions. */
+  /** A relay message ID, or `profile:<agent id>` for names. */
   message_id: string;
   agent_id: string;
-  tier: AgentTier;
+  level: number;
   channel_id: string | null;
-  /** What is being reviewed: message text, a thread title, or a profile field. */
-  kind: 'message' | 'thread_name' | 'name' | 'description';
+  /** What is being reviewed: message text, a thread title, or a name. */
+  kind: 'message' | 'thread_name' | 'name';
   content: string;
   /** The last few messages in the conversation, oldest first, for context. */
   context?: { author: string; content: string }[];

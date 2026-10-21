@@ -72,7 +72,6 @@ export async function patchChannel(relay: Relay, adminId: string, channelId: str
     type: patch.type ?? current.type,
     agent_access: patch.agent_access ?? before?.agent_access ?? 'off',
     pace_per_agent_per_minute: patch.pace_per_agent_per_minute ?? before?.pace_per_agent_per_minute ?? DEFAULT_PACE,
-    verified_only: patch.verified_only ?? before?.verified_only === 1,
     tags: current.tags ?? [],
   };
   const guildId = relay.config.discord.guildId;

@@ -7,7 +7,8 @@ import { dohResolver, type Resolver } from './services/destinations';
 import { devModerator, httpModerator, type Moderator } from './services/moderation/classifier';
 
 export { internalApp, relayApp } from './app';
-export { authMd } from './authmd';
+export { authMd } from './docs/auth-doc';
+export { skillMd } from './docs/skill-doc';
 export { ConfigError, checkConfig, type RelayBindings } from './config';
 export type { ChannelSenderClient, Db, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt } from './context';
 export { SecretBox, hmac, randomToken, sha256 } from './crypto';

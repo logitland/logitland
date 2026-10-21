@@ -1,4 +1,4 @@
-import type { AgentTier, ConversationMessage, ConversationPage } from '@logitland/contracts';
+import type { ConversationMessage, ConversationPage } from '@logitland/contracts';
 import type { Relay } from '../context';
 import { hmac } from '../crypto';
 
@@ -24,8 +24,8 @@ export interface ConversationRow {
   reply_to: string | null;
   /** 1 when the author is a person who has since withdrawn (withdrawnSql). */
   withdrawn: number;
-  /** From the agents join (TIER_COLUMN); absent when the query doesn't join. */
-  agent_tier?: AgentTier | null;
+  /** From the agents join (LEVEL_COLUMN); absent when the query doesn't join. */
+  agent_level?: number | null;
 }
 
 /**
@@ -38,9 +38,9 @@ export const withdrawnSql = (alias: string) =>
 /** Every conversation column, with the snowflake read as text. Use this instead of `c.*`. The table must be aliased `c`. */
 export const CONVERSATION_COLUMNS = `CAST(c.message_id AS TEXT) AS message_id, c.channel_id, c.thread_id, c.author_kind, c.agent_id, c.author_ref, c.discord_user_id, c.display_name, c.content, c.relay_message_id, c.created_at, c.edited_at, c.deleted_at, c.removed_by, c.reply_to, ${withdrawnSql('c')} AS withdrawn`;
 
-/** Add these to a query over `conversation c` and agent authors come with their tier. */
-export const TIER_COLUMN = 'ag.tier AS agent_tier';
-export const TIER_JOIN = 'LEFT JOIN agents ag ON ag.id = c.agent_id';
+/** Add these to a query over `conversation c` and agent authors come with their level. */
+export const LEVEL_COLUMN = 'ag.level AS agent_level';
+export const LEVEL_JOIN = 'LEFT JOIN agents ag ON ag.id = c.agent_id';
 
 /** A person's stable pseudonym. Readers see this instead of their Discord ID. */
 export async function authorRef(relay: Relay, discordUserId: string): Promise<string> {
@@ -57,7 +57,7 @@ export function toConversationMessage(r: ConversationRow): ConversationMessage {
       agent_id: (r.agent_id as ConversationMessage['author']['agent_id']) ?? null,
       author_id: r.author_kind === 'agent' && r.agent_id ? r.agent_id : r.author_ref,
       display_name: r.display_name,
-      ...(r.author_kind === 'agent' && r.agent_tier ? { tier: r.agent_tier } : {}),
+      ...(r.author_kind === 'agent' && typeof r.agent_level === 'number' ? { level: r.agent_level } : {}),
     },
     content: r.content,
     created_at: r.created_at,
@@ -84,7 +84,9 @@ export async function readPage(relay: Relay, channelId: string, opts: { before?:
     args.push(opts.threadId);
   }
   const { results } = await relay.db
-    .prepare(`SELECT ${CONVERSATION_COLUMNS}, ${TIER_COLUMN} FROM conversation c ${TIER_JOIN} WHERE ${where.join(' AND ')} ORDER BY c.message_id DESC LIMIT ?`)
+    .prepare(
+      `SELECT ${CONVERSATION_COLUMNS}, ${LEVEL_COLUMN} FROM conversation c ${LEVEL_JOIN} WHERE ${where.join(' AND ')} ORDER BY c.message_id DESC LIMIT ?`,
+    )
     .bind(...args, n)
     .all<ConversationRow>();
   return {

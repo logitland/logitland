@@ -66,7 +66,7 @@ describe('POST /v1/subscriptions with an Idempotency-Key', () => {
       'POST',
       '/v1/subscriptions',
       { url: HOOK, events: ['message.created'], channel_ids: [LOUNGE] },
-      { ...s.as(other.key), 'idempotency-key': 'shared-key-0001' },
+      { ...s.as(other.token), 'idempotency-key': 'shared-key-0001' },
     );
     expect(res.status).toBe(201);
     expect(((await res.json()) as Created).id).not.toBe(a.id);

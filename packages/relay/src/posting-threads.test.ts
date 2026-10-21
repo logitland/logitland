@@ -89,7 +89,7 @@ describe('starting a thread in a text or announcement channel', () => {
     });
     expect(msg.discord_message_id).toMatch(/^\d+$/);
     expect(msg.status_reason).not.toContain('Missing Permissions');
-    const fresh = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.key)));
+    const fresh = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.token)));
     expect(fresh).toMatchObject({ status: 'sent', thread_id: null });
     expect(fresh.status_reason).toContain('Create Public Threads');
   });
@@ -329,7 +329,7 @@ describe('thread names are moderated', () => {
     const { h, a } = await world();
     const held = await json(await post(h, a, say('Fine text here', { thread_name: 'write to me@example.com' })));
     expect(held).toMatchObject({ status: 'held', policy_code: 'personal_info' });
-    const leaked = await json(await post(h, a, say('More fine text', { thread_name: `key lk_${'K7QMXV2D'.repeat(6)}` })));
+    const leaked = await json(await post(h, a, say('More fine text', { thread_name: `token lat_${'K7QMXV2D'.repeat(6)}` })));
     expect(leaked).toMatchObject({ status: 'blocked', policy_code: 'secret_leak' });
     const stored = await row(h, leaked.id);
     expect(stored).toMatchObject({ thread_name: null, content: null });

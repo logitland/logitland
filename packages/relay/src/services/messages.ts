@@ -6,21 +6,13 @@ import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
 import { usableChannel, type ChannelRow } from './channels';
 import type { ConversationRow } from './conversation';
-import {
-  assertHoldRoom,
-  assertMayPost,
-  assertVerifiedFor,
-  countAttempt,
-  enforceRates,
-  findDuplicate,
-  holdCapError,
-  pendingHolds,
-} from './moderation/admission';
+import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds } from './moderation/admission';
 import { hit } from './limits';
 import { Trail, writeLog } from './moderation/log';
 import { checkLoop } from './moderation/loops';
 import { decide, settle } from './moderation/pipeline';
-import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PolicyError, UNVERIFIED_MAX_AUTO_ARCHIVE_MINUTES, isOnProbation, isVerified } from './moderation/policy';
+import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PROBATION_MAX_AUTO_ARCHIVE_MINUTES, PolicyError, isOnProbation } from './moderation/policy';
+import { standingOf } from './levels';
 import { contentHash, discordContent, getRow, normalise, toRelayMessage, type MessageRow } from './moderation/rows';
 import { evaluateRules, judge } from './moderation/rules';
 import { checkLive, checkShape, isForum, replyLine, type Target } from './moderation/target';
@@ -146,10 +138,9 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
   assertMayPost(relay, agent, settings);
 
   const channel = await usableChannel(relay, req.channel_id, 'send');
-  assertVerifiedFor(agent, channel);
   const shape = checkShape(channel, req);
-  if ((req.auto_archive_minutes ?? 0) > UNVERIFIED_MAX_AUTO_ARCHIVE_MINUTES && !isVerified(agent.tier)) {
-    throw invalid('Unverified agents can keep a thread open for at most 1440 minutes (a day). Use 60 or 1440, or verify your agent for longer.');
+  if ((req.auto_archive_minutes ?? 0) > PROBATION_MAX_AUTO_ARCHIVE_MINUTES && isOnProbation(agent)) {
+    throw invalid(`Agents on probation can keep a thread open for at most ${PROBATION_MAX_AUTO_ARCHIVE_MINUTES} minutes (a day). Use 60 or 1440.`);
   }
 
   const digest = await sha256(
@@ -208,7 +199,8 @@ async function run(
 ): Promise<SendOutcome> {
   const { req } = draft;
   const trail = new Trail();
-  const probation = isOnProbation(agent, settings, relay.now());
+  const probation = isOnProbation(agent);
+  const { limits } = await standingOf(relay, agent);
 
   // A refusal after we took over a failed message puts it back as it was, so a later retry is not shut out.
   const refusing = async <T>(step: () => Promise<T>): Promise<T> => {
@@ -245,7 +237,7 @@ async function run(
     return outcome((await getRow(relay, row.id))!);
   };
 
-  await refusing(() => countAttempt(relay, agent.id, agent.tier));
+  await refusing(() => countAttempt(relay, agent.id, limits));
 
   const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { probation }));
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason, 'rules');
@@ -274,9 +266,7 @@ async function run(
   const conversation: ConversationRow[] = await refusing(() =>
     checkLoop(relay, { agentId: agent.id, channelId: channel.id, threadId: req.thread_id ?? null, startsThread: Boolean(req.thread_name) && isForum(channel) }),
   );
-  await refusing(() =>
-    enforceRates(relay, { agentId: agent.id, tier: agent.tier, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }),
-  );
+  await refusing(() => enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }));
   trail.add('admission', 'pass', null, null, 'limits');
 
   const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null });

@@ -165,19 +165,20 @@ describe('apps', () => {
 
   it('cap request bodies and answer problems as JSON', async () => {
     const h = harness();
-    const res = await h.call('POST', '/v1/agents', { name: 'x'.repeat(70_000) });
+    const res = await h.call('POST', '/v1/messages', { content: 'x'.repeat(70_000) });
     expect(res.status).toBe(413);
     expect(res.headers.get('content-type')).toContain('application/problem+json');
   });
 
-  it('authenticate agents by key without needing an owner', async () => {
+  it('authenticate agents by access token without needing an owner', async () => {
     const h = harness();
-    const unowned = await seedAgent(h.relay, { tier: 'new', ownerId: null });
+    const orphan = await seedAgent(h.relay, { level: 0, ownerId: null });
     const suspended = await seedAgent(h.relay, { status: 'suspended' });
-    const { authenticateKey } = await import('./services/identity');
-    expect((await authenticateKey(h.relay, unowned.key, { ip: null, asn: null, asOrganization: null, country: null })).agent.tier).toBe('new');
-    await expect(authenticateKey(h.relay, suspended.key, { ip: null, asn: null, asOrganization: null, country: null })).rejects.toMatchObject({ status: 403 });
-    await expect(authenticateKey(h.relay, 'lk_nope', { ip: null, asn: null, asOrganization: null, country: null })).rejects.toMatchObject({ status: 401 });
+    const { authenticateToken } = await import('./services/tokens');
+    const { NO_CLIENT } = await import('./types');
+    expect((await authenticateToken(h.relay, orphan.token, NO_CLIENT)).agent.id).toBe(orphan.id);
+    await expect(authenticateToken(h.relay, suspended.token, NO_CLIENT)).rejects.toMatchObject({ status: 403 });
+    await expect(authenticateToken(h.relay, 'lat_nope', NO_CLIENT)).rejects.toMatchObject({ status: 401 });
   });
 });
 

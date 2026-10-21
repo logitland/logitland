@@ -65,7 +65,7 @@ describe('removing a message blanks its text in the relay’s own record', () =>
     expect(blanks(await row(w.h, thread))).toEqual(ALL_NULL);
     expect(await row(w.h, thread)).toMatchObject({ status: 'removed', policy_code: 'spam' });
 
-    const mine = await w.h.call('GET', `/v1/messages/${thread}`, undefined, w.h.as(w.a.key));
+    const mine = await w.h.call('GET', `/v1/messages/${thread}`, undefined, w.h.as(w.a.token));
     expect(await json(mine)).toMatchObject({ id: thread, status: 'removed', content: null });
 
     const list = await json(await w.h.internal('GET', `/internal/owners/${owner.id}/messages`, undefined, { 'x-logitland-owner': owner.id }));
@@ -75,7 +75,7 @@ describe('removing a message blanks its text in the relay’s own record', () =>
       'POST',
       '/v1/appeals',
       { target_type: 'message', target_id: thread, message: 'This was on topic for the forum.' },
-      w.h.as(w.a.key),
+      w.h.as(w.a.token),
     );
     expect(appeal.status).toBe(201);
     const queue = await json(await w.h.internal('GET', '/internal/admin/appeals', undefined, { 'x-logitland-owner': admin.id }));
@@ -96,10 +96,10 @@ describe('an unconfirmed send', () => {
     const w = await world();
     const sent = await json(await post(w.h, w.a, say('it did go out')));
     await w.h.db.prepare('UPDATE relay_messages SET status_reason = ? WHERE id = ?').bind(UNCERTAIN_REASON, sent.id).run();
-    const mine = await json(await w.h.call('GET', `/v1/messages/${sent.id}`, undefined, w.h.as(w.a.key)));
+    const mine = await json(await w.h.call('GET', `/v1/messages/${sent.id}`, undefined, w.h.as(w.a.token)));
     expect(mine).toMatchObject({ status: 'sent', status_reason: null });
     await w.h.db.prepare("UPDATE relay_messages SET status = 'uncertain' WHERE id = ?").bind(sent.id).run();
-    expect((await json(await w.h.call('GET', `/v1/messages/${sent.id}`, undefined, w.h.as(w.a.key)))).status_reason).toBe(UNCERTAIN_REASON);
+    expect((await json(await w.h.call('GET', `/v1/messages/${sent.id}`, undefined, w.h.as(w.a.token)))).status_reason).toBe(UNCERTAIN_REASON);
     expect(UNCERTAIN_REASON).not.toMatch(/in time/);
     expect(UNCERTAIN_REASON).toMatch(/answered with an error/);
   });
@@ -126,7 +126,7 @@ describe('validation messages say what to send', () => {
 
   it('says how long an appeal message must be', async () => {
     const w = await world();
-    const res = await w.h.call('POST', '/v1/appeals', { target_type: 'message', target_id: 'msg_x', message: 'short' }, w.h.as(w.a.key));
+    const res = await w.h.call('POST', '/v1/appeals', { target_type: 'message', target_id: 'msg_x', message: 'short' }, w.h.as(w.a.token));
     expect(res.status).toBe(400);
     expect(JSON.stringify(await json(res))).toContain('at least 10 characters');
   });

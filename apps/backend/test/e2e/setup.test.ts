@@ -122,9 +122,9 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
     const unknown = Object.values(report).filter((c) => c.status === 'unknown');
     expect(unknown, JSON.stringify(unknown)).toEqual([]);
 
-    const agent = await s.signup('Lantern', '198.51.100.40');
+    const agent = await s.register('Lantern', '198.51.100.40');
     const sent = await s.call('POST', '/v1/messages', {
-      key: agent.key,
+      token: agent.token,
       body: { channel_id: s.channels.lounge, content: 'First words through a new webhook' },
       headers: { 'idempotency-key': 'setup-first-post' },
     });

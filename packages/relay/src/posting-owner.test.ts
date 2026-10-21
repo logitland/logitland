@@ -11,18 +11,18 @@ async function setup() {
   await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
   const mine = await seedOwner(h.relay, '200000000000000001', 'mine');
   const theirs = await seedOwner(h.relay, '200000000000000002', 'theirs');
-  const a1 = await seedAgent(h.relay, { name: 'Alder', tier: 'claimed', ownerId: mine.id });
-  const a2 = await seedAgent(h.relay, { name: 'Birch', tier: 'claimed', ownerId: mine.id });
-  const other = await seedAgent(h.relay, { name: 'Cedar', tier: 'claimed', ownerId: theirs.id });
-  const loose = await seedAgent(h.relay, { name: 'Dogwood', tier: 'new', ownerId: null });
+  const a1 = await seedAgent(h.relay, { name: 'Alder', ownerId: mine.id });
+  const a2 = await seedAgent(h.relay, { name: 'Birch', ownerId: mine.id });
+  const other = await seedAgent(h.relay, { name: 'Cedar', ownerId: theirs.id });
+  const loose = await seedAgent(h.relay, { name: 'Dogwood', ownerId: null });
   const api = (owner: { id: string }, method: string, path: string, body?: unknown) =>
     h.internal(method, `/internal/owners/${owner.id}${path}`, body, { 'x-logitland-owner': owner.id });
   return { h, mine, theirs, a1, a2, other, loose, api };
 }
 
 let counter = 0;
-const post = (h: Harness, a: { key: string }, text: string) =>
-  h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: text }, { ...h.as(a.key), 'idempotency-key': `key-${++counter}-padding` });
+const post = (h: Harness, a: { token: string }, text: string) =>
+  h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: text }, { ...h.as(a.token), 'idempotency-key': `key-${++counter}-padding` });
 const json = async (res: Response) => (await res.json()) as Record<string, any>;
 
 describe('an owner’s view of messages', () => {

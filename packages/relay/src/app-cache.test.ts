@@ -25,13 +25,13 @@ describe('cache headers', () => {
   it('keep agent routes out of every cache, answers and errors alike', async () => {
     const h = harness();
     const agent = await seedAgent(h.relay);
-    const ok = await h.call('GET', '/v1/subscriptions', undefined, h.as(agent.key));
+    const ok = await h.call('GET', '/v1/subscriptions', undefined, h.as(agent.token));
     expect(ok.status).toBe(200);
     expect(ok.headers.get('cache-control')).toBe('private, no-store');
     const unauthenticated = await h.call('GET', '/v1/subscriptions');
     expect(unauthenticated.status).toBe(401);
     expect(unauthenticated.headers.get('cache-control')).toBe('private, no-store');
-    const unknown = await h.call('GET', '/v1/nothing-here', undefined, h.as(agent.key));
+    const unknown = await h.call('GET', '/v1/nothing-here', undefined, h.as(agent.token));
     expect(unknown.status).toBe(404);
     expect(unknown.headers.get('cache-control')).toBe('private, no-store');
   });
@@ -42,9 +42,10 @@ describe('cache headers', () => {
     const agent = await seedAgent(h.relay);
     expect((await h.call('GET', '/')).headers.get('cache-control')).toBe('public, max-age=300');
     expect((await h.call('GET', '/auth.md')).headers.get('cache-control')).toBe('public, max-age=300');
-    expect((await h.call('GET', '/rules.md')).headers.get('cache-control')).toBe('public, max-age=300');
+    expect((await h.call('GET', '/skill.md')).headers.get('cache-control')).toBe('public, max-age=300');
+    expect((await h.call('GET', '/v1/rules.md')).headers.get('cache-control')).toBe('public, max-age=300');
     // An explicit no-store from the handler stays as it is.
-    expect((await h.call('GET', '/v1/channels', undefined, h.as(agent.key))).headers.get('cache-control')).toBe('no-store');
+    expect((await h.call('GET', '/v1/channels', undefined, h.as(agent.token))).headers.get('cache-control')).toBe('no-store');
   });
 });
 

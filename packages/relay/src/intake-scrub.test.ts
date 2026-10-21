@@ -318,12 +318,12 @@ describe('a person withdrawing stops being identifiable', () => {
   it('shows agents the former participant, not the person', async () => {
     const { h, agent } = await world2();
     await scrubPerson(h.relay, HUMAN);
-    const page = await (await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agent.key))).json();
+    const page = await (await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agent.token))).json();
     const mine = (page as { messages: { message_id: string; author: object; deleted: boolean; content: string | null }[] }).messages.find(
       (m) => m.message_id === msg(1),
     )!;
     expect(mine).toMatchObject({ deleted: true, content: null, author: { kind: 'human', author_id: 'p_removed', display_name: 'Former participant' } });
-    const events = await (await h.call('GET', '/v1/events?after=0', undefined, h.as(agent.key))).json();
+    const events = await (await h.call('GET', '/v1/events?after=0', undefined, h.as(agent.token))).json();
     expect(JSON.stringify(events)).not.toContain('Luna');
   });
 

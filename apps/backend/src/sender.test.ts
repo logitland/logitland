@@ -27,7 +27,7 @@ async function setup() {
   // The relay's own sender does nothing, so messages stop at `queued`; the queue under test sends them.
   const h = harness({ moderator: { review: async () => ({ verdict: 'pass' }) }, sender: { enqueue: async () => {} } });
   await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
-  const agent = await seedAgent(h.relay, { tier: 'claimed' });
+  const agent = await seedAgent(h.relay);
   const clock = { t: 1_000_000 };
   const mem = memoryStorage();
   const queue = (storage: QueueStorage = mem.storage, relay: () => Relay = () => h.relay) => new SendQueue(storage, relay, () => clock.t);
@@ -37,7 +37,7 @@ async function setup() {
       'POST',
       '/v1/messages',
       { channel_id: LOUNGE, content: text },
-      { ...h.as(agent.key), 'idempotency-key': `sender-key-${++n}-padding` },
+      { ...h.as(agent.token), 'idempotency-key': `sender-key-${++n}-padding` },
     );
     const msg = (await res.json()) as { id: string; status: string };
     expect(msg.status).toBe('queued');

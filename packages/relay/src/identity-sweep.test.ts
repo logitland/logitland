@@ -1,10 +1,9 @@
-import { LIMITS, newId } from '@logitland/contracts';
+import { ClaimAttempt, LIMITS, newId } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { adminAct, deleteAgent, deleteOwner } from './services/identity';
+import { deleteOwner } from './services/identity';
 import { evaluateRules } from './services/moderation/rules';
 import { checkName, nameKey } from './services/names';
-import { updateSettings } from './services/settings';
-import { asOwner, count, easyChallenges, ipHeader, signUp, signedUp, seedSubscription } from './signup.helpers';
+import { asOwner, count, easyChallenges, ipHeader, registered, seedSubscription, signUp, tokenCall } from './signup.helpers';
 import { ADMIN_DISCORD, harness, seedAgent, seedOwner, type Harness } from './testing';
 
 const DAY = 86_400_000;
@@ -26,49 +25,52 @@ const strike = (h: Harness, agentId: string) =>
     .bind(newId('strike'), agentId, 'spam', 'x', 'system', h.now().toISOString(), new Date(h.now().getTime() + 30 * DAY).toISOString())
     .run();
 
+/** An orphan with an open adoption code, as the agent shows it to its future owner. */
+async function wantsAdoption(h: Harness) {
+  const agent = await seedAgent(h.relay, { name: 'Wants Claim' });
+  const res = await h.call('POST', '/agent/identity/claim', undefined, h.as(agent.token));
+  return ClaimAttempt.parse(await res.json()).claim_attempt.user_code;
+}
+
 describe('R1-1 Workers in other zones', () => {
   it('limits and bans follow the Worker zone, not the address every Worker shares', async () => {
     const { h, act } = await withAdmin();
     await easyChallenges(h);
-    for (let i = 0; i < 3; i++) expect((await signUp(h, `Zone A ${i}`, { headers: worker('a.example') })).status).toBe(201);
+    for (let i = 0; i < 3; i++) expect((await signUp(h, `Zone A ${i}`, { headers: worker('a.example') })).status).toBe(200);
     expect((await signUp(h, 'Zone A 4', { headers: worker('a.example') })).status).toBe(429);
-    const b = await signUp(h, 'Zone B 1', { headers: worker('b.example') });
-    expect(b.status).toBe(201);
+    expect((await signUp(h, 'Zone B 1', { headers: worker('b.example') })).status).toBe(200);
 
     const a1 = await h.db.prepare("SELECT id FROM agents WHERE name = 'Zone A 0'").first<{ id: string }>();
     expect((await act(a1!.id, { action: 'ban', reason: 'spam' })).status).toBe(200);
     h.advance(2 * 3_600_000);
     expect((await signUp(h, 'Zone A again', { headers: worker('a.example') })).status).toBe(403);
-    expect((await signUp(h, 'Zone B 2', { headers: worker('b.example') })).status).toBe(201);
+    expect((await signUp(h, 'Zone B 2', { headers: worker('b.example') })).status).toBe(200);
   });
 
   it('ignores cf-worker from an ordinary address', async () => {
     const h = harness();
     await easyChallenges(h);
     for (let i = 0; i < 3; i++)
-      expect((await signUp(h, `Spoof ${i}`, { headers: { ...ipHeader('203.0.113.7'), 'cf-worker': `z${i}.example` } })).status).toBe(201);
+      expect((await signUp(h, `Spoof ${i}`, { headers: { ...ipHeader('203.0.113.7'), 'cf-worker': `z${i}.example` } })).status).toBe(200);
     expect((await signUp(h, 'Spoof 4', { headers: { ...ipHeader('203.0.113.7'), 'cf-worker': 'z9.example' } })).status).toBe(429);
   });
 });
 
 describe('R1-2 a ban reaches the owner', () => {
-  it('keeps the owner of a banned agent from registering or claiming until the ban ends or is lifted', async () => {
+  it('keeps the owner of a banned agent from adopting until the ban is lifted', async () => {
     const { h, act } = await withAdmin();
-    await easyChallenges(h);
     const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
     const bad = await seedAgent(h.relay, { name: 'Owned Bad', ownerId: owner.id });
     await seedAgent(h.relay, { name: 'Owned Fine', ownerId: owner.id });
     expect((await act(bad.id, { action: 'ban', reason: 'spam' })).status).toBe(200);
 
-    const register = await owned(h, owner.id, 'POST', '/agents', { name: 'Replacement', scopes: ['messages:read'] });
-    expect(register.status).toBe(403);
-    const other = await signedUp(h, 'Wants Claim');
-    const claim = await owned(h, owner.id, 'POST', '/claims', { user_code: other.claim.user_code, decision: 'approve' });
-    expect(claim.status).toBe(403);
-    expect((await owned(h, owner.id, 'POST', '/claims', { user_code: other.claim.user_code, decision: 'deny' })).status).toBe(200);
+    expect((await owned(h, owner.id, 'POST', '/adoption-tokens')).status).toBe(403);
+    const code = await wantsAdoption(h);
+    expect((await owned(h, owner.id, 'POST', '/claims', { user_code: code, decision: 'approve' })).status).toBe(403);
+    expect((await owned(h, owner.id, 'POST', '/claims', { user_code: code, decision: 'deny' })).status).toBe(200);
 
     expect((await act(bad.id, { action: 'reinstate', reason: 'a mistake' })).status).toBe(200);
-    expect((await owned(h, owner.id, 'POST', '/agents', { name: 'Replacement', scopes: ['messages:read'] })).status).toBe(201);
+    expect((await owned(h, owner.id, 'POST', '/adoption-tokens')).status).toBe(201);
   });
 
   it('lets the owner back in when the record expires', async () => {
@@ -77,30 +79,30 @@ describe('R1-2 a ban reaches the owner', () => {
     const bad = await seedAgent(h.relay, { name: 'Owned Bad', ownerId: owner.id });
     await act(bad.id, { action: 'ban', reason: 'spam' });
     h.advance(LIMITS.bannedOriginDays * DAY + 1000);
-    expect((await owned(h, owner.id, 'POST', '/agents', { name: 'Replacement', scopes: ['messages:read'] })).status).toBe(201);
+    expect((await owned(h, owner.id, 'POST', '/adoption-tokens')).status).toBe(201);
   });
 });
 
-describe('R1-4 deleting an agent with strikes', () => {
-  it('keeps its addresses closed', async () => {
+describe('R1-4 revoking an agent with strikes', () => {
+  async function revokedAfterSignup(withStrike: boolean) {
     const h = harness();
     await easyChallenges(h);
     const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
-    const a = await signedUp(h, 'Struck', { headers: ipHeader('203.0.113.7') });
-    await h.db.prepare('UPDATE agents SET owner_id = ? WHERE id = ?').bind(owner.id, a.agent_id).run();
-    await strike(h, a.agent_id);
-    await deleteAgent(h.relay, owner.id, a.agent_id);
-    expect(await count(h, 'SELECT COUNT(*) AS n FROM banned_origins WHERE agent_id = ?', a.agent_id)).toBe(2);
+    const { reg } = await registered(h, 'Struck', { headers: ipHeader('203.0.113.7') });
+    await h.db.prepare('UPDATE agents SET owner_id = ? WHERE id = ?').bind(owner.id, reg.registration_id).run();
+    if (withStrike) await strike(h, reg.registration_id);
+    expect((await owned(h, owner.id, 'DELETE', `/agents/${reg.registration_id}`)).status).toBe(204);
+    return { h, id: reg.registration_id };
+  }
+
+  it('keeps its addresses closed', async () => {
+    const { h, id } = await revokedAfterSignup(true);
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM banned_origins WHERE agent_id = ?', id)).toBe(2);
     expect((await signUp(h, 'Back Again', { headers: ipHeader('203.0.113.7') })).status).toBe(403);
   });
 
   it('leaves an agent without strikes alone', async () => {
-    const h = harness();
-    await easyChallenges(h);
-    const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
-    const a = await signedUp(h, 'Clean', { headers: ipHeader('203.0.113.7') });
-    await h.db.prepare('UPDATE agents SET owner_id = ? WHERE id = ?').bind(owner.id, a.agent_id).run();
-    await deleteAgent(h.relay, owner.id, a.agent_id);
+    const { h } = await revokedAfterSignup(false);
     expect(await count(h, 'SELECT COUNT(*) AS n FROM banned_origins')).toBe(0);
   });
 });
@@ -147,12 +149,10 @@ describe('R1-5 and R1-10 names', () => {
   });
 });
 
-describe('R1-6 claim codes are not posted', () => {
+describe('R1-6 adoption codes are not posted', () => {
   const policies = (content: string) => evaluateRules({ content }, { probation: false }).map((m) => m.policy);
-  it('blocks a claim code and a claim link', () => {
+  it('blocks an adoption code', () => {
     expect(policies('approve code 7QFM-KX2D please')).toContain('secret_leak');
-    expect(policies('https://logitland.example/claim/7QFM-KX2D')).toContain('secret_leak');
-    expect(policies('https://logitland.example/claim/qfmk-kxdd')).toContain('secret_leak');
   });
   it('leaves ordinary hyphenated text alone', () => {
     for (const text of ['in 2024-2025 we grew', 'FOOD-BARS and X-RAYS', 'call 1234-5678', 'see run-1234'])
@@ -168,85 +168,43 @@ describe('R1-7 shared signup caps', () => {
     await h.db.prepare('INSERT INTO rate_counters (key, window_start, count) VALUES (?, ?, ?)').bind('signup:all:h', start, LIMITS.signupsPerHour).run();
     const res = await signUp(h, 'Fresh Agent', { headers: ipHeader('198.51.100.77') });
     expect(res.status).toBe(429);
-    expect(((await res.json()) as { detail: string }).detail).toContain('across the relay');
+    expect(((await res.json()) as { error_description: string }).error_description).toContain('across the relay');
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(0);
   });
 
   it('does not charge the shared counters for a refused name', async () => {
     const h = harness();
     await easyChallenges(h);
-    await signedUp(h, 'Taken Name');
+    await registered(h, 'Taken Name');
     const before = await count(h, "SELECT COALESCE(SUM(count), 0) AS n FROM rate_counters WHERE key = 'signup:all:h'");
     expect((await signUp(h, 'Taken Name')).status).toBe(409);
     expect(await count(h, "SELECT COALESCE(SUM(count), 0) AS n FROM rate_counters WHERE key = 'signup:all:h'")).toBe(before);
   });
 });
 
-describe('R1-8 keys per agent', () => {
-  it('caps active keys, and revoking one makes room', async () => {
-    const h = harness();
-    const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
-    const a = await seedAgent(h.relay, { name: 'Keyed', ownerId: owner.id });
-    const issue = () => owned(h, owner.id, 'POST', `/agents/${a.id}/keys`, {});
-    for (let i = 0; i < 9; i++) expect((await issue()).status).toBe(201);
-    const full = await issue();
-    expect(full.status).toBe(409);
-    expect(((await full.json()) as { detail: string }).detail).toContain('10 active keys');
-    expect((await owned(h, owner.id, 'DELETE', `/agents/${a.id}/keys/${a.keyId}`)).status).toBe(204);
-    expect((await issue()).status).toBe(201);
-  });
-});
-
 describe('R1-9 agents per Discord account', () => {
-  it('stops claims and registrations at 10 owned agents', async () => {
+  it('stops adoption both ways at 10 owned agents', async () => {
     const h = harness();
-    await easyChallenges(h);
     const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
     for (let i = 0; i < 10; i++) await seedAgent(h.relay, { name: `Mine ${i}`, ownerId: owner.id });
-    const other = await signedUp(h, 'Wants Claim');
-    const claim = await owned(h, owner.id, 'POST', '/claims', { user_code: other.claim.user_code, decision: 'approve' });
+    const claim = await owned(h, owner.id, 'POST', '/claims', { user_code: await wantsAdoption(h), decision: 'approve' });
     expect(claim.status).toBe(403);
     expect(((await claim.json()) as { detail: string }).detail).toContain('10 agents');
-    expect((await owned(h, owner.id, 'POST', '/agents', { name: 'Eleven', scopes: ['messages:read'] })).status).toBe(403);
+    expect((await owned(h, owner.id, 'POST', '/adoption-tokens')).status).toBe(403);
   });
 });
 
-describe('R1-12 claims while signups are closed', () => {
-  it('refuses approvals', async () => {
-    const h = harness();
-    await easyChallenges(h);
-    const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
-    const a = await signedUp(h, 'Wants Claim');
-    await updateSettings(h.relay, 'own_test_setup', { signup_open: false });
-    expect((await owned(h, owner.id, 'POST', '/claims', { user_code: a.claim.user_code, decision: 'approve' })).status).toBe(403);
-    await updateSettings(h.relay, 'own_test_setup', { signup_open: true });
-    expect((await owned(h, owner.id, 'POST', '/claims', { user_code: a.claim.user_code, decision: 'approve' })).status).toBe(200);
-  });
-});
-
-describe('R1-13 reinstating an unowned banned agent', () => {
-  it('hands the admin one new key that works', async () => {
+describe('R1-13 reinstating a banned agent', () => {
+  it('lets it exchange its identity assertion again', async () => {
     const { h, act } = await withAdmin();
     await easyChallenges(h);
-    const a = await signedUp(h, 'Unowned');
-    await act(a.agent_id, { action: 'ban', reason: 'a mistake' });
-    expect((await h.call('GET', '/v1/me', undefined, h.as(a.key.secret))).status).toBe(401);
-    const res = await act(a.agent_id, { action: 'reinstate', reason: 'sorry' });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { key?: { secret: string } };
-    expect(body.key?.secret).toMatch(/^lk_/);
-    expect((await h.call('GET', '/v1/me', undefined, h.as(body.key!.secret))).status).toBe(200);
-  });
-
-  it('adds no key for a suspended agent or one with an owner', async () => {
-    const { h, act } = await withAdmin();
-    const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
-    const mine = await seedAgent(h.relay, { name: 'Mine', ownerId: owner.id });
-    await act(mine.id, { action: 'ban', reason: 'for the test' });
-    expect(((await (await act(mine.id, { action: 'reinstate' })).json()) as { key?: unknown }).key).toBeUndefined();
-    const susp = await seedAgent(h.relay, { name: 'Susp' });
-    await act(susp.id, { action: 'suspend', reason: 'for the test' });
-    expect(((await (await act(susp.id, { action: 'reinstate' })).json()) as { key?: unknown }).key).toBeUndefined();
+    const { reg, auth } = await registered(h, 'Unowned');
+    const exchange = () => tokenCall(h, { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: reg.identity_assertion });
+    await act(reg.registration_id, { action: 'ban', reason: 'a mistake' });
+    expect((await h.call('GET', '/v1/me', undefined, auth)).status).toBe(401);
+    expect(await (await exchange()).json()).toMatchObject({ error: 'invalid_grant' });
+    expect((await act(reg.registration_id, { action: 'reinstate', reason: 'sorry' })).status).toBe(200);
+    expect((await exchange()).status).toBe(200);
   });
 });
 
@@ -254,23 +212,12 @@ describe('R1-37 bans close the signup network, not every network used', () => {
   it('bans the signup /24 and every address, not a network only used from', async () => {
     const { h, act } = await withAdmin();
     await easyChallenges(h);
-    const a = await signedUp(h, 'Roamer', { headers: ipHeader('203.0.113.7') });
-    await h.call('GET', '/v1/me', undefined, { ...h.as(a.key.secret), ...ipHeader('198.51.100.9') });
-    await act(a.agent_id, { action: 'ban', reason: 'for the test' });
-    expect((await signUp(h, 'Neighbour', { headers: ipHeader('198.51.100.200') })).status).toBe(201);
+    const { reg, auth } = await registered(h, 'Roamer', { headers: ipHeader('203.0.113.7') });
+    await h.call('GET', '/v1/me', undefined, { ...auth, ...ipHeader('198.51.100.9') });
+    await act(reg.registration_id, { action: 'ban', reason: 'for the test' });
+    expect((await signUp(h, 'Neighbour', { headers: ipHeader('198.51.100.200') })).status).toBe(200);
     expect((await signUp(h, 'Neighbour Two', { headers: ipHeader('198.51.100.9') })).status).toBe(403);
     expect((await signUp(h, 'Same Net', { headers: ipHeader('203.0.113.200') })).status).toBe(403);
-  });
-});
-
-describe('R1-38 owners can not edit a suspended or banned agent', () => {
-  it.each(['suspend', 'ban'])('refuses a PATCH after %s', async (action) => {
-    const { h, act } = await withAdmin();
-    const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
-    const a = await seedAgent(h.relay, { name: 'Edited', ownerId: owner.id });
-    await act(a.id, { action, reason: 'for the test' });
-    expect((await owned(h, owner.id, 'PATCH', `/agents/${a.id}`, { name: 'Innocent' })).status).toBe(403);
-    expect((await h.db.prepare('SELECT name FROM agents WHERE id = ?').bind(a.id).first<{ name: string }>())!.name).toBe('Edited');
   });
 });
 
@@ -287,17 +234,7 @@ describe('R1-40 deleting an owner turns their off agents on', () => {
   });
 });
 
-describe('R1-45 owner_hint', () => {
-  it('goes through the description rules', async () => {
-    const h = harness();
-    await easyChallenges(h);
-    expect((await signUp(h, 'Hinter', { owner_hint: 'join discord.gg/abcdef to keep your account' })).status).toBe(422);
-    expect((await signUp(h, 'Hinter', { owner_hint: 'approve‮ to keep your account' })).status).toBe(422);
-    expect((await signUp(h, 'Hinter', { owner_hint: '@ada on Discord' })).status).toBe(201);
-  });
-});
-
-describe('R1-61 a deleted agent’s name leaves its messages', () => {
+describe('R1-61 a revoked agent’s name leaves its messages', () => {
   it('renames the conversation rows and the events', async () => {
     const h = harness();
     const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
@@ -315,29 +252,23 @@ describe('R1-61 a deleted agent’s name leaves its messages', () => {
       )
       .bind(payload, h.now().toISOString())
       .run();
-    await deleteAgent(h.relay, owner.id, a.id);
-    expect((await h.db.prepare('SELECT display_name FROM conversation').first<{ display_name: string }>())!.display_name).toBe('Deleted agent');
+    expect((await owned(h, owner.id, 'DELETE', `/agents/${a.id}`)).status).toBe(204);
+    expect((await h.db.prepare('SELECT display_name FROM conversation').first<{ display_name: string }>())!.display_name).toBe('Revoked agent');
     const ev = (await h.db.prepare('SELECT payload FROM events').first<{ payload: string }>())!.payload;
-    expect(JSON.parse(ev).data.author.display_name).toBe('Deleted agent');
+    expect(JSON.parse(ev).data.author.display_name).toBe('Revoked agent');
   });
 });
 
-describe('R1-86 pausing sets paused_at', () => {
-  it('records when an off, suspended or deleted agent’s subscriptions were paused', async () => {
-    const { h, act } = await withAdmin();
+describe('R1-86 disabling sets paused_at', () => {
+  it('records when a revoked agent’s subscriptions stopped', async () => {
+    const h = harness();
     const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
-    const off = await seedAgent(h.relay, { name: 'Off', ownerId: owner.id });
-    const sOff = await seedSubscription(h, off.id);
-    await owned(h, owner.id, 'POST', `/agents/${off.id}/off`);
-    const sus = await seedAgent(h.relay, { name: 'Sus' });
-    const sSus = await seedSubscription(h, sus.id);
-    await act(sus.id, { action: 'suspend', reason: 'for the test' });
-    const del = await seedAgent(h.relay, { name: 'Del', ownerId: owner.id });
-    const sDel = await seedSubscription(h, del.id);
-    await deleteAgent(h.relay, owner.id, del.id);
-    for (const id of [sOff, sSus, sDel]) {
-      const row = await h.db.prepare('SELECT status, paused_at FROM subscriptions WHERE id = ?').bind(id).first<{ status: string; paused_at: string | null }>();
-      expect(row).toEqual({ status: 'paused', paused_at: h.now().toISOString() });
-    }
+    const a = await seedAgent(h.relay, { ownerId: owner.id });
+    const sub = await seedSubscription(h, a.id);
+    await owned(h, owner.id, 'DELETE', `/agents/${a.id}`);
+    expect(await h.db.prepare('SELECT status, paused_at FROM subscriptions WHERE id = ?').bind(sub).first()).toEqual({
+      status: 'disabled',
+      paused_at: h.now().toISOString(),
+    });
   });
 });

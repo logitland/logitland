@@ -41,6 +41,33 @@ export class RelayError extends Error {
   }
 }
 
+/**
+ * An error at /agent/* or /oauth2/*, which answer in auth.md's and RFC 6749's shape (`{ error, error_description }`) rather than
+ * problem+json. `error` is the protocol's code: invalid_request, invalid_grant, authorization_pending, slow_down and so on.
+ */
+export class OAuthError extends RelayError {
+  constructor(
+    status: number,
+    readonly error: string,
+    description: string,
+    extra: { retryAfterSeconds?: number } = {},
+  ) {
+    super(status, status === 429 ? 'rate_limited' : status === 401 ? 'unauthorized' : status === 403 ? 'forbidden' : 'invalid_request', description, extra);
+  }
+
+  toBody(): { error: string; error_description: string } {
+    return { error: this.error, error_description: this.detail ?? this.error };
+  }
+}
+
+/** The same failure, worded for auth.md: a problem from the rest of the relay becomes an OAuth-shaped error. */
+export function asOAuthError(err: unknown): unknown {
+  if (!(err instanceof RelayError) || err instanceof OAuthError) return err;
+  const error = err.status === 429 ? 'rate_limited' : err.status >= 500 ? 'temporarily_unavailable' : 'invalid_request';
+  const fields = err.extra.errors?.map((e) => `${e.path}: ${e.message}`).join('; ');
+  return new OAuthError(err.status, error, fields ? `${err.detail} ${fields}` : (err.detail ?? err.message), err.extra);
+}
+
 export const invalid = (detail: string, errors?: Problem['errors']) => new RelayError(400, 'invalid_request', detail, { errors });
 export const unauthorized = (detail?: string) => new RelayError(401, 'unauthorized', detail);
 export const forbidden = (detail?: string) => new RelayError(403, 'forbidden', detail);

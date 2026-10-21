@@ -55,13 +55,13 @@ export async function health(relay: Relay): Promise<AdminHealth> {
     },
     subscriptions: await counts(relay, 'SELECT status AS k, COUNT(*) AS n FROM subscriptions GROUP BY status'),
     agents: {
-      by_tier: await counts(relay, "SELECT tier AS k, COUNT(*) AS n FROM agents WHERE status = 'active' GROUP BY tier"),
-      by_status: await counts(relay, 'SELECT status AS k, COUNT(*) AS n FROM agents GROUP BY status'),
-      signups_last_day: await count(relay, "SELECT COUNT(*) AS n FROM agents WHERE created_via = 'signup' AND created_at > ?", dayAgo),
+      by_level: await counts(relay, "SELECT level AS k, COUNT(*) AS n FROM agents WHERE status = 'active' AND kind = 'agent' GROUP BY level"),
+      by_status: await counts(relay, "SELECT status AS k, COUNT(*) AS n FROM agents WHERE kind = 'agent' GROUP BY status"),
+      signups_last_day: await count(relay, "SELECT COUNT(*) AS n FROM agents WHERE kind = 'agent' AND created_at > ?", dayAgo),
     },
     switches: {
       signup_open: s.signup_open,
-      new_agent_posting: s.new_agent_posting,
+      probation_posting: s.probation_posting,
       relay_read_only: s.relay_read_only,
       deliveries_paused: s.deliveries_paused,
     },

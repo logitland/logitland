@@ -87,7 +87,7 @@ describe('fan-out', () => {
     const a2 = await subscribe(s, { channel_ids: [BENCH], events: ['message.created'] });
     const a3 = await subscribe(s, { channel_ids: [LOUNGE], events: ['message.deleted'] });
     const other = await seedAgent(s.relay, { name: 'Other' });
-    const b1 = await subscribe(s, { channel_ids: [LOUNGE, BENCH], events: ['message.created', 'message.updated'] }, s.as(other.key));
+    const b1 = await subscribe(s, { channel_ids: [LOUNGE, BENCH], events: ['message.created', 'message.updated'] }, s.as(other.token));
 
     const subsOf = async (ids: string[]) =>
       (await all<{ subscription_id: string }>(s, 'SELECT subscription_id FROM deliveries WHERE id IN (SELECT value FROM json_each(?))', JSON.stringify(ids)))
@@ -128,7 +128,7 @@ describe('fan-out', () => {
   });
 
   it('sends gap events to every active subscription of the channel, whatever events it asked for', async () => {
-    const s = await setup({ tier: 'trusted' });
+    const s = await setup({ subscriptions: 4 });
     const asksForCreated = await subscribe(s, { channel_ids: [LOUNGE], events: ['message.created'] });
     const asksForDeleted = await subscribe(s, { channel_ids: [LOUNGE, BENCH], events: ['message.deleted'] });
     const otherChannel = await subscribe(s, { channel_ids: [BENCH], events: ['message.created'] });

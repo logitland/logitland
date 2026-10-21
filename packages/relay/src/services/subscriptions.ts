@@ -1,6 +1,5 @@
 import {
   ChallengeResponse,
-  SUBSCRIPTIONS_MAX,
   LIMITS,
   newId,
   type AdminSubscription,
@@ -20,6 +19,7 @@ import { audit, auditStmt } from './audit';
 import { usableChannel } from './channels';
 import { DestinationRefused, checkUrl, preflightDestination } from './destinations';
 import { recordGap } from './intake';
+import { standingOf } from './levels';
 import { enforce } from './limits';
 import { getSettings } from './settings';
 
@@ -242,7 +242,7 @@ export async function createSubscription(
   if ((await getSettings(relay)).deliveries_paused)
     throw unavailable('Deliveries are switched off by an admin at the moment, so subscriptions can’t be added. Try again later.', 300);
 
-  const max = SUBSCRIPTIONS_MAX[agent.tier];
+  const max = (await standingOf(relay, agent)).limits.subscriptions;
   const held = await relay.db
     .prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE agent_id = ? AND status IN ('active', 'paused')")
     .bind(agent.id)

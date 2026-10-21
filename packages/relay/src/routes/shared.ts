@@ -3,8 +3,9 @@ import type { Context, Hono, MiddlewareHandler } from 'hono';
 import type { Relay } from '../context';
 import { timingSafeEqual } from '../crypto';
 import { RelayError, forbidden, unauthorized } from '../errors';
-import { authenticateKey, getOwner, isAdmin } from '../services/identity';
+import { getOwner, isAdmin } from '../services/identity';
 import { isWorkerAddress } from '../services/origins';
+import { authenticateToken } from '../services/tokens';
 import type { AgentPrincipal, ClientInfo } from '../types';
 
 export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; client: ClientInfo } };
@@ -24,7 +25,7 @@ export async function body(c: AppContext): Promise<unknown> {
 }
 
 export function requireScope(c: AppContext, scope: Scope): void {
-  if (!c.get('principal').scopes.includes(scope)) throw forbidden(`This key doesn’t have ${scope}`);
+  if (!c.get('principal').scopes.includes(scope)) throw forbidden(`This access token doesn’t have ${scope}`);
 }
 
 /** Cloudflare's view of the caller. Set for every request by the app. */
@@ -40,16 +41,27 @@ export function clientInfo(c: Context): ClientInfo {
   };
 }
 
-/** Bearer `lk_…` key → principal. Use on every /v1 route except signup. Only active agents pass unless `allowStatuses` says otherwise. */
+/** The request's Bearer token, if it has one. */
+export function bearer(c: Context): string | null {
+  const [kind, token] = (c.req.header('authorization') ?? '').split(' ');
+  return kind === 'Bearer' && token ? token : null;
+}
+
+/**
+ * Bearer access token → principal. Use on every /v1 route. Only active agents pass unless `allowStatuses` says otherwise. A
+ * 401 points at the protected-resource metadata, where auth.md's discovery starts.
+ */
 export function agentAuth(relay: Relay, opts: { allowStatuses?: AgentStatus[] } = {}): MiddlewareHandler<Env> {
   return async (c, next) => {
-    const auth = c.req.header('authorization') ?? '';
-    const [kind, token] = auth.split(' ');
-    if (kind !== 'Bearer' || !token) {
-      c.header('www-authenticate', 'Bearer realm="logitland"');
-      throw unauthorized('Send your relay key as a Bearer token');
+    try {
+      const token = bearer(c);
+      if (!token) throw unauthorized(`Send an access token as a Bearer token. To get one, read ${relay.config.publicUrl}/auth.md.`);
+      c.set('principal', await authenticateToken(relay, token, c.get('client'), opts));
+    } catch (err) {
+      if (err instanceof RelayError && err.status === 401)
+        c.header('www-authenticate', `Bearer resource_metadata="${relay.config.publicUrl}/.well-known/oauth-protected-resource"`);
+      throw err;
     }
-    c.set('principal', await authenticateKey(relay, token, c.get('client'), opts));
     await next();
   };
 }

@@ -14,7 +14,7 @@ async function setup() {
     .prepare(
       "INSERT INTO subscriptions (id, agent_id, url_ciphertext, url_host, events, channel_ids, secret_ciphertext, status, created_at) VALUES ('sub_0000000001', ?, 'x', 'hooks.orrery.dev', '[]', '[]', 'x', 'active', ?)",
     )
-    .bind(bad.agent_id, h.now().toISOString())
+    .bind(bad.registration_id, h.now().toISOString())
     .run();
   return { h, bad };
 }
@@ -22,8 +22,8 @@ async function setup() {
 describe('the strike ladder', () => {
   it('pauses subscriptions at the fourth strike (suspension)', async () => {
     const { h, bad } = await setup();
-    for (let i = 0; i < 4; i++) await strike(h, bad.agent_id, i);
-    expect((await h.db.prepare('SELECT status FROM agents WHERE id = ?').bind(bad.agent_id).first<{ status: string }>())!.status).toBe('suspended');
+    for (let i = 0; i < 4; i++) await strike(h, bad.registration_id, i);
+    expect((await h.db.prepare('SELECT status FROM agents WHERE id = ?').bind(bad.registration_id).first<{ status: string }>())!.status).toBe('suspended');
     expect(await count(h, "SELECT COUNT(*) AS n FROM subscriptions WHERE status = 'active'")).toBe(0);
     expect(await count(h, 'SELECT COUNT(*) AS n FROM banned_origins')).toBe(0);
   });
@@ -31,7 +31,7 @@ describe('the strike ladder', () => {
   it('bars the addresses of an agent it bans at the fifth strike, so the same address cannot sign up again', async () => {
     const { h, bad } = await setup();
     let last;
-    for (let i = 0; i < 5; i++) last = await strike(h, bad.agent_id, i);
+    for (let i = 0; i < 5; i++) last = await strike(h, bad.registration_id, i);
     expect(last!.effect).toBe('banned');
     expect(await count(h, 'SELECT COUNT(*) AS n FROM banned_origins')).toBeGreaterThan(0);
     expect(await count(h, "SELECT COUNT(*) AS n FROM subscriptions WHERE status = 'active'")).toBe(0);

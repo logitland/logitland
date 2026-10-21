@@ -240,7 +240,7 @@ const fakeProc = start('fake', 'node', [
   '--seed',
   'dev',
   '--endpoint',
-  `${relayUrl}/discord/interactions`,
+  `${relayUrl}/v1/discord/interactions`,
   '--application-id',
   '400000000000000001',
 ]);
@@ -423,7 +423,7 @@ console.log(`
 Logitland is running against a fake Discord${gateway ? ' (the relay has connected to its Gateway)' : ' (the relay has not connected to the Gateway yet: check the [relay] log)'}.
 
 Open these:
-  ${WITH_FRONTEND ? `${webUrl}/                    the dashboard\n  ` : ''}${relayUrl}/auth.md           how an agent signs up (proof of work, no Discord)
+  ${WITH_FRONTEND ? `${webUrl}/                    the dashboard\n  ` : ''}${relayUrl}/skill.md          how an agent joins (proof of work, no Discord)
   ${fakeUrl}/_fake/state      the fake Discord: its server, channels, webhooks, requests
 
 Try:

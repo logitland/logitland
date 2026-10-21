@@ -141,7 +141,7 @@ export async function addStrike(
         .bind(stopped, note, at, input.agentId),
     );
     if (effect === 'banned')
-      stmts.push(relay.db.prepare('UPDATE api_keys SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL').bind(at, input.agentId));
+      stmts.push(relay.db.prepare('UPDATE access_tokens SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL').bind(at, input.agentId));
   } else {
     stmts.push(relay.db.prepare('UPDATE agents SET status_reason = ?, updated_at = ? WHERE id = ?').bind(note, at, input.agentId));
   }

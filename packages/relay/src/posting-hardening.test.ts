@@ -106,7 +106,7 @@ describe('duplicates', () => {
   it('do not hold three agents who each answer “I am here!”', async () => {
     const w = await world();
     const target = await converse(w.h, { author: 'agent', name: 'Orrery' });
-    const others = [await seedAgent(w.h.relay, { tier: 'claimed' }), await seedAgent(w.h.relay, { tier: 'claimed' })];
+    const others = [await seedAgent(w.h.relay), await seedAgent(w.h.relay)];
     for (const a of [w.a, ...others]) expect((await json(await post(w.h, a, say('I am here!', { reply_to: target })))).status).toBe('sent');
   });
 
@@ -132,9 +132,9 @@ describe('starting threads', () => {
     expect(codes[10]).toBe(429);
   });
 
-  it('caps how long an unverified agent can keep a thread open', async () => {
+  it('caps how long an agent on probation can keep a thread open', async () => {
     const w = await world();
-    const a = await seedAgent(w.h.relay, { tier: 'new' });
+    const a = await seedAgent(w.h.relay, { level: 0 });
     const res = await post(w.h, a, say('a topic that stays open', { thread_name: 'Long', auto_archive_minutes: 10080 }, ANNOUNCE));
     expect(res.status).toBe(400);
   });
@@ -164,10 +164,9 @@ describe('fixed rules', () => {
   it('leave ordinary links alone', () => {
     expect(rules('read https://discord.com/developers/docs and https://example.org/invite/x')).toEqual([]);
   });
-  it('catch a relay key written in groups', () => {
-    const key = 'lk_7QFM-KX2D-9ABC-DEFG-HJKM-NPQR-STVW-XYZ0-1234-5678-9ABC-DEFG-HJKM';
-    expect(rules(`my key is ${key}`)).toContain('secret_leak');
-    expect(rules('relay keys start with lk_ and are long')).toEqual([]);
+  it('catch an access token, but not talk about the prefix', () => {
+    expect(rules(`my token is lat_${'K7QMXV2D'.repeat(4)}`)).toContain('secret_leak');
+    expect(rules('access tokens start with lat_ and are long')).toEqual([]);
   });
 });
 
@@ -307,7 +306,7 @@ describe('held messages after an outage', () => {
     const moderator = mod(() => (up ? pass : down));
     const w = await world({ moderator });
     for (let k = 0; k < 5; k++) {
-      const a = await seedAgent(w.h.relay, { tier: 'claimed' });
+      const a = await seedAgent(w.h.relay);
       for (let i = 0; i < 9; i++) await post(w.h, a, say(`outage message ${k}-${i} text`));
     }
     expect((await w.h.db.prepare("SELECT COUNT(*) AS n FROM relay_messages WHERE status = 'held'").first<{ n: number }>())!.n).toBe(45);

@@ -222,7 +222,7 @@ function intentCheck(f: Facts): CheckDef {
 }
 
 function interactionsUrlCheck(relay: Relay, f: Facts): CheckDef {
-  const expected = `${relay.config.publicUrl}/discord/interactions`;
+  const expected = `${relay.config.publicUrl}/v1/discord/interactions`;
   return {
     id: 'interactions-url',
     title: 'Discord sends commands and buttons to the relay',
@@ -522,8 +522,6 @@ export interface ChannelState {
   type: ChannelType;
   agent_access: ChannelAccess;
   pace_per_agent_per_minute: number;
-  /** Agents that haven't verified with Discord can read the channel but not post or start threads in it. */
-  verified_only: boolean;
   tags: ChannelTag[];
 }
 
@@ -532,14 +530,12 @@ export type ChannelRowWithTags = ChannelRow & { tags: string };
 /** undefined: leave the webhook alone. null: remove it. */
 export type WebhookChange = { ciphertext: string; webhookId: string } | null | undefined;
 
-const FIELDS = ['name', 'guild_id', 'type', 'agent_access', 'pace_per_agent_per_minute', 'verified_only'] as const;
-/** Stored as 0 or 1, shown and audited as true or false. */
-const FLAGS = new Set<string>(['verified_only']);
+const FIELDS = ['name', 'guild_id', 'type', 'agent_access', 'pace_per_agent_per_minute'] as const;
 
 /** What an admin changed, as audit-log pairs. The webhook appears only as “set”, “replaced” or removed, never as the URL. */
 export function channelDiff(before: ChannelRowWithTags | null, next: ChannelState, webhook: WebhookChange): Record<string, { from: unknown; to: unknown }> {
   const diff: Record<string, { from: unknown; to: unknown }> = {};
-  const was: Record<string, unknown> = before ? { ...before, verified_only: before.verified_only === 1 } : {};
+  const was: Record<string, unknown> = { ...before };
   for (const key of FIELDS) if (was[key] !== next[key]) diff[key] = { from: was[key] ?? null, to: next[key] };
   const had = Boolean(before?.webhook_ciphertext);
   if (webhook) diff.webhook = { from: had ? 'set' : null, to: had ? 'replaced' : 'set' };
@@ -580,7 +576,7 @@ export async function saveChannel(
     for (const key of FIELDS)
       if (key in diff) {
         sets.push(`${key} = ?`);
-        values.push(FLAGS.has(key) ? Number(next[key]) : next[key]);
+        values.push(next[key]);
       }
     if (tags !== before.tags) {
       sets.push('tags = ?');
@@ -595,21 +591,9 @@ export async function saveChannel(
   } else {
     const r = await relay.db
       .prepare(
-        'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, verified_only, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
+        'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
       )
-      .bind(
-        channelId,
-        next.guild_id,
-        next.name,
-        next.type,
-        next.agent_access,
-        next.pace_per_agent_per_minute,
-        Number(next.verified_only),
-        ciphertext,
-        webhookId,
-        tags,
-        now,
-      )
+      .bind(channelId, next.guild_id, next.name, next.type, next.agent_access, next.pace_per_agent_per_minute, ciphertext, webhookId, tags, now)
       .run();
     if (r.meta.changes === 0) throw conflict('Someone just added that channel. Reload and check its settings.');
     await audit(relay, entry);
@@ -660,7 +644,6 @@ export async function relayChannel(
     type,
     agent_access: req.agent_access ?? (live ? before!.agent_access : threadsOnly ? 'post_new_threads' : 'post'),
     pace_per_agent_per_minute: req.pace_per_agent_per_minute ?? before?.pace_per_agent_per_minute ?? DEFAULT_PACE,
-    verified_only: req.verified_only ?? before?.verified_only === 1,
     tags: threadsOnly ? mapTags(channel.available_tags) : [],
   };
 

@@ -1,9 +1,9 @@
-import { ChannelList, ConversationPage, EventsPage, ExpiredCursorProblem, LIMITS } from '@logitland/contracts';
+import { ChannelList, ConversationPage, EventsPage, ExpiredCursorProblem } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { AGENT_POST, at, edit, human, msg, push, remove, world } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
 import { hit } from './services/limits';
-import { BENCH, FORUM, LOUNGE, seedAgent, seedChannel } from './testing';
+import { BENCH, FORUM, LOUNGE, TEST_LIMITS, seedAgent, seedChannel } from './testing';
 
 const DAY = 86_400_000;
 
@@ -16,7 +16,7 @@ async function closeBenchAfter(h: Awaited<ReturnType<typeof reader>>['h'], ...ev
 
 async function reader() {
   const w = await world();
-  const get = (path: string) => w.h.call('GET', path, undefined, w.h.as(w.agent.key));
+  const get = (path: string) => w.h.call('GET', path, undefined, w.h.as(w.agent.token));
   const json = async <T>(path: string): Promise<T> => (await get(path)).json() as Promise<T>;
   return { ...w, get, json };
 }
@@ -49,10 +49,10 @@ describe('GET /v1/channels', () => {
     expect(body.channels.find((c) => c.id === LOUNGE)!.tags).toEqual([]);
   });
 
-  it('lets any agent read, owner or not', async () => {
+  it('lets any agent read, on probation and without an owner too', async () => {
     const { h } = await reader();
-    const unclaimed = await seedAgent(h.relay, { tier: 'new', ownerId: null });
-    expect((await h.call('GET', '/v1/channels', undefined, h.as(unclaimed.key))).status).toBe(200);
+    const orphan = await seedAgent(h.relay, { level: 0, ownerId: null });
+    expect((await h.call('GET', '/v1/channels', undefined, h.as(orphan.token))).status).toBe(200);
   });
 });
 
@@ -108,7 +108,7 @@ describe('GET /v1/channels/:id/messages', () => {
       createdAt: at(0, 1),
     });
     const [m] = ConversationPage.parse(await json(`/v1/channels/${LOUNGE}/messages`)).messages;
-    expect(m!.author).toEqual({ kind: 'agent', agent_id: agent.id, author_id: agent.id, display_name: 'Moth-9', tier: 'claimed' });
+    expect(m!.author).toEqual({ kind: 'agent', agent_id: agent.id, author_id: agent.id, display_name: 'Moth-9', level: 1 });
   });
 
   it('refuses channels agents can’t use and keys without the scope', async () => {
@@ -116,7 +116,7 @@ describe('GET /v1/channels/:id/messages', () => {
     expect((await get(`/v1/channels/${BENCH}/messages`)).status).toBe(404);
     expect((await get('/v1/channels/119999999999999999/messages')).status).toBe(404);
     const writer = await seedAgent(h.relay, { scopes: ['messages:write'] });
-    expect((await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(writer.key))).status).toBe(403);
+    expect((await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(writer.token))).status).toBe(403);
   });
 
   it('checks the query', async () => {
@@ -131,7 +131,7 @@ describe('reads are counted per agent', () => {
   it('refuses past the limit with retry-after, for that agent only', async () => {
     const { h, agent, get } = await reader();
     const key = `read:${agent.id}:m`;
-    await hit(h.relay, { key, limit: LIMITS.agentReadsPerMinute, windowSeconds: 60 }, LIMITS.agentReadsPerMinute);
+    await hit(h.relay, { key, limit: TEST_LIMITS.reads_per_minute, windowSeconds: 60 }, TEST_LIMITS.reads_per_minute);
     const res = await get('/v1/channels');
     expect(res.status).toBe(429);
     expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
@@ -139,7 +139,7 @@ describe('reads are counted per agent', () => {
     expect((await get(`/v1/channels/${LOUNGE}/messages`)).status).toBe(429);
     expect((await get('/v1/events')).status).toBe(429);
     const other = await seedAgent(h.relay);
-    expect((await h.call('GET', '/v1/channels', undefined, h.as(other.key))).status).toBe(200);
+    expect((await h.call('GET', '/v1/channels', undefined, h.as(other.token))).status).toBe(200);
     h.advance(61_000);
     expect((await get('/v1/channels')).status).toBe(200);
   });
@@ -214,7 +214,7 @@ describe('GET /v1/events', () => {
   it('needs the read scope', async () => {
     const { h } = await reader();
     const writer = await seedAgent(h.relay, { scopes: ['messages:write'] });
-    expect((await h.call('GET', '/v1/events', undefined, h.as(writer.key))).status).toBe(403);
+    expect((await h.call('GET', '/v1/events', undefined, h.as(writer.token))).status).toBe(403);
   });
 
   it('long-polls: answers as soon as an event lands', async () => {

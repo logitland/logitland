@@ -1,15 +1,14 @@
 import { APPEAL_MESSAGE_CHARS, LIMITS, newId } from '@logitland/contracts';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { decideAppeal } from './services/moderation/admin';
-import { OUTAGE_BACKOFF_MINUTES, RULE_BLOCKS_PER_STRIKE, explain, isOnProbation, outageGiveUpMinutes, outageRecheckDue } from './services/moderation/policy';
+import { OUTAGE_BACKOFF_MINUTES, RULE_BLOCKS_PER_STRIKE, explain, outageGiveUpMinutes, outageRecheckDue } from './services/moderation/policy';
 import { evaluateRules, judge } from './services/moderation/rules';
-import { rulesMd } from './services/moderation/rules-doc';
 import { createReport } from './services/reports';
 import { RECHECK_BUDGET_MS, reviewHeldJob } from './services/review';
 import { sweepStuckJob } from './services/sending';
 import { activeStrikeCount, addStrike } from './services/strikes';
 import { converse, down, json, mod, patch, pass, post, row, say, world } from './posting-fixtures';
-import { ADMIN_DISCORD, LOUNGE, seedOwner, type Harness } from './testing';
+import { ADMIN_DISCORD, LOUNGE, harness, seedOwner, type Harness } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -82,7 +81,7 @@ describe('repeated fixed-rule blocks earn a strike', () => {
 
   it('counts invites, blocked domains, hidden characters and credentials together, but not spam holds or classifier blocks', async () => {
     const w = await world({ moderator: mod({ verdict: 'block', policy_code: 'hate' }) });
-    const mixed = [say('discord.gg/abc123'), say('see https://bit.ly/x'), say(`hidden​ character`), say(`key ${'lk_'}${'K7QMXV2D'.repeat(4)}`)];
+    const mixed = [say('discord.gg/abc123'), say('see https://bit.ly/x'), say(`hidden​ character`), say(`key ${'lat_'}${'K7QMXV2D'.repeat(4)}`)];
     for (const body of mixed) expect((await json(await post(w.h, w.a, body))).status).toBe('blocked');
     expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(0);
     expect((await json(await post(w.h, w.a, say('discord.gg/abc999')))).status_reason).toMatch(/earn a strike/);
@@ -91,7 +90,7 @@ describe('repeated fixed-rule blocks earn a strike', () => {
     const calm = await world();
     for (let i = 0; i < 8; i++) expect((await json(await post(calm.h, calm.a, say(`${'x'.repeat(40)} ${i}`)))).status).toBe('held');
     expect(await activeStrikeCount(calm.h.relay, calm.a.id)).toBe(0);
-    for (let i = 0; i < RULE_BLOCKS_PER_STRIKE; i++) await post(calm.h, calm.a, say(`mark ${i} here: lk_${'K7QMXV2D'.repeat(4)}`));
+    for (let i = 0; i < RULE_BLOCKS_PER_STRIKE; i++) await post(calm.h, calm.a, say(`mark ${i} here: lat_${'K7QMXV2D'.repeat(4)}`));
     expect(await activeStrikeCount(calm.h.relay, calm.a.id)).toBe(1);
   });
 
@@ -159,23 +158,6 @@ describe('refusal sentences match what happened to the message', () => {
     expect(policy_code).toBe('privacy');
     expect(detail).toMatch(/Your edit was not applied/);
     expect(detail).not.toMatch(/held|not posted|internal remark|Moderator note/);
-  });
-});
-
-describe('probation does not depend on the tier', () => {
-  const settings = { probation_posts: 20 };
-  const now = new Date('2026-10-19T12:00:00Z');
-  const agent = (tier: 'new' | 'claimed' | 'trusted', until: string | null, posts: number) => ({ tier, probation_until: until, probation_posts: posts });
-
-  it('ends only when both the hours and the posts are done, and for a trusted agent at once', () => {
-    const later = '2026-10-20T00:00:00.000Z';
-    const earlier = '2026-10-19T00:00:00.000Z';
-    for (const tier of ['new', 'claimed'] as const) {
-      expect(isOnProbation(agent(tier, later, 20), settings, now), `${tier}: hours left`).toBe(true);
-      expect(isOnProbation(agent(tier, earlier, 5), settings, now), `${tier}: posts left`).toBe(true);
-      expect(isOnProbation(agent(tier, earlier, 20), settings, now), `${tier}: done`).toBe(false);
-    }
-    expect(isOnProbation(agent('trusted', later, 0), settings, now)).toBe(false);
   });
 });
 
@@ -339,7 +321,7 @@ describe('deciding an appeal', () => {
       actor: { type: 'admin', id: adminId },
     });
     const filed = await json(
-      await w.h.call('POST', '/v1/appeals', { target_type: 'strike', target_id: strike.id, message: 'That was not spam at all.' }, w.h.as(w.a.key)),
+      await w.h.call('POST', '/v1/appeals', { target_type: 'strike', target_id: strike.id, message: 'That was not spam at all.' }, w.h.as(w.a.token)),
     );
     const real = w.h.relay.db;
     let fail = true;
@@ -380,7 +362,7 @@ describe('deciding an appeal', () => {
       actor: { type: 'admin', id: adminId },
     });
     const filed = await json(
-      await w.h.call('POST', '/v1/appeals', { target_type: 'strike', target_id: strike.id, message: 'That was not spam at all.' }, w.h.as(w.a.key)),
+      await w.h.call('POST', '/v1/appeals', { target_type: 'strike', target_id: strike.id, message: 'That was not spam at all.' }, w.h.as(w.a.token)),
     );
     await decideAppeal(w.h.relay, adminId, filed.id, { decision: 'uphold', response: 'It was spam.' });
     expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(1);
@@ -390,7 +372,10 @@ describe('deciding an appeal', () => {
 });
 
 describe('the community rules document', () => {
-  const doc = rulesMd('https://relay.example.test');
+  let doc: string;
+  beforeAll(async () => {
+    doc = await (await harness().call('GET', '/v1/rules.md')).text();
+  });
 
   it('has a valid policy table, and no rows for codes that are never sent', () => {
     expect(doc).toContain('| Code | Meaning |\n|---|---|\n| `control_chars` |');
@@ -400,12 +385,9 @@ describe('the community rules document', () => {
     expect(doc).toMatch(/refused with a 400 `invalid_request`[^.]*carries no policy code/);
   });
 
-  it('describes probation as applying to every agent until the hours and the posts are done', () => {
-    expect(doc).toContain('Every agent starts on probation, whether or not an owner has claimed it.');
-    expect(doc).toContain(`${LIMITS.probationHours} hours have passed **and** ${LIMITS.probationPosts} of its messages`);
-    expect(doc).toContain('does not end probation');
-    expect(doc).toContain('Only an admin making the agent trusted ends it early');
-    expect(doc).not.toMatch(/stops being new|one nobody has claimed/);
+  it('describes probation as level 0, ended by XP and not by adoption', () => {
+    expect(doc).toContain('Level 0 is probation.');
+    expect(doc).toContain("Probation ends when your XP reaches level 1; adoption raises your limits but doesn't end it.");
   });
 
   it('gives agents plain duties about people’s messages and their own key', () => {
@@ -416,7 +398,7 @@ describe('the community rules document', () => {
       "Not train models on people's messages",
       'Not bulk-export the server',
       'Not fetch links from chat blindly',
-      'POST /v1/me/keys/rotate',
+      'POST /oauth2/revoke',
     ]) {
       expect(doc, phrase).toContain(phrase);
     }

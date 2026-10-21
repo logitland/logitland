@@ -5,13 +5,13 @@ import { readPage, toConversationMessage, type ConversationRow } from './service
 import { recordAgentPost } from './services/intake';
 import { LOUNGE, seedAgent } from './testing';
 
-describe('agent authors carry their tier', () => {
+describe('agent authors carry their level', () => {
   async function conversationOfAgents() {
     const { h } = await world();
     const agents = {
-      fresh: await seedAgent(h.relay, { name: 'Fresh-1', tier: 'new' }),
-      claimed: await seedAgent(h.relay, { name: 'Claimed-1', tier: 'claimed' }),
-      trusted: await seedAgent(h.relay, { name: 'Trusted-1', tier: 'trusted' }),
+      fresh: await seedAgent(h.relay, { name: 'Fresh-1', level: 0 }),
+      middle: await seedAgent(h.relay, { name: 'Middle-1', level: 2 }),
+      senior: await seedAgent(h.relay, { name: 'Senior-1', level: 5 }),
     };
     let n = 1;
     for (const a of Object.values(agents)) {
@@ -32,7 +32,7 @@ describe('agent authors carry their tier', () => {
   }
 
   it('through one joined query, with no lookup per agent', async () => {
-    const { h, agents } = await conversationOfAgents();
+    const { h } = await conversationOfAgents();
     let queries = 0;
     const prepare = h.db.prepare.bind(h.db);
     h.db.prepare = (sql: string) => {
@@ -41,29 +41,29 @@ describe('agent authors carry their tier', () => {
     };
     const page = ConversationPage.parse(await readPage(h.relay, LOUNGE, {}));
     expect(queries).toBe(1);
-    const tiers = Object.fromEntries(page.messages.map((m) => [m.author.display_name, m.author.tier]));
-    expect(tiers).toEqual({ 'Fresh-1': 'new', 'Claimed-1': 'claimed', 'Trusted-1': 'trusted', 'Moth-9': 'claimed', Luna: undefined });
-    expect(page.messages.find((m) => m.author.kind === 'human')!.author).not.toHaveProperty('tier');
-    expect(agents.fresh.id).toBeTruthy();
+    const levels = Object.fromEntries(page.messages.map((m) => [m.author.display_name, m.author.level]));
+    expect(levels).toEqual({ 'Fresh-1': 0, 'Middle-1': 2, 'Senior-1': 5, 'Moth-9': 1, Luna: undefined });
+    expect(page.messages.find((m) => m.author.kind === 'human')!.author).not.toHaveProperty('level');
   });
 
-  it('follow a promotion', async () => {
+  it('follow a level change', async () => {
     const { h, agents } = await conversationOfAgents();
-    expect((await readPage(h.relay, LOUNGE, {})).messages.find((m) => m.author.agent_id === agents.fresh.id)!.author.tier).toBe('new');
-    await h.db.prepare("UPDATE agents SET tier = 'trusted' WHERE id = ?").bind(agents.fresh.id).run();
-    expect((await readPage(h.relay, LOUNGE, {})).messages.find((m) => m.author.agent_id === agents.fresh.id)!.author.tier).toBe('trusted');
+    const level = async () => (await readPage(h.relay, LOUNGE, {})).messages.find((m) => m.author.agent_id === agents.fresh.id)!.author.level;
+    expect(await level()).toBe(0);
+    await h.db.prepare('UPDATE agents SET level = 3 WHERE id = ?').bind(agents.fresh.id).run();
+    expect(await level()).toBe(3);
   });
 
   it('are served over the API', async () => {
     const { h, agents } = await conversationOfAgents();
-    const res = await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agents.claimed.key));
+    const res = await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agents.middle.token));
     const page = ConversationPage.parse(await res.json());
     expect(
       page.messages
         .filter((m) => m.author.kind === 'agent')
-        .map((m) => m.author.tier)
+        .map((m) => m.author.level)
         .sort(),
-    ).toEqual(['claimed', 'claimed', 'new', 'trusted']);
+    ).toEqual([0, 1, 2, 5]);
   });
 
   it('are left out by queries that don’t join agents, without breaking them', () => {
@@ -85,9 +85,9 @@ describe('agent authors carry their tier', () => {
       reply_to: null,
       withdrawn: 0,
     };
-    expect(toConversationMessage(row).author).not.toHaveProperty('tier');
-    expect(toConversationMessage({ ...row, agent_tier: 'claimed' }).author.tier).toBe('claimed');
-    // A person never gets a tier, whatever the row says.
-    expect(toConversationMessage({ ...row, author_kind: 'human', agent_id: null, agent_tier: 'claimed' }).author).not.toHaveProperty('tier');
+    expect(toConversationMessage(row).author).not.toHaveProperty('level');
+    expect(toConversationMessage({ ...row, agent_level: 2 }).author.level).toBe(2);
+    // A person never gets a level, whatever the row says.
+    expect(toConversationMessage({ ...row, author_kind: 'human', agent_id: null, agent_level: 2 }).author).not.toHaveProperty('level');
   });
 });

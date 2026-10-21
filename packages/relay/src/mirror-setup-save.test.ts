@@ -2,7 +2,7 @@ import type { RelayChannelResult } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { getChannel } from './services/channels';
 import { saveChannel, type ChannelRowWithTags } from './services/setup';
-import { BENCH, FORUM, GUILD, LOUNGE, harness, seedChannel, type Harness } from './testing';
+import { FORUM, GUILD, LOUNGE, harness, seedChannel, type Harness } from './testing';
 import { NEW_HOOK, admin, connectGateway, discordError, discordWorld, type ChannelSpec } from './mirror.testkit';
 import { runSetup } from './services/setup';
 
@@ -83,7 +83,6 @@ describe('saving a channel', () => {
         type: stale.type,
         agent_access: stale.agent_access,
         pace_per_agent_per_minute: 3,
-        verified_only: stale.verified_only === 1,
         tags: [],
       },
       undefined,
@@ -103,7 +102,6 @@ describe('saving a channel', () => {
       type: before.type,
       agent_access: before.agent_access,
       pace_per_agent_per_minute: 10,
-      verified_only: false,
       tags: [{ id: '700000000000000011', name: 'Idea', moderated: false }],
     };
     await saveChannel(h.relay, owner.id, FORUM, before, next, null);
@@ -172,72 +170,3 @@ describe('a webhook made for a relay that then failed', () => {
     expect((await getChannel(h.relay, FORUM))!.webhook_id).toBe(NEW_HOOK);
   });
 });
-
-describe('verified-only channels', () => {
-  const diffs = async (h: Harness, id: string) =>
-    (
-      await h.db.prepare("SELECT diff FROM audit_log WHERE target_id = ? AND action = 'channel.updated' ORDER BY rowid").bind(id).all<{ diff: string }>()
-    ).results.map((r) => JSON.parse(r.diff));
-
-  it('are off by default, in the table and in what the admin API returns', async () => {
-    const { h, patch } = await ready();
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge' });
-    expect(await getChannel(h.relay, LOUNGE)).toMatchObject({ verified_only: 0 });
-    const res = await patch(LOUNGE, { pace_per_agent_per_minute: 4 });
-    expect(((await res.json()) as { verified_only: boolean }).verified_only).toBe(false);
-  });
-
-  it('are switched on and off with PATCH, change nothing else, and are audited', async () => {
-    const { h, patch } = await ready();
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post', pace: 7 });
-    const on = await patch(LOUNGE, { verified_only: true });
-    expect(on.status).toBe(200);
-    expect(await on.json()).toMatchObject({ verified_only: true, agent_access: 'post', pace_per_agent_per_minute: 7 });
-    expect(await getChannel(h.relay, LOUNGE)).toMatchObject({ verified_only: 1, pace_per_agent_per_minute: 7 });
-    expect(await diffs(h, LOUNGE)).toEqual([{ verified_only: { from: false, to: true } }]);
-
-    // Saying the same again is not a change.
-    expect((await patch(LOUNGE, { verified_only: true })).status).toBe(200);
-    expect(await diffs(h, LOUNGE)).toHaveLength(1);
-
-    expect(((await (await patch(LOUNGE, { verified_only: false })).json()) as { verified_only: boolean }).verified_only).toBe(false);
-    expect(await diffs(h, LOUNGE)).toEqual([{ verified_only: { from: false, to: true } }, { verified_only: { from: true, to: false } }]);
-  });
-
-  it('can be set when a channel is first saved, and a non-boolean is refused', async () => {
-    const { h, world, patch } = await ready();
-    world.channels = [{ id: BENCH, name: 'bench', type: 0 }];
-    const created = await patch(BENCH, { agent_access: 'post', verified_only: true });
-    expect(created.status).toBe(201);
-    expect(await created.json()).toMatchObject({ verified_only: true });
-    expect(await getChannel(h.relay, BENCH)).toMatchObject({ verified_only: 1 });
-    expect((await patch(BENCH, { verified_only: 'yes' })).status).toBe(400);
-  });
-
-  it('are set from the relay dialog too, and an existing channel keeps its setting when the request leaves it out', async () => {
-    const { h, world, relay } = await ready();
-    world.channels = [forum()];
-    const first = (await (await relay(FORUM, { verified_only: true })).json()) as RelayChannelResult;
-    expect(first.channel.verified_only).toBe(true);
-    const again = (await (await relay(FORUM, { pace_per_agent_per_minute: 5 })).json()) as RelayChannelResult;
-    expect(again.channel).toMatchObject({ verified_only: true, pace_per_agent_per_minute: 5 });
-    const off = (await (await relay(FORUM, { verified_only: false })).json()) as RelayChannelResult;
-    expect(off.channel.verified_only).toBe(false);
-    expect(await diffs(h, FORUM)).toEqual([{ pace_per_agent_per_minute: { from: 10, to: 5 } }, { verified_only: { from: true, to: false } }]);
-  });
-
-  it('show in the channel list the admin sees', async () => {
-    const { h, a, patch } = await readyWithAdmin();
-    await seedChannel(h.relay, { id: LOUNGE, name: 'lounge' });
-    await patch(LOUNGE, { verified_only: true });
-    const list = (await (await h.internal('GET', '/internal/admin/channels', undefined, a.as)).json()) as {
-      channels: { id: string; verified_only: boolean }[];
-    };
-    expect(list.channels.find((c) => c.id === LOUNGE)!.verified_only).toBe(true);
-  });
-});
-
-async function readyWithAdmin() {
-  const r = await ready();
-  return { ...r, a: { as: { 'x-logitland-owner': r.owner.id } } };
-}

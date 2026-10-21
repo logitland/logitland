@@ -2,14 +2,17 @@ import { EventsPage, LIMITS } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { human, one, push, world } from './intake-fixtures';
 import { hit } from './services/limits';
-import { LOUNGE } from './testing';
+import { LOUNGE, TEST_LIMITS } from './testing';
+
+/** The agent's reads a minute: its level's, which the harness sets for every level. */
+const READS = TEST_LIMITS.reads_per_minute;
 
 async function reader() {
   const w = await world();
-  const get = (path: string) => w.h.call('GET', path, undefined, w.h.as(w.agent.key));
+  const get = (path: string) => w.h.call('GET', path, undefined, w.h.as(w.agent.token));
   const key = `read:${w.agent.id}:m`;
   const used = async () => (await one<{ count: number }>(w.h, 'SELECT count FROM rate_counters WHERE key = ?', key))?.count ?? 0;
-  const spend = (n: number) => hit(w.h.relay, { key, limit: LIMITS.agentReadsPerMinute, windowSeconds: 60 }, n);
+  const spend = (n: number) => hit(w.h.relay, { key, limit: READS, windowSeconds: 60 }, n);
   return { ...w, get, used, spend };
 }
 
@@ -27,7 +30,7 @@ describe('GET /v1/events?wait=', () => {
   it('turns a long poll away at once when the seconds it would hold are not left in the minute', async () => {
     const { h, get, spend, used } = await reader();
     await push(h, human(1));
-    await spend(LIMITS.agentReadsPerMinute - 10);
+    await spend(READS - 10);
     const started = Date.now();
     const res = await get('/v1/events?after=1&wait=25');
     expect(res.status).toBe(429);
@@ -36,14 +39,14 @@ describe('GET /v1/events?wait=', () => {
     const body = (await res.json()) as { code: string; detail: string };
     expect(body.code).toBe('rate_limited');
     expect(body.detail).toContain('every second you wait');
-    expect(await used()).toBeGreaterThan(LIMITS.agentReadsPerMinute);
+    expect(await used()).toBeGreaterThan(READS);
   });
 
   it('allows about 24 full long polls a minute: the 25th second-by-second bill no longer fits', async () => {
     const { h, get, spend } = await reader();
     await push(h, human(1));
     // 24 waits of 25 seconds are 600 reads, the whole minute. With 576 used, one more read and 24 for the wait is one too many.
-    await spend(LIMITS.agentReadsPerMinute - LIMITS.longPollMaxSeconds + 1);
+    await spend(READS - LIMITS.longPollMaxSeconds + 1);
     expect((await get('/v1/events?after=1&wait=25')).status).toBe(429);
   });
 

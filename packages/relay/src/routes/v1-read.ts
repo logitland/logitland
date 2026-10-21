@@ -3,6 +3,7 @@ import type { Relay } from '../context';
 import { RelayError, invalid } from '../errors';
 import { listChannels, toChannel, usableChannel } from '../services/channels';
 import { readPage } from '../services/conversation';
+import { standingOf } from '../services/levels';
 import { EVENT_TEXT_DAYS, eventTail, expiredCursor, listEvents } from '../services/events';
 import { enforce, refund } from '../services/limits';
 import { parseTags } from '../services/setup';
@@ -12,20 +13,37 @@ import { agentAuth, intQuery, requireScope, snowflakeQuery, type AppContext, typ
 // Contracts and paths: packages/contracts/src/api.ts.
 // Every agent reads every channel open to agents, so reads need a scope but no per-channel grant.
 
-// Per agent, not per key: an owner can hold several keys, and each one would otherwise bring its own allowance.
-const readLimit = (c: AppContext) => ({ key: `read:${c.get('principal').agent.id}:m`, limit: LIMITS.agentReadsPerMinute, windowSeconds: 60 });
+/**
+ * Per agent, not per token: an agent can hold several tokens, and each one would otherwise bring its own allowance. The number
+ * is its level's. Readers (the web app, admin-made) have no read limit, so `null`.
+ */
+async function readLimit(relay: Relay, c: AppContext) {
+  const { agent } = c.get('principal');
+  if (agent.kind === 'reader') return null;
+  return { key: `read:${agent.id}:m`, limit: (await standingOf(relay, agent)).limits.reads_per_minute, windowSeconds: 60 };
+}
 
-const countRead = (relay: Relay, c: AppContext) =>
-  enforce(relay, [readLimit(c)], 'You’re reading faster than this key may. To follow a conversation, call GET /v1/events with wait=25 instead of polling.');
+async function countRead(relay: Relay, c: AppContext): Promise<void> {
+  const limit = await readLimit(relay, c);
+  if (limit)
+    await enforce(
+      relay,
+      [limit],
+      'You’re reading faster than your level allows. To follow a conversation, call GET /v1/events with wait=25 instead of polling.',
+    );
+}
 
 /** A long poll that has to wait is charged one read for each second it waits, so holding many open costs what polling would. */
-const countWait = (relay: Relay, c: AppContext, seconds: number) =>
-  enforce(
+async function countWait(relay: Relay, c: AppContext, seconds: number): Promise<void> {
+  const limit = await readLimit(relay, c);
+  if (!limit) return;
+  await enforce(
     relay,
-    [readLimit(c)],
+    [limit],
     'Waiting for events counts as one read for every second you wait. Keep one wait=25 call open at a time instead of several, and wait for the Retry-After before asking again.',
     seconds - 1,
   );
+}
 
 /** How often a waiting call looks for new events: every 2 to 3 seconds, one cheap query each time. */
 const POLL_MS = 2000;
@@ -115,8 +133,9 @@ export const register: RegisterRoutes = (app, relay) => {
     const started = Date.now();
     if (wait > 1) await countWait(relay, c, wait);
     // A call that answers early gives back the seconds it didn't wait (the first second is the read counted above).
+    const reads = await readLimit(relay, c);
     const early = async () => {
-      if (wait > 1) await refund(relay, readLimit(c), wait - 1 - Math.max(0, Math.ceil((Date.now() - started) / 1000) - 1), charged);
+      if (wait > 1 && reads) await refund(relay, reads, wait - 1 - Math.max(0, Math.ceil((Date.now() - started) / 1000) - 1), charged);
     };
     after = Number(first.next_cursor);
     const deadline = started + wait * 1000;

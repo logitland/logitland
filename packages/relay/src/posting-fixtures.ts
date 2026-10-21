@@ -67,11 +67,11 @@ export function fakeDiscord(h: Harness, opts: FakeDiscordOptions = {}) {
 
 export interface World {
   h: Harness;
-  /** A claimed agent, so no probation. */
+  /** A level 1 agent, so no probation. */
   a: Awaited<ReturnType<typeof seedAgent>>;
 }
 
-/** One channel of each type, all open for posting, a claimed agent, and the fake Discord. */
+/** One channel of each type, all open for posting, a level 1 agent, and the fake Discord. */
 export async function world(opts: HarnessOptions & { access?: ChannelAccess; discord?: FakeDiscordOptions } = {}): Promise<World> {
   const { access = 'post', discord, ...harnessOptions } = opts;
   const h = harness({ moderator: mod(), ...harnessOptions });
@@ -83,7 +83,7 @@ export async function world(opts: HarnessOptions & { access?: ChannelAccess; dis
   ];
   for (const [id, name, type] of types) await seedChannel(h.relay, { id, name, type, access, pace: 120 });
   fakeDiscord(h, discord);
-  return { h, a: await seedAgent(h.relay, { tier: 'claimed' }) };
+  return { h, a: await seedAgent(h.relay) };
 }
 
 /** Text of exactly `n` characters that no spam rule objects to. */
@@ -92,10 +92,11 @@ export const filler = (n: number) => `${Array.from({ length: Math.ceil(n / 3) + 
 let counter = 0;
 export const key = () => `fixture-key-${++counter}-padding`;
 
-export const post = (h: Harness, a: { key: string }, body: Record<string, unknown>, idem: string | null = key()) =>
-  h.call('POST', '/v1/messages', body, { ...h.as(a.key), ...(idem ? { 'idempotency-key': idem } : {}) });
-export const patch = (h: Harness, a: { key: string }, id: string, body: Record<string, unknown>) => h.call('PATCH', `/v1/messages/${id}`, body, h.as(a.key));
-export const remove = (h: Harness, a: { key: string }, id: string) => h.call('DELETE', `/v1/messages/${id}`, undefined, h.as(a.key));
+export const post = (h: Harness, a: { token: string }, body: Record<string, unknown>, idem: string | null = key()) =>
+  h.call('POST', '/v1/messages', body, { ...h.as(a.token), ...(idem ? { 'idempotency-key': idem } : {}) });
+export const patch = (h: Harness, a: { token: string }, id: string, body: Record<string, unknown>) =>
+  h.call('PATCH', `/v1/messages/${id}`, body, h.as(a.token));
+export const remove = (h: Harness, a: { token: string }, id: string) => h.call('DELETE', `/v1/messages/${id}`, undefined, h.as(a.token));
 export const say = (content: string, extra: Record<string, unknown> = {}, channel_id = LOUNGE) => ({ channel_id, content, ...extra });
 export const json = async (res: Response) => (await res.json()) as Record<string, any>;
 export const row = (h: Harness, id: string) => h.db.prepare('SELECT * FROM relay_messages WHERE id = ?').bind(id).first<Record<string, any>>();

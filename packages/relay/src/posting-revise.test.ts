@@ -153,7 +153,7 @@ describe('editing a message', () => {
     it.each([
       ['an invite', 'come to discord.gg/abc123', 'invite_link'],
       ['personal details, which are held for a new message but never for an edit', 'write to me@example.com', 'personal_info'],
-      ['a credential', `my key lk_${'K7QMXV2D'.repeat(6)}`, 'secret_leak'],
+      ['a credential', `my token lat_${'K7QMXV2D'.repeat(6)}`, 'secret_leak'],
       ['spam', 'a'.repeat(50), 'spam'],
       ['a blocked link', 'see bit.ly/abc', 'blocked_domain'],
     ])('answers 422 with the policy code and leaves the message alone: %s', async (_name, content, policy) => {
@@ -173,15 +173,15 @@ describe('editing a message', () => {
     it('does not keep the text of a credential anywhere', async () => {
       const w = await world();
       const msg = await sent(w);
-      const secret = `lk_${'K7QMXV2D'.repeat(6)}`;
-      await patch(w.h, w.a, msg.id, { content: `my key ${secret}` });
+      const secret = `lat_${'K7QMXV2D'.repeat(6)}`;
+      await patch(w.h, w.a, msg.id, { content: `my token ${secret}` });
       expect(JSON.stringify(await w.h.db.prepare('SELECT * FROM relay_messages').all())).not.toContain(secret);
       expect(JSON.stringify(await w.h.db.prepare('SELECT * FROM moderation_log').all())).not.toContain(secret);
     });
 
     it('holds a probation agent’s new link to the rules, too', async () => {
       const w = await world();
-      const fresh = await seedAgent(w.h.relay, { tier: 'new', probationUntil: new Date(w.h.now().getTime() + hours(1)).toISOString() });
+      const fresh = await seedAgent(w.h.relay, { level: 0 });
       const msg = await json(await post(w.h, fresh, say('Plain words, no link')));
       expect(msg.status).toBe('sent');
       const res = await patch(w.h, fresh, msg.id, { content: 'Now with a link https://example.com/page' });
@@ -299,7 +299,7 @@ describe('editing a message', () => {
     it('only the agent’s own', async () => {
       const w = await world();
       const msg = await sent(w);
-      const other = await seedAgent(w.h.relay, { tier: 'claimed' });
+      const other = await seedAgent(w.h.relay);
       expect((await patch(w.h, other, msg.id, { content: 'Not yours to edit' })).status).toBe(404);
       expect((await patch(w.h, w.a, 'msg_NOSUCHMESSAGE0', { content: 'No such message' })).status).toBe(404);
     });
@@ -509,7 +509,7 @@ describe('deleting a message', () => {
   it('is only for the agent’s own messages', async () => {
     const w = await world();
     const msg = await sent(w);
-    const other = await seedAgent(w.h.relay, { tier: 'claimed' });
+    const other = await seedAgent(w.h.relay);
     expect((await remove(w.h, other, msg.id)).status).toBe(404);
     expect((await remove(w.h, w.a, 'msg_NOSUCHMESSAGE0')).status).toBe(404);
     const reader = await seedAgent(w.h.relay, { scopes: ['messages:read'] });

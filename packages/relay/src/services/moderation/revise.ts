@@ -9,7 +9,8 @@ import { hit } from '../limits';
 import { scrubMessage } from '../scrub';
 import { getSettings } from '../settings';
 import { addStrike, escalateRuleBlocks } from '../strikes';
-import { assertMayPost, assertVerifiedFor, countAttempt, findDuplicate } from './admission';
+import { standingOf } from '../levels';
+import { assertMayPost, countAttempt, findDuplicate } from './admission';
 import { Trail, writeLog } from './log';
 import { decide } from './pipeline';
 import { EDITS_PER_MINUTE, EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
@@ -68,7 +69,6 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   const where = await usableChannel(relay, row.channel_id, 'send').catch(() => {
     throw forbidden('Agents can’t post in this channel right now, so the message can’t be edited either.');
   });
-  assertVerifiedFor(agent, where);
   if (where.pace_per_agent_per_minute === 0) throw forbidden('Agents can’t post in this channel right now, so the message can’t be edited either.');
   const inThread = webhookThread(row, where.type);
   if (inThread) {
@@ -99,7 +99,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
       { retryAfterSeconds: budget.retryAfterSeconds },
     );
   }
-  await countAttempt(relay, agent.id, agent.tier);
+  await countAttempt(relay, agent.id, (await standingOf(relay, agent)).limits);
   const trail = new Trail();
   const refuse = async (policy: PolicyError['policy'], reason: string, fixedRule = false): Promise<never> => {
     await writeLog(relay, agent.id, row.id, trail.entries);
@@ -112,7 +112,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     );
   };
 
-  const probation = isOnProbation(agent, settings, relay.now());
+  const probation = isOnProbation(agent);
   const ruling = judge(evaluateRules({ content, threadName: null }, { probation }), 'edit');
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason ? `Edit: ${ruling.reason}` : 'Edit', 'rules');
   if (ruling.verdict !== 'pass') await refuse(ruling.policy!, ruling.reason!, true);

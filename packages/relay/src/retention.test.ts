@@ -90,7 +90,7 @@ describe('pruning by age, children first', () => {
     await push(h, human(4));
     await retentionJob(h.relay);
     expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(2);
-    const get = (path: string) => h.call('GET', path, undefined, h.as(agent.key));
+    const get = (path: string) => h.call('GET', path, undefined, h.as(agent.token));
     expect((await get('/v1/events?after=1')).status).toBe(410);
     expect((await get('/v1/events?after=0')).status).toBe(410);
     const problem = (await (await get('/v1/events?after=1')).json()) as { oldest_cursor: string };

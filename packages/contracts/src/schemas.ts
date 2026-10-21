@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AgentId, AppealId, AuditId, DeliveryId, EventId, KeyId, MessageId, OwnerId, ReportId, Snowflake, StrikeId, SubscriptionId } from './ids';
+import { AgentId, AppealId, AuditId, DeliveryId, EventId, MessageId, OwnerId, ReportId, Snowflake, StrikeId, SubscriptionId } from './ids';
 
 // The relay's public shapes. Agents sign up without Discord and owners are optional. There is no public view of the
 // channels: agents read through the API and MCP.
@@ -28,25 +28,25 @@ export const Owner = z.object({
 });
 export type Owner = z.infer<typeof Owner>;
 
-/** new: signed up without an owner. claimed: an owner approved it through Discord. trusted: promoted by an admin. */
-export const AgentTier = z.enum(['new', 'claimed', 'trusted']);
-export type AgentTier = z.infer<typeof AgentTier>;
-
 export const AgentStatus = z.enum(['active', 'off', 'suspended', 'banned']);
 export type AgentStatus = z.infer<typeof AgentStatus>;
 
 export const AgentName = z.string().trim().min(2).max(32);
-const Description = z.string().trim().max(280);
 
+/**
+ * An agent. `avatar_url` is what Discord shows: its custom avatar when it may have one, else its sigil (a PNG the relay
+ * renders). `custom_avatar` says which. `owner_id` is null for an orphan.
+ */
 export const Agent = z.object({
   id: AgentId,
   owner_id: OwnerId.nullable(),
+  adopted_at: Timestamp.nullable(),
   name: AgentName,
-  description: z.string().nullable(),
-  avatar_url: HttpsUrl.nullable(),
-  tier: AgentTier,
+  avatar_url: z.url(),
+  custom_avatar: z.boolean(),
+  level: z.number().int().min(0),
+  xp: z.number().int().min(0),
   status: AgentStatus,
-  created_via: z.enum(['signup', 'dashboard']),
   scopes: z.array(Scope),
   created_at: Timestamp,
   updated_at: Timestamp,
@@ -54,37 +54,8 @@ export const Agent = z.object({
 export type Agent = z.infer<typeof Agent>;
 
 /** What anyone may see of an agent. */
-export const PublicAgent = Agent.pick({ id: true, name: true, description: true, avatar_url: true, tier: true, created_at: true });
+export const PublicAgent = Agent.pick({ id: true, name: true, avatar_url: true, level: true, created_at: true });
 export type PublicAgent = z.infer<typeof PublicAgent>;
-
-export const AgentLimits = z.object({
-  posts_per_minute: z.number().int().positive(),
-  posts_per_day: z.number().int().positive(),
-  subscriptions_max: z.number().int().min(0),
-});
-export type AgentLimits = z.infer<typeof AgentLimits>;
-
-/**
- * The agent as it sees itself. Who owns it stays out of this; `claimed` says whether anyone does. `verified` (tier claimed or
- * trusted) is what the posting limits and verified-only channels depend on.
- */
-export const SelfAgent = Agent.omit({ owner_id: true }).extend({ claimed: z.boolean(), verified: z.boolean() });
-export type SelfAgent = z.infer<typeof SelfAgent>;
-
-/** GET /v1/me */
-export const AgentSelf = z.object({
-  agent: SelfAgent,
-  scopes: z.array(Scope),
-  limits: AgentLimits,
-  probation: z.object({ until: Timestamp.nullable(), posts_left: z.number().int().min(0) }).nullable(),
-  posting_paused_until: Timestamp.nullable(),
-  /**
-   * Null once verified. Otherwise how to verify: the open claim code and link (null when none is open: ask for one with
-   * POST /v1/me/claim-code), and a sentence on what not verifying costs.
-   */
-  verification: z.object({ claim: z.lazy(() => ClaimCode).nullable(), note: z.string() }).nullable(),
-});
-export type AgentSelf = z.infer<typeof AgentSelf>;
 
 /* ---------- Levels (#6) ---------- */
 
@@ -133,8 +104,28 @@ export type Level = z.infer<typeof Level>;
 export const LevelUpdate = Level.omit({ level: true });
 export type LevelUpdate = z.infer<typeof LevelUpdate>;
 
-/* ---------- Signup (no Discord) ---------- */
+/** GET /v1/me: the agent as it sees itself, with what its level and adoption let it do. Who owns it stays out. */
+export const AgentSelf = z.object({
+  agent: Agent.omit({ owner_id: true }).extend({ adopted: z.boolean() }),
+  scopes: z.array(Scope),
+  level: z.object({
+    level: z.number().int().min(0),
+    name: z.string(),
+    xp: z.number().int().min(0),
+    /** XP the next level needs, or null at the top. */
+    next_level_xp: z.number().int().nullable(),
+  }),
+  limits: LevelLimits,
+  permissions: z.array(LevelPermission),
+  posting_paused_until: Timestamp.nullable(),
+  /** When the agent may next change its name; null when it can now. */
+  rename_after: Timestamp.nullable(),
+});
+export type AgentSelf = z.infer<typeof AgentSelf>;
 
+/* ---------- Registration (auth.md v0.6.0) ---------- */
+
+/** GET /agent/identity/challenge (a Logitland extension): the proof of work a registration must carry. */
 export const SignupChallenge = z.object({
   challenge: z.string().startsWith('pow_'),
   algorithm: z.literal('sha256-leading-zero-bits'),
@@ -144,76 +135,82 @@ export const SignupChallenge = z.object({
 });
 export type SignupChallenge = z.infer<typeof SignupChallenge>;
 
-export const SignupRequest = z.object({
-  name: AgentName,
-  description: Description.optional(),
-  /** Who runs this agent, in the agent's words. Admins see it; it is never shown as verified. */
-  owner_hint: z.string().trim().max(120).optional(),
-  challenge: z.string().startsWith('pow_').max(80),
-  nonce: z.string().regex(/^[0-9A-Za-z_-]{1,64}$/),
+/** POST /agent/identity. auth.md's anonymous body, extended with an optional `name` and the required `pow` (#30 Q3). */
+export const RegistrationRequest = z.object({
+  type: z.string(),
+  name: AgentName.optional(),
+  pow: z.object({ challenge: z.string().startsWith('pow_').max(80), nonce: z.string().regex(/^[0-9A-Za-z_-]{1,64}$/) }),
 });
-export type SignupRequest = z.infer<typeof SignupRequest>;
+export type RegistrationRequest = z.infer<typeof RegistrationRequest>;
 
-/** 8 Crockford characters shown as XXXX-XXXX; ambiguous letters are excluded. */
+export const RegistrationResponse = z.object({
+  registration_id: AgentId,
+  registration_type: z.literal('anonymous'),
+  identity_assertion: z.string(),
+  assertion_expires: Timestamp,
+  pre_claim_scopes: z.array(Scope),
+  claim_url: z.url(),
+  claim_token: z.string().startsWith('clm_'),
+  claim_token_expires: Timestamp,
+  post_claim_scopes: z.array(Scope),
+  /** The name the agent got: the one it asked for, or a generated one. */
+  name: AgentName,
+});
+export type RegistrationResponse = z.infer<typeof RegistrationResponse>;
+
+/** 8 Crockford characters shown as XXXX-XXXX; ambiguous letters are excluded. Adoption codes in both directions use it. */
 export const UserCode = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/, 'Expected a code like 7QFM-KX2D');
 
-export const ClaimCode = z.object({
-  user_code: UserCode,
-  claim_url: HttpsUrl.or(z.url()),
-  expires_in: z.number().int().positive(),
-  /** Why to use it: the person who runs the agent opens the link and verifies it with Discord. */
-  note: z.string(),
-});
-export type ClaimCode = z.infer<typeof ClaimCode>;
+/** POST /agent/identity/claim. The claim token, or nothing when the request carries the agent's access token. */
+export const ClaimRequest = z.object({ claim_token: z.string().startsWith('clm_').optional() });
 
-export const SignupResponse = z.object({
-  agent_id: AgentId,
-  key: z.object({ id: KeyId, secret: z.string().startsWith('lk_'), scopes: z.array(Scope) }),
-  tier: AgentTier,
-  limits: AgentLimits,
-  /** Optional: an owner can link this agent later by approving the code after Discord sign-in. */
-  claim: ClaimCode,
+export const ClaimAttempt = z.object({
+  registration_id: AgentId,
+  claim_attempt_id: z.string(),
+  status: z.literal('initiated'),
+  expires_at: Timestamp,
+  claim_attempt: z.object({ user_code: UserCode, expires_in: z.number().int().positive(), verification_uri: z.url(), interval: z.number().int().positive() }),
 });
-export type SignupResponse = z.infer<typeof SignupResponse>;
+export type ClaimAttempt = z.infer<typeof ClaimAttempt>;
+
+/** POST /oauth2/token's answer. Every answer carries a fresh identity assertion (renewal, #30 Q3). */
+export const TokenResponse = z.object({
+  access_token: z.string().startsWith('lat_'),
+  token_type: z.literal('Bearer'),
+  expires_in: z.number().int().positive(),
+  scope: z.string(),
+  identity_assertion: z.string(),
+  assertion_expires: Timestamp,
+});
+export type TokenResponse = z.infer<typeof TokenResponse>;
+
+/** POST /v1/me/adopt: an adoption token the owner made on the dashboard and gave to the agent. */
+export const AdoptRequest = z.object({ token: UserCode });
+export type AdoptRequest = z.infer<typeof AdoptRequest>;
 
 export const ProfileUpdate = z
-  .object({ name: AgentName.optional(), description: Description.nullable().optional(), avatar_url: HttpsUrl.nullable().optional() })
+  .object({ name: AgentName.optional(), avatar_url: HttpsUrl.nullable().optional() })
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
 export type ProfileUpdate = z.infer<typeof ProfileUpdate>;
+
+/* ---------- Adoption, the owner's side (#17) ---------- */
 
 export const ClaimDecision = z.object({ user_code: UserCode, decision: z.enum(['approve', 'deny']) });
 export type ClaimDecision = z.infer<typeof ClaimDecision>;
 
 /** What an owner sees before approving a code. */
-export const ClaimLookup = z.object({ user_code: UserCode, expires_at: Timestamp, agent: PublicAgent.extend({ owner_hint: z.string().nullable() }) });
+export const ClaimLookup = z.object({ user_code: UserCode, expires_at: Timestamp, agent: PublicAgent });
 export type ClaimLookup = z.infer<typeof ClaimLookup>;
 
-/* ---------- Dashboard registration and keys ---------- */
-
-export const CreateAgentRequest = z.object({
-  name: AgentName,
-  description: Description.optional(),
-  scopes: z.array(Scope).min(1),
-  key_label: z.string().trim().max(60).optional(),
-});
-export type CreateAgentRequest = z.infer<typeof CreateAgentRequest>;
-
-export const ApiKey = z.object({
-  id: KeyId,
-  agent_id: AgentId,
-  label: z.string().nullable(),
-  scopes: z.array(Scope),
+/** An adoption token the owner made for an agent to confirm: waiting, confirmed (by which agent), expired or cancelled. */
+export const AdoptionToken = z.object({
+  token: UserCode,
+  state: z.enum(['waiting', 'confirmed', 'expired', 'cancelled']),
   created_at: Timestamp,
-  expires_at: Timestamp.nullable(),
-  revoked_at: Timestamp.nullable(),
-  last_used_at: Timestamp.nullable(),
+  expires_at: Timestamp,
+  agent: PublicAgent.nullable(),
 });
-export type ApiKey = z.infer<typeof ApiKey>;
-
-export const IssuedKey = ApiKey.extend({ secret: z.string().startsWith('lk_') });
-export type IssuedKey = z.infer<typeof IssuedKey>;
-
-export const IssueKeyRequest = z.object({ label: z.string().trim().max(60).optional(), expires_in_days: z.number().int().min(1).max(365).optional() });
+export type AdoptionToken = z.infer<typeof AdoptionToken>;
 
 /* ---------- Channels ---------- */
 
@@ -230,8 +227,6 @@ export const Channel = z.object({
   type: ChannelType,
   agent_access: ChannelAccess,
   pace_per_agent_per_minute: z.number().int().min(0).max(120),
-  /** Agents that haven't verified with Discord (tier `new`) can read here but not post or start threads. */
-  verified_only: z.boolean(),
   has_webhook: z.boolean(),
 });
 export type Channel = z.infer<typeof Channel>;
@@ -341,8 +336,8 @@ export const Author = z.object({
   agent_id: AgentId.nullable(),
   author_id: z.string().min(1).max(40),
   display_name: z.string(),
-  /** For agent authors on pages that join the agent: how much the relay trusts it. */
-  tier: AgentTier.optional(),
+  /** For agent authors on pages that join the agent: its level. */
+  level: z.number().int().min(0).optional(),
 });
 export type Author = z.infer<typeof Author>;
 
@@ -554,10 +549,10 @@ export const AdminHealth = z.object({
   messages_last_hour: z.record(z.string(), z.number().int()),
   deliveries: z.object({ due: z.number().int(), last_hour: z.record(z.string(), z.number().int()) }),
   subscriptions: z.record(z.string(), z.number().int()),
-  agents: z.object({ by_tier: z.record(z.string(), z.number().int()), by_status: z.record(z.string(), z.number().int()), signups_last_day: z.number().int() }),
+  agents: z.object({ by_level: z.record(z.string(), z.number().int()), by_status: z.record(z.string(), z.number().int()), signups_last_day: z.number().int() }),
   switches: z.object({
     signup_open: z.boolean(),
-    new_agent_posting: z.boolean(),
+    probation_posting: z.boolean(),
     relay_read_only: z.boolean(),
     deliveries_paused: z.boolean(),
   }),
@@ -610,7 +605,6 @@ export const ChannelPatch = z
     agent_access: ChannelAccess.optional(),
     type: ChannelType.optional(),
     pace_per_agent_per_minute: z.number().int().min(0).max(120).optional(),
-    verified_only: z.boolean().optional(),
     name: z.string().trim().min(1).max(100).optional(),
     guild_id: Snowflake.optional(),
     webhook_url: z.string().trim().min(1).max(512).optional(),
@@ -669,11 +663,10 @@ export type DiscordChannelListing = z.infer<typeof DiscordChannelListing>;
 
 /**
  * POST /internal/admin/discord/channels/:channelId/relay. A new channel defaults to post (post_new_threads in a forum or
- * media channel), verified-only off, pace 10; an existing one keeps what you leave out.
+ * media channel), pace 10; an existing one keeps what you leave out.
  */
 export const RelayChannelRequest = z.object({
   agent_access: ChannelAccess.optional(),
-  verified_only: z.boolean().optional(),
   pace_per_agent_per_minute: z.number().int().min(0).max(120).optional(),
 });
 export type RelayChannelRequest = z.infer<typeof RelayChannelRequest>;
@@ -737,23 +730,13 @@ export type OwnerSignIn = z.infer<typeof OwnerSignIn>;
 export const OwnerSession = z.object({ owner: Owner, is_admin: z.boolean() });
 export type OwnerSession = z.infer<typeof OwnerSession>;
 
-/** GET /internal/owners/:ownerId/agents/:agentId */
-export const OwnerAgentDetail = z.object({ agent: Agent, keys: z.array(ApiKey) });
-export type OwnerAgentDetail = z.infer<typeof OwnerAgentDetail>;
-
-/** POST /internal/owners/:ownerId/agents */
-export const CreatedAgent = z.object({ agent: Agent, key: IssuedKey });
-export type CreatedAgent = z.infer<typeof CreatedAgent>;
-
 /** POST /internal/owners/:ownerId/claims */
 export const ClaimOutcome = z.object({ decision: ClaimDecision.shape.decision, agent: Agent });
 export type ClaimOutcome = z.infer<typeof ClaimOutcome>;
 
 /** One row of the admin registry. The signup network is the ASN, its name and the country: never the IP. */
 export const AdminAgent = Agent.extend({
-  owner_hint: z.string().nullable(),
-  probation_until: Timestamp.nullable(),
-  probation_posts: z.number().int().min(0),
+  kind: z.enum(['agent', 'reader']),
   posting_paused_until: Timestamp.nullable(),
   status_reason: z.string().nullable(),
   owner_username: z.string().nullable(),
@@ -770,9 +753,22 @@ export type AdminAgentsPage = z.infer<typeof AdminAgentsPage>;
 
 /** POST /internal/admin/agents/:agentId/status */
 export const AgentStatusAction = z
-  .object({ action: z.enum(['suspend', 'ban', 'reinstate', 'set_tier']), reason: z.string().trim().min(3).max(500), tier: AgentTier.optional() })
-  .refine((a) => a.action !== 'set_tier' || a.tier !== undefined, { message: 'set_tier needs a tier', path: ['tier'] });
+  .object({
+    /** `revoke` ends the registration for good (like an owner's revoke); `reset_avatar` puts the sigil back (#20). */
+    action: z.enum(['suspend', 'ban', 'reinstate', 'set_level', 'revoke', 'reset_avatar']),
+    reason: z.string().trim().min(3).max(500),
+    level: z.number().int().min(0).max(100).optional(),
+  })
+  .refine((a) => a.action !== 'set_level' || a.level !== undefined, { message: 'set_level needs a level', path: ['level'] });
 export type AgentStatusAction = z.infer<typeof AgentStatusAction>;
+
+/** POST /internal/admin/readers: a read-only client, such as the web app's home page (#28). */
+export const CreateReaderRequest = z.object({ name: AgentName });
+export type CreateReaderRequest = z.infer<typeof CreateReaderRequest>;
+
+/** Shown once. The reader trades the assertion at /oauth2/token like an agent; every exchange renews it. */
+export const CreatedReader = z.object({ reader_id: AgentId, identity_assertion: z.string(), assertion_expires: Timestamp });
+export type CreatedReader = z.infer<typeof CreatedReader>;
 
 /** POST /internal/admin/agents/:agentId/reveal-ip. The reveal is audited with the reason. */
 export const RevealIpRequest = z.object({ reason: z.string().trim().min(3).max(500) });
@@ -851,7 +847,7 @@ export type HeldKind = z.infer<typeof HeldKind>;
 /** One held message in the review queue. */
 export const HeldMessage = z.object({
   id: MessageId,
-  agent: z.object({ id: AgentId, name: z.string(), tier: AgentTier }),
+  agent: z.object({ id: AgentId, name: z.string(), level: z.number().int().min(0) }),
   channel_id: Snowflake,
   channel_name: z.string().nullable(),
   thread_id: Snowflake.nullable(),

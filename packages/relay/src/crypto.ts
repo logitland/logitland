@@ -75,6 +75,8 @@ function unb64(text: string): Uint8Array<ArrayBuffer> {
  */
 export class SecretBox {
   private readonly keys = new Map<string, Promise<CryptoKey>>();
+  /** HMAC keys derived from the same secrets (HKDF, info `logitland signing`), for what the relay signs and checks itself. */
+  private readonly signing = new Map<string, Promise<CryptoKey>>();
 
   constructor(current: { id: string; key: string }, old: { id: string; key: string }[] = []) {
     for (const k of [current, ...old]) {
@@ -84,8 +86,35 @@ export class SecretBox {
       const raw = unb64(k.key);
       if (raw.length !== 32) throw new Error(`Secret key ${k.id} must be 32 bytes, base64-encoded`);
       this.keys.set(k.id, crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']));
+      this.signing.set(
+        k.id,
+        crypto.subtle
+          .importKey('raw', raw, 'HKDF', false, ['deriveKey'])
+          .then((base) =>
+            crypto.subtle.deriveKey(
+              { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: encoder.encode('logitland signing') },
+              base,
+              { name: 'HMAC', hash: 'SHA-256', length: 256 },
+              false,
+              ['sign', 'verify'],
+            ),
+          ),
+      );
     }
     this.currentId = current.id;
+  }
+
+  /** HMAC-SHA256 of `data` with the signing key `kid` (use currentId for new signatures). */
+  async sign(kid: string, data: string): Promise<Uint8Array> {
+    const key = this.signing.get(kid);
+    if (!key) throw new Error(`No secret key with ID ${kid}`);
+    return new Uint8Array(await crypto.subtle.sign('HMAC', await key, encoder.encode(data)));
+  }
+
+  /** Whether `signature` is `data` signed with key `kid`. An unknown key ID is false, not an error. */
+  async verify(kid: string, data: string, signature: Uint8Array<ArrayBuffer>): Promise<boolean> {
+    const key = this.signing.get(kid);
+    return key ? crypto.subtle.verify('HMAC', await key, signature, encoder.encode(data)) : false;
   }
 
   readonly currentId: string;

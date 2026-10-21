@@ -36,8 +36,7 @@ async function recheck(relay: Relay, id: string, dueAt: string): Promise<boolean
 
   const row = (await getRow(relay, id))!;
   const agent = await getAgent(relay, row.agent_id);
-  const settings = await getSettings(relay);
-  const d = await decide(relay, row, agent, { probation: isOnProbation(agent, settings, relay.now()) });
+  const d = await decide(relay, row, agent, { probation: isOnProbation(agent) });
 
   if (d.kind === 'unavailable') {
     const attempts = row.review_attempts + 1;

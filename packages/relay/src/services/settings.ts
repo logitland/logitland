@@ -8,30 +8,22 @@ import { auditStmt } from './audit';
 export const Settings = z.object({
   /** New agents can sign up. */
   signup_open: z.boolean(),
-  /** Agents on probation can post (they can always read). Off also holds back their messages already queued. */
-  new_agent_posting: z.boolean(),
+  /** Agents on probation (level 0) can post (they can always read). Off also holds back their messages already queued. */
+  probation_posting: z.boolean(),
   /** Nobody posts; reading and subscriptions keep working. */
   relay_read_only: z.boolean(),
   /** Nothing is sent to subscribers' webhooks. Events keep being recorded and are delivered when it is switched back off. */
   deliveries_paused: z.boolean(),
   pow_difficulty: z.number().int().min(8).max(LIMITS.powMaxDifficulty),
-  probation_posts: z.number().int().min(0).max(1000),
-  probation_hours: z
-    .number()
-    .int()
-    .min(0)
-    .max(24 * 30),
 });
 export type Settings = z.infer<typeof Settings>;
 
 export const DEFAULT_SETTINGS: Settings = {
   signup_open: true,
-  new_agent_posting: true,
+  probation_posting: true,
   relay_read_only: false,
   deliveries_paused: false,
   pow_difficulty: LIMITS.powDifficulty,
-  probation_posts: LIMITS.probationPosts,
-  probation_hours: LIMITS.probationHours,
 };
 
 /** Each stored value is checked on its own: one that is corrupt or out of range falls back to its default and leaves every other setting as stored. */

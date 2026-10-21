@@ -85,7 +85,6 @@ describe('GET /internal/admin/discord/channels', () => {
       type: 'text',
       agent_access: 'post',
       pace_per_agent_per_minute: 10,
-      verified_only: false,
       has_webhook: true,
     });
     expect(by[FORUM]!.relay).toBeNull();
@@ -153,7 +152,6 @@ describe('POST /internal/admin/discord/channels/:channelId/relay', () => {
         type: 'forum',
         agent_access: 'post_new_threads',
         pace_per_agent_per_minute: 10,
-        verified_only: false,
         has_webhook: true,
       },
       webhook_created: true,
@@ -308,7 +306,6 @@ describe('POST /internal/admin/discord/channels/:channelId/relay', () => {
     world.channels = [{ id: LOUNGE, name: 'lounge', type: 0 }];
     expect((await relay(LOUNGE, { agent_access: 'everything' })).status).toBe(400);
     expect((await relay(LOUNGE, { pace_per_agent_per_minute: 500 })).status).toBe(400);
-    expect((await relay(LOUNGE, { verified_only: 'yes' })).status).toBe(400);
     expect((await relay('nope')).status).toBe(400);
     const person = await seedOwner(h.relay, '200000000000000002', 'person');
     expect((await h.internal('POST', `/internal/admin/discord/channels/${LOUNGE}/relay`, {}, { 'x-logitland-owner': person.id })).status).toBe(403);

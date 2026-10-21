@@ -14,7 +14,7 @@ async function queued(opts: Parameters<typeof world>[0] = {}) {
   const handed: string[] = [];
   const w = await world({ sender: { enqueue: async (_c, id) => void handed.push(id) }, ...opts });
   const admin = await seedOwner(w.h.relay, ADMIN_DISCORD, 'admin');
-  const send = async (who: { key: string } = w.a, text = 'waiting its turn') => {
+  const send = async (who: { token: string } = w.a, text = 'waiting its turn') => {
     const res = await post(w.h, who, say(text));
     expect(res.status).toBe(202);
     return (await json(res)).id as string;
@@ -44,7 +44,7 @@ describe('kill switches reach messages that were already accepted', () => {
 
   it('holds back the messages of a paused agent only, until the pause ends', async () => {
     const { h, a, send } = await queued();
-    const other = await seedAgent(h.relay, { tier: 'trusted' });
+    const other = await seedAgent(h.relay);
     const mine = await send(a, 'from the paused one');
     const theirs = await send(other, 'from another agent');
     await h.db
@@ -63,12 +63,12 @@ describe('kill switches reach messages that were already accepted', () => {
     expect((await row(h, mine))!.status).toBe('sent');
   });
 
-  it('holds back an agent on probation, claimed or not, when posting is off for them, but not a trusted one', async () => {
+  it('holds back an agent on probation when posting is off for them, but not one past it', async () => {
     const { h, a, admin, send } = await queued();
-    const trusted = await seedAgent(h.relay, { tier: 'trusted' });
-    const first = await send(a, 'claimed but still on probation');
-    const second = await send(trusted, 'trusted');
-    await updateSettings(h.relay, admin.id, { new_agent_posting: false });
+    const fresh = await seedAgent(h.relay, { level: 0 });
+    const first = await send(fresh, 'still on probation');
+    const second = await send(a, 'level one');
+    await updateSettings(h.relay, admin.id, { probation_posting: false });
 
     await processSend(h.relay, first);
     await processSend(h.relay, second);
@@ -158,12 +158,12 @@ describe('settings are read key by key', () => {
       h.db.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)').bind(key, value, h.now().toISOString()).run();
     await put('relay_read_only', 'true');
     await put('pow_difficulty', '"hard"');
-    await put('probation_posts', '999999');
+    await put('probation_posting', '"no"');
     await put('unknown_key', 'true');
     const s = await getSettings(h.relay);
     expect(s.relay_read_only).toBe(true);
     expect(s.pow_difficulty).toBe(20);
-    expect(s.probation_posts).toBe(20);
+    expect(s.probation_posting).toBe(true);
     expect(s).not.toHaveProperty('unknown_key');
   });
 

@@ -1,7 +1,7 @@
 // A relay wired to in-memory SQLite and a fake network, shared by every test file.
 // Seed helpers insert rows directly, so each part can be tested without the others' endpoints.
 
-import { ALL_SCOPES, newId, type AgentTier, type ChannelAccess, type ChannelType, type Scope } from '@logitland/contracts';
+import { ALL_SCOPES, newId, type ChannelAccess, type ChannelType, type LevelLimits, type Scope } from '@logitland/contracts';
 import { fileURLToPath } from 'node:url';
 import { internalApp, relayApp } from '../app';
 import type { ChannelSenderClient, GatewayClient, Relay } from '../context';
@@ -30,7 +30,12 @@ export interface HarnessOptions {
   start?: string;
   /** Extra or replacement bindings, e.g. DISCORD_PUBLIC_KEY or MODERATION_OUTAGE. */
   env?: Partial<RelayBindings>;
+  /** Keep the migration's placeholder level limits. By default every level gets TEST_LIMITS, so tests about other things don't trip them. */
+  seededLevels?: boolean;
 }
+
+/** The limits every level has in tests unless `seededLevels` is set. */
+export const TEST_LIMITS: LevelLimits = { posts_per_minute: 20, posts_per_day: 1000, subscriptions: 3, reads_per_minute: 600 };
 
 export function harness(opts: HarnessOptions = {}) {
   let clock = new Date(opts.start ?? '2026-10-19T03:00:00Z');
@@ -76,6 +81,10 @@ export function harness(opts: HarnessOptions = {}) {
     return h(req);
   };
   const db = new SqliteD1().migrate(MIGRATIONS);
+  if (!opts.seededLevels) {
+    const limits = JSON.stringify(TEST_LIMITS);
+    db.raw.prepare("UPDATE levels SET rules = json_set(rules, '$.limits.orphan', json(?), '$.limits.adopted', json(?))").run(limits, limits);
+  }
   const log = memoryLogger();
   const relay: Relay = createRelay(
     {
@@ -128,12 +137,24 @@ export function harness(opts: HarnessOptions = {}) {
     receivers,
     dns,
     discordCalls,
-    /** Public app: /v1, /public, /discord. */
+    /** Public app: /v1, /agent, /oauth2, the docs. */
     call: request(publicApp),
+    /** A form-encoded POST to the public app, as /oauth2/token and /oauth2/revoke take. */
+    form: (path: string, fields: Record<string, string>) =>
+      publicApp.request(
+        path,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded', 'cf-connecting-ip': '203.0.113.7' },
+          body: new URLSearchParams(fields).toString(),
+        },
+        undefined,
+        ctx as never,
+      ),
     /** Internal app, with the dashboard token already set. Pass x-logitland-owner yourself. */
     internal: (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) =>
       request(internal)(method, path, body, { 'x-logitland-internal': INTERNAL_TOKEN, ...headers }),
-    as: (key: string) => ({ authorization: `Bearer ${key}` }),
+    as: (token: string) => ({ authorization: `Bearer ${token}` }),
     /** Waits for everything handed to waitUntil so far. */
     async settle() {
       while (waitUntil.length) await Promise.allSettled(waitUntil.splice(0));
@@ -159,46 +180,57 @@ export async function seedOwner(relay: Relay, discordUserId = '20000000000000000
   return { id, discord_user_id: discordUserId };
 }
 
+/** How long a seeded access token lasts: long enough that tests moving the clock by days don't have to exchange again. */
+const SEEDED_TOKEN_MS = 365 * 86_400_000;
+
+/**
+ * An agent with an access token, inserted directly (no registration, no proof of work). Level 1 by default, so it isn't on
+ * probation; pass `level: 0` for probation. `kind: 'reader'` makes the web app's read-only client.
+ */
 export async function seedAgent(
   relay: Relay,
   opts: {
     name?: string;
-    tier?: AgentTier;
+    level?: number;
+    xp?: number;
+    kind?: 'agent' | 'reader';
     ownerId?: string | null;
     status?: 'active' | 'off' | 'suspended' | 'banned';
     scopes?: Scope[];
-    probationUntil?: string | null;
+    avatarUrl?: string | null;
   } = {},
-): Promise<{ id: string; key: string; keyId: string; name: string }> {
+): Promise<{ id: string; token: string; tokenId: string; name: string }> {
   const id = newId('agent');
   const name = opts.name ?? `Agent-${id.slice(-5)}`;
-  const now = relay.now().toISOString();
+  const now = relay.now();
   const scopes = JSON.stringify(opts.scopes ?? ALL_SCOPES);
   await relay.db
     .prepare(
-      'INSERT INTO agents (id, owner_id, name, name_key, description, avatar_url, tier, status, created_via, scopes, probation_until, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO agents (id, kind, owner_id, adopted_at, name, name_key, avatar_url, level, xp, status, scopes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
     .bind(
       id,
+      opts.kind ?? 'agent',
       opts.ownerId ?? null,
+      opts.ownerId ? now.toISOString() : null,
       name,
       nameKey(name),
-      opts.tier ?? 'claimed',
+      opts.avatarUrl ?? null,
+      opts.level ?? 1,
+      opts.xp ?? 0,
       opts.status ?? 'active',
-      opts.ownerId ? 'dashboard' : 'signup',
       scopes,
-      opts.probationUntil ?? null,
-      now,
-      now,
+      now.toISOString(),
+      now.toISOString(),
     )
     .run();
-  const key = randomToken('lk_');
-  const keyId = newId('key');
+  const token = randomToken('lat_');
+  const tokenId = newId('token');
   await relay.db
-    .prepare('INSERT INTO api_keys (id, agent_id, hash, scopes, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(keyId, id, await sha256(key), scopes, now)
+    .prepare('INSERT INTO access_tokens (id, agent_id, hash, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(tokenId, id, await sha256(token), scopes, now.toISOString(), new Date(now.getTime() + SEEDED_TOKEN_MS).toISOString())
     .run();
-  return { id, key, keyId, name };
+  return { id, token, tokenId, name };
 }
 
 export async function seedChannel(

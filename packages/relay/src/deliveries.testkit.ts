@@ -1,6 +1,6 @@
 // Shared setup for deliveries*.test.ts and subscriptions*.test.ts (not a test file itself).
 
-import { newId, type AgentTier, type CreateSubscriptionRequest } from '@logitland/contracts';
+import { newId, type CreateSubscriptionRequest } from '@logitland/contracts';
 import { expect } from 'vitest';
 import { fanOut, type EventRow } from './services/deliveries';
 import { BENCH, GUILD, LOUNGE, harness, seedAgent, seedChannel, type Harness } from './testing';
@@ -13,16 +13,29 @@ export const HOOK = `https://${HOOK_HOST}/logitland`;
 /** Answers the subscription challenge the way a well-behaved receiver does. */
 export const echoChallenge: Receiver = async (req) => Response.json({ challenge: ((await req.json()) as { challenge: string }).challenge });
 
-export type Setup = Harness & { agent: { id: string; key: string; keyId: string; name: string }; auth: Record<string, string> };
+export type Setup = Harness & { agent: Awaited<ReturnType<typeof seedAgent>>; auth: Record<string, string> };
 
-/** A relay with the lounge (post) and the bench (read only) open to agents, one agent, and a receiver that echoes challenges. */
-export async function setup(opts: { tier?: AgentTier } = {}): Promise<Setup> {
+/** Sets how many subscriptions an agent may hold, orphan and adopted alike: at `level` only, or at every level. */
+export const allowSubscriptions = (h: Pick<Harness, 'db'>, n: number, level?: number) =>
+  h.db
+    .prepare(
+      "UPDATE levels SET rules = json_set(rules, '$.limits.orphan.subscriptions', ?1, '$.limits.adopted.subscriptions', ?1) WHERE ?2 IS NULL OR level = ?2",
+    )
+    .bind(n, level ?? null)
+    .run();
+
+/**
+ * A relay with the lounge (post) and the bench (read only) open to agents, one agent, and a receiver that echoes challenges.
+ * `subscriptions` raises every level's cap, for tests that need more than TEST_LIMITS allows.
+ */
+export async function setup(opts: { level?: number; subscriptions?: number } = {}): Promise<Setup> {
   const h = harness();
+  if (opts.subscriptions !== undefined) await allowSubscriptions(h, opts.subscriptions);
   await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post' });
   await seedChannel(h.relay, { id: BENCH, name: 'lab-bench', access: 'read_only' });
-  const agent = await seedAgent(h.relay, { name: 'Orrery', tier: opts.tier ?? 'claimed' });
+  const agent = await seedAgent(h.relay, { name: 'Orrery', level: opts.level });
   h.receivers[HOOK_HOST] = echoChallenge;
-  return { ...h, agent, auth: h.as(agent.key) };
+  return { ...h, agent, auth: h.as(agent.token) };
 }
 
 export interface Created {

@@ -77,7 +77,7 @@ export function overwrites(...entries: OverwriteSpec[]): OverwriteSpec[] {
 
 export function goodWorld(): World {
   return {
-    application: { id: APP, name: 'Logitland', flags: 1 << 19, interactions_endpoint_url: 'https://relay.logitland.test/discord/interactions' },
+    application: { id: APP, name: 'Logitland', flags: 1 << 19, interactions_endpoint_url: 'https://relay.logitland.test/v1/discord/interactions' },
     roles: [
       {
         id: GUILD,

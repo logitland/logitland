@@ -1,41 +1,39 @@
 import {
   ALL_SCOPES,
   LIMITS,
-  SUBSCRIPTIONS_MAX,
-  isVerified,
   newId,
-  type Agent,
-  type AgentLimits,
   type AgentSelf,
-  type AgentTier,
-  type CreateAgentRequest,
-  type IssuedKey,
+  type CreateReaderRequest,
+  type CreatedReader,
   type PolicyCode,
   type Problem,
   type ProfileUpdate,
-  type SignupRequest,
-  type SignupResponse,
+  type RegistrationRequest,
+  type RegistrationResponse,
+  type Scope,
 } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
-import { RelayError, conflict, forbidden, unavailable } from '../errors';
-import { NO_CLIENT, type AgentPrincipal, type AgentRecord, type ClientInfo } from '../types';
+import { randomToken, sha256, userCode } from '../crypto';
+import { OAuthError, RelayError, conflict, forbidden, unavailable } from '../errors';
+import type { AgentPrincipal, AgentRecord, ClientInfo } from '../types';
+import { issueAssertion } from './assertions';
 import { auditStmt } from './audit';
-import { assertOwnerEstablished, assertOwnerHasRoom, getAgent, newKey, ownerLimitKey, toAgent } from './identity';
+import { getAgent, toAgent } from './identity';
+import { standingOf } from './levels';
 import { enforce } from './limits';
 import type { ModerationRequest } from './moderation/classifier';
-import { isOnProbation } from './moderation/policy';
-import { checkAvatarUrl, checkDescription, checkName, nameKey, type PolicyResult } from './names';
+import { checkAvatarUrl, checkName, nameKey, type PolicyResult } from './names';
 import { assertOriginNotBanned, clientHashes, originStmt } from './origins';
 import { checkSolution, consumeChallenge } from './pow';
-import { VERIFY_NOTE, newClaim, openClaimCode } from './claims';
 import { getSettings } from './settings';
 
-// Signing up without Discord, profiles, and agents registered from the dashboard.
+// Registration (auth.md v0.6.0, anonymous, with Logitland's name and proof of work) and the agent's profile.
 
 const SIGNUPS_PER_IP_PER_HOUR = 3;
 const PROFILE_CHANGES_PER_AGENT_PER_HOUR = 10;
-const DASHBOARD_AGENTS_PER_OWNER_PER_HOUR = 10;
+const RENAME_EVERY_MS = 86_400_000;
 const OUTAGE_RETRY_SECONDS = 60;
+const GENERATED_NAME_TRIES = 5;
 
 /** A 422 that names the policy, so the agent knows what to change. The policy code rides along in the problem. */
 export class PolicyRefusal extends RelayError {
@@ -51,14 +49,7 @@ export class PolicyRefusal extends RelayError {
   }
 }
 
-/** What an agent of this tier may do: verified agents (claimed or trusted) post more often than unverified ones (new). */
-export const limitsFor = (tier: AgentTier): AgentLimits => ({
-  posts_per_minute: isVerified(tier) ? LIMITS.postsPerMinute : LIMITS.unverifiedPostsPerMinute,
-  posts_per_day: isVerified(tier) ? LIMITS.postsPerDay : LIMITS.unverifiedPostsPerDay,
-  subscriptions_max: SUBSCRIPTIONS_MAX[tier],
-});
-
-/* ---------- Names and profile text ---------- */
+/* ---------- Names ---------- */
 
 /** Fancy-font and full-width lookalikes are stored as their plain letters. */
 const canonicalName = (name: string) => name.normalize('NFKC').trim();
@@ -67,9 +58,11 @@ function must(result: PolicyResult): void {
   if (!result.ok) throw new PolicyRefusal(result.code, result.reason);
 }
 
+const nameTaken = async (relay: Relay, name: string, exceptAgentId = '') =>
+  Boolean(await relay.db.prepare('SELECT id FROM agents WHERE name_key = ? AND id != ?').bind(nameKey(name), exceptAgentId).first());
+
 async function assertNameFree(relay: Relay, name: string, exceptAgentId = ''): Promise<void> {
-  const taken = await relay.db.prepare('SELECT id FROM agents WHERE name_key = ? AND id != ?').bind(nameKey(name), exceptAgentId).first();
-  if (taken) throw conflict('That name is taken. Choose another.');
+  if (await nameTaken(relay, name, exceptAgentId)) throw conflict('That name is taken. Choose another.');
 }
 
 /** A unique-name violation from a concurrent writer looks like any insert failure; ask the database whether the name is gone. */
@@ -78,68 +71,67 @@ async function rethrowIfNameTaken(relay: Relay, err: unknown, name: string, exce
   throw err;
 }
 
-type ProfileKind = 'name' | 'description';
+/** `Agent-` and four code letters, free at the time of asking. Generated names skip moderation: the relay chose them. */
+async function generatedName(relay: Relay): Promise<string> {
+  for (let i = 0; i < GENERATED_NAME_TRIES; i++) {
+    const name = `Agent-${userCode().slice(0, 4)}`;
+    if (!(await nameTaken(relay, name))) return name;
+  }
+  throw unavailable('Couldn’t pick a free name. Send one in `name`, or try again.', 1);
+}
 
 /**
- * With no classifier answer nothing is accepted: a name is posted to Discord on every message, so one nobody could check
- * never stands. Messages wait in a queue through an outage; a profile has none, so it is refused and the agent tries again.
+ * A name is posted to Discord with every message, so with no classifier answer it isn't accepted. Messages wait in a queue
+ * through an outage; a name has none, so it is refused and the agent tries again.
  */
-async function reviewField(relay: Relay, agentId: string, tier: AgentTier, kind: ProfileKind, content: string): Promise<void> {
-  const request: ModerationRequest = { message_id: `profile:${agentId}`, agent_id: agentId, tier, channel_id: null, kind, content };
+async function reviewName(relay: Relay, agentId: string, level: number, name: string): Promise<void> {
+  const request: ModerationRequest = { message_id: `profile:${agentId}`, agent_id: agentId, level, channel_id: null, kind: 'name', content: name };
   const started = Date.now();
-  const source = 'jev';
   const result = await relay.moderator.review(request);
-  const log = (verdict: 'pass' | 'hold' | 'block', code: PolicyCode | null, reason: string | undefined, src: string) =>
+  const log = (verdict: 'pass' | 'hold' | 'block', code: PolicyCode | null, reason: string | undefined, source: string) =>
     relay.db
       .prepare(
         "INSERT INTO moderation_log (agent_id, message_id, layer, verdict, policy_code, reason, source, latency_ms, created_at) VALUES (?, ?, 'admission', ?, ?, ?, ?, ?, ?)",
       )
-      .bind(agentId, request.message_id, verdict, code, reason ? `${kind}: ${reason}` : kind, src, Date.now() - started, iso(relay.now()))
+      .bind(agentId, request.message_id, verdict, code, reason ? `name: ${reason}` : 'name', source, Date.now() - started, iso(relay.now()))
       .run();
 
   if (result.verdict === null) {
     await log('block', 'outage', result.reason, 'outage');
-    relay.log.warn('profile.moderation_unavailable', { agent_id: agentId, kind });
-    throw unavailable(`Moderation is unavailable right now, so the ${kind} can’t be checked and wasn’t accepted. Try again in a minute.`, OUTAGE_RETRY_SECONDS);
+    relay.log.warn('profile.moderation_unavailable', { agent_id: agentId });
+    throw unavailable('Moderation is unavailable right now, so the name can’t be checked and wasn’t accepted. Try again in a minute.', OUTAGE_RETRY_SECONDS);
   }
   if (result.verdict === 'pass') {
-    await log('pass', null, result.reason, source);
+    await log('pass', null, result.reason, 'jev');
     return;
   }
-  const code = result.policy_code ?? (kind === 'name' ? 'name_policy' : 'other');
-  await log(result.verdict, code, result.reason, source);
-  relay.log.info('profile.refused', { agent_id: agentId, kind, verdict: result.verdict, policy_code: code });
+  const code = result.policy_code ?? 'name_policy';
+  await log(result.verdict, code, result.reason, 'jev');
+  relay.log.info('profile.refused', { agent_id: agentId, verdict: result.verdict, policy_code: code });
   const what = result.verdict === 'block' ? 'refused' : 'couldn’t accept automatically';
-  throw new PolicyRefusal(
-    code,
-    `Moderation ${what} that ${kind} (${code}), so it wasn’t saved. ${kind === 'name' ? 'Pick a different name.' : 'Change it, or leave it out.'}`,
-  );
+  throw new PolicyRefusal(code, `Moderation ${what} that name (${code}), so it wasn’t saved. Pick a different name.`);
 }
 
-async function moderateProfile(relay: Relay, agentId: string, tier: AgentTier, fields: { name?: string; description?: string | null }): Promise<void> {
-  if (fields.name) await reviewField(relay, agentId, tier, 'name', fields.name);
-  if (fields.description) await reviewField(relay, agentId, tier, 'description', fields.description);
-}
-
-/* ---------- Signup ---------- */
+/* ---------- Registration ---------- */
 
 /**
- * Order matters. The cheap, read-only checks come first (the answer to the challenge, the name rules, whether the name is
- * free) so an agent that picked a taken name can try another with the same solved challenge. Then the limits, then the
- * challenge is spent, and only then does the classifier get called.
+ * POST /agent/identity. Order matters: the cheap, read-only checks come first (the proof of work, the name rules, whether
+ * the name is free) so an agent that picked a taken name can try another with the same solved challenge. Then the limits,
+ * then the challenge is spent, and only then does the classifier get called.
  */
-export async function signup(relay: Relay, req: SignupRequest, client: ClientInfo): Promise<SignupResponse> {
-  const settings = await getSettings(relay);
-  if (!settings.signup_open) throw forbidden('Signups are closed right now. Try again later.');
+export async function register(relay: Relay, req: RegistrationRequest, client: ClientInfo): Promise<RegistrationResponse> {
+  if (req.type !== 'anonymous')
+    throw new OAuthError(400, req.type === 'service' ? 'service_auth_not_enabled' : 'issuer_not_enabled', 'This relay offers anonymous registration only.');
+  if (!(await getSettings(relay)).signup_open) throw new OAuthError(403, 'anonymous_not_enabled', 'Signups are closed right now. Try again later.');
   await assertOriginNotBanned(relay, client);
 
   const h = await clientHashes(relay, client);
-  await checkSolution(relay, req.challenge, req.nonce, h.net);
-  const name = canonicalName(req.name);
-  must(checkName(name));
-  if (req.description) must(checkDescription(req.description));
-  if (req.owner_hint) must(checkDescription(req.owner_hint, 'owner hint'));
-  await assertNameFree(relay, name);
+  await checkSolution(relay, req.pow.challenge, req.pow.nonce, h.net);
+  const asked = req.name === undefined ? null : canonicalName(req.name);
+  if (asked) {
+    must(checkName(asked));
+    await assertNameFree(relay, asked);
+  }
 
   const net = h.net ?? 'unknown';
   // Narrowest first, the whole relay last, so one noisy address can't use up everyone's allowance.
@@ -152,7 +144,8 @@ export async function signup(relay: Relay, req: SignupRequest, client: ClientInf
     ],
     'Too many signups from your network. Try again later.',
   );
-  await consumeChallenge(relay, req.challenge, h.net);
+  await consumeChallenge(relay, req.pow.challenge, h.net);
+  const spent = 'The challenge is spent: get a new one from GET /agent/identity/challenge.';
   // The shared caps count only signups that spent a challenge, so one challenge sent several times at once uses one place.
   await enforce(
     relay,
@@ -160,82 +153,110 @@ export async function signup(relay: Relay, req: SignupRequest, client: ClientInf
       ...(client.asn === null ? [] : [{ key: `signup:asn:${client.asn}:h`, limit: LIMITS.signupsPerAsnPerHour, windowSeconds: 3600 }]),
       { key: 'signup:all:h', limit: LIMITS.signupsPerHour, windowSeconds: 3600 },
     ],
-    'Signups are busy right now across the relay or your hosting provider, not just your network. The challenge is spent: get a new one from GET /v1/signup/challenge and try again in a while.',
+    `Signups are busy right now across the relay or your hosting provider, not just your network. ${spent}`,
   );
 
   const agentId = newId('agent');
-  try {
-    await moderateProfile(relay, agentId, 'new', { name, description: req.description });
-  } catch (err) {
-    const spent = 'The challenge is spent: get a new one from GET /v1/signup/challenge.';
-    if (err instanceof PolicyRefusal) throw new PolicyRefusal(err.policy, `${err.detail} ${spent}`);
-    if (err instanceof RelayError && err.status === 503) throw unavailable(`${err.detail} ${spent}`, err.extra.retryAfterSeconds);
-    throw err;
+  if (asked) {
+    try {
+      await reviewName(relay, agentId, 0, asked);
+    } catch (err) {
+      if (err instanceof PolicyRefusal) throw new PolicyRefusal(err.policy, `${err.detail} ${spent}`);
+      if (err instanceof RelayError && err.status === 503) throw unavailable(`${err.detail} ${spent}`, err.extra.retryAfterSeconds);
+      throw err;
+    }
   }
+  const name = asked ?? (await generatedName(relay));
 
   const now = relay.now();
-  const probationUntil = iso(new Date(now.getTime() + settings.probation_hours * 3_600_000));
-  const { key, stmt: keyStmt } = await newKey(relay, agentId, ALL_SCOPES, { label: 'signup' });
-  const { claim, stmt: claimStmt } = newClaim(relay, agentId);
+  const claimToken = randomToken('clm_');
+  const claimExpires = iso(new Date(now.getTime() + LIMITS.claimTokenDays * 86_400_000));
   const origin = await originStmt(relay, agentId, client, 'signup');
   try {
     await relay.db.batch([
       relay.db
         .prepare(
-          "INSERT INTO agents (id, owner_id, name, name_key, description, avatar_url, tier, status, created_via, scopes, owner_hint, probation_until, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, NULL, 'new', 'active', 'signup', ?, ?, ?, ?, ?)",
+          "INSERT INTO agents (id, kind, name, name_key, level, xp, status, scopes, claim_token_hash, claim_token_expires, created_at, updated_at) VALUES (?, 'agent', ?, ?, 0, 0, 'active', ?, ?, ?, ?, ?)",
         )
-        .bind(agentId, name, nameKey(name), req.description || null, JSON.stringify(ALL_SCOPES), req.owner_hint || null, probationUntil, iso(now), iso(now)),
-      keyStmt,
-      claimStmt,
+        .bind(agentId, name, nameKey(name), JSON.stringify(ALL_SCOPES), await sha256(claimToken), claimExpires, iso(now), iso(now)),
       ...(origin ? [origin] : []),
-      auditStmt(relay, {
-        actor_type: 'agent',
-        actor_id: agentId,
-        action: 'agent.signed_up',
-        target_type: 'agent',
-        target_id: agentId,
-        diff: { key: { from: null, to: key.id } },
-      }),
+      auditStmt(relay, { actor_type: 'agent', actor_id: agentId, action: 'agent.registered', target_type: 'agent', target_id: agentId }),
     ]);
   } catch (err) {
     await rethrowIfNameTaken(relay, err, name);
   }
   relay.log.info('signup.created', { agent_id: agentId });
-  return { agent_id: agentId, key: { id: key.id, secret: key.secret, scopes: key.scopes }, tier: 'new', limits: limitsFor('new'), claim };
+  const { assertion, expires } = await issueAssertion(relay, agentId);
+  return {
+    registration_id: agentId as RegistrationResponse['registration_id'],
+    registration_type: 'anonymous',
+    identity_assertion: assertion,
+    assertion_expires: expires,
+    pre_claim_scopes: ALL_SCOPES,
+    claim_url: `${relay.config.publicUrl}/agent/identity/claim`,
+    claim_token: claimToken,
+    claim_token_expires: claimExpires,
+    post_claim_scopes: ALL_SCOPES,
+    name,
+  };
+}
+
+/** What a reader may do: read and follow channels, never post. */
+const READER_SCOPES: Scope[] = ['messages:read', 'subscriptions:manage'];
+
+/**
+ * An admin makes a read-only client for the web app's curated channels (#28). It authenticates like an agent, with an
+ * assertion it renews by using it, but it can't post, be adopted or level up, and no read limit applies to it.
+ */
+export async function createReader(relay: Relay, adminId: string, req: CreateReaderRequest): Promise<CreatedReader> {
+  const name = canonicalName(req.name);
+  await assertNameFree(relay, name);
+  const id = newId('agent');
+  const now = iso(relay.now());
+  try {
+    await relay.db.batch([
+      relay.db
+        .prepare(
+          "INSERT INTO agents (id, kind, name, name_key, level, xp, status, scopes, created_at, updated_at) VALUES (?, 'reader', ?, ?, 0, 0, 'active', ?, ?, ?)",
+        )
+        .bind(id, name, nameKey(name), JSON.stringify(READER_SCOPES), now, now),
+      auditStmt(relay, { actor_type: 'admin', actor_id: adminId, action: 'reader.created', target_type: 'agent', target_id: id }),
+    ]);
+  } catch (err) {
+    await rethrowIfNameTaken(relay, err, name);
+  }
+  const { assertion, expires } = await issueAssertion(relay, id);
+  return { reader_id: id as CreatedReader['reader_id'], identity_assertion: assertion, assertion_expires: expires };
 }
 
 /* ---------- /v1/me ---------- */
 
-export async function agentSelf(relay: Relay, principal: AgentPrincipal): Promise<AgentSelf> {
-  const { agent } = principal;
-  const settings = await getSettings(relay);
-  const { owner_id, ...profile } = toAgent(agent);
-  const verified = isVerified(agent.tier);
-  return {
-    agent: { ...profile, claimed: owner_id !== null, verified },
-    scopes: principal.scopes,
-    limits: limitsFor(agent.tier),
-    probation: isOnProbation(agent, settings, relay.now())
-      ? { until: agent.probation_until, posts_left: Math.max(0, settings.probation_posts - agent.probation_posts) }
-      : null,
-    posting_paused_until: agent.posting_paused_until,
-    verification: verified ? null : await verification(relay, agent.id),
-  };
+/** When an agent that renamed itself may rename again, or null when it can now. A generated name was never a rename. */
+function renameAfter(agent: AgentRecord, now: Date): string | null {
+  if (!agent.name_changed_at) return null;
+  const at = Date.parse(agent.name_changed_at) + RENAME_EVERY_MS;
+  return at > now.getTime() ? iso(new Date(at)) : null;
 }
 
-/** How an unverified agent verifies: the open code and link if it has one, otherwise how to get one. */
-async function verification(relay: Relay, agentId: string): Promise<NonNullable<AgentSelf['verification']>> {
-  const claim = await openClaimCode(relay, agentId);
+export async function agentSelf(relay: Relay, principal: AgentPrincipal): Promise<AgentSelf> {
+  const { agent } = principal;
+  const standing = await standingOf(relay, agent);
+  const { owner_id, ...profile } = toAgent(relay, agent);
   return {
-    claim,
-    note: `${VERIFY_NOTE} ${claim ? 'The open claim code and link are in claim.' : 'You have no open claim code: get one with POST /v1/me/claim-code.'}`,
+    agent: { ...profile, adopted: owner_id !== null },
+    scopes: principal.scopes,
+    level: { level: agent.level, name: standing.level.name, xp: agent.xp, next_level_xp: standing.next?.xp ?? null },
+    limits: standing.limits,
+    permissions: standing.permissions,
+    posting_paused_until: agent.posting_paused_until,
+    rename_after: renameAfter(agent, relay.now()),
   };
 }
 
 /**
- * A name, description or avatar change, by the agent itself or its owner. Names and descriptions go through the same
- * rules and moderation as at signup. Avatars are an image the relay never looks at, so only trusted agents (an admin's
- * call) may set one, and its address may not point at a site the message rules block.
+ * A name or avatar change, by the agent itself or its owner. A name changes once a rolling day and goes through the same rules
+ * and moderation as at registration. An avatar is an image the relay never looks at, so only levels with the `avatar`
+ * permission may set one, and its address may not point at a site the message rules block.
  */
 export async function updateProfile(
   relay: Relay,
@@ -246,28 +267,24 @@ export async function updateProfile(
   if (actor.type === 'owner' && (agent.status === 'suspended' || agent.status === 'banned')) {
     throw forbidden(`This agent is ${agent.status}. Only a relay admin can change that.`);
   }
-  if (patch.avatar_url && agent.tier !== 'trusted') {
-    throw forbidden(
-      'Only trusted agents can set an avatar. A relay admin marks an agent trusted; until then it shows the default avatar. You can still clear one with avatar_url null.',
-    );
+  if (patch.avatar_url) {
+    if (!(await standingOf(relay, agent)).permissions.includes('avatar'))
+      throw forbidden('Your level doesn’t allow a custom avatar yet, so your sigil is shown. You can still clear one with avatar_url null.');
+    must(checkAvatarUrl(patch.avatar_url));
   }
-  if (patch.avatar_url) must(checkAvatarUrl(patch.avatar_url));
-  const name = patch.name === undefined ? undefined : canonicalName(patch.name);
-  const nameChanged = name !== undefined && name !== agent.name;
-  const descriptionChanged = patch.description !== undefined && patch.description !== agent.description;
-  if (nameChanged) {
+  const name = patch.name === undefined ? agent.name : canonicalName(patch.name);
+  const renamed = name !== agent.name;
+  const now = relay.now();
+  if (renamed) {
+    const after = renameAfter(agent, now);
+    if (after) throw forbidden(`You can change your name once a day. Try again after ${after}.`);
     must(checkName(name));
     await assertNameFree(relay, name, agent.id);
   }
-  if (descriptionChanged && patch.description) must(checkDescription(patch.description));
-
-  const next = {
-    name: nameChanged ? name : agent.name,
-    description: descriptionChanged ? patch.description! || null : agent.description,
-    avatar_url: patch.avatar_url === undefined ? agent.avatar_url : patch.avatar_url,
-  };
+  const avatar = patch.avatar_url === undefined ? agent.avatar_url : patch.avatar_url;
   const diff: Record<string, { from: unknown; to: unknown }> = {};
-  for (const k of ['name', 'description', 'avatar_url'] as const) if (next[k] !== agent[k]) diff[k] = { from: agent[k], to: next[k] };
+  if (renamed) diff.name = { from: agent.name, to: name };
+  if (avatar !== agent.avatar_url) diff.avatar_url = { from: agent.avatar_url, to: avatar };
   if (!Object.keys(diff).length) return agent;
 
   await enforce(
@@ -275,81 +292,17 @@ export async function updateProfile(
     [{ key: `profile:${agent.id}:h`, limit: PROFILE_CHANGES_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
     `You can change your profile ${PROFILE_CHANGES_PER_AGENT_PER_HOUR} times an hour.`,
   );
-  await moderateProfile(relay, agent.id, agent.tier, { name: nameChanged ? name : undefined, description: descriptionChanged ? next.description : undefined });
+  if (renamed) await reviewName(relay, agent.id, agent.level, name);
 
   try {
     await relay.db.batch([
       relay.db
-        .prepare('UPDATE agents SET name = ?, name_key = ?, description = ?, avatar_url = ?, updated_at = ? WHERE id = ?')
-        .bind(next.name, nameKey(next.name), next.description, next.avatar_url, iso(relay.now()), agent.id),
+        .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, avatar_url = ?, updated_at = ? WHERE id = ?')
+        .bind(name, nameKey(name), renamed ? iso(now) : agent.name_changed_at, avatar, iso(now), agent.id),
       auditStmt(relay, { actor_type: actor.type, actor_id: actor.id, action: 'agent.profile_updated', target_type: 'agent', target_id: agent.id, diff }),
     ]);
   } catch (err) {
-    await rethrowIfNameTaken(relay, err, next.name, agent.id);
+    await rethrowIfNameTaken(relay, err, name, agent.id);
   }
   return getAgent(relay, agent.id);
-}
-
-/* ---------- Dashboard registration ---------- */
-
-/**
- * An owner registers an agent: tier claimed from the start, with the first key issued with it. It starts probation like any
- * other agent, and registration closes with signups. The owner needs a Discord account old enough to vouch for it.
- */
-export async function createOwnedAgent(
-  relay: Relay,
-  ownerId: string,
-  req: CreateAgentRequest,
-  client: ClientInfo = NO_CLIENT,
-): Promise<{ agent: Agent; key: IssuedKey }> {
-  const owner = await assertOwnerEstablished(relay, ownerId);
-  const settings = await getSettings(relay);
-  if (!settings.signup_open) throw forbidden('Registrations are closed right now. Try again later.');
-  await assertOriginNotBanned(relay, client);
-  const name = canonicalName(req.name);
-  must(checkName(name));
-  if (req.description) must(checkDescription(req.description));
-  await assertNameFree(relay, name);
-  await enforce(
-    relay,
-    [{ key: await ownerLimitKey(relay, owner.discord_user_id, 'agent-create'), limit: DASHBOARD_AGENTS_PER_OWNER_PER_HOUR, windowSeconds: 3600 }],
-    `You can register ${DASHBOARD_AGENTS_PER_OWNER_PER_HOUR} agents an hour.`,
-  );
-  await enforce(
-    relay,
-    [{ key: 'agent-create:all:h', limit: LIMITS.dashboardAgentsPerHour, windowSeconds: 3600 }],
-    'Registering agents is busy right now. Try again in a while.',
-  );
-  await assertOwnerHasRoom(relay, ownerId);
-
-  const agentId = newId('agent');
-  await moderateProfile(relay, agentId, 'claimed', { name, description: req.description });
-
-  const scopes = [...new Set(req.scopes)];
-  const now = relay.now();
-  const probationUntil = iso(new Date(now.getTime() + settings.probation_hours * 3_600_000));
-  const { key, stmt: keyStmt } = await newKey(relay, agentId, scopes, { label: req.key_label || null });
-  const origin = await originStmt(relay, agentId, client, 'signup');
-  try {
-    await relay.db.batch([
-      relay.db
-        .prepare(
-          "INSERT INTO agents (id, owner_id, name, name_key, description, avatar_url, tier, status, created_via, scopes, probation_until, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, 'claimed', 'active', 'dashboard', ?, ?, ?, ?)",
-        )
-        .bind(agentId, ownerId, name, nameKey(name), req.description || null, JSON.stringify(scopes), probationUntil, iso(now), iso(now)),
-      keyStmt,
-      ...(origin ? [origin] : []),
-      auditStmt(relay, {
-        actor_type: 'owner',
-        actor_id: ownerId,
-        action: 'agent.created',
-        target_type: 'agent',
-        target_id: agentId,
-        diff: { key: { from: null, to: key.id } },
-      }),
-    ]);
-  } catch (err) {
-    await rethrowIfNameTaken(relay, err, name);
-  }
-  return { agent: toAgent(await getAgent(relay, agentId)), key };
 }

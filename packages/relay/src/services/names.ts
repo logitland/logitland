@@ -1,8 +1,8 @@
 import type { PolicyCode } from '@logitland/contracts';
 import { evaluateRules, judge } from './moderation/rules';
 
-// Agent name policy and the folded key that makes names unique. Names and descriptions also pass the fixed message rules
-// (invites, credentials, blocked sites, personal details, spam), so a profile can't say what a message can't.
+// Agent name policy and the folded key that makes names unique. Names also pass the fixed message rules (invites,
+// credentials, blocked sites, personal details, spam), so a name can't say what a message can't.
 
 export type PolicyResult = { ok: true } | { ok: false; code: PolicyCode; reason: string };
 
@@ -53,7 +53,7 @@ export function nameKey(name: string): string {
     .join('')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u{300}-\u{36f}]/gu, '')
     .normalize('NFC');
   return [...plain]
     .map((ch) => FOLD.get(ch) ?? ch)
@@ -88,34 +88,30 @@ const RESERVED_WORDS = ['mod', 'mods', 'here', 'automod', 'modteam', 'modmail', 
 const RESERVED_KEYS = RESERVED.map((w) => [w, nameKey(w)] as const);
 const RESERVED_WORD_KEYS = RESERVED_WORDS.map((w) => [w, nameKey(w)] as const);
 
-const INVISIBLE = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Variation_Selector}\u2028\u2029]/u;
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Variation_Selector}\u{2028}\u{2029}]/u;
 const ALLOWED = /^[\p{L}\p{M}\p{Nd} _.'-]+$/u;
-const BIDI = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 
 const refuse = (code: PolicyCode, reason: string): PolicyResult => ({ ok: false, code, reason });
 
-/** What each fixed rule found, worded for a profile field. Never repeats the text that matched. */
+/** What each fixed rule found, worded for a name. Never repeats the text that matched. */
 const FOUND: Partial<Record<PolicyCode, string>> = {
   invite_link: 'contains a Discord invite',
   secret_leak: 'appears to contain a credential, which you should treat as exposed and rotate or revoke',
   blocked_domain: 'links to a site that isn’t allowed here',
-  personal_info: 'includes an email address or phone number, and profiles are public',
+  personal_info: 'includes an email address or phone number, and names are public',
   spam: 'looks like spam',
   control_chars: 'contains invisible or direction-changing characters',
 };
 
 /**
- * The fixed message rules, run over a name or description. Holds count as refusals: there is no review queue for profiles.
- * The sentence says what was found and that nothing was saved; the message wording ("not posted") doesn't fit a profile.
+ * The fixed message rules, run over a name. Holds count as refusals: there is no review queue for names.
+ * The sentence says what was found and that nothing was saved; the message wording ("not posted") doesn't fit a name.
  */
-function fixedRules(text: string, what: 'name' | 'description' | 'owner hint'): PolicyResult {
-  const ruling = judge(evaluateRules({ content: text }, { probation: false }));
+function fixedRules(name: string): PolicyResult {
+  const ruling = judge(evaluateRules({ content: name }, { probation: false }));
   if (ruling.verdict === 'pass') return { ok: true };
   const policy = ruling.policy!;
-  return refuse(
-    policy,
-    `The ${what} ${FOUND[policy] ?? 'breaks the rules'}, so it wasn’t saved. ${what === 'name' ? 'Pick a different name.' : 'Change it, or leave it out.'}`,
-  );
+  return refuse(policy, `The name ${FOUND[policy] ?? 'breaks the rules'}, so it wasn’t saved. Pick a different name.`);
 }
 
 /** An avatar address may not point at a site the message rules block (link shorteners, IP loggers, fake gift pages). */
@@ -143,12 +139,5 @@ export function checkName(name: string): PolicyResult {
   if (/\p{Script=Latin}/u.test(name) && /[\p{Script=Greek}\p{Script=Cyrillic}]/u.test(name)) {
     return refuse('name_policy', 'Names can’t mix Latin letters with Greek or Cyrillic ones, which can pass for each other. Use one alphabet.');
   }
-  return fixedRules(name, 'name');
-}
-
-/** A description is plain text: line breaks and tabs are fine, other control characters and text-direction overrides aren't. */
-export function checkDescription(text: string, what: 'description' | 'owner hint' = 'description'): PolicyResult {
-  if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029]/u.test(text) || BIDI.test(text))
-    return refuse('control_chars', `The ${what} can’t contain control or text-direction characters.`);
-  return fixedRules(text, what);
+  return fixedRules(name);
 }

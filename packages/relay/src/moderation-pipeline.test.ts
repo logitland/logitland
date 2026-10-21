@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ModerationRequest, ModerationResult, Moderator } from './services/moderation/classifier';
 import { sendMessage } from './services/messages';
-import { authenticateKey } from './services/identity';
+import { authenticateToken } from './services/tokens';
 import { NO_CLIENT } from './types';
-import { BENCH, LOUNGE, harness, seedAgent, seedChannel, type Harness, type HarnessOptions } from './testing';
+import { BENCH, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness, type HarnessOptions } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -24,13 +24,13 @@ const mod = (answer: ModerationResult | ((req: ModerationRequest) => ModerationR
 async function setup(opts: HarnessOptions = {}, agent: Parameters<typeof seedAgent>[1] = {}, channel: Parameters<typeof seedChannel>[1] = {}) {
   const h = harness({ moderator: mod(), ...opts });
   await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120, ...channel });
-  const a = await seedAgent(h.relay, { tier: 'claimed', ...agent });
+  const a = await seedAgent(h.relay, agent);
   return { h, a };
 }
 
 let counter = 0;
-const post = (h: Harness, a: { key: string }, text: string, extra: Record<string, unknown> = {}, channel_id = LOUNGE) =>
-  h.call('POST', '/v1/messages', { channel_id, content: text, ...extra }, { ...h.as(a.key), 'idempotency-key': `key-${++counter}-padding` });
+const post = (h: Harness, a: { token: string }, text: string, extra: Record<string, unknown> = {}, channel_id = LOUNGE) =>
+  h.call('POST', '/v1/messages', { channel_id, content: text, ...extra }, { ...h.as(a.token), 'idempotency-key': `key-${++counter}-padding` });
 const json = async (res: Response) => (await res.json()) as Record<string, any>;
 const status = async (res: Response) => (await json(res)).status as string;
 const logOf = (h: Harness, id: string) =>
@@ -39,10 +39,7 @@ const logOf = (h: Harness, id: string) =>
     .bind(id)
     .all<{ layer: string; verdict: string; policy_code: string | null; reason: string | null; source: string | null }>()
     .then((r) => r.results);
-/** For seeds made before the harness exists; the harness clock starts here. */
-const inHours = (hours: number) => new Date(Date.parse('2026-10-19T03:00:00Z') + hours * 3_600_000).toISOString();
 const future = (h: Harness, hours = 24) => new Date(h.now().getTime() + hours * 3_600_000).toISOString();
-const past = (h: Harness) => new Date(h.now().getTime() - 3_600_000).toISOString();
 
 describe('fixed rules, end to end', () => {
   it('block with a policy code and a sentence, never reaching the classifier or Discord', async () => {
@@ -71,11 +68,11 @@ describe('fixed rules, end to end', () => {
 
   it('keep none of a leaked credential, say to rotate it, and add no strike', async () => {
     const { h, a } = await setup();
-    const secret = 'lk_' + 'K7QMXV2D'.repeat(6);
-    const res = await post(h, a, `my key is ${secret}`, {}, LOUNGE);
+    const secret = 'lat_' + 'K7QMXV2D'.repeat(6);
+    const res = await post(h, a, `my token is ${secret}`, {}, LOUNGE);
     const msg = await json(res);
     expect(msg).toMatchObject({ status: 'blocked', policy_code: 'secret_leak', content: null });
-    expect(msg.status_reason).toMatch(/rotate a relay key now with POST \/v1\/me\/keys\/rotate/);
+    expect(msg.status_reason).toMatch(/revoke an access token with POST \/oauth2\/revoke/);
     expect(msg.status_reason).toMatch(/It was not posted/);
     const stored = await h.db.prepare('SELECT * FROM relay_messages').first<Record<string, unknown>>();
     expect(JSON.stringify(stored)).not.toContain(secret);
@@ -96,60 +93,24 @@ describe('fixed rules, end to end', () => {
 });
 
 describe('probation', () => {
-  it('holds a link from an agent on probation, claimed or not, and lets a trusted agent post the same one', async () => {
-    const { h, a } = await setup({}, { tier: 'new', probationUntil: inHours(24) });
-    const claimed = await seedAgent(h.relay, { tier: 'claimed', probationUntil: future(h) });
-    const trusted = await seedAgent(h.relay, { tier: 'trusted', probationUntil: future(h) });
+  it('holds a link from an agent on probation, adopted or not, and lets a level 1 agent post the same one', async () => {
+    const { h, a } = await setup({}, { level: 0 });
+    const owner = await seedOwner(h.relay);
+    const adopted = await seedAgent(h.relay, { level: 0, ownerId: owner.id });
+    const levelled = await seedAgent(h.relay, { level: 1 });
     const held = await json(await post(h, a, 'docs: https://example.com/guide'));
     expect(held).toMatchObject({ status: 'held', policy_code: 'links_not_allowed' });
     expect(held.status_reason).toMatch(/probation/);
     expect(held.status_reason).toMatch(/held for a reviewer/);
     expect(held.status_reason).not.toMatch(/try again|rephrase/i);
-    expect(await status(await post(h, claimed, 'docs: https://example.com/guide'))).toBe('held');
-    expect(await status(await post(h, trusted, 'docs, for trusted: https://example.com/guide'))).toBe('sent');
+    expect(await status(await post(h, adopted, 'docs: https://example.com/guide'))).toBe('held');
+    expect(await status(await post(h, levelled, 'docs, for level 1: https://example.com/guide'))).toBe('sent');
   });
 
-  it('applies to a claimed agent until both the time and the post count are done', async () => {
-    const { h } = await setup();
-    const link = (who: string) => `${who} says see https://example.com/page`;
-    const timeLeft = await seedAgent(h.relay, { tier: 'claimed', probationUntil: future(h) });
-    await h.db.prepare('UPDATE agents SET probation_posts = 20 WHERE id = ?').bind(timeLeft.id).run();
-    const postsLeft = await seedAgent(h.relay, { tier: 'claimed', probationUntil: past(h) });
-    await h.db.prepare('UPDATE agents SET probation_posts = 5 WHERE id = ?').bind(postsLeft.id).run();
-    const done = await seedAgent(h.relay, { tier: 'claimed', probationUntil: past(h) });
-    await h.db.prepare('UPDATE agents SET probation_posts = 20 WHERE id = ?').bind(done.id).run();
-    expect(await status(await post(h, timeLeft, link('time')))).toBe('held');
-    expect(await status(await post(h, postsLeft, link('posts')))).toBe('held');
-    expect(await status(await post(h, done, link('done')))).toBe('sent');
-  });
-
-  it('lasts while either the time or the post count is unfinished', async () => {
-    const { h } = await setup();
-    const link = (who: string) => `${who} says see https://example.com/page`;
-    const timeLeft = await seedAgent(h.relay, { tier: 'new', probationUntil: future(h) });
-    await h.db.prepare('UPDATE agents SET probation_posts = 20 WHERE id = ?').bind(timeLeft.id).run();
-    const postsLeft = await seedAgent(h.relay, { tier: 'new', probationUntil: past(h) });
-    await h.db.prepare('UPDATE agents SET probation_posts = 5 WHERE id = ?').bind(postsLeft.id).run();
-    const done = await seedAgent(h.relay, { tier: 'new', probationUntil: past(h) });
-    await h.db.prepare('UPDATE agents SET probation_posts = 20 WHERE id = ?').bind(done.id).run();
-    expect(await status(await post(h, timeLeft, link('time')))).toBe('held');
-    expect(await status(await post(h, postsLeft, link('posts')))).toBe('held');
-    expect(await status(await post(h, done, link('done')))).toBe('sent');
-  });
-
-  it('ends once enough posts have been sent', async () => {
-    const { h } = await setup();
-    const a = await seedAgent(h.relay, { tier: 'new', probationUntil: past(h) });
-    await h.db.prepare('UPDATE agents SET probation_posts = 19 WHERE id = ?').bind(a.id).run();
-    expect(await status(await post(h, a, 'link while new https://example.com/a'))).toBe('held');
-    expect(await status(await post(h, a, 'one more plain post'))).toBe('sent');
-    expect(await status(await post(h, a, 'link after probation https://example.com/b'))).toBe('sent');
-  });
-
-  it('turns a classifier flag into a hold for new agents only', async () => {
+  it('turns a classifier flag into a hold for agents on probation only', async () => {
     const moderator = mod({ verdict: 'pass', policy_code: 'privacy' });
-    const { h, a } = await setup({ moderator }, { tier: 'new', probationUntil: inHours(24) });
-    const established = await seedAgent(h.relay, { tier: 'trusted' });
+    const { h, a } = await setup({ moderator }, { level: 0 });
+    const established = await seedAgent(h.relay, { level: 1 });
     const held = await json(await post(h, a, 'a message the classifier flags but passes'));
     expect(held).toMatchObject({ status: 'held', verdict: 'hold', policy_code: 'privacy' });
     expect(held.status_reason).toMatch(/While your agent is on probation, flagged messages are held for a reviewer/);
@@ -158,11 +119,11 @@ describe('probation', () => {
     expect(logged).toMatchObject({ verdict: 'pass', policy_code: 'privacy' });
   });
 
-  it('passes the tier to the classifier', async () => {
+  it('passes the level to the classifier', async () => {
     const moderator = mod();
-    const { h, a } = await setup({ moderator }, { tier: 'new', probationUntil: inHours(24) });
+    const { h, a } = await setup({ moderator }, { level: 0 });
     await post(h, a, 'plain words');
-    expect(moderator.calls[0]).toMatchObject({ tier: 'new', kind: 'message', agent_id: a.id, channel_id: LOUNGE, strikes: 0 });
+    expect(moderator.calls[0]).toMatchObject({ level: 0, kind: 'message', agent_id: a.id, channel_id: LOUNGE, strikes: 0 });
   });
 });
 
@@ -171,8 +132,8 @@ describe('duplicates', () => {
 
   it('hold the third different agent to send the same text inside ten minutes', async () => {
     const { h, a } = await setup();
-    const b = await seedAgent(h.relay, { tier: 'claimed' });
-    const c = await seedAgent(h.relay, { tier: 'claimed' });
+    const b = await seedAgent(h.relay);
+    const c = await seedAgent(h.relay);
     expect(await status(await post(h, a, same))).toBe('sent');
     h.advance(60_000);
     expect(await status(await post(h, b, same.toUpperCase()))).toBe('sent');
@@ -186,8 +147,8 @@ describe('duplicates', () => {
 
   it('forget the others after ten minutes', async () => {
     const { h, a } = await setup();
-    const b = await seedAgent(h.relay, { tier: 'claimed' });
-    const c = await seedAgent(h.relay, { tier: 'claimed' });
+    const b = await seedAgent(h.relay);
+    const c = await seedAgent(h.relay);
     await post(h, a, same);
     await post(h, b, same);
     h.advance(11 * 60_000);
@@ -196,8 +157,8 @@ describe('duplicates', () => {
 
   it('count each agent once, however often it repeated itself', async () => {
     const { h, a } = await setup({}, {}, { pace: 120 });
-    const b = await seedAgent(h.relay, { tier: 'claimed' });
-    const c = await seedAgent(h.relay, { tier: 'claimed' });
+    const b = await seedAgent(h.relay);
+    const c = await seedAgent(h.relay);
     await post(h, a, same);
     await post(h, a, same); // blocked as a repeat, but still only agent a
     await post(h, b, same);
@@ -258,7 +219,7 @@ describe('rate limits', () => {
 
   it('apply the channel’s pace per agent, not across agents', async () => {
     const { h, a } = await setup({}, {}, { pace: 2 });
-    const b = await seedAgent(h.relay, { tier: 'claimed' });
+    const b = await seedAgent(h.relay);
     expect((await post(h, a, 'one')).status).toBe(201);
     expect((await post(h, a, 'two')).status).toBe(201);
     const third = await post(h, a, 'three');
@@ -291,11 +252,12 @@ describe('rate limits', () => {
     expect((await json(res)).detail).toMatch(/can’t post in this channel/);
   });
 
-  it('share an hourly budget among agents on probation on one network, claimed or not, and spare trusted ones', async () => {
+  it('share an hourly budget among agents on probation on one network, adopted or not, and spare levelled ones', async () => {
     const { h } = await setup();
-    const fresh = await authenticateKey(h.relay, (await seedAgent(h.relay, { tier: 'new', probationUntil: future(h) })).key, NO_CLIENT);
-    const claimedOnProbation = await authenticateKey(h.relay, (await seedAgent(h.relay, { tier: 'claimed' })).key, NO_CLIENT);
-    const claimed = await authenticateKey(h.relay, (await seedAgent(h.relay, { tier: 'trusted' })).key, NO_CLIENT);
+    const owner = await seedOwner(h.relay);
+    const fresh = await authenticateToken(h.relay, (await seedAgent(h.relay, { level: 0 })).token, NO_CLIENT);
+    const adoptedOnProbation = await authenticateToken(h.relay, (await seedAgent(h.relay, { level: 0, ownerId: owner.id })).token, NO_CLIENT);
+    const levelled = await authenticateToken(h.relay, (await seedAgent(h.relay, { level: 1 })).token, NO_CLIENT);
     const window = Math.floor(h.now().getTime() / 1000 / 3600) * 3600;
     await h.db.prepare('INSERT INTO rate_counters (key, window_start, count) VALUES (?, ?, 100)').bind('post:net:netA:h', window).run();
     const req = (text: string) => ({ channel_id: LOUNGE, content: text });
@@ -306,11 +268,11 @@ describe('rate limits', () => {
     });
     expect((await sendMessage(h.relay, fresh, req('from another network'), { ...k(), net: 'netB' })).message.status).toBe('sent');
     expect((await sendMessage(h.relay, fresh, req('from no known network'), { ...k(), net: null })).message.status).toBe('sent');
-    await expect(sendMessage(h.relay, claimedOnProbation, req('claiming does not lift it'), { ...k(), net: 'netA' })).rejects.toMatchObject({
+    await expect(sendMessage(h.relay, adoptedOnProbation, req('adoption does not lift it'), { ...k(), net: 'netA' })).rejects.toMatchObject({
       status: 429,
       policy: 'rate_limit',
     });
-    expect((await sendMessage(h.relay, claimed, req('trusted agents are not budgeted'), { ...k(), net: 'netA' })).message.status).toBe('sent');
+    expect((await sendMessage(h.relay, levelled, req('levelled agents are not budgeted'), { ...k(), net: 'netA' })).message.status).toBe('sent');
   });
 
   it('count blocked attempts on a looser counter, so blocked spam runs out too', async () => {
@@ -366,8 +328,8 @@ describe('the loop breaker', () => {
 
   async function pair() {
     const ctx = await setup();
-    const b = await seedAgent(ctx.h.relay, { tier: 'claimed' });
-    const c = await seedAgent(ctx.h.relay, { tier: 'claimed' });
+    const b = await seedAgent(ctx.h.relay);
+    const c = await seedAgent(ctx.h.relay);
     return { ...ctx, b, c };
   }
 
@@ -443,7 +405,7 @@ describe('the loop breaker', () => {
 });
 
 describe('the classifier', () => {
-  it('asks Jev/Laya with the recent conversation, the tier, the strike count and the thread name', async () => {
+  it('asks Jev/Laya with the recent conversation, the level, the strike count and the thread name', async () => {
     const moderator = mod();
     const { h, a } = await setup({ moderator }, { name: 'Orrery' }, { type: 'forum', access: 'post_new_threads' });
     for (let i = 1; i <= 12; i++) {
@@ -468,7 +430,7 @@ describe('the classifier', () => {
     const res = await post(h, a, 'replying here', { thread_id: '120000000000000001' });
     expect(res.status).toBe(201);
     const req = moderator.calls[0]!;
-    expect(req).toMatchObject({ agent_id: a.id, tier: 'claimed', channel_id: LOUNGE, kind: 'message', content: 'replying here', strikes: 1 });
+    expect(req).toMatchObject({ agent_id: a.id, level: 1, channel_id: LOUNGE, kind: 'message', content: 'replying here', strikes: 1 });
     expect(req.message_id).toBe((await json(res)).id);
     // The twelve newest rows were read (the deleted one and lines 2 to 12); the ten newest with text are passed on, oldest first.
     expect(req.context!.map((c) => c.author)).toEqual(Array.from({ length: 10 }, (_, i) => `Person ${i + 3}`));
@@ -543,7 +505,7 @@ describe('the classifier', () => {
       const { h, a } = await setup({ moderator: mod(() => (healthy ? pass : down)) });
       h.relay.config.moderationOutage = 'refuse';
       const k = 'refused-then-ok-key';
-      const send = () => h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: 'try me twice' }, { ...h.as(a.key), 'idempotency-key': k });
+      const send = () => h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: 'try me twice' }, { ...h.as(a.token), 'idempotency-key': k });
       const res = await send();
       expect(res.status).toBe(503);
       expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);

@@ -3,10 +3,11 @@ import { iso, type Relay } from '../context';
 import type { AgentRecord } from '../types';
 import { audit } from './audit';
 import { getChannel, openWebhook } from './channels';
-import { getAgent } from './identity';
+import { getAgent, toAgent } from './identity';
 import { recordAgentPost, type AgentPost } from './intake';
 import { logStmt } from './moderation/log';
-import { STUCK_AFTER_MS, VERIFY_HOW, isOnProbation, isVerified } from './moderation/policy';
+import { STUCK_AFTER_MS, isOnProbation } from './moderation/policy';
+import { awardSent } from './xp/award';
 import { UNCERTAIN_REASON, UNCONFIRMED_REASON, discordContent, getRow, type MessageRow } from './moderation/rows';
 import { isForum } from './moderation/target';
 import { getSettings, type Settings } from './settings';
@@ -60,14 +61,13 @@ export async function dispatch(relay: Relay, row: { id: string; channel_id: stri
   }
 }
 
-/** What goes to Discord: the text under its reply line, and for a new forum post its title and tags. */
-function webhookBody(row: MessageRow, agent: { name: string; tier: string; avatar_url: string | null }, forum: boolean): ExecuteWebhookBody {
+/** What goes to Discord: the agent's name and avatar (toAgent's), the text under its reply line, and for a new forum post its title and tags. */
+function webhookBody(row: MessageRow, agent: { name: string; avatar_url: string }, forum: boolean): ExecuteWebhookBody {
   const text = discordContent(row);
   const tags = row.tag_ids ? (JSON.parse(row.tag_ids) as string[]) : [];
   return {
     username: agent.name,
-    // Only trusted agents may set an avatar (signup.ts clears it when the tier drops); sending checks too, so a stale one is never shown.
-    ...(agent.tier === 'trusted' && agent.avatar_url ? { avatar_url: agent.avatar_url } : {}),
+    avatar_url: agent.avatar_url,
     ...(text ? { content: text } : {}),
     ...(forum && row.thread_name ? { thread_name: row.thread_name } : {}),
     ...(forum && tags.length ? { applied_tags: tags } : {}),
@@ -133,7 +133,7 @@ function heldBack(relay: Relay, agent: AgentRecord, settings: Settings): keyof t
   const now = relay.now();
   if (settings.relay_read_only) return 'read_only';
   if (agent.posting_paused_until && agent.posting_paused_until > iso(now)) return 'paused';
-  if (!settings.new_agent_posting && isOnProbation(agent, settings, now)) return 'probation';
+  if (!settings.probation_posting && isOnProbation(agent)) return 'probation';
   return null;
 }
 
@@ -161,8 +161,6 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
   if (agent.status !== 'active') return fail('The agent was switched off or suspended before this message could be sent.');
   if (!channel || (channel.agent_access !== 'post' && channel.agent_access !== 'post_new_threads'))
     return fail('This channel stopped accepting agent posts before the message could be sent.');
-  if (channel.verified_only === 1 && !isVerified(agent.tier))
-    return fail(`This channel only takes verified agents now, and this agent isn’t verified, so the message was not sent. ${VERIFY_HOW} Then send it again.`);
 
   // A kill switch reaches what is already waiting. The message stays queued with its place in line given up (the sender drops it
   // from the channel's line, so one blocked agent can't hold up the others) and the stuck-message sweep offers it again every
@@ -202,7 +200,7 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
 
   const forum = isForum(channel);
   try {
-    const { message, rateLimit } = await relay.discord.executeWebhook(hook, webhookBody(row, agent, forum), row.thread_id ?? undefined);
+    const { message, rateLimit } = await relay.discord.executeWebhook(hook, webhookBody(row, toAgent(relay, agent), forum), row.thread_id ?? undefined);
     // A forum post made with thread_name answers with the new thread's ID as its channel.
     const created = forum && row.thread_name && message.channel_id !== row.channel_id ? message.channel_id : null;
     const at = iso(relay.now());
@@ -214,7 +212,7 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
       )
       .bind(message.id, created, at, at, row.id, message.id)
       .run();
-    await relay.db.prepare('UPDATE agents SET probation_posts = probation_posts + 1 WHERE id = ?').bind(agent.id).run();
+    await awardSent(relay, row.id);
     try {
       await recordAgentPost(relay, recordedPost(row, agent, { id: message.id, at: message.timestamp ?? at, threadId: row.thread_id ?? created }));
     } catch (error) {

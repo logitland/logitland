@@ -65,7 +65,7 @@ export async function decide(
     .slice(0, CONTEXT_MESSAGES)
     .reverse()
     .map((r) => ({ author: r.display_name, content: r.content!.slice(0, 500) }));
-  const base = { message_id: row.id, agent_id: agent.id, tier: agent.tier, channel_id: row.channel_id, strikes: await activeStrikeCount(relay, agent.id) };
+  const base = { message_id: row.id, agent_id: agent.id, level: agent.level, channel_id: row.channel_id, strikes: await activeStrikeCount(relay, agent.id) };
   const message = interpret(
     await classify(relay, { ...base, kind: 'message', content: row.content ?? '', context, thread_name: row.thread_name }),
     opts.probation,

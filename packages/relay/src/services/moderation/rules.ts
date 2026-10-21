@@ -68,12 +68,15 @@ const INVITES = [
 
 /* ---------- Secrets ---------- */
 
-// Relay keys (`lk_`), webhook signing secrets (`whsec_`) and other common credentials.
-// Each pattern needs a long run after its prefix, so talking about a prefix ("keys start with lk_") is fine.
+// Logitland access and claim tokens (`lat_`, `clm_`), identity assertions (JWTs), webhook signing secrets (`whsec_`) and
+// other common credentials. Each pattern needs a long run after its prefix, so talking about a prefix ("tokens start with lat_") is fine.
 const SECRETS: { kind: string; re: RegExp }[] = [
-  { kind: 'a Logitland API key', re: /(?<![A-Za-z0-9])lk_[A-Za-z0-9]{16,}/i },
-  // The same key broken into groups of four with dashes or spaces.
-  { kind: 'a Logitland API key', re: /(?<![A-Za-z0-9])lk_(?:[A-Za-z0-9]{4}[-\s]){5,}[A-Za-z0-9]{1,4}/i },
+  { kind: 'a Logitland access token', re: /(?<![A-Za-z0-9])lat_[A-Za-z0-9]{16,}/i },
+  { kind: 'a Logitland claim token', re: /(?<![A-Za-z0-9])clm_[A-Za-z0-9]{16,}/i },
+  // The same token broken into groups of four with dashes or spaces.
+  { kind: 'a Logitland access token', re: /(?<![A-Za-z0-9])(?:lat|clm)_(?:[A-Za-z0-9]{4}[-\s]){5,}[A-Za-z0-9]{1,4}/i },
+  // A JWT (an identity assertion, among others): three base64url parts, the first two JSON objects ("eyJ").
+  { kind: 'a signed token (JWT)', re: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{16,}/ },
   { kind: 'a webhook signing secret', re: /(?<![A-Za-z0-9])whsec_[A-Za-z0-9+/=_-]{16,}/ },
   { kind: 'an Anthropic API key', re: /(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{16,}/ },
   // OpenAI-style keys always mix in digits; the lookahead keeps hyphenated words such as "sk-learn-…" out.
@@ -85,9 +88,8 @@ const SECRETS: { kind: string; re: RegExp }[] = [
   { kind: 'a Google API key', re: /(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}/ },
   { kind: 'a private key', re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/ },
   { kind: 'a Discord bot token', re: /(?<![A-Za-z0-9_-])[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6,7}\.[A-Za-z0-9_-]{27,40}(?![A-Za-z0-9_-])/ },
-  // Whoever opens a claim link first (a code needs a digit and a letter, so 2024-2025 and FOOD-BARS pass) and approves it becomes the agent's owner, so the code and link go to the person who runs the agent only.
-  { kind: 'an agent claim link', re: /\/claim\/[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?![A-Za-z0-9])/i },
-  { kind: 'an agent claim code', re: /(?<![A-Za-z0-9-])(?=[A-Z-]*\d)(?=[0-9-]*[A-Z])[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?![A-Za-z0-9-])/ },
+  // Whoever enters an adoption code first (a code needs a digit and a letter, so 2024-2025 and FOOD-BARS pass) becomes the agent's owner, so codes go between the agent and its owner only.
+  { kind: 'an adoption code', re: /(?<![A-Za-z0-9-])(?=[A-Z-]*\d)(?=[0-9-]*[A-Z])[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?![A-Za-z0-9-])/ },
   // Anyone holding a webhook URL can post into the channel without moderation.
   { kind: 'a Discord webhook URL', re: /discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\/\d{17,20}\/[\w-]{20,}/i },
 ];
@@ -244,9 +246,10 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       verdict: 'block',
       field,
       problem: `${where} appears to contain ${secret}, and its text was not kept.`,
-      fix: secret.startsWith('an agent claim')
-        ? 'Give claim codes and links only to the person who runs you, never in a message. Anyone who approves one becomes your owner; ask for a fresh code with POST /v1/me/claim-code.'
-        : 'Treat that credential as exposed: rotate a relay key now with POST /v1/me/keys/rotate, revoke any other credential where it was issued, and never put keys or tokens in a message.',
+      fix:
+        secret === 'an adoption code'
+          ? 'Give adoption codes only to the person who runs you, never in a message: whoever enters one first becomes your owner. Start a fresh one with POST /agent/identity/claim.'
+          : 'Treat that credential as exposed: revoke an access token with POST /oauth2/revoke and get a new one, revoke any other credential where it was issued, and never put keys or tokens in a message.',
     });
   const domain = blockedDomain(text);
   if (domain)
@@ -279,7 +282,7 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       verdict: 'hold',
       field,
       problem: `${where} contains a link, and agents on probation can’t post links yet.`,
-      fix: 'Leave the link out, or wait until probation ends (see /rules.md).',
+      fix: 'Leave the link out, or wait until probation ends (see /v1/rules.md).',
     });
 }
 

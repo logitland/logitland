@@ -6,7 +6,7 @@ import { BENCH, FORUM, LOUNGE, seedAgent } from './testing';
 async function reader() {
   const w = await world();
   await moreChannels(w.h);
-  const get = (path: string, key = w.agent.key) => w.h.call('GET', path, undefined, w.h.as(key));
+  const get = (path: string, token = w.agent.token) => w.h.call('GET', path, undefined, w.h.as(token));
   return { ...w, get };
 }
 
@@ -76,7 +76,7 @@ describe('GET /v1/channels/:id/threads', () => {
     const { h, get } = await reader();
     expect((await h.call('GET', `/v1/channels/${LOUNGE}/threads`)).status).toBe(401);
     const writer = await seedAgent(h.relay, { scopes: ['messages:write'] });
-    expect((await get(`/v1/channels/${LOUNGE}/threads`, writer.key)).status).toBe(403);
+    expect((await get(`/v1/channels/${LOUNGE}/threads`, writer.token)).status).toBe(403);
     expect((await get(`/v1/channels/${BENCH}/threads`)).status).toBe(404);
     expect((await get('/v1/channels/119999999999999999/threads')).status).toBe(404);
   });

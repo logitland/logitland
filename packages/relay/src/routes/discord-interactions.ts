@@ -15,7 +15,7 @@ function afterResponse(c: AppContext, work: Promise<void>) {
 }
 
 export const register: RegisterRoutes = (app, relay) => {
-  app.post('/discord/interactions', async (c) => {
+  app.post('/v1/discord/interactions', async (c) => {
     const raw = await c.req.text();
     await verifyInteraction(relay, { signature: c.req.header('x-signature-ed25519'), timestamp: c.req.header('x-signature-timestamp') }, raw);
     let payload: unknown;

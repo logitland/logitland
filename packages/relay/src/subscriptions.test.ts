@@ -1,6 +1,19 @@
 import { verify } from '@logitland/webhooks';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { all, echoChallenge, HOOK, HOOK_HOST, insertEvent, one, publish, recorder, setup, subscribe, subscribeRaw } from './deliveries.testkit';
+import {
+  all,
+  allowSubscriptions,
+  echoChallenge,
+  HOOK,
+  HOOK_HOST,
+  insertEvent,
+  one,
+  publish,
+  recorder,
+  setup,
+  subscribe,
+  subscribeRaw,
+} from './deliveries.testkit';
 import { recordGap } from './services/intake';
 import type { SubscriptionRow } from './services/subscriptions';
 import { BENCH, LOUNGE, seedAgent, seedChannel } from './testing';
@@ -69,13 +82,13 @@ describe('creating a subscription', () => {
     s.receivers[HOOK_HOST] = rec.handler;
     const manager = await seedAgent(s.relay, { name: 'Manager', scopes: ['subscriptions:manage'] });
     const reader = await seedAgent(s.relay, { name: 'Reader', scopes: ['messages:read'] });
-    for (const key of [manager.key, reader.key]) {
-      const res = await subscribeRaw(s, {}, s.as(key));
+    for (const token of [manager.token, reader.token]) {
+      const res = await subscribeRaw(s, {}, s.as(token));
       expect(res.status).toBe(403);
       expect((await problem(res)).code).toBe('forbidden');
     }
-    expect((await s.call('GET', '/v1/subscriptions', undefined, s.as(reader.key))).status).toBe(403);
-    expect((await s.call('GET', '/v1/subscriptions', undefined, s.as(manager.key))).status).toBe(200);
+    expect((await s.call('GET', '/v1/subscriptions', undefined, s.as(reader.token))).status).toBe(403);
+    expect((await s.call('GET', '/v1/subscriptions', undefined, s.as(manager.token))).status).toBe(200);
     expect((await s.call('GET', '/v1/subscriptions')).status).toBe(401);
     expect(rec.requests).toHaveLength(0);
     expect(await count(s)).toBe(0);
@@ -154,7 +167,7 @@ describe('the challenge', () => {
 });
 
 describe('caps and limits', () => {
-  it('caps subscriptions per agent by tier, counting active and paused but not disabled', async () => {
+  it('caps subscriptions per agent, counting active and paused but not disabled', async () => {
     const s = await setup();
     const rec = recorder(echoChallenge);
     s.receivers[HOOK_HOST] = rec.handler;
@@ -170,11 +183,11 @@ describe('caps and limits', () => {
     expect((await subscribeRaw(s)).status).toBe(201);
   });
 
-  it('gives trusted agents more room', async () => {
-    const s = await setup({ tier: 'trusted' });
-    s.receivers[HOOK_HOST] = recorder(echoChallenge).handler;
+  it('takes the cap from the agent’s level', async () => {
+    const s = await setup({ level: 2 });
+    await allowSubscriptions(s, 4, 2);
     for (let i = 0; i < 4; i++) await subscribe(s);
-    expect(await count(s)).toBe(4);
+    expect((await subscribeRaw(s)).status).toBe(409);
   });
 
   it('keeps the cap under concurrent creates', async () => {
@@ -186,7 +199,7 @@ describe('caps and limits', () => {
   });
 
   it('allows five creations an hour per agent, then 429 with Retry-After', async () => {
-    const s = await setup({ tier: 'trusted' });
+    const s = await setup({ subscriptions: 10 });
     for (let i = 0; i < 5; i++) await subscribe(s);
     const sixth = await subscribeRaw(s);
     expect(sixth.status).toBe(429);
@@ -197,20 +210,20 @@ describe('caps and limits', () => {
   });
 
   it('allows ten creations an hour per destination host across agents', async () => {
-    const s = await setup();
+    const s = await setup({ subscriptions: 10 });
     s.dns['other.orrery.dev'] = ['93.184.216.40'];
     s.receivers['other.orrery.dev'] = echoChallenge;
-    const a = await seedAgent(s.relay, { name: 'AgentA', tier: 'trusted' });
-    const b = await seedAgent(s.relay, { name: 'AgentB', tier: 'trusted' });
-    const c = await seedAgent(s.relay, { name: 'AgentC', tier: 'trusted' });
+    const a = await seedAgent(s.relay, { name: 'AgentA' });
+    const b = await seedAgent(s.relay, { name: 'AgentB' });
+    const c = await seedAgent(s.relay, { name: 'AgentC' });
     for (let i = 0; i < 5; i++) {
-      await subscribe(s, {}, s.as(a.key));
-      await subscribe(s, {}, s.as(b.key));
+      await subscribe(s, {}, s.as(a.token));
+      await subscribe(s, {}, s.as(b.token));
     }
-    const eleventh = await subscribeRaw(s, { url: `${HOOK}/other-path` }, s.as(c.key));
+    const eleventh = await subscribeRaw(s, { url: `${HOOK}/other-path` }, s.as(c.token));
     expect(eleventh.status).toBe(429);
     expect((await problem(eleventh)).detail).toContain('destination');
-    expect((await subscribeRaw(s, { url: 'https://other.orrery.dev/x' }, s.as(c.key))).status).toBe(201);
+    expect((await subscribeRaw(s, { url: 'https://other.orrery.dev/x' }, s.as(c.token))).status).toBe(201);
   });
 });
 
@@ -246,7 +259,7 @@ describe('deleting a subscription', () => {
     const s = await setup();
     const sub = await subscribe(s);
     const other = await seedAgent(s.relay, { name: 'Other' });
-    const auth = s.as(other.key);
+    const auth = s.as(other.token);
     expect(((await (await s.call('GET', '/v1/subscriptions', undefined, auth)).json()) as { subscriptions: unknown[] }).subscriptions).toEqual([]);
     for (const [method, path] of [
       ['DELETE', ''],

@@ -135,9 +135,9 @@ describe('the Message Content intent', () => {
 });
 
 describe('the interactions endpoint URL', () => {
-  it('must be the relay’s own /discord/interactions', async () => {
+  it('must be the relay’s own /v1/discord/interactions', async () => {
     const { world, run } = await ready();
-    const expected = 'https://relay.logitland.test/discord/interactions';
+    const expected = 'https://relay.logitland.test/v1/discord/interactions';
     world.application.interactions_endpoint_url = `${expected}/`;
     expect(check(await run(), 'interactions-url').status).toBe('ok');
 

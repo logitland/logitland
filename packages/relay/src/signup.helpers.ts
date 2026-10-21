@@ -1,6 +1,7 @@
-// Shared by the signup and identity tests (signup*.test.ts, identity*.test.ts): solving real challenges and signing agents up without Discord.
+// Shared by the signup and identity tests (signup*.test.ts, identity*.test.ts, auth*.test.ts): solving real challenges and
+// registering agents the auth.md way.
 
-import { SignupResponse, type SignupChallenge } from '@logitland/contracts';
+import { RegistrationResponse, TokenResponse, type SignupChallenge } from '@logitland/contracts';
 import { createHash } from 'node:crypto';
 import { expect } from 'vitest';
 import { updateSettings } from './services/settings';
@@ -31,31 +32,34 @@ export async function easyChallenges(h: Harness): Promise<void> {
 }
 
 export async function getChallenge(h: Harness, headers: Record<string, string> = {}): Promise<SignupChallenge> {
-  const res = await h.call('GET', '/v1/signup/challenge', undefined, headers);
+  const res = await h.call('GET', '/agent/identity/challenge', undefined, headers);
   expect(res.status).toBe(200);
   return (await res.json()) as SignupChallenge;
 }
 
-/** Asks for a challenge, solves it and posts the signup. Returns the raw response. */
-export async function signUp(
-  h: Harness,
-  name: string,
-  opts: { description?: string; owner_hint?: string; headers?: Record<string, string> } = {},
-): Promise<Response> {
+/** Asks for a challenge, solves it and registers (auth.md Step 3). No name gets a generated one. Returns the raw response. */
+export async function signUp(h: Harness, name?: string, opts: { headers?: Record<string, string> } = {}): Promise<Response> {
   const c = await getChallenge(h, opts.headers);
-  return h.call(
-    'POST',
-    '/v1/agents',
-    { name, description: opts.description, owner_hint: opts.owner_hint, challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) },
-    opts.headers,
-  );
+  return h.call('POST', '/agent/identity', { type: 'anonymous', name, pow: { challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) } }, opts.headers);
 }
 
-/** Signs up and returns the parsed 201 response. */
-export async function signedUp(h: Harness, name: string, opts: { description?: string; owner_hint?: string; headers?: Record<string, string> } = {}) {
+/** Registers and returns the parsed response. */
+export async function signedUp(h: Harness, name?: string, opts: { headers?: Record<string, string> } = {}) {
   const res = await signUp(h, name, opts);
-  expect(res.status).toBe(201);
-  return SignupResponse.parse(await res.json());
+  expect(res.status).toBe(200);
+  return RegistrationResponse.parse(await res.json());
+}
+
+/** POST /oauth2/token, form-encoded as auth.md shows. */
+export const tokenCall = (h: Harness, fields: Record<string, string>) => h.form('/oauth2/token', fields);
+
+/** Registers and exchanges the assertion: an agent with a working access token, the way a real one gets it. */
+export async function registered(h: Harness, name?: string, opts: { headers?: Record<string, string> } = {}) {
+  const reg = await signedUp(h, name, opts);
+  const res = await tokenCall(h, { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: reg.identity_assertion });
+  expect(res.status).toBe(200);
+  const token = TokenResponse.parse(await res.json());
+  return { reg, token, auth: h.as(token.access_token) };
 }
 
 export const ipHeader = (ip: string) => ({ 'cf-connecting-ip': ip });

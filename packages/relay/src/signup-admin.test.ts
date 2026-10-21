@@ -1,4 +1,4 @@
-import { AdminAgent, AdminAgentsPage, RevealIpResponse, newId } from '@logitland/contracts';
+import { AdminAgent, AdminAgentsPage, AgentSelf, Level, RevealIpResponse, newId, type LevelUpdate } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import type { Relay } from './context';
 import { adminAct } from './services/identity';
@@ -38,6 +38,8 @@ describe('admin routes are for admins', () => {
       ['POST', `/agents/${agent.id}/reveal-ip`, { reason: 'because' }],
       ['GET', '/settings'],
       ['PATCH', '/settings', { signup_open: false }],
+      ['DELETE', '/levels/1'],
+      ['POST', '/readers', { name: 'Web home' }],
     ] as const) {
       expect((await adm(method, path, body, person.id)).status).toBe(403);
     }
@@ -48,7 +50,7 @@ describe('admin routes are for admins', () => {
 describe('the agent registry', () => {
   it('lists agents newest first with owner, held and blocked counts, strikes and signup network', async () => {
     const { h, person, adm } = await setup();
-    const alpha = await seedAgent(h.relay, { name: 'Alpha', tier: 'claimed', ownerId: person.id });
+    const alpha = await seedAgent(h.relay, { name: 'Alpha', level: 2, ownerId: person.id });
     const now = h.now().getTime();
     const ago = (days: number) => new Date(now - days * 86_400_000).toISOString();
     for (const [status, at] of [
@@ -72,11 +74,8 @@ describe('the agent registry', () => {
     }
     await recordOrigin(h.relay, alpha.id, client('203.0.113.7'), 'signup');
     await recordOrigin(h.relay, alpha.id, { ip: '198.51.100.9', asn: 64511, asOrganization: 'Elsewhere', country: 'DE' }, 'use');
-    await h.db
-      .prepare("UPDATE agents SET owner_hint = 'Ada', probation_until = ?, probation_posts = 4, status_reason = 'noted' WHERE id = ?")
-      .bind(ago(-1), alpha.id)
-      .run();
-    const bravo = await seedAgent(h.relay, { name: 'Bravo', tier: 'new', ownerId: null });
+    await h.db.prepare("UPDATE agents SET posting_paused_until = ?, status_reason = 'noted' WHERE id = ?").bind(ago(-1), alpha.id).run();
+    const bravo = await seedAgent(h.relay, { name: 'Bravo', level: 0 });
 
     const res = await adm('GET', '/agents');
     expect(res.status).toBe(200);
@@ -90,12 +89,12 @@ describe('the agent registry', () => {
     const row = AdminAgent.parse(page.agents.find((a) => a.id === alpha.id));
     expect(row).toMatchObject({
       name: 'Alpha',
+      level: 2,
       owner_username: 'ada',
-      owner_hint: 'Ada',
       held_7d: 2,
       blocked_7d: 3,
       active_strikes: 1,
-      probation_posts: 4,
+      posting_paused_until: ago(-1),
       status_reason: 'noted',
       signup_network: { asn: 64496, name: 'Example Net', country: 'NL' },
     });
@@ -103,18 +102,18 @@ describe('the agent registry', () => {
     expect(plain).toMatchObject({ owner_username: null, held_7d: 0, blocked_7d: 0, active_strikes: 0, signup_network: null });
   });
 
-  it('filters by status, tier and search', async () => {
+  it('filters by status, level and search', async () => {
     const { h, person, adm } = await setup();
-    const alpha = await seedAgent(h.relay, { name: 'alpha', tier: 'claimed', ownerId: person.id });
-    const bravo = await seedAgent(h.relay, { name: 'bravo', tier: 'new', status: 'suspended' });
-    const charlie = await seedAgent(h.relay, { name: 'charlie', tier: 'trusted' });
+    const alpha = await seedAgent(h.relay, { name: 'alpha', level: 1, ownerId: person.id });
+    const bravo = await seedAgent(h.relay, { name: 'bravo', level: 1, status: 'suspended' });
+    const charlie = await seedAgent(h.relay, { name: 'charlie', level: 4 });
     const ids = async (query: string) =>
       AdminAgentsPage.parse(await (await adm('GET', `/agents${query}`)).json())
         .agents.map((a) => a.id)
         .sort();
     expect(await ids('?status=suspended')).toEqual([bravo.id]);
-    expect(await ids('?tier=trusted')).toEqual([charlie.id]);
-    expect(await ids('?status=active&tier=claimed')).toEqual([alpha.id]);
+    expect(await ids('?level=4')).toEqual([charlie.id]);
+    expect(await ids('?status=active&level=1')).toEqual([alpha.id]);
     expect(await ids('?q=ALP')).toEqual([alpha.id]);
     expect(await ids('?q=ada')).toEqual([alpha.id]);
     expect(await ids(`?q=${charlie.id}`)).toEqual([charlie.id]);
@@ -145,7 +144,7 @@ describe('the agent registry', () => {
   it('says what is wrong with a bad filter', async () => {
     const { adm } = await setup();
     expect((await adm('GET', '/agents?status=gone')).status).toBe(400);
-    expect((await adm('GET', '/agents?tier=vip')).status).toBe(400);
+    expect((await adm('GET', '/agents?level=vip')).status).toBe(400);
     expect((await adm('GET', '/agents?before=nope')).status).toBe(400);
     expect((await adm('GET', '/agents?limit=many')).status).toBe(400);
   });
@@ -153,7 +152,7 @@ describe('the agent registry', () => {
 
 describe('changing an agent’s status', () => {
   async function withActivity(h: Harness) {
-    const agent = await seedAgent(h.relay, { name: 'busy', tier: 'claimed' });
+    const agent = await seedAgent(h.relay, { name: 'busy' });
     const sub = await seedSubscription(h, agent.id, 'active');
     const waiting = await seedDelivery(h, sub, 'pending');
     const delivered = await seedDelivery(h, sub, 'delivered');
@@ -164,7 +163,7 @@ describe('changing an agent’s status', () => {
   const state = async (h: Harness, table: string, id: string) =>
     (await h.db.prepare(`SELECT status FROM ${table} WHERE id = ?`).bind(id).first<{ status: string }>())!.status;
 
-  it('suspends: keys stop, subscriptions pause, waiting deliveries drop, the reason is kept and audited', async () => {
+  it('suspends: waiting deliveries drop, subscriptions stay, the reason is kept and audited', async () => {
     const { h, admin, adm } = await setup();
     const a = await withActivity(h);
     const res = await adm('POST', `/agents/${a.agent.id}/status`, { action: 'suspend', reason: 'posting spam' });
@@ -174,36 +173,34 @@ describe('changing an agent’s status', () => {
       status: 'suspended',
       status_reason: 'posting spam',
     });
-    expect(await state(h, 'subscriptions', a.sub)).toBe('paused');
+    expect(await state(h, 'subscriptions', a.sub)).toBe('active');
     expect(await state(h, 'deliveries', a.waiting)).toBe('dropped');
     expect(await state(h, 'deliveries', a.delivered)).toBe('delivered');
     expect(await state(h, 'subscriptions', a.bystanderSub)).toBe('active');
     expect(await statusOf(h, a.bystander.id)).toBe('active');
     // Only its own status stays readable, so it can see why and appeal.
-    expect((await h.call('GET', '/v1/channels', undefined, h.as(a.agent.key))).status).toBe(403);
-    const call = await h.call('GET', '/v1/me', undefined, h.as(a.agent.key));
+    expect((await h.call('GET', '/v1/channels', undefined, h.as(a.agent.token))).status).toBe(403);
+    const call = await h.call('GET', '/v1/me', undefined, h.as(a.agent.token));
     expect(call.status).toBe(200);
-    expect(((await call.json()) as { agent: { status: string } }).agent.status).toBe('suspended');
-    expect(await count(h, 'SELECT COUNT(*) AS n FROM api_keys WHERE agent_id = ? AND revoked_at IS NULL', a.agent.id)).toBe(1);
+    expect(AgentSelf.parse(await call.json()).agent.status).toBe('suspended');
     const entry = await h.db.prepare("SELECT * FROM audit_log WHERE action = 'agent.suspended'").first<Record<string, string>>();
     expect(entry).toMatchObject({ actor_type: 'admin', actor_id: admin.id, target_type: 'agent', target_id: a.agent.id, reason: 'posting spam' });
     expect(JSON.parse(entry!.diff!)).toEqual({ status: { from: 'active', to: 'suspended' } });
   });
 
-  it('bans: every key is revoked as well', async () => {
+  it('bans: every access token is revoked as well', async () => {
     const { h, adm } = await setup();
     const a = await withActivity(h);
     await h.db
-      .prepare('INSERT INTO api_keys (id, agent_id, hash, scopes, created_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(newId('key'), a.agent.id, 'second-hash', '[]', h.now().toISOString())
+      .prepare('INSERT INTO access_tokens (id, agent_id, hash, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(newId('token'), a.agent.id, 'second-hash', '[]', h.now().toISOString(), new Date(h.now().getTime() + 3_600_000).toISOString())
       .run();
     const res = await adm('POST', `/agents/${a.agent.id}/status`, { action: 'ban', reason: 'harassment' });
     expect(res.status).toBe(200);
     expect(await statusOf(h, a.agent.id)).toBe('banned');
-    expect(await count(h, 'SELECT COUNT(*) AS n FROM api_keys WHERE agent_id = ? AND revoked_at IS NULL', a.agent.id)).toBe(0);
-    expect(await state(h, 'subscriptions', a.sub)).toBe('paused');
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM access_tokens WHERE agent_id = ? AND revoked_at IS NULL', a.agent.id)).toBe(0);
     expect(await state(h, 'deliveries', a.waiting)).toBe('dropped');
-    expect((await h.call('GET', '/v1/me', undefined, h.as(a.agent.key))).status).toBe(401);
+    expect((await h.call('GET', '/v1/me', undefined, h.as(a.agent.token))).status).toBe(401);
     expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.banned' AND reason = 'harassment'")).toBe(1);
   });
 
@@ -218,17 +215,17 @@ describe('changing an agent’s status', () => {
     const res = await adm('POST', `/agents/${b.id}/status`, { action: 'reinstate', reason: 'false alarm' });
     expect(res.status).toBe(200);
     expect(await h.db.prepare('SELECT status, status_reason FROM agents WHERE id = ?').bind(b.id).first()).toEqual({ status: 'active', status_reason: null });
-    expect((await h.call('GET', '/v1/me', undefined, h.as(b.key))).status).toBe(200);
+    expect((await h.call('GET', '/v1/me', undefined, h.as(b.token))).status).toBe(200);
     expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.reinstated' AND reason = 'false alarm'")).toBe(1);
   });
 
-  it('reinstates a banned agent without bringing its keys back', async () => {
+  it('reinstates a banned agent without bringing its tokens back', async () => {
     const { h, adm } = await setup();
     const a = await seedAgent(h.relay);
     await adm('POST', `/agents/${a.id}/status`, { action: 'ban', reason: 'bad' });
     expect((await adm('POST', `/agents/${a.id}/status`, { action: 'reinstate', reason: 'appeal upheld' })).status).toBe(200);
     expect(await statusOf(h, a.id)).toBe('active');
-    expect((await h.call('GET', '/v1/me', undefined, h.as(a.key))).status).toBe(401);
+    expect((await h.call('GET', '/v1/me', undefined, h.as(a.token))).status).toBe(401);
   });
 
   it('refuses changes that make no sense, and leaves no audit entry for them', async () => {
@@ -250,18 +247,29 @@ describe('changing an agent’s status', () => {
     expect(await statusOf(h, off.id)).toBe('suspended');
   });
 
-  it('changes the tier, with the reason in the audit trail', async () => {
+  it('sets the level, with the reason in the audit trail', async () => {
     const { h, admin, adm } = await setup();
-    const a = await seedAgent(h.relay, { tier: 'new' });
-    const res = await adm('POST', `/agents/${a.id}/status`, { action: 'set_tier', tier: 'trusted', reason: 'known operator' });
+    const a = await seedAgent(h.relay, { level: 0 });
+    const res = await adm('POST', `/agents/${a.id}/status`, { action: 'set_level', level: 3, reason: 'known operator' });
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { agent: { tier: string } }).agent.tier).toBe('trusted');
-    const entry = await h.db.prepare("SELECT * FROM audit_log WHERE action = 'agent.tier_changed'").first<Record<string, string>>();
+    expect(((await res.json()) as { agent: { level: number } }).agent.level).toBe(3);
+    const entry = await h.db.prepare("SELECT * FROM audit_log WHERE action = 'agent.level_set'").first<Record<string, string>>();
     expect(entry).toMatchObject({ actor_id: admin.id, reason: 'known operator' });
-    expect(JSON.parse(entry!.diff!)).toEqual({ tier: { from: 'new', to: 'trusted' } });
+    expect(JSON.parse(entry!.diff!)).toEqual({ level: { from: 0, to: 3 } });
     expect(await statusOf(h, a.id)).toBe('active');
-    await adm('POST', `/agents/${a.id}/status`, { action: 'set_tier', tier: 'trusted', reason: 'again' });
-    expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.tier_changed'")).toBe(1);
+    await adm('POST', `/agents/${a.id}/status`, { action: 'set_level', level: 3, reason: 'again' });
+    expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.level_set'")).toBe(1);
+  });
+
+  it('puts the sigil back in place of a custom avatar', async () => {
+    const { h, adm } = await setup();
+    const a = await seedAgent(h.relay, { level: 5, avatarUrl: 'https://cdn.example.com/rude.png' });
+    const res = await adm('POST', `/agents/${a.id}/status`, { action: 'reset_avatar', reason: 'rude picture' });
+    expect(((await res.json()) as { agent: unknown }).agent).toMatchObject({
+      avatar_url: `https://relay.logitland.test/v1/avatars/${a.id}.png`,
+      custom_avatar: false,
+    });
+    expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.avatar_reset' AND reason = 'rude picture'")).toBe(1);
   });
 
   it('validates the request and the agent', async () => {
@@ -270,8 +278,8 @@ describe('changing an agent’s status', () => {
     expect((await adm('POST', `/agents/${a.id}/status`, { action: 'suspend' })).status).toBe(400);
     expect((await adm('POST', `/agents/${a.id}/status`, { action: 'suspend', reason: 'ab' })).status).toBe(400);
     expect((await adm('POST', `/agents/${a.id}/status`, { action: 'delete', reason: 'whatever' })).status).toBe(400);
-    expect((await adm('POST', `/agents/${a.id}/status`, { action: 'set_tier', reason: 'no tier given' })).status).toBe(400);
-    expect((await adm('POST', `/agents/${a.id}/status`, { action: 'set_tier', tier: 'vip', reason: 'no such tier' })).status).toBe(400);
+    expect((await adm('POST', `/agents/${a.id}/status`, { action: 'set_level', reason: 'no level given' })).status).toBe(400);
+    expect((await adm('POST', `/agents/${a.id}/status`, { action: 'set_level', level: 101, reason: 'no such level' })).status).toBe(400);
     expect((await adm('POST', '/agents/agt_NOSUCHAGENT0/status', { action: 'suspend', reason: 'nobody' })).status).toBe(404);
     expect(await statusOf(h, a.id)).toBe('active');
   });
@@ -295,7 +303,6 @@ describe('changing an agent’s status', () => {
     };
     await expect(adminAct(relay, admin.id, a.agent.id, { action: 'suspend', reason: 'too slow' })).rejects.toMatchObject({ status: 409 });
     expect(await statusOf(h, a.agent.id)).toBe('banned');
-    expect(await state(h, 'subscriptions', a.sub)).toBe('active');
     expect(await state(h, 'deliveries', a.waiting)).toBe('pending');
     expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.suspended'")).toBe(0);
   });
@@ -304,7 +311,7 @@ describe('changing an agent’s status', () => {
 describe('revealing IP addresses', () => {
   it('returns the addresses still within retention and audits the reveal with its reason', async () => {
     const { h, admin, adm } = await setup();
-    const a = await seedAgent(h.relay, { tier: 'new', ownerId: null });
+    const a = await seedAgent(h.relay, { level: 0 });
     await recordOrigin(h.relay, a.id, client('203.0.113.7'), 'signup');
     h.advance(3_600_000);
     await recordOrigin(h.relay, a.id, { ip: '2001:db8::1', asn: null, asOrganization: null, country: null }, 'use');
@@ -361,9 +368,9 @@ describe('settings', () => {
     expect(entry).toMatchObject({ actor_type: 'admin', actor_id: admin.id });
     expect(JSON.parse(entry!.diff)).toEqual({ signup_open: { from: true, to: false }, pow_difficulty: { from: 20, to: 12 } });
 
-    expect((await h.call('GET', '/v1/signup/challenge')).status).toBe(403);
+    expect((await h.call('GET', '/agent/identity/challenge')).status).toBe(403);
     await adm('PATCH', '/settings', { signup_open: true, pow_difficulty: 8 });
-    expect((await signUp(h, 'Open Again')).status).toBe(201);
+    expect((await signUp(h, 'Open Again')).status).toBe(200);
   });
 
   it('refuses values out of range and requests that change nothing', async () => {
@@ -373,5 +380,41 @@ describe('settings', () => {
     expect((await adm('PATCH', '/settings', { signup_open: 'no' })).status).toBe(400);
     expect((await adm('PATCH', '/settings', {})).status).toBe(400);
     expect((await adm('PATCH', '/settings', { not_a_setting: true })).status).toBe(400);
+  });
+});
+
+describe('levels', () => {
+  const rules = (xp: number): LevelUpdate => ({
+    name: 'Elder',
+    xp,
+    role_id: null,
+    limits: {
+      orphan: { posts_per_minute: 30, posts_per_day: 5000, subscriptions: 30, reads_per_minute: 200 },
+      adopted: { posts_per_minute: 40, posts_per_day: 6000, subscriptions: 40, reads_per_minute: 300 },
+    },
+    permissions: { orphan: ['reports', 'avatar'], adopted: ['reports', 'avatar'] },
+    checks: ['credentials'],
+  });
+
+  it('adds a level whose rules apply to agents at it at once, and falls back to the level below when it is removed', async () => {
+    const { h, adm } = await setup();
+    const agent = await seedAgent(h.relay, { level: 6 });
+    const me = async () => AgentSelf.parse(await (await h.call('GET', '/v1/me', undefined, h.as(agent.token))).json());
+    const put = await adm('PUT', '/levels/6', rules(10_000));
+    expect(put.status).toBe(200);
+    expect(Level.parse(await put.json())).toMatchObject({ level: 6, name: 'Elder' });
+    expect((await me()).limits).toEqual(rules(10_000).limits.orphan);
+    expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'level.added'")).toBe(1);
+
+    expect((await adm('DELETE', '/levels/6')).status).toBe(204);
+    expect((await me()).level).toMatchObject({ level: 6, name: 'Level 5' });
+  });
+
+  it('keeps thresholds rising and probation in place', async () => {
+    const { adm } = await setup();
+    expect((await adm('PUT', '/levels/6', rules(5000))).status).toBe(409);
+    expect((await adm('PUT', '/levels/0', rules(10))).status).toBe(409);
+    expect((await adm('DELETE', '/levels/0')).status).toBe(409);
+    expect((await adm('DELETE', '/levels/42')).status).toBe(404);
   });
 });

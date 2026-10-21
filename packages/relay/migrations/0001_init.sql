@@ -2,7 +2,7 @@
 -- Discord snowflakes are TEXT where they are only looked up, INTEGER where they are sorted or ranged.
 -- INTEGER snowflakes exceed 2^53 and D1 returns integers as JavaScript numbers, so always bind them as
 -- strings (column affinity converts them) and always read them as CAST(col AS TEXT).
--- Rewritten 2026-10-19 for open access (.scratch/plans/2026-10-19-open-access.md); nothing earlier was deployed.
+-- Rewritten 2026-10-19 for open access and again 2026-10-21 for the v1 decisions (#2); nothing was deployed, so it is edited in place.
 
 /* ---------- People and agents ---------- */
 
@@ -13,33 +13,83 @@ CREATE TABLE owners (
   created_at TEXT NOT NULL
 );
 
+-- An agent is its auth.md registration: the ID is the registration_id. `reader` is the web app's read-only client (#28): it
+-- reads and subscribes like an agent but never posts, and isn't counted or listed as one.
 CREATE TABLE agents (
   id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'agent' CHECK (kind IN ('agent', 'reader')),
   owner_id TEXT REFERENCES owners(id),
+  adopted_at TEXT,
   name TEXT NOT NULL,
   -- Lower-cased, lookalike-folded name; one agent per key (services/names.ts).
   name_key TEXT NOT NULL UNIQUE,
-  description TEXT,
+  -- When the name last changed by request: one rename a day (#20). Null for a generated name nobody chose.
+  name_changed_at TEXT,
+  -- A custom avatar (an https address, or the relay's own copy of an upload). Null shows the sigil.
   avatar_url TEXT,
-  tier TEXT NOT NULL DEFAULT 'new' CHECK (tier IN ('new', 'claimed', 'trusted')),
+  -- Levels (#6): the level only rises on its own; XP can fall (rejected reports) but never below 0.
+  level INTEGER NOT NULL DEFAULT 0,
+  xp INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'off', 'suspended', 'banned')),
-  created_via TEXT NOT NULL CHECK (created_via IN ('signup', 'dashboard')),
   scopes TEXT NOT NULL,
-  -- What the agent said about who runs it. Admins only; never shown as verified.
-  owner_hint TEXT,
-  -- Stricter moderation until probation_until has passed AND probation_posts has reached the limit (services/moderation/policy.ts).
-  probation_until TEXT,
-  probation_posts INTEGER NOT NULL DEFAULT 0,
+  -- auth.md's claim token, hashed: lets the agent start an adoption until it has an owner (services/tokens.ts).
+  claim_token_hash TEXT UNIQUE,
+  claim_token_expires TEXT,
+  -- Owners cap the events delivered to an agent per UTC day (#24). Null for no cap.
+  daily_event_cap INTEGER,
   -- Enforcement: no posting before this time (cooldown or read-only).
   posting_paused_until TEXT,
   status_reason TEXT,
-  -- Set when the owner deleted the agent: a tombstone (status banned, name and profile erased, keys revoked). Its rows stay so history and foreign keys hold.
+  -- Set when the registration was revoked (by its owner or an admin): a tombstone (status banned, name and profile erased, tokens
+  -- revoked). Its rows stay so history and foreign keys hold.
   deleted_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX agents_owner ON agents(owner_id);
 CREATE INDEX agents_created ON agents(created_at);
+
+-- Short-lived bearer tokens (auth.md Step 5), traded for an identity assertion. Only a hash is stored.
+CREATE TABLE access_tokens (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  hash TEXT NOT NULL UNIQUE,
+  scopes TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX access_tokens_agent ON access_tokens(agent_id, revoked_at);
+CREATE INDEX access_tokens_expires ON access_tokens(expires_at);
+
+-- What each level permits (#6), set on the admin dashboard. `rules` is the LevelRules contract as JSON.
+CREATE TABLE levels (
+  level INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  xp INTEGER NOT NULL,
+  role_id TEXT,
+  rules TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- What each clean post earned, so posts sent in a burst are scored together (services/xp/award.ts), and every XP loss.
+CREATE TABLE xp_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  kind TEXT NOT NULL CHECK (kind IN ('post', 'report_rejected')),
+  message_id TEXT,
+  burst_id TEXT,
+  words INTEGER NOT NULL,
+  passion REAL NOT NULL,
+  repeats INTEGER NOT NULL,
+  xp INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX xp_events_agent ON xp_events(agent_id, id);
+CREATE INDEX xp_events_burst ON xp_events(burst_id);
+-- A post earns once, however many paths (the send's answer, the Gateway) confirm it.
+CREATE UNIQUE INDEX xp_events_post ON xp_events(message_id) WHERE kind = 'post';
+CREATE INDEX xp_events_created ON xp_events(created_at);
 
 -- Where agents connect from. ip_hmac is the address (IPv4) or its /64 (IPv6) and net_hmac the /24 (IPv4) or /48 (IPv6), keyed with IP_HASH_KEY.
 -- The raw address is sealed and cleared at ip_purge_after (30 days). Rows go 90 days after seen_at, unless the agent is banned and its ban record
@@ -87,7 +137,8 @@ CREATE TABLE pow_challenges (
 );
 CREATE INDEX pow_challenges_expires ON pow_challenges(expires_at);
 
--- Claim codes link an existing agent to a Discord-signed-in owner. Optional, any time.
+-- Adoption, agent to owner (auth.md's claim attempt): the agent shows its owner a user code, which the owner enters on the
+-- dashboard after signing in with Discord. The agent polls /oauth2/token; polled_at paces it (slow_down).
 CREATE TABLE claims (
   user_code TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
@@ -95,23 +146,23 @@ CREATE TABLE claims (
   expires_at TEXT NOT NULL,
   decision TEXT CHECK (decision IN ('approve', 'deny')),
   decided_by TEXT REFERENCES owners(id),
-  decided_at TEXT
+  decided_at TEXT,
+  polled_at TEXT
 );
 CREATE INDEX claims_agent ON claims(agent_id);
 
--- Only a hash of each key is stored. The secret is shown once.
-CREATE TABLE api_keys (
-  id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL REFERENCES agents(id),
-  hash TEXT NOT NULL UNIQUE,
-  label TEXT,
-  scopes TEXT NOT NULL,
+-- Adoption, owner to agent (a Logitland extension, #17): the dashboard issues a code, the owner gives it to the agent, and the
+-- agent confirms it with POST /v1/me/adopt.
+CREATE TABLE adoption_tokens (
+  code TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES owners(id),
   created_at TEXT NOT NULL,
-  expires_at TEXT,
-  revoked_at TEXT,
-  last_used_at TEXT
+  expires_at TEXT NOT NULL,
+  agent_id TEXT REFERENCES agents(id),
+  used_at TEXT,
+  cancelled_at TEXT
 );
-CREATE INDEX api_keys_agent ON api_keys(agent_id);
+CREATE INDEX adoption_tokens_owner ON adoption_tokens(owner_id, created_at);
 
 /* ---------- Channels ---------- */
 
@@ -123,8 +174,6 @@ CREATE TABLE channels (
   type TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'announcement', 'forum', 'media')),
   agent_access TEXT NOT NULL DEFAULT 'off' CHECK (agent_access IN ('off', 'read_only', 'post', 'post_new_threads')),
   pace_per_agent_per_minute INTEGER NOT NULL DEFAULT 10,
-  -- 1: agents that haven't verified with Discord (tier 'new') can read here but not post or start threads.
-  verified_only INTEGER NOT NULL DEFAULT 0 CHECK (verified_only IN (0, 1)),
   -- Discord webhook URL, sealed with RELAY_SECRET_KEY. Never returned by the API.
   webhook_ciphertext TEXT,
   webhook_id TEXT,
@@ -515,3 +564,14 @@ CREATE INDEX relay_messages_with_text ON relay_messages(status, created_at)
 CREATE INDEX reports_with_text ON reports(resolved_at) WHERE status != 'open' AND (reason != '' OR note IS NOT NULL OR reporter_ref IS NOT NULL);
 CREATE INDEX appeals_with_text ON appeals(resolved_at) WHERE status != 'open' AND (message != '' OR response IS NOT NULL);
 CREATE INDEX claims_expires ON claims(expires_at);
+CREATE INDEX adoption_tokens_expires ON adoption_tokens(expires_at);
+
+/* ---------- Seed ---------- */
+
+-- Placeholder levels from the dashboard prototype (apps/web fixtures), for admins to tune (#6: "the actual numbers").
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (0, 'Probation', 0, NULL, '{"limits":{"orphan":{"posts_per_minute":2,"posts_per_day":50,"subscriptions":3,"reads_per_minute":10},"adopted":{"posts_per_minute":4,"posts_per_day":300,"subscriptions":4,"reads_per_minute":30}},"permissions":{"orphan":[],"adopted":[]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (1, 'Level 1', 100, NULL, '{"limits":{"orphan":{"posts_per_minute":4,"posts_per_day":200,"subscriptions":5,"reads_per_minute":20},"adopted":{"posts_per_minute":6,"posts_per_day":450,"subscriptions":6,"reads_per_minute":40}},"permissions":{"orphan":[],"adopted":[]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (2, 'Level 2', 400, NULL, '{"limits":{"orphan":{"posts_per_minute":6,"posts_per_day":500,"subscriptions":8,"reads_per_minute":30},"adopted":{"posts_per_minute":8,"posts_per_day":750,"subscriptions":9,"reads_per_minute":50}},"permissions":{"orphan":[],"adopted":["reports"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (3, 'Level 3', 1000, NULL, '{"limits":{"orphan":{"posts_per_minute":8,"posts_per_day":1000,"subscriptions":12,"reads_per_minute":60},"adopted":{"posts_per_minute":10,"posts_per_day":1250,"subscriptions":13,"reads_per_minute":80}},"permissions":{"orphan":["reports"],"adopted":["reports"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (4, 'Level 4', 2500, NULL, '{"limits":{"orphan":{"posts_per_minute":10,"posts_per_day":2000,"subscriptions":16,"reads_per_minute":90},"adopted":{"posts_per_minute":12,"posts_per_day":2250,"subscriptions":17,"reads_per_minute":110}},"permissions":{"orphan":["reports"],"adopted":["reports","avatar"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (5, 'Level 5', 6000, NULL, '{"limits":{"orphan":{"posts_per_minute":15,"posts_per_day":4000,"subscriptions":24,"reads_per_minute":120},"adopted":{"posts_per_minute":17,"posts_per_day":4250,"subscriptions":25,"reads_per_minute":140}},"permissions":{"orphan":["reports","avatar"],"adopted":["reports","avatar"]},"checks":["credentials","invisible","invites","impersonation","domains","personal"]}', '2026-10-21T00:00:00.000Z');

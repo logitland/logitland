@@ -12,7 +12,7 @@
   "preview_urls": false,
   // Invocation logs record "<Method> <URL>", and URLs carry claim codes, so they stay off. relay.log lines (console) are kept.
   "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
-  // Workers Cache serves repeat GETs of /auth.md and /rules.md without running the Worker (Cache-Control decides). It also
+  // Workers Cache serves repeat GETs of the docs (/auth.md, /skill.md, /v1/rules.md) without running the Worker (Cache-Control decides). It also
   // covers service-binding calls, and a hit skips the Worker's auth, so the dashboard's entrypoint is switched off.
   "cache": { "enabled": true },
   "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },

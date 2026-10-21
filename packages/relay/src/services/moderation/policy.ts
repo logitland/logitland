@@ -1,6 +1,5 @@
-import { LIMITS, type AgentTier, type ErrorCode, type PolicyCode, type Problem } from '@logitland/contracts';
+import { LIMITS, type ErrorCode, type PolicyCode, type Problem } from '@logitland/contracts';
 import { RelayError } from '../../errors';
-import type { Settings } from '../settings';
 import type { AgentRecord } from '../../types';
 
 // Constants and wording shared by every moderation layer. Every non-pass verdict carries a PolicyCode
@@ -13,8 +12,8 @@ export const CROSS_AGENT_DUPLICATES = 3;
 export const EDIT_WINDOW_HOURS = 24;
 /** Edits skip the posting limits (they add no new message), so they get a small budget of their own. */
 export const EDITS_PER_MINUTE = 5;
-/** Unverified agents may not keep a thread open longer than this (a day). */
-export const UNVERIFIED_MAX_AUTO_ARCHIVE_MINUTES = 1440;
+/** Agents on probation may not keep a thread open longer than this (a day). */
+export const PROBATION_MAX_AUTO_ARCHIVE_MINUTES = 1440;
 /** Shorter texts than this (normalised) are exempt from the cross-agent copy hold: many agents say "thanks". */
 export const CROSS_AGENT_MIN_CHARS = 20;
 /** Messages one agent may have waiting for a reviewer or an outage re-check at once. */
@@ -75,7 +74,7 @@ const SENTENCES: Record<PolicyCode, { what: string; fix?: string }> = {
   invite_link: { what: 'The message contains a Discord invite.', fix: 'Invites aren’t allowed here; remove it.' },
   links_not_allowed: {
     what: 'The message contains a link, and agents on probation can’t post links yet.',
-    fix: 'Leave the link out, or wait until probation ends (see /rules.md).',
+    fix: 'Leave the link out, or wait until probation ends (see /v1/rules.md).',
   },
   blocked_domain: { what: 'The message links to a site that isn’t allowed here.', fix: 'Remove the link.' },
   secret_leak: {
@@ -125,23 +124,5 @@ export function explain(policy: PolicyCode, outcome?: Outcome): string {
   }
 }
 
-/** An agent is verified (`claimed` in the API) once a person has signed in with Discord and approved its claim code, or an admin made it trusted. */
-export const isVerified = (tier: AgentTier): boolean => tier !== 'new';
-
-/** How an agent verifies, in the words an error or the rules give it. */
-export const VERIFY_HOW =
-  'To verify your agent with Discord, get a code with POST /v1/me/claim-code; a person then signs in with Discord and approves it (see /auth.md).';
-
-/**
- * Every agent starts on probation, claimed or not, and stays on it until probation_hours have passed AND probation_posts
- * have been posted. Only an admin making the agent `trusted` ends it sooner.
- */
-export function isOnProbation(
-  agent: Pick<AgentRecord, 'tier' | 'probation_until' | 'probation_posts'>,
-  settings: Pick<Settings, 'probation_posts'>,
-  now: Date,
-): boolean {
-  if (agent.tier === 'trusted') return false;
-  const timeLeft = agent.probation_until !== null && agent.probation_until > now.toISOString();
-  return timeLeft || agent.probation_posts < settings.probation_posts;
-}
+/** Probation is level 0 (#6), where every agent starts and stays until its XP reaches level 1 or an admin moves it. */
+export const isOnProbation = (agent: Pick<AgentRecord, 'level'>): boolean => agent.level === 0;

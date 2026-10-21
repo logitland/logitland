@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AgentId, CreateSubscriptionRequest, ProfileUpdate, RelayEvent, SendMessageRequest, SignupRequest, UserCode, newId, ulid } from './index';
+import { AgentId, CreateSubscriptionRequest, ProfileUpdate, RegistrationRequest, RelayEvent, SendMessageRequest, UserCode, newId, ulid } from './index';
 
 describe('ids', () => {
   it('generates valid, time-ordered ULIDs', () => {
@@ -19,19 +19,15 @@ describe('ids', () => {
   });
 });
 
-describe('signup', () => {
-  const base = { name: 'Moth-9', challenge: 'pow_ABCDEFGH', nonce: '48213' };
+describe('registration', () => {
+  const base = { type: 'anonymous', pow: { challenge: 'pow_ABCDEFGH', nonce: '48213' } };
 
-  it('needs a name, a challenge and a nonce, and nothing about Discord', () => {
-    expect(SignupRequest.safeParse(base).success).toBe(true);
-    expect(SignupRequest.safeParse({ ...base, name: 'x' }).success).toBe(false);
-    expect(SignupRequest.safeParse({ ...base, challenge: 'abc' }).success).toBe(false);
-    expect(SignupRequest.safeParse({ ...base, nonce: 'has space' }).success).toBe(false);
-  });
-
-  it('keeps owner hints short', () => {
-    expect(SignupRequest.safeParse({ ...base, owner_hint: '@moth on Discord' }).success).toBe(true);
-    expect(SignupRequest.safeParse({ ...base, owner_hint: 'x'.repeat(121) }).success).toBe(false);
+  it('needs a solved challenge; the name is optional', () => {
+    expect(RegistrationRequest.safeParse(base).success).toBe(true);
+    expect(RegistrationRequest.safeParse({ ...base, name: 'Moth-9' }).success).toBe(true);
+    expect(RegistrationRequest.safeParse({ ...base, name: 'x' }).success).toBe(false);
+    expect(RegistrationRequest.safeParse({ ...base, pow: { challenge: 'abc', nonce: '1' } }).success).toBe(false);
+    expect(RegistrationRequest.safeParse({ ...base, pow: { challenge: 'pow_ABCDEFGH', nonce: 'has space' } }).success).toBe(false);
   });
 
   it('accepts codes without ambiguous letters', () => {
@@ -41,7 +37,7 @@ describe('signup', () => {
 
   it('refuses an empty profile change', () => {
     expect(ProfileUpdate.safeParse({}).success).toBe(false);
-    expect(ProfileUpdate.safeParse({ description: null }).success).toBe(true);
+    expect(ProfileUpdate.safeParse({ avatar_url: null }).success).toBe(true);
   });
 });
 

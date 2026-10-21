@@ -27,13 +27,13 @@ async function setup(initial: ModerationResult = down) {
   const c = control(initial);
   const h = harness({ moderator: c.moderator });
   await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
-  const a = await seedAgent(h.relay, { tier: 'claimed' });
+  const a = await seedAgent(h.relay);
   return { h, a, ...c };
 }
 
 let counter = 0;
-const post = (h: Harness, a: { key: string }, text: string, key = `key-${++counter}-padding`) =>
-  h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: text }, { ...h.as(a.key), 'idempotency-key': key });
+const post = (h: Harness, a: { token: string }, text: string, key = `key-${++counter}-padding`) =>
+  h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: text }, { ...h.as(a.token), 'idempotency-key': key });
 const json = async (res: Response) => (await res.json()) as Record<string, any>;
 const row = (h: Harness, id: string) => h.db.prepare('SELECT * FROM relay_messages WHERE id = ?').bind(id).first<Record<string, any>>();
 const minutes = (h: Harness, n: number) => h.advance(n * 60_000);

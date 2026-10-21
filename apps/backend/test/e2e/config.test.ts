@@ -30,10 +30,10 @@ describe.skipIf(!E2E)('startup checks', () => {
     stacks.push(s);
     for (const [method, path] of [
       ['GET', '/'],
-      ['GET', '/rules.md'],
-      ['GET', '/v1/signup/challenge'],
+      ['GET', '/v1/rules.md'],
+      ['GET', '/agent/identity/challenge'],
       ['GET', '/public/channels'],
-      ['POST', '/discord/interactions'],
+      ['POST', '/v1/discord/interactions'],
     ] as const) {
       const res = await s.call(method, path);
       expect(res.status, `${method} ${path}`).toBe(503);

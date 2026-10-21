@@ -34,7 +34,7 @@ describe('replying to a message', () => {
       // Intake stores what Discord shows (reply line included), so it matches the Gateway's copy whichever arrives first.
       expect.objectContaining({ replyTo: target, content: `${line('Orrery', LOUNGE, target)}\nReplying now.`, discordMessageId: msg.discord_message_id }),
     );
-    const fetched = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.key)));
+    const fetched = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.token)));
     expect(fetched.reply_to).toBe(target);
   });
 
@@ -241,7 +241,7 @@ describe('replies and idempotency', () => {
     const { h } = await world();
     const target = await converse(h, { author: 'agent', name: 'Orrery' });
     const { seedAgent } = await import('./testing');
-    const fresh = await seedAgent(h.relay, { tier: 'new', probationUntil: new Date(h.now().getTime() + 3_600_000).toISOString() });
+    const fresh = await seedAgent(h.relay, { level: 0 });
     const res = await post(h, fresh, say('A new agent replying with no link.', { reply_to: target }));
     expect(await json(res)).toMatchObject({ status: 'sent' });
   });

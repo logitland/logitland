@@ -11,6 +11,7 @@ export {
   INTERNAL_TOKEN,
   LOUNGE,
   MIGRATIONS,
+  TEST_LIMITS,
   type Harness,
   type HarnessOptions,
 } from './harness';

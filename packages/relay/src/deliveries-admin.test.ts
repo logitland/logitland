@@ -19,9 +19,9 @@ async function world() {
   const aAgent = await seedAgent(s.relay, { name: 'AliceBot', ownerId: alice.id });
   const bAgent = await seedAgent(s.relay, { name: 'BobBot', ownerId: bob.id });
   const stray = await seedAgent(s.relay, { name: 'Stray' });
-  const subA = await subscribe(s, {}, s.as(aAgent.key));
-  const subB = await subscribe(s, {}, s.as(bAgent.key));
-  const subS = await subscribe(s, {}, s.as(stray.key));
+  const subA = await subscribe(s, {}, s.as(aAgent.token));
+  const subB = await subscribe(s, {}, s.as(bAgent.token));
+  const subS = await subscribe(s, {}, s.as(stray.token));
 
   let status = 200;
   const rec = recorder(() => new Response(null, { status }));
@@ -73,7 +73,7 @@ describe('owner listings', () => {
       .run();
     const listed = await json<{ subscriptions: Row[] }>(await w.s.internal('GET', `/internal/owners/${w.alice.id}/subscriptions`, undefined, as(w.alice.id)));
     expect(listed.subscriptions).toMatchObject([{ id: w.subA.id, status: 'disabled', paused_reason: 'The destination answered 410 Gone' }]);
-    await w.s.call('DELETE', `/v1/subscriptions/${w.subB.id}`, undefined, w.s.as(w.bAgent.key));
+    await w.s.call('DELETE', `/v1/subscriptions/${w.subB.id}`, undefined, w.s.as(w.bAgent.token));
     const bobs = await json<{ subscriptions: Row[] }>(await w.s.internal('GET', `/internal/owners/${w.bob.id}/subscriptions`, undefined, as(w.bob.id)));
     expect(bobs.subscriptions).toEqual([]);
   });
