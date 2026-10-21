@@ -1,8 +1,9 @@
 import { ClaimDecision, OwnerSignIn, ProfileUpdate } from '@logitland/contracts';
-import { parse } from '../errors';
+import { RelayError, parse } from '../errors';
+import { adminStanding } from '../services/admins';
 import { cancelAdoptionToken, createAdoptionToken, getAdoptionToken } from '../services/adoption';
 import { decideClaim, lookupClaim } from '../services/claims';
-import { deleteOwner, isAdmin, listOwnerAgents, ownedAgent, revokeRegistration, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
+import { deleteOwner, getOwner, listOwnerAgents, ownedAgent, revokeRegistration, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
 import { updateProfile } from '../services/signup';
 import { body, type RegisterRoutes } from './shared';
 
@@ -14,8 +15,15 @@ export const register: RegisterRoutes = (app, relay) => {
   app.post('/internal/owners', async (c) => {
     const { discord_user_id, username } = parse(OwnerSignIn, await body(c));
     const owner = await upsertOwner(relay, discord_user_id, username);
-    return c.json({ owner, is_admin: isAdmin(relay, owner) });
+    // Signing in never waits on Discord: when it can't say who is an admin, is_admin is false and GET …/admin asks again.
+    const standing = await adminStanding(relay, owner.discord_user_id).catch((err) => {
+      if (err instanceof RelayError && err.status === 503) return null;
+      throw err;
+    });
+    return c.json({ owner, is_admin: Boolean(standing?.permissions.length) });
   });
+
+  app.get('/internal/owners/:ownerId/admin', async (c) => c.json(await adminStanding(relay, (await getOwner(relay, c.req.param('ownerId'))).discord_user_id)));
 
   app.delete('/internal/owners/:ownerId', async (c) => {
     await deleteOwner(relay, c.req.param('ownerId'));

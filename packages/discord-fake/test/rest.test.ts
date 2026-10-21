@@ -341,6 +341,18 @@ describe('bot routes', () => {
     fake.application.interactions_endpoint_url = null;
   });
 
+  it('/applications/@me names one owner, or the Developer team that owns the bot', async () => {
+    const solo = await bot.getCurrentApplication();
+    expect(solo).toMatchObject({ owner: { id: fake.application.owner_id }, team: null });
+    fake.application.team = [f.alice.id];
+    const owned = await bot.getCurrentApplication();
+    expect(owned.team?.members).toEqual([
+      expect.objectContaining({ user: expect.objectContaining({ id: f.alice.id, username: 'alice' }), membership_state: 2 }),
+    ]);
+    expect(owned.owner?.id).toBe(owned.team?.id);
+    fake.application.team = null;
+  });
+
   it('message content flags follow the setup', async () => {
     const before = fake.application.flags;
     fake.application.flags = 0;

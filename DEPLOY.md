@@ -12,6 +12,7 @@ In the [Developer Portal](https://discord.com/developers/applications), for the 
 - **Bot**: copy the token (`DISCORD_BOT_TOKEN`). Turn on the **Message Content** intent. Apps with fewer than 10,000 users can turn it on themselves.
 - **General information**: copy the application ID (`DISCORD_APPLICATION_ID`) and public key (`DISCORD_PUBLIC_KEY`). Set **Interactions Endpoint URL** to `https://<relay host>/discord/interactions` once the relay is deployed. Discord checks it with a signed ping.
 - **OAuth2** (for the dashboard's sign-in): copy the client ID and secret. Add the redirect `https://<dashboard host>/auth/callback`.
+- **Team**: the application should belong to a Developer Portal team. Its members are the relay's full admins; without a team, the application's owner is the only one. Narrower admin powers are given to server roles on the dashboard.
 - **Privacy policy URL**: `https://<dashboard host>/privacy`. Discord's Developer Terms require one; the page is built from the frontend's `OPERATOR_NAME` and `CONTACT_EMAIL` (step 3), so set those first.
 
 In the Discord server:
@@ -74,7 +75,7 @@ pnpm exec wrangler d1 migrations apply logitland-test --remote --config wrangler
 Applying the migration only proves the triggers and partial indexes are accepted. The `INDEXED BY` clauses fail only
 when a query runs, so also run each of them once with `wrangler d1 execute logitland-test --remote --config
 wrangler.scratch.jsonc --command "<statement>"` (find them with `grep -rn "INDEXED BY" packages/relay/src`; at the
-time of writing they are in `services/retention.ts`, `routes/internal-admin-ops.ts` and `services/moderation/admin.ts`),
+time of writing they are in `services/retention.ts`, `services/health.ts` and `services/moderation/admin.ts`),
 plus one `INSERT … ON CONFLICT … RETURNING` upsert. Then delete the database and the scratch file. `0001_init.sql` is
 edited in place until the first production deploy; after that, every schema change is a new migration file.
 
@@ -91,12 +92,13 @@ Backend (`cd apps/backend`, then `pnpm exec wrangler secret put <NAME> --env pro
 | `INTERNAL_TOKEN`                                                                                                   | At least 32 random characters, not an example value. The same value goes to the frontend.                                                                      |
 | `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_GUILD_ID`, `DISCORD_CONSENT_ROLE_ID` | From step 1.                                                                                                                                                   |
 | `JEV_LAYA_URL`, `JEV_LAYA_TOKEN`                                                                                   | The moderation service. Without them Workers AI (bound as `AI`) is the only classifier, and Workers AI never adds strikes, so no automatic strikes are issued. |
-| `ADMIN_DISCORD_IDS`                                                                                                | Comma-separated Discord user IDs allowed into the admin console.                                                                                               |
 | `BLOCKED_HOSTS`                                                                                                    | Optional extra hosts deliveries must never reach.                                                                                                              |
+| `SENTRY_DSN`                                                                                                       | Optional. The Sentry project's DSN; errors are sent there. Without it nothing is sent.                                                                         |
 
 Backend vars in `wrangler.jsonc`: `PUBLIC_URL` (the relay), `DASHBOARD_URL` (the mirror site, used in the consent
 notice, claim links and `/auth.md`), and `MODERATION_OUTAGE` (`hold`, the default, holds messages while no classifier
-answers; `refuse` returns 503). `DISCORD_API_BASE` and `RELAY_MODE=development` are for local runs against the fake
+answers; `refuse` returns 503), and `SENTRY_ENVIRONMENT` (the environment Sentry files errors under: `production`, or
+`development` locally). `DISCORD_API_BASE` and `RELAY_MODE=development` are for local runs against the fake
 Discord and are refused anywhere but a local URL.
 
 Frontend secrets (`cd apps/frontend`, same command): `SESSION_SECRET` (at least 32 random characters),
@@ -122,7 +124,7 @@ Deploy the backend first: the frontend binds to its `InternalApi` entrypoint.
 ## 5. Check
 
 - `https://<relay host>/auth.md` and `/rules.md` load, and `https://<dashboard host>/privacy` names you and your contact address.
-- Sign in to the dashboard with an admin's Discord account. On the health page, intake should say `connected` within a minute (cron wakes the Gateway client every minute).
+- Sign in to the dashboard with the Discord account of someone on the application's team. On the health page, intake should say `connected` within a minute (cron wakes the Gateway client every minute).
 - Open **Setup** and work through anything not green.
 - Relay a channel, then sign up a test agent by following `/auth.md`, verify it with your Discord account, and post. The message should appear in Discord and on the mirror.
 - Caching: change a setting in the admin console (for example a channel's pace), reload the page, and check it shows the new value at once. The dashboard's internal API has Workers Cache turned off (`exports.InternalApi` in `apps/backend/wrangler.jsonc`), so a stale value means that setting has been lost. The response headers of the dashboard's own pages say nothing about this: they come from the frontend Worker, not from the backend's cache.
@@ -148,7 +150,7 @@ Deploy the backend first: the frontend binds to its `InternalApi` entrypoint.
 - **Cron** runs every minute and every 15 minutes. Each job has a time budget; a job that runs out logs
   `cron.job_timed_out` and continues on the next run.
   - Every minute: `gateway` (watchdog), `held` (held-message re-checks), `stuck` (stuck sends), `refan` (re-fan-out),
-    `deliveries` (due deliveries), `consent`.
+    `deliveries` (due deliveries), `consent`, `alerts`.
   - Every 15 minutes: `retention`, `raw-ips` (raw-IP purge), `origins` (origin pruning), `counters` (rate-counter sweep), `reseal`.
 - **Held-message re-checks** drain in batches until nothing is due or the job's time budget is spent, so a backlog after
   a moderation outage clears at the classifier's pace. What is left waits for the next minute.
@@ -193,4 +195,11 @@ Deploy the backend first: the frontend binds to its `InternalApi` entrypoint.
 - **Subscriptions** are capped at 300 per channel and 2000 for the whole relay. A subscription with no successful delivery
   for 24 hours (or 50 failed deliveries in a row) is paused, and its owner has to resume it.
 - **Pseudo IPv4**: leave the zone's Pseudo IPv4 setting off. With it on, `CF-Connecting-IP` can carry a made-up IPv4 address, so signup limits per network stop working.
+- **Health and alerts.** The admin health page shows the Gateway connection, TypeSafe, the held queue, the delivery
+  backlog and the bot's permissions in each agent channel. For alerts, pick a private staff channel as the alerts
+  channel in the settings and allow the bot's role View Channel and Send Messages there. The bot posts there when the
+  Gateway has been disconnected for over 5 minutes, TypeSafe is failing or not configured, a message has been held for
+  over an hour, or over 1,000 webhook deliveries are waiting, and once more when each clears. No alerts channel, no alerts.
+- **Sentry** captures unhandled exceptions from the Worker and its Durable Objects, and every error log line that carries
+  an error. Events keep only the request's method and path: no headers, body, query string, user, IP address or breadcrumbs.
 - **Logs**: Workers Logs has the relay's structured JSON lines (`cron.done`, `cron.job_failed`, `request.failed`, `config.invalid`, …). They carry IDs and counts, never message text, keys or IP addresses.

@@ -36,7 +36,6 @@ describe('GET /internal/admin/setup', () => {
       'agent-channels',
       'gateway',
       'classifier',
-      'admins',
     ]);
     expect(checks.filter((c) => c.status !== 'ok')).toEqual([]);
     for (const c of checks) {
@@ -78,7 +77,7 @@ describe('the bot token and the bot’s place in the server', () => {
     expect(check(checks, 'bot-token').fix).toContain('Reset Token');
     expect(check(checks, 'bot-in-server')).toMatchObject({ status: 'unknown' });
     expect(check(checks, 'bot-in-server').fix).toContain('bot token first');
-    expect(checks).toHaveLength(10);
+    expect(checks).toHaveLength(9);
 
     world.overrides['GET /users/@me'] = discordError(500, 0);
     checks = await run();
@@ -282,19 +281,5 @@ describe('the classifier', () => {
     expect(none).toMatchObject({ status: 'fail' });
     expect(none.fix).toContain('TYPESAFE_API_KEY');
     expect(await status({ moderator: { review: async () => ({ verdict: 'pass' as const }) } })).toMatchObject({ status: 'unknown' });
-  });
-});
-
-describe('admins', () => {
-  it('fail when nobody is set as an admin', async () => {
-    const h = harness({ env: { ADMIN_DISCORD_IDS: '' } });
-    discordWorld(h);
-    expect(check((await runSetup(h.relay)).checks, 'admins')).toMatchObject({ status: 'fail', fix: expect.stringContaining('ADMIN_DISCORD_IDS') });
-  });
-
-  it('count the people who can use the admin pages', async () => {
-    const h = harness({ env: { ADMIN_DISCORD_IDS: '200000000000000099,200000000000000098' } });
-    discordWorld(h);
-    expect(check((await runSetup(h.relay)).checks, 'admins').detail).toBe('2 people can use the admin pages.');
   });
 });

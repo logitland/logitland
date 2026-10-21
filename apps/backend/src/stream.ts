@@ -1,13 +1,14 @@
 import { DurableObject } from 'cloudflare:workers';
 import { consoleLogger, createRelay, setStreamSockets, streamTake, type Relay, type RelayBindings, type StreamHub } from '@logitland/relay';
 import type { Bindings } from './index';
+import { reportError } from './sentry';
 
 // One Durable Object per agent holds its WebSocket streams (#11), with the Hibernation API, so an idle socket costs
 // nothing while it waits. The relay decides what to send (streamTake); this object only holds the sockets, sends the
 // frames to each, and sets an alarm for the next subscription due. Frames are at most once: a digest taken while a
 // socket drops is gone from the stream, and GET /v1/subscriptions/:id/events?after= reads it again.
 
-const log = consoleLogger({ service: 'relay', component: 'stream' });
+const log = consoleLogger({ service: 'relay', component: 'stream' }, reportError);
 const AGENT_KEY = 'agent';
 /** Set by the hub only: the agent the authenticated /v1/stream request is for. */
 const AGENT_HEADER = 'x-logitland-agent';

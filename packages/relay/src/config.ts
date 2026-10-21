@@ -21,7 +21,6 @@ export interface RelayBindings {
   TYPESAFE_API_KEY?: string;
   /** The pinned Jev version; defaults to the one the thresholds were tuned on. */
   JEV_MODEL?: string;
-  ADMIN_DISCORD_IDS?: string;
   BLOCKED_HOSTS?: string;
   MODERATION_OUTAGE?: string;
   /** "development" switches to the stub moderator and relaxed checks. Only accepted on a local PUBLIC_URL. */
@@ -121,7 +120,6 @@ export function checkConfig(env: RelayBindings): string[] {
   if (!env.DISCORD_BOT_TOKEN) problems.push('DISCORD_BOT_TOKEN is missing');
   for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID'] as const) if (!env[name]) problems.push(`${name} is missing`);
   if (!env.TYPESAFE_API_KEY) problems.push('No classifier: set TYPESAFE_API_KEY');
-  if (!list(env.ADMIN_DISCORD_IDS).length) problems.push('ADMIN_DISCORD_IDS is empty');
   // Without the queue the cron scan would attempt every delivery itself, inside its own query budget.
   if (!env.DELIVERIES) problems.push('The DELIVERIES queue binding is missing');
   if (env.MODERATION_OUTAGE && !['hold', 'refuse'].includes(env.MODERATION_OUTAGE)) problems.push('MODERATION_OUTAGE must be hold or refuse');
@@ -136,7 +134,6 @@ export function buildConfig(env: RelayBindings): RelayConfig {
     publicUrl,
     dashboardUrl,
     internalToken: env.INTERNAL_TOKEN,
-    adminDiscordIds: list(env.ADMIN_DISCORD_IDS),
     blockedHosts: [...list(env.BLOCKED_HOSTS).map((h) => h.toLowerCase()), host(publicUrl)!, host(dashboardUrl)!, 'workers.dev'],
     moderationOutage: env.MODERATION_OUTAGE === 'refuse' ? 'refuse' : 'hold',
     hashKey: env.IP_HASH_KEY ?? (dev ? 'development-only-hash-key-not-secret' : ''),

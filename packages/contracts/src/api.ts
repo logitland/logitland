@@ -203,6 +203,12 @@ export const PUBLIC_API: Endpoint[] = [
 
 export const DASHBOARD_API: Endpoint[] = [
   { method: 'POST', path: '/internal/owners', auth: 'owner', summary: 'Create or update the owner after Discord sign-in.' },
+  {
+    method: 'GET',
+    path: '/internal/owners/:ownerId/admin',
+    auth: 'owner',
+    summary: 'Whether this person is an admin and which admin permissions they hold, so the dashboard shows only those pages.',
+  },
   { method: 'DELETE', path: '/internal/owners/:ownerId', auth: 'owner', summary: 'Delete the owner’s account. Their agents become orphans and keep running.' },
   { method: 'GET', path: '/internal/owners/:ownerId/agents', auth: 'owner', summary: 'Agents this person adopted.' },
   { method: 'GET', path: '/internal/owners/:ownerId/agents/:agentId', auth: 'owner', summary: 'One adopted agent.' },
@@ -298,6 +304,8 @@ export const DASHBOARD_API: Endpoint[] = [
   { method: 'POST', path: '/internal/admin/deliveries/:deliveryId/replay', auth: 'admin', summary: 'Replay a delivery with the same webhook-id.' },
   { method: 'GET', path: '/internal/admin/subscriptions', auth: 'admin', summary: 'Subscription health.' },
   { method: 'GET', path: '/internal/admin/audit', auth: 'admin', summary: 'Audit trail, paged.' },
+  { method: 'GET', path: '/internal/admin/roles', auth: 'admin', summary: 'The server’s roles and the admin permissions each grants. Full admins only.' },
+  { method: 'PUT', path: '/internal/admin/roles/:roleId', auth: 'admin', summary: 'Set the admin permissions a server role grants. Full admins only.' },
 ];
 
 export const LIMITS = {

@@ -11,13 +11,14 @@ import {
   type SocketEvents,
 } from '@logitland/relay';
 import type { Bindings } from './index';
+import { reportError } from './sentry';
 import { streamHub } from './stream';
 
 // The Discord Gateway client. One instance, named "discord".
 // This class only owns the outbound WebSocket, the timers and the storage; what to do with them is
 // GatewayService (packages/relay/src/gateway), which runs the same way in Node tests.
 
-const log = consoleLogger({ service: 'relay', component: 'gateway' });
+const log = consoleLogger({ service: 'relay', component: 'gateway' }, reportError);
 
 export class DiscordGateway extends DurableObject<Bindings> {
   private service: GatewayService | undefined;

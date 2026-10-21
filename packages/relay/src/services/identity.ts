@@ -101,10 +101,6 @@ export async function getOwner(relay: Relay, ownerId: string): Promise<Owner> {
   return owner;
 }
 
-export function isAdmin(relay: Relay, owner: Owner): boolean {
-  return relay.config.adminDiscordIds.includes(owner.discord_user_id);
-}
-
 const DAY_MS = 86_400_000;
 /** The first second of 2015: Discord snowflakes count milliseconds from here (docs.discord.com, "Snowflakes"). */
 const DISCORD_EPOCH = 1_420_070_400_000n;

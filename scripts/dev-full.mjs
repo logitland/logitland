@@ -276,15 +276,7 @@ if (Object.keys(generated).length) {
   chmodSync(stateFile, 0o600);
 }
 
-const admins = [
-  ...new Set([
-    ...(devVars.ADMIN_DISCORD_IDS ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-    community.adminId,
-  ]),
-];
+// Admins are the fake application's Developer team: the seeded admin. Add yourself with PATCH /_fake/application {"team": [...]}.
 const backendEnv = {
   ...devVars,
   RELAY_SECRET_KEY: secrets.RELAY_SECRET_KEY,
@@ -295,7 +287,6 @@ const backendEnv = {
   DISCORD_APPLICATION_ID: fakeInfo.application_id,
   DISCORD_PUBLIC_KEY: fakeInfo.public_key,
   DISCORD_GUILD_ID: community.guildId,
-  ADMIN_DISCORD_IDS: admins.join(','),
 };
 const backendEnvFile = join(state, 'backend.env');
 generatedFiles.push(backendEnvFile);

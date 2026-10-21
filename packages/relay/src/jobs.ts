@@ -1,4 +1,6 @@
 import type { Relay } from './context';
+import { pruneLookupsJob } from './services/admins';
+import { alertsJob } from './services/alerts';
 import { consentSweepJob } from './services/consent';
 import { drainDue } from './services/deliveries';
 import { sweepCountersJob } from './services/limits';
@@ -32,11 +34,13 @@ const JOBS: Job[] = [
   // WebSocket subscriptions of a minute and longer fall due without a new event to wake them.
   { name: 'streams', every: 'minute', budgetMs: 10_000, run: async (relay) => (relay.streams ? (await wakeStreams(relay), 1) : 0) },
   { name: 'consent', every: 'minute', budgetMs: 20_000, run: (relay, ctx) => consentSweepJob(relay, ctx) },
+  { name: 'alerts', every: 'minute', budgetMs: 10_000, run: alertsJob },
   { name: 'retention', every: 'quarter-hour', budgetMs: 25_000, run: retentionJob },
   { name: 'raw-ips', every: 'quarter-hour', budgetMs: 10_000, run: purgeRawIpsJob },
   { name: 'origins', every: 'quarter-hour', budgetMs: 10_000, run: pruneOriginsJob },
   { name: 'counters', every: 'quarter-hour', budgetMs: 10_000, run: sweepCountersJob },
   { name: 'reseal', every: 'quarter-hour', budgetMs: 15_000, run: resealJob },
+  { name: 'lookups', every: 'quarter-hour', budgetMs: 5_000, run: pruneLookupsJob },
 ];
 
 export type JobOutcome = number | 'failed' | 'timed_out';

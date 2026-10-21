@@ -19,7 +19,6 @@ const prodEnv = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   DISCORD_PUBLIC_KEY: 'ab',
   DISCORD_GUILD_ID: '2',
   TYPESAFE_API_KEY: 't',
-  ADMIN_DISCORD_IDS: '200000000000000099',
   DELIVERIES: { send: async () => undefined },
   ...over,
 });

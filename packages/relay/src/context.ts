@@ -55,8 +55,6 @@ export interface RelayConfig {
   dashboardUrl: string;
   /** Defence in depth on the internal entrypoint, which is only reachable through the service binding. */
   internalToken: string;
-  /** Discord user IDs allowed into the admin console. */
-  adminDiscordIds: string[];
   /** Hosts deliveries must never reach (the relay and dashboard themselves, plus BLOCKED_HOSTS). */
   blockedHosts: string[];
   /** What to do when no classifier answers. */

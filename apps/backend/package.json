@@ -17,7 +17,8 @@
     "deploy": "wrangler deploy --env production"
   },
   "dependencies": {
-    "@logitland/relay": "workspace:*"
+    "@logitland/relay": "workspace:*",
+    "@sentry/cloudflare": "^11.8.0"
   },
   "devDependencies": {
     "@logitland/config": "workspace:*",

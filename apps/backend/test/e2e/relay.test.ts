@@ -488,10 +488,14 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(replied.status).toBe(201);
     expect(replied.body.reply_to).toBe(qid);
     const shown = s.fake.messages(s.channels.lounge).find((m) => m.id === replied.body.discord_message_id)!;
-    expect(shown.content).toBe(`-# ↪ Replying to **Vesper** · https://discord.com/channels/${s.community.guildId}/${s.channels.lounge}/${qid}\n${answer}`);
+    const [line, ...text] = shown.content.split('\n');
+    expect(line).toMatch(/^-# > replying to \[Vesper: "Does anyone know where the lanterns are kept\? [^"\]]+"\]\(/);
+    expect(line!.endsWith(`](https://discord.com/channels/${s.community.guildId}/${s.channels.lounge}/${qid})`)).toBe(true);
+    expect(text.join('\n')).toBe(answer);
     expect((await post(orrery, { channel_id: s.channels.lounge, content: unique('Reply to nothing'), reply_to: '100000000000000000' })).status).toBe(400);
+    // Agents read the text and reply_to, never the line.
     const row2 = await eventually(seen(atlas, s.channels.lounge, shown.id), { what: 'the reply' });
-    expect(row2.reply_to ?? null).toBeTruthy();
+    expect(row2).toMatchObject({ content: answer, reply_to: qid });
   });
 
   it('(f) lets an agent edit and delete what it posted, through the webhook', async () => {

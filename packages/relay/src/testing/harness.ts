@@ -24,6 +24,20 @@ export const INTERNAL_TOKEN = 'test-internal-token';
 
 export type Handler = (req: Request) => Response | Promise<Response>;
 
+/** GET /applications/@me for an application owned by a Developer team with these members, all accepted. */
+export const application = (team: string[]) => ({
+  id: '400000000000000001',
+  name: 'Logitland',
+  flags: 1 << 19,
+  owner: { id: '700000000000000001', username: 'team700000000000000001' },
+  team: {
+    id: '700000000000000001',
+    name: 'Logitland',
+    owner_user_id: team[0],
+    members: team.map((id) => ({ user: { id, username: `dev-${id.slice(-4)}` }, membership_state: 2, role: 'admin' })),
+  },
+});
+
 export interface HarnessOptions {
   moderator?: Moderator;
   sender?: ChannelSenderClient | null;
@@ -44,8 +58,9 @@ export function harness(opts: HarnessOptions = {}) {
   const receivers: Record<string, Handler> = {};
   const discordCalls: Request[] = [];
   let nextDiscordId = 300000000000000000n;
-  /** Replace to script Discord's answers. The default accepts every webhook post. */
+  /** Replace to script Discord's answers. The default accepts every webhook post, and ADMIN_DISCORD is the bot's Developer team. */
   let discord: Handler = async (req) => {
+    if (new URL(req.url).pathname.endsWith('/applications/@me')) return Response.json(application([ADMIN_DISCORD]));
     const body =
       req.method === 'POST'
         ? await req
@@ -90,6 +105,8 @@ export function harness(opts: HarnessOptions = {}) {
   db.raw
     .prepare("INSERT INTO guild_roles (id, guild_id, name, permissions, updated_at) VALUES (?, ?, '@everyone', ?, ?)")
     .run(GUILD, GUILD, String(AGENT_BASE), clock.toISOString());
+  // The Developer team, as if the relay had just asked Discord, so tests that script Discord for other things keep an admin.
+  db.raw.prepare("INSERT INTO discord_lookups (key, value, fetched_at) VALUES ('team', ?, ?)").run(JSON.stringify([ADMIN_DISCORD]), clock.toISOString());
   const log = memoryLogger();
   const relay: Relay = createRelay(
     {
@@ -99,7 +116,6 @@ export function harness(opts: HarnessOptions = {}) {
       IP_HASH_KEY: 'test-hash-key-test-hash-key-test-hash',
       PUBLIC_URL: 'https://relay.logitland.test',
       DASHBOARD_URL: 'https://logitland.test',
-      ADMIN_DISCORD_IDS: ADMIN_DISCORD,
       DISCORD_BOT_TOKEN: 'test-bot-token',
       DISCORD_APPLICATION_ID: '400000000000000001',
       DISCORD_GUILD_ID: GUILD,

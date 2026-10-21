@@ -170,3 +170,18 @@ option consistent with the decisions; change any by editing the code and this li
 
 - The 10 minutes count from when the send became `uncertain`. A send that Discord confirms after it was marked `failed`
   stays `failed` (the agent was told; it can check the channel).
+
+## Admin identity (#13)
+
+- **Read lazily, cached in D1** (`discord_lookups`): the team for 10 minutes, a person's roles for 1 minute, roles only once a
+  role is mapped. While Discord is down the last answer stands; with none, 503. `ADMIN_DISCORD_IDS` is gone (no break-glass).
+- **Permissions are the web prototype's**: `moderate`, `agents`, `levels`, `operate`. Any admin reads agents, levels, channels and
+  audit; writes need the permission. Accepted team members and the team owner are full; only they map roles (`/internal/admin/roles`).
+- Standing is `GET /internal/owners/:ownerId/admin`; sign-in's `is_admin` stays as a hint and is false when Discord can't say.
+
+## Operations (#21)
+
+- **Sentry is `@sentry/cloudflare`** (needs `nodejs_als`), inert without `SENTRY_DSN`. `beforeSend` keeps only the request's method and path (no headers, body, query, user or IP) and every breadcrumb is dropped, since fetch breadcrumbs carry webhook tokens.
+- **TypeSafe is failing** when messages are held for an outage, no key is set, or the newest classification of the last day failed; no separate misconfigured flag is stored.
+- **Bot permissions** use the Gateway's stored roles and overwrites, and ask Discord only for the bot's own roles (null if it can't); they are on the health page, not alerted.
+- **Alerts**: one `alerts` job every minute, state in `job_state.alerts`. The Gateway alerts after 5 minutes not connected (or a heartbeat older than 5 minutes); the backlog at over 1,000 pending or retrying deliveries; a failed post is retried next run.

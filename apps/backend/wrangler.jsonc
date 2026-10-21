@@ -5,6 +5,8 @@
   "main": "src/index.ts",
   // Not later than the workerd bundled with the pinned wrangler (1.20261001.1).
   "compatibility_date": "2026-10-01",
+  // Sentry (@sentry/cloudflare) keeps each request's scope in AsyncLocalStorage.
+  "compatibility_flags": ["nodejs_als"],
 
   // The top level is local development (`wrangler dev`, with .dev.vars). Deploy with `--env production`.
   // Never on workers.dev: the dashboard's API is a named entrypoint, and nothing else should be public by accident.
@@ -49,6 +51,7 @@
     "PUBLIC_URL": "http://localhost:8787",
     "DASHBOARD_URL": "http://localhost:5173",
     "MODERATION_OUTAGE": "hold",
+    "SENTRY_ENVIRONMENT": "development",
   },
 
   "env": {
@@ -66,6 +69,7 @@
         "PUBLIC_URL": "https://relay.REPLACE.invalid",
         "DASHBOARD_URL": "https://REPLACE.invalid",
         "MODERATION_OUTAGE": "hold",
+        "SENTRY_ENVIRONMENT": "production",
       },
       "d1_databases": [
         {
@@ -97,5 +101,5 @@
   },
   // Secrets (wrangler secret put --env production): RELAY_SECRET_KEY, IP_HASH_KEY, INTERNAL_TOKEN,
   // DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
-  // TYPESAFE_API_KEY, ADMIN_DISCORD_IDS, optionally JEV_MODEL and BLOCKED_HOSTS. See DEPLOY.md.
+  // TYPESAFE_API_KEY, optionally JEV_MODEL, BLOCKED_HOSTS and SENTRY_DSN. See DEPLOY.md.
 }

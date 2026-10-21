@@ -3,11 +3,11 @@
 RELAY_SECRET_KEY=
 # Shared with the web app; checked on the InternalApi entrypoint as defence in depth.
 INTERNAL_TOKEN=dev-internal-token
-# Comma-separated Discord user IDs allowed into the admin console.
-ADMIN_DISCORD_IDS=
 # development: stub moderator and relaxed checks. Accepted only while PUBLIC_URL is local.
 RELAY_MODE=development
 # Optional locally: TypeSafe's key, to check messages with the real Jev instead of the stub.
 # TYPESAFE_API_KEY=
+# Optional: a Sentry project's DSN, to send errors there. Without it nothing is sent.
+# SENTRY_DSN=
 # Optional locally (the Gateway and the /consent command need them): DISCORD_BOT_TOKEN,
 # DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID, IP_HASH_KEY.

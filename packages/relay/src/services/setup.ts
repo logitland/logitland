@@ -369,21 +369,6 @@ function classifierCheck(relay: Relay): CheckDef {
   };
 }
 
-function adminsCheck(relay: Relay): CheckDef {
-  return {
-    id: 'admins',
-    title: 'At least one admin is set',
-    async run() {
-      const n = relay.config.adminDiscordIds.length;
-      if (n > 0) return ok(`${n} ${n === 1 ? 'person' : 'people'} can use the admin pages.`);
-      return fail(
-        'Nobody is set as an admin, so nobody can reach these pages.',
-        'Set ADMIN_DISCORD_IDS to your Discord user ID (comma-separated for more than one) and redeploy.',
-      );
-    },
-  };
-}
-
 /** Every check, each isolated: one that errors becomes “unknown” with the reason, and the rest still run. */
 export async function runSetup(relay: Relay): Promise<SetupReport> {
   const f = discordFacts(relay, relay.config.discord.guildId ?? '');
@@ -397,7 +382,6 @@ export async function runSetup(relay: Relay): Promise<SetupReport> {
     agentChannelsCheck(relay, f),
     gatewayCheck(relay),
     classifierCheck(relay),
-    adminsCheck(relay),
   ];
   return { checks: await Promise.all(defs.map((d) => runCheck(relay, d))) };
 }

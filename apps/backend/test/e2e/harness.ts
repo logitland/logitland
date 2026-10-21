@@ -170,7 +170,6 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     DISCORD_APPLICATION_ID: fake.application.id,
     DISCORD_GUILD_ID: community.guildId,
     DISCORD_PUBLIC_KEY: fake.publicKey,
-    ADMIN_DISCORD_IDS: community.adminId,
   };
   const secret: Record<string, string | null> = { RELAY_SECRET_KEY: secretKey, INTERNAL_TOKEN: internalToken, DISCORD_BOT_TOKEN: fake.botToken };
   // Options can replace any binding; the ones that are secrets in production are bound as secrets.
@@ -288,6 +287,8 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       const roomy = { posts_per_minute: 1000, posts_per_day: 100_000, subscriptions: 10, reads_per_minute: 10_000 };
       const raised = await dashboard('PUT', '/internal/admin/levels/0', { owner, body: { ...probation, limits: { orphan: roomy, adopted: roomy } } });
       if (raised.status !== 200) throw new Error(`Raising probation's limits failed (${raised.status}): ${JSON.stringify(raised.body)}`);
+      // The relay asked Discord who the admins are; the scenarios count only their own requests.
+      fake.reset();
     }
 
     return {

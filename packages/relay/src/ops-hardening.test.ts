@@ -13,7 +13,6 @@ const prod = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   IP_HASH_KEY: 'h'.repeat(40),
   PUBLIC_URL: 'https://relay.logitland.org',
   DASHBOARD_URL: 'https://logitland.org',
-  ADMIN_DISCORD_IDS: '200000000000000099',
   DISCORD_BOT_TOKEN: 't',
   DISCORD_APPLICATION_ID: '1',
   DISCORD_PUBLIC_KEY: 'k',

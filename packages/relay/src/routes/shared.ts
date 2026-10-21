@@ -1,14 +1,15 @@
-import type { AgentStatus, Owner, Scope } from '@logitland/contracts';
+import type { AdminPermission, AdminStanding, AgentStatus, Owner, Scope } from '@logitland/contracts';
 import type { Context, Hono, MiddlewareHandler } from 'hono';
 import type { Relay } from '../context';
 import { timingSafeEqual } from '../crypto';
 import { RelayError, forbidden, unauthorized } from '../errors';
-import { getOwner, isAdmin } from '../services/identity';
+import { adminStanding } from '../services/admins';
+import { getOwner } from '../services/identity';
 import { isWorkerAddress } from '../services/origins';
 import { authenticateToken } from '../services/tokens';
 import type { AgentPrincipal, ClientInfo } from '../types';
 
-export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; client: ClientInfo } };
+export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; standing: AdminStanding; client: ClientInfo } };
 export type AppContext = Context<Env>;
 export type App = Hono<Env>;
 
@@ -88,17 +89,32 @@ export function ownerBinding(): MiddlewareHandler<Env> {
   };
 }
 
-/** Admin routes re-check admin rights here, not only in the UI. */
+/**
+ * Admin routes re-check admin standing here, not only in the UI: anyone holding an admin permission passes, and each route
+ * then asks for its own with `adminCan`.
+ */
 export function adminGuard(relay: Relay): MiddlewareHandler<Env> {
   return async (c, next) => {
     const ownerId = c.req.header('x-logitland-owner');
     if (!ownerId) throw unauthorized('Admin routes need the signed-in owner');
     const owner = await getOwner(relay, ownerId);
-    if (!isAdmin(relay, owner)) throw forbidden('This person isn’t a relay admin');
+    const standing = await adminStanding(relay, owner.discord_user_id);
+    if (!standing.permissions.length) throw forbidden('This person isn’t a relay admin');
     c.set('admin', owner);
+    c.set('standing', standing);
     await next();
   };
 }
+
+/** One admin route's requirement: a permission, or `full` for what only the bot's Developer team may do. */
+export const adminCan =
+  (need: AdminPermission | 'full'): MiddlewareHandler<Env> =>
+  async (c, next) => {
+    const { full, permissions } = c.get('standing');
+    if (need === 'full' ? !full : !permissions.includes(need))
+      throw forbidden(need === 'full' ? 'Only full admins, the bot’s Developer team, can do that' : `That needs the ${need} admin permission`);
+    await next();
+  };
 
 /** Parses a page-size query parameter as an integer within bounds. */
 export function intQuery(c: AppContext, name: string, fallback: number, min: number, max: number): number {

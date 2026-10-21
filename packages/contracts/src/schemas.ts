@@ -685,6 +685,17 @@ export type AuditEntry = z.infer<typeof AuditEntry>;
 
 /* ---------- Admin health ---------- */
 
+/** What the bot may do in one channel open to agents, from the stored roles and overwrites and the bot's own roles. */
+export const BotChannelStanding = z.object({
+  channel_id: Snowflake,
+  name: z.string(),
+  can_view: z.boolean(),
+  can_send: z.boolean(),
+  can_manage_webhooks: z.boolean(),
+  can_read_history: z.boolean(),
+});
+export type BotChannelStanding = z.infer<typeof BotChannelStanding>;
+
 export const AdminHealth = z.object({
   generated_at: Timestamp,
   intake: z.object({
@@ -701,8 +712,29 @@ export const AdminHealth = z.object({
     open_reports: z.number().int(),
     open_appeals: z.number().int(),
   }),
+  /**
+   * Jev on TypeSafe. `failing`: messages are held for an outage, no classifier is configured, or the latest classification
+   * in the last day failed. `last_failure` is the reason the moderation log gives.
+   */
+  typesafe: z.object({
+    classifier: z.enum(['jev', 'dev', 'unconfigured']).nullable(),
+    failing: z.boolean(),
+    last_failure_at: Timestamp.nullable(),
+    last_failure: z.string().nullable(),
+    last_answer_at: Timestamp.nullable(),
+  }),
   messages_last_hour: z.record(z.string(), z.number().int()),
-  deliveries: z.object({ due: z.number().int(), last_hour: z.record(z.string(), z.number().int()) }),
+  /** The delivery backlog: deliveries waiting to be sent, the earliest due, and agents' webhooks paused after failing. */
+  deliveries: z.object({
+    due: z.number().int(),
+    pending: z.number().int(),
+    retrying: z.number().int(),
+    oldest_due_at: Timestamp.nullable(),
+    paused_webhooks: z.number().int(),
+    last_hour: z.record(z.string(), z.number().int()),
+  }),
+  /** Each channel open to agents (and each the bot can't view), by name. Null when Discord couldn't be asked for the bot's roles. */
+  bot_permissions: z.array(BotChannelStanding).nullable(),
   subscriptions: z.record(z.string(), z.number().int()),
   agents: z.object({ by_level: z.record(z.string(), z.number().int()), by_status: z.record(z.string(), z.number().int()), signups_last_day: z.number().int() }),
   switches: z.object({
@@ -1126,3 +1158,27 @@ export const ModerationStats = z.object({
   queue: z.object({ size: z.number().int().min(0), oldest_age_seconds: z.number().int().min(0).nullable() }),
 });
 export type ModerationStats = z.infer<typeof ModerationStats>;
+
+/* ---------- Human admins (#13) ---------- */
+
+/**
+ * What a server role can let a person do on the admin pages, named as the web app's admin pages name them. `moderate`: the
+ * held queue, takedowns, reports, appeals and moderation stats. `agents`: change an agent's status or level, reset its avatar,
+ * reveal its raw IPs. `levels`: add, change and remove levels. `operate`: health, settings, setup, deliveries, subscriptions
+ * and readers. Any admin may read the agent registry, the levels, the channels and the audit trail. Full admins (the bot's
+ * Developer team) hold every permission, and only they map roles to permissions.
+ */
+export const AdminPermission = z.enum(['moderate', 'agents', 'levels', 'operate']);
+export type AdminPermission = z.infer<typeof AdminPermission>;
+
+/** GET /internal/owners/:ownerId/admin: whether this person may use the admin pages, and which. No permissions: not an admin. */
+export const AdminStanding = z.object({ full: z.boolean(), permissions: z.array(AdminPermission) });
+export type AdminStanding = z.infer<typeof AdminStanding>;
+
+/** A server role and the admin permissions it grants (GET /internal/admin/roles). */
+export const AdminRole = z.object({ id: Snowflake, name: z.string(), permissions: z.array(AdminPermission) });
+export type AdminRole = z.infer<typeof AdminRole>;
+
+/** PUT /internal/admin/roles/:roleId. An empty list takes the role's admin powers away. */
+export const AdminRoleUpdate = z.object({ permissions: z.array(AdminPermission).max(AdminPermission.options.length) });
+export type AdminRoleUpdate = z.infer<typeof AdminRoleUpdate>;

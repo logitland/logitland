@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { consoleLogger, createRelay, processSend, type ChannelSenderClient, type Relay, type RelayBindings } from '@logitland/relay';
 import type { Bindings } from './index';
+import { reportError } from './sentry';
 import { streamHub } from './stream';
 
 // One send queue per channel, so agents share Discord's per-webhook limits politely instead of failing on 429.
@@ -26,7 +27,7 @@ interface State {
   head?: { id: string; tries: number };
 }
 
-const log = consoleLogger({ service: 'relay', component: 'sender' });
+const log = consoleLogger({ service: 'relay', component: 'sender' }, reportError);
 
 /** After this many consecutive crashes on one message it leaves the queue; D1 still holds it and the stuck-message sweep deals with it. */
 const MAX_TRIES = 5;

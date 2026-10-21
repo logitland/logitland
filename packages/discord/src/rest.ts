@@ -153,6 +153,21 @@ export interface CurrentApplication {
   /** GATEWAY_MESSAGE_CONTENT is 1 << 18 (100+ servers), GATEWAY_MESSAGE_CONTENT_LIMITED is 1 << 19 (under 100). */
   flags?: number;
   interactions_endpoint_url?: string | null;
+  /** The person who owns the application; for a team-owned one, a stand-in user for the team. */
+  owner?: DiscordUser;
+  /** The Developer Portal team that owns the application, if one does. */
+  team?: Team | null;
+}
+
+/** 1 invited, 2 accepted. Only accepted members are on the team. */
+export const TEAM_MEMBER_ACCEPTED = 2;
+
+/** https://docs.discord.com/developers/topics/teams */
+export interface Team {
+  id: string;
+  name: string;
+  owner_user_id: string;
+  members: { user: DiscordUser; membership_state: number; role: string }[];
 }
 
 export interface CreatedWebhook {
@@ -236,6 +251,7 @@ export class DiscordRest {
     return this.send<DiscordUser>('GET', '/users/@me', undefined, true);
   }
 
+  /** The bot's application: its flags, interactions URL, and who owns it (a team, or one person). */
   getCurrentApplication(): Promise<CurrentApplication> {
     return this.send<CurrentApplication>('GET', '/applications/@me', undefined, true);
   }

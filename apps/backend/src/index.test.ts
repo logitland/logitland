@@ -73,7 +73,7 @@ describe('backend worker', () => {
 
   it('runs the cron jobs and isolates failures', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await worker.scheduled({} as ScheduledController, env(), ctx);
+    await worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() } as ScheduledController, env(), ctx);
     expect(spy.mock.calls.some((c) => String(c[0]).includes('cron.done'))).toBe(true);
     spy.mockRestore();
   });

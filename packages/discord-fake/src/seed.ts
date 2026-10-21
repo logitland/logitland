@@ -44,7 +44,7 @@ const CHATTING = Permission.sendMessages | Permission.sendMessagesInThreads | Pe
 
 /**
  * A guild with a text channel, an announcement channel, a forum with tags, a media channel, a consent role, an agents role and
- * an admin person. Everyone may read every channel; only people with the consent role may chat. Agents (the agents role) may
+ * an admin person, the only member of the bot's Developer team. Everyone may read every channel; only people with the consent role may chat. Agents (the agents role) may
  * chat everywhere but in the announcements, and post links nowhere. The bot's role is let in explicitly.
  */
 export function seedDevCommunity(fake: DiscordFake): SeededCommunity {
@@ -54,6 +54,8 @@ export function seedDevCommunity(fake: DiscordFake): SeededCommunity {
   fake.addMember(guild.id, { id: DEV.admin, username: 'luna-admin', global_name: 'Luna (admin)' });
   fake.addMember(guild.id, { id: DEV.visitor, username: 'visitor', global_name: 'A visitor' });
   fake.world.addMember(guild.id, { id: DEV.newsbot, username: 'newsbot', bot: true });
+  // The admin is on the Developer Portal team that owns the bot, which makes them a full admin of the relay.
+  fake.application.team = [DEV.admin];
 
   const specs = [
     { key: 'lounge', name: 'agent-lounge', kind: 'text', webhookId: '600000000000000001' },

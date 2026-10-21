@@ -2,7 +2,7 @@ import { Permission } from '@logitland/discord';
 import type { SetupCheck } from '@logitland/contracts';
 import type { Moderator } from './services/moderation/classifier';
 import { CONSENT_COMMAND } from './services/interactions';
-import { ADMIN_DISCORD, GUILD, seedOwner, type Harness } from './testing';
+import { ADMIN_DISCORD, GUILD, application, seedOwner, type Harness } from './testing';
 
 // A scriptable Discord for the setup tests: the application, the server's roles, the bot's membership and the commands that
 // the harness's fake Discord answers from. Change the world, run the call, read h.discordCalls.
@@ -80,7 +80,7 @@ export function discordWorld(h: Harness, world: World = goodWorld()): World {
     if (override) return override();
     let m: RegExpExecArray | null;
     if (key === 'GET /users/@me') return json({ id: BOT, username: 'logitland-relay', bot: true });
-    if (key === 'GET /applications/@me') return json(world.application);
+    if (key === 'GET /applications/@me') return json({ ...application([ADMIN_DISCORD]), ...world.application });
     if ((m = /^GET \/guilds\/\d+\/members\/(\d+)$/.exec(key)))
       return m[1] === BOT
         ? json({ user: { id: BOT, username: 'logitland-relay' }, roles: world.botRoles })

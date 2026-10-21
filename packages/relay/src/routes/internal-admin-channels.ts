@@ -5,6 +5,7 @@ import { register as registerSetup } from './internal-admin-setup';
 import type { RegisterRoutes } from './shared';
 
 // Every channel and what each level may do there (#9). Access is changed in Discord, on the agent roles; this shows its effect.
+// Any admin may read it.
 
 export const register: RegisterRoutes = (app, relay) => {
   registerSetup(app, relay);

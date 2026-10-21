@@ -36,7 +36,7 @@ describe('owner sign-in', () => {
     expect(await count(h, 'SELECT COUNT(*) AS n FROM owners')).toBe(1);
   });
 
-  it('marks the configured Discord IDs as admins', async () => {
+  it('marks the bot’s Developer team as admins', async () => {
     const h = harness();
     expect(OwnerSession.parse(await (await h.internal('POST', '/internal/owners', { discord_user_id: ADMIN_DISCORD, username: 'boss' })).json()).is_admin).toBe(
       true,

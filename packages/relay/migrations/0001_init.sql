@@ -529,6 +529,21 @@ CREATE TABLE agent_streams (
   updated_at TEXT NOT NULL
 );
 
+-- Server roles that grant narrower admin powers (#13), set by full admins: a JSON array of AdminPermission.
+CREATE TABLE admin_roles (
+  role_id TEXT PRIMARY KEY,
+  permissions TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Discord's answers about admin standing, cached briefly (services/admins.ts): `team`, the Developer team's user IDs, and
+-- `member:<user ID>`, that person's server roles. Both are JSON arrays of IDs.
+CREATE TABLE discord_lookups (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  fetched_at TEXT NOT NULL
+);
+
 -- The delivery ledger: one row per webhook POST, holding the digest it carries, so a retry sends exactly the same body.
 -- The delivery ID is the Standard Webhooks webhook-id and stays stable across retries.
 CREATE TABLE deliveries (

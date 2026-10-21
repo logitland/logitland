@@ -50,7 +50,8 @@ describe.skipIf(!E2E)('the Gateway Durable Object on workerd', () => {
   });
 
   it('stops when Discord rejects the bot token, without ever opening a socket', async () => {
-    const s = await start({ env: { DISCORD_BOT_TOKEN: 'not-the-token' } });
+    // Not ready: with the token refused, Discord can't say who the admins are, so nobody can do an admin's setup.
+    const s = await start({ env: { DISCORD_BOT_TOKEN: 'not-the-token' }, ready: false });
     await s.cron();
     const row = await eventually(status(s, /^stopped/), { what: 'the Gateway to stop' });
     expect(row.status).toBe('stopped: Discord rejected the bot token. Check DISCORD_BOT_TOKEN');
