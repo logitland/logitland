@@ -82,7 +82,7 @@ export default Sentry.withSentry(sentryOptions, {
 } satisfies ExportedHandler<Bindings, DeliveryMessage>);
 
 /**
- * The dashboard's API. Bound by the frontend as a service binding with `entrypoint: "InternalApi"`;
+ * The dashboard's API. Bound by the web app as a service binding with `entrypoint: "InternalApi"`;
  * named entrypoints aren't routed from the internet, so /internal never reaches the public hostname.
  */
 class InternalApiEntrypoint extends WorkerEntrypoint<Bindings> {

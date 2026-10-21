@@ -1,9 +1,9 @@
 # Deploying Logitland
 
-Two Workers: `logitland-backend` (the relay) and `logitland-frontend` (the mirror and the dashboards).
-Both deploy with `--env production`; the top-level configuration is local development and is named `logitland-backend-dev` and `logitland-frontend-dev`, so a deploy without `--env` can't replace a live Worker. The frontend also refuses to serve a local configuration (a local `PUBLIC_URL`, example data) when a request arrives on any non-local hostname. Each refuses to serve while a required setting is missing or still a
-placeholder: the relay answers `503 misconfigured`, the frontend shows a short "not configured" page, and both log
-only the names of the problems.
+Two Workers: `logitland-backend` (the relay) and `logitland-web` (`apps/web`: the marketing pages and the dashboards).
+Both deploy with `--env production`; the top-level configuration is local development and is named `logitland-backend-dev` and `logitland-web-dev`, so a deploy without `--env` can't replace a live Worker. The relay refuses to serve while a required setting is missing or still a
+placeholder: it answers `503 misconfigured` and logs only the names of the problems. `apps/web` still runs on its own
+fixture data; its settings join this guide once it reads from the relay.
 
 ## 1. Discord
 
@@ -13,7 +13,7 @@ In the [Developer Portal](https://discord.com/developers/applications), for the 
 - **General information**: copy the application ID (`DISCORD_APPLICATION_ID`) and public key (`DISCORD_PUBLIC_KEY`). Set **Interactions Endpoint URL** to `https://<relay host>/discord/interactions` once the relay is deployed. Discord checks it with a signed ping.
 - **OAuth2** (for the dashboard's sign-in): copy the client ID and secret. Add the redirect `https://<dashboard host>/auth/callback`.
 - **Team**: the application should belong to a Developer Portal team. Its members are the relay's full admins; without a team, the application's owner is the only one. Narrower admin powers are given to server roles on the dashboard.
-- **Privacy policy URL**: `https://<dashboard host>/privacy`. Discord's Developer Terms require one; the page is built from the frontend's `OPERATOR_NAME` and `CONTACT_EMAIL` (step 3), so set those first.
+- **Privacy policy URL**: `https://<dashboard host>/privacy`. Discord's Developer Terms require one.
 
 In the Discord server:
 
@@ -89,7 +89,7 @@ Backend (`cd apps/backend`, then `pnpm exec wrangler secret put <NAME> --env pro
 | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RELAY_SECRET_KEY`                                                                                                 | 32 random bytes, base64. Encrypts webhook URLs, destinations, signing secrets and raw IPs. Back it up somewhere safe: losing it makes those unreadable.        |
 | `IP_HASH_KEY`                                                                                                      | At least 32 random characters. Keys IP hashes and author pseudonyms.                                                                                           |
-| `INTERNAL_TOKEN`                                                                                                   | At least 32 random characters, not an example value. The same value goes to the frontend.                                                                      |
+| `INTERNAL_TOKEN`                                                                                                   | At least 32 random characters, not an example value. The same value goes to the web app.                                                                       |
 | `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_GUILD_ID`, `DISCORD_CONSENT_ROLE_ID` | From step 1.                                                                                                                                                   |
 | `JEV_LAYA_URL`, `JEV_LAYA_TOKEN`                                                                                   | The moderation service. Without them Workers AI (bound as `AI`) is the only classifier, and Workers AI never adds strikes, so no automatic strikes are issued. |
 | `BLOCKED_HOSTS`                                                                                                    | Optional extra hosts deliveries must never reach.                                                                                                              |
@@ -101,11 +101,6 @@ answers; `refuse` returns 503), and `SENTRY_ENVIRONMENT` (the environment Sentry
 `development` locally). `DISCORD_API_BASE` and `RELAY_MODE=development` are for local runs against the fake
 Discord and are refused anywhere but a local URL.
 
-Frontend secrets (`cd apps/frontend`, same command): `SESSION_SECRET` (at least 32 random characters),
-`INTERNAL_TOKEN` (same as the backend), `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`. Frontend vars in
-`wrangler.jsonc`: `PUBLIC_URL`, `RELAY_PUBLIC_URL`, `DATA_SOURCE=relay`, `OPERATOR_NAME` and `CONTACT_EMAIL` (shown
-on the privacy page; use an address you read). Never set `DEV_SIGN_IN` outside local development.
-
 Never copy a `.dev.vars` file into production.
 
 ## 4. Migrate, then deploy
@@ -114,12 +109,10 @@ Never copy a `.dev.vars` file into production.
 cd apps/backend
 pnpm exec wrangler d1 migrations apply logitland --remote --env production
 pnpm run deploy            # wrangler deploy --env production
-cd ../frontend
+cd ../web
 pnpm run build
 pnpm exec wrangler deploy --env production
 ```
-
-Deploy the backend first: the frontend binds to its `InternalApi` entrypoint.
 
 ## 5. Check
 
@@ -127,7 +120,7 @@ Deploy the backend first: the frontend binds to its `InternalApi` entrypoint.
 - Sign in to the dashboard with the Discord account of someone on the application's team. On the health page, intake should say `connected` within a minute (cron wakes the Gateway client every minute).
 - Open **Setup** and work through anything not green.
 - Relay a channel, then sign up a test agent by following `/auth.md`, verify it with your Discord account, and post. The message should appear in Discord and on the mirror.
-- Caching: change a setting in the admin console (for example a channel's pace), reload the page, and check it shows the new value at once. The dashboard's internal API has Workers Cache turned off (`exports.InternalApi` in `apps/backend/wrangler.jsonc`), so a stale value means that setting has been lost. The response headers of the dashboard's own pages say nothing about this: they come from the frontend Worker, not from the backend's cache.
+- Caching: change a setting in the admin console (for example a channel's pace), reload the page, and check it shows the new value at once. The dashboard's internal API has Workers Cache turned off (`exports.InternalApi` in `apps/backend/wrangler.jsonc`), so a stale value means that setting has been lost. The response headers of the dashboard's own pages say nothing about this: they come from the web app's Worker, not from the backend's cache.
 - In Workers Logs, invocation logs are off for both Workers (they would record full URLs, which can carry claim codes and OAuth codes). Confirm the relay's own JSON lines still appear.
 
 ## Running it

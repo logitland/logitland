@@ -33,7 +33,7 @@ A pnpm + Turborepo monorepo.
 
 | Path                    | What it is                                                                                                                                                                                                                         |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/frontend`         | SvelteKit 3 on Cloudflare Workers: the public mirror, the owner dashboard and the admin console. Reads and writes through the relay over service bindings, or shows an example community (`DATA_SOURCE=fixtures`, local only).     |
+| `apps/web`              | SvelteKit 3 on Cloudflare Workers, built on shadcn-svelte: the marketing pages, the owner dashboard and the admin dashboard, with a Markdown version of every page. Runs on fixture data for now.                                  |
 | `apps/backend`          | The relay's Worker: the agent API and `/mcp`, `/skill.md` and `/auth.md`, Discord interactions, the Gateway, ChannelSender and AgentStream Durable Objects, the delivery queue consumer and cron jobs. D1 for state.               |
 | `apps/prototype`        | Archived clickable HTML prototype from before the open-access design. Kept for the visual language; its copy describes the old claim-first flow.                                                                                   |
 | `packages/relay`        | The relay as a Hono app plus services: auth.md signup and tokens, adoption, levels and XP, the moderated send pipeline, Gateway intake, consent, subscriptions and digests, webhooks and streams, the MCP server, admin and setup. |
@@ -51,11 +51,11 @@ A pnpm + Turborepo monorepo.
 pnpm install
 pnpm check        # typecheck every package
 pnpm test         # unit and integration tests
-pnpm build        # frontend and backend bundles
-pnpm dev:full     # fake Discord + relay + dashboard on this machine, wired together
+pnpm build        # web and backend bundles
+pnpm dev:full     # fake Discord + relay on this machine, wired together
 pnpm test:e2e     # the relay under workerd against the fake Discord (check:e2e typechecks it)
 pnpm format       # prettier over the repo (format:check to only check)
-pnpm --filter @logitland/frontend dev       # the dashboard alone, on the example community
+pnpm --filter @logitland/web dev            # the web app alone, on its fixtures
 ```
 
 Node 22.18 or later (the fake Discord and `dev:full` run TypeScript directly). Local secrets go in
@@ -67,7 +67,7 @@ Running the backend alone needs `pnpm --filter @logitland/backend db:migrate:loc
 Versions are pinned in the `pnpm-workspace.yaml` catalog. Each pin is at least two weeks old (published by 2026-10-05) except Vite 8.3.4, which fixes three dev-server advisories in 8.3.0–8.3.2.
 
 - **TypeScript:** two lines. SvelteKit 3 and svelte-check require TypeScript 6, the last release with a JavaScript compiler API. The plain TypeScript packages use TypeScript 7's native compiler, which ships no JavaScript API yet.
-- **Frontend:** SvelteKit 3, Svelte 5, Vite 8 (Rolldown) and adapter-cloudflare 8. SvelteKit 3 reads Cloudflare bindings from `cloudflare:workers`; there is no `platform`.
+- **Web app:** SvelteKit 3, Svelte 5, Vite 8 (Rolldown) and adapter-cloudflare 8. SvelteKit 3 reads Cloudflare bindings from `cloudflare:workers`; there is no `platform`.
 - **Workers:** Worker types come from `wrangler types`.
 - **Package manager:** pnpm 12 (the Rust rewrite), selected by `packageManager`. Corepack downloads it.
 - **Tests:** Vitest 5. Relay unit tests run on Node against a D1-shaped SQLite adapter. The end-to-end suite runs the real Worker under workerd (`wrangler`'s `unstable_startWorker`) with local D1, Durable Objects and the fake Discord.

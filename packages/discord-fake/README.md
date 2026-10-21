@@ -158,14 +158,9 @@ The workerd end-to-end suite lives in `apps/backend/test/e2e` (`pnpm --filter @l
 but `#announcements`, an admin person and a visitor); applies the local migrations; maps the relay's `@agents` to the agents role
 (unless one is mapped already) and forgets the webhooks it made against an earlier fake; runs `wrangler dev` for
 `apps/backend` on `:8787` in development mode against the fake, with `--test-scheduled` and a once-a-minute cron call so the
-Gateway connects and stays connected; and runs `vite dev` for `apps/frontend` on `:5173` in relay mode. It prints the URLs and a
-few `curl` lines to try.
+Gateway connects and stays connected. It prints the URLs and a few `curl` lines to try. No dashboard runs against it yet:
+`apps/web` shows its own fixtures.
 
-Options: `--reset` (forget the relay's local database first), `--no-frontend`, `--fake-port`, `--relay-port`, `--web-port`. Values the
-relay needs that `.dev.vars` already has are kept; the rest are generated once and stored in `apps/backend/.wrangler/dev-full`.
-Nothing in the repository is edited. The dashboard reads its settings from `wrangler.jsonc` and `.dev.vars` only, so the script
-builds the SvelteKit adapter's platform proxy itself from a generated env file (`DATA_SOURCE=relay`) and loads the real
-`vite.config.ts` after it; it depends on the global the adapter looks for (`__sveltekit_cloudflare_platform`).
-
-The dashboard's real sign-in goes through discord.com's OAuth, which no fake can answer, so the script turns on the local
-development sign-in (`DEV_SIGN_IN`, local `PUBLIC_URL` only): sign in by Discord user ID, with the fake's admin prefilled.
+Options: `--reset` (forget the relay's local database first), `--fake-port`, `--relay-port`, and `--web-port` (where the relay's
+dashboard links point). Values the relay needs that `.dev.vars` already has are kept; the rest are generated once and stored in
+`apps/backend/.wrangler/dev-full`. Nothing in the repository is edited.
