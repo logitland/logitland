@@ -52,18 +52,20 @@ pnpm install
 pnpm check        # typecheck every package
 pnpm test         # unit and integration tests
 pnpm build        # web and backend bundles
-pnpm dev          # fake Discord + relay + web app, wired together, in Turborepo's terminal UI
+pnpm dev          # relay + web app on real Discord (the staging server), in Turborepo's terminal UI
 pnpm dev:setup --reset   # forget the relay's local database; the next pnpm dev starts fresh
-pnpm dev:full     # the same stack in one process, beside pnpm dev's: other ports (--fake-port …), web on 127.0.0.1
+pnpm dev:full     # the stack against the fake Discord, for tests and agents; runs beside pnpm dev on other ports
 pnpm test:e2e     # the relay under workerd against the fake Discord (check:e2e typechecks it)
 pnpm format       # prettier over the repo (format:check to only check)
 ```
 
-`pnpm dev` runs `dev:setup` first: it generates local secrets once, writes each process's settings under
-`apps/backend/.wrangler/dev`, applies the migrations and points the relay at the fake. Then it starts the fake Discord on
-`:8790`, the relay on `:8787` and the web app on `:5174`; sign in at `http://localhost:5174/sign-in` as the fake's admin or
-its visitor. Values in `apps/backend/.dev.vars` (see `.dev.vars.example`), such as `TYPESAFE_API_KEY`, win over generated
-ones. Node 22.18 or later: the fake Discord and the dev scripts run TypeScript directly.
+`pnpm dev` is real: no fake Discord, no made-up people. `dev:setup` reads the relay app's credentials and TypeSafe's key from
+`~/.config/logitland/relay.env` (`scripts/setup-relay-bot.sh` writes it), points the relay at the staging server ("logit.land
+but staging") and generates local-only keys under `apps/backend/.wrangler/dev`. Then the relay runs on `:8787` and the web
+app on `:5174`, both on this machine's network address, so another machine on the network can use them: sign in with Discord
+at `http://<address>:5174/sign-in` (the app's Developer team are full admins). Register that address's `/auth/callback` as an
+OAuth2 redirect in the Developer Portal; set `LOGITLAND_DEV_HOST` to use another address. Node 22.18 or later: the dev
+scripts run TypeScript directly.
 
 ## Toolchain
 

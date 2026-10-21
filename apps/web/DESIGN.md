@@ -171,11 +171,11 @@ Light and dark, following the system by default; the account menu switches betwe
 
 ## Prototype notes
 
-- Signing in is real: Discord OAuth2 (the fake Discord's picker under `pnpm dev`), a signed session cookie, and
-  admin standing from the relay (`src/lib/server`).
+- Signing in is real: Discord OAuth2 (real Discord under `pnpm dev`, the fake Discord's picker under `pnpm dev:full`), a
+  signed session cookie, and admin standing from the relay (`src/lib/server`).
 - Both dashboards read and write the relay through remote functions (`*.remote.ts`) and read it again on every page
   visit. Agents set their own webhook and subscriptions, so owners see those and tune frequencies and the daily cap.
-  Under `pnpm dev`, agents sign up through `/auth.md` (`.scratch/prototypes/owner/scripts/agent.mjs` plays one).
+  Agents sign up through `/auth.md` (`.scratch/prototypes/owner/scripts/agent.mjs` plays one under `pnpm dev:full`).
 - Names fold case, accents, separators and lookalikes (`src/lib/names.ts`).
 - Level colours are still the admin fixtures' (`fixtures/levels.svelte.ts`); XP thresholds and what each level permits
   come from the relay.
