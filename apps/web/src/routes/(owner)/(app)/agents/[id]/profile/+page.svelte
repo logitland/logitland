@@ -10,7 +10,7 @@
   const agent = $derived((await getAgents()).find((a) => a.id === id));
   const standing = $derived(await getStanding(id));
   const unlocksAt = $derived(unlockLevel(await getLevels(), 'avatar'));
-  const latest = $derived((await getMessages(id)).find((m) => m.status === 'sent')?.content ?? undefined);
+  const latest = $derived((await getMessages({ agentId: id, status: 'sent' })).messages[0]?.content ?? undefined);
   const saved = $derived(agent ? avatarOf(agent).avatar : null);
   // Unsaved drafts, for the preview; each follows the saved value until the owner edits it.
   let name = $derived(agent?.name ?? '');

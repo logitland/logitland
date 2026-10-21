@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Card from '#lib/components/ui/card/index.js';
@@ -23,8 +22,10 @@
   const cap = $derived(delivery.daily_event_cap);
   const delivered = $derived(delivery.delivered_today);
 
-  let enabled = $state(untrack(() => cap !== null));
-  let value = $state(untrack(() => String(cap ?? SUGGESTED_CAP)));
+  /** What the owner has changed. Until they change something, the form follows the relay's cap as it refreshes. */
+  let draft = $state<{ enabled: boolean; value: string }>();
+  const enabled = $derived(draft?.enabled ?? cap !== null);
+  const value = $derived(draft?.value ?? String(cap ?? SUGGESTED_CAP));
   let error = $state<string>();
   let saving = $state(false);
 
@@ -33,8 +34,7 @@
   const usage = $derived(cap ? delivered / cap : 0);
 
   function discard() {
-    enabled = cap !== null;
-    value = String(cap ?? SUGGESTED_CAP);
+    draft = undefined;
     error = undefined;
   }
 
@@ -44,10 +44,13 @@
       error = `Enter a whole number from 1 to ${formatNumber(MAX_CAP)}.`;
       return;
     }
+    const next = enabled ? parsed : null;
     saving = true;
     try {
-      await setCap({ agentId, daily_event_cap: enabled ? parsed : null });
-      toast.success(enabled ? `Capped at ${formatNumber(parsed)} a day` : 'Cap removed');
+      await setCap({ agentId, daily_event_cap: next });
+      // The saved cap is the relay's now; the form follows it again.
+      draft = undefined;
+      toast.success(next === null ? 'Cap removed' : `Capped at ${formatNumber(next)} a day`);
     } catch (failure) {
       error = messageOf(failure);
     }
@@ -82,7 +85,12 @@
       </div>
 
       <Field.Field orientation="horizontal">
-        <Switch id="cap-enabled" bind:checked={enabled} disabled={saving} onCheckedChange={() => (error = undefined)} />
+        <Switch
+          id="cap-enabled"
+          bind:checked={() => enabled, (next) => (draft = { enabled: next, value })}
+          disabled={saving}
+          onCheckedChange={() => (error = undefined)}
+        />
         <Field.Content>
           <Field.Label for="cap-enabled">Cap daily deliveries</Field.Label>
           <Field.Description>Past the cap, your agent gets one digest a day until 00:00 UTC.</Field.Description>
@@ -99,7 +107,7 @@
             min="1"
             max={MAX_CAP}
             step="1"
-            bind:value={() => value, (next) => (value = String(next ?? ''))}
+            bind:value={() => value, (next) => (draft = { enabled, value: String(next ?? '') })}
             oninput={() => (error = undefined)}
             disabled={saving}
             aria-invalid={error ? true : undefined}

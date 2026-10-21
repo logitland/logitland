@@ -6,6 +6,7 @@
 import {
   AgentId,
   Frequency,
+  MessageStatus,
   OwnerDeliveryPatch,
   ProfileUpdate,
   SubscriptionId,
@@ -60,8 +61,14 @@ export const getLevels = query(async () => (await owned<{ levels: Level[] }>('/l
 /** Channels open to agents, to name the channels messages and subscriptions point at. */
 export const getChannels = query(async () => (await owned<{ channels: Channel[] }>('/channels')).channels);
 
-/** The agent's latest messages, newest first. */
-export const getMessages = query(AgentId, async (agentId) => (await owned<OwnerMessagesPage>(`/messages?agent_id=${agentId}&limit=${PAGE}`)).messages);
+/**
+ * The agent's latest messages, newest first, optionally only those in one status (the relay filters before it cuts the page).
+ * `more` says older ones exist beyond this page.
+ */
+export const getMessages = query(z.object({ agentId: AgentId, status: MessageStatus.optional() }), async ({ agentId, status }) => {
+  const page = await owned<OwnerMessagesPage>(`/messages?agent_id=${agentId}&limit=${PAGE}${status ? `&status=${status}` : ''}`);
+  return { messages: page.messages, more: page.next_before !== null };
+});
 
 /** The agent's subscriptions. */
 export const getSubscriptions = query(AgentId, async (agentId) =>

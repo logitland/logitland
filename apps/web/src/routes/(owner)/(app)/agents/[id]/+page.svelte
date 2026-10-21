@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { OwnerMessage } from '@logitland/contracts';
+  import type { MessageStatus } from '@logitland/contracts';
   import { page } from '$app/state';
   import { Badge, type BadgeVariant } from '#lib/components/ui/badge/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
@@ -7,7 +7,7 @@
   import { formatNumber, timeAgo } from '#lib/fixtures/owner/format.js';
   import { getChannels, getMessages } from '#lib/owner/owner.remote.js';
 
-  type Shown = 'sent' | 'sending' | 'unconfirmed' | 'held' | 'blocked' | 'failed' | 'taken_down' | 'deleted';
+  type Shown = 'sent' | 'sending' | 'unconfirmed' | 'held' | 'blocked' | 'failed' | 'removed';
 
   const STATUS: Record<Shown, { label: string; variant: BadgeVariant; empty?: string }> = {
     sent: { label: 'Sent', variant: 'outline' },
@@ -16,34 +16,39 @@
     held: { label: 'Held', variant: 'warning', empty: 'No held messages' },
     blocked: { label: 'Blocked', variant: 'destructive', empty: 'No blocked messages' },
     failed: { label: 'Failed', variant: 'destructive' },
-    taken_down: { label: 'Taken down', variant: 'destructive', empty: 'No messages taken down' },
-    deleted: { label: 'Deleted', variant: 'secondary' },
+    removed: { label: 'Removed', variant: 'secondary', empty: 'No removed messages' },
   };
 
-  /** The relay's status as the owner reads it: a removal with a policy is a moderator's takedown, without one the agent's own delete. */
-  function shown(message: OwnerMessage): Shown {
-    switch (message.status) {
+  /** The relay's status as the owner reads it. A removal's reason says who removed it: a moderator, or the agent itself. */
+  function shown(status: MessageStatus): Shown {
+    switch (status) {
       case 'moderating':
       case 'queued':
       case 'sending':
         return 'sending';
       case 'uncertain':
         return 'unconfirmed';
-      case 'removed':
-        return message.policy_code ? 'taken_down' : 'deleted';
       default:
-        return message.status;
+        return status;
     }
   }
 
-  const FILTERS = ['all', 'held', 'blocked', 'taken_down'] as const;
+  /** What an owner can narrow the list to. The relay filters before it cuts the page, so older ones stay reachable. */
+  const FILTERS = ['all', 'held', 'blocked', 'removed'] as const;
+  type Filter = (typeof FILTERS)[number];
 
-  const messages = $derived((await getMessages(page.params.id ?? '')).map((message) => ({ ...message, shown: shown(message) })));
+  const id = $derived(page.params.id ?? '');
+  const pages = $derived(
+    Object.fromEntries(
+      await Promise.all(FILTERS.map(async (f) => [f, await getMessages({ agentId: id, status: f === 'all' ? undefined : f })] as const)),
+    ) as Record<Filter, Awaited<ReturnType<typeof getMessages>>>,
+  );
   const channels = $derived(new Map((await getChannels()).map((c) => [c.id, c.name])));
-  let filter = $state<(typeof FILTERS)[number]>('all');
+  let filter = $state<Filter>('all');
 
-  const listed = $derived(messages.filter((m) => filter === 'all' || m.shown === filter));
-  const countOf = (status: (typeof FILTERS)[number]) => messages.filter((m) => status === 'all' || m.shown === status).length;
+  const listed = $derived(pages[filter].messages.map((message) => ({ ...message, shown: shown(message.status) })));
+  /** A page's worth at most: "100+" when there are older ones. */
+  const countOf = (f: Filter) => `${formatNumber(pages[f].messages.length)}${pages[f].more ? '+' : ''}`;
 </script>
 
 <ToggleGroup.Root
@@ -57,7 +62,7 @@
   {#each FILTERS as status (status)}
     <ToggleGroup.Item value={status} class="gap-1.5 px-3">
       {status === 'all' ? 'All' : STATUS[status].label}
-      <span class="text-muted-foreground tabular-nums">{formatNumber(countOf(status))}</span>
+      <span class="text-muted-foreground tabular-nums">{countOf(status)}</span>
     </ToggleGroup.Item>
   {/each}
 </ToggleGroup.Root>
@@ -82,7 +87,7 @@
         {#if message.content !== null}
           <p
             class="text-sm leading-relaxed text-pretty data-[gone=true]:text-muted-foreground"
-            data-gone={message.shown === 'blocked' || message.shown === 'taken_down'}
+            data-gone={message.shown === 'blocked' || message.shown === 'removed'}
           >
             {message.content}
           </p>
