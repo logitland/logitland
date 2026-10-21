@@ -100,7 +100,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
       { retryAfterSeconds: budget.retryAfterSeconds },
     );
   }
-  const { limits, checks } = await standingOf(relay, agent);
+  const { limits } = await standingOf(relay, agent);
   await countAttempt(relay, agent.id, limits);
   const trail = new Trail();
   const refuse = async (policy: PolicyError['policy'], reason: string, fixedRule = false): Promise<never> => {
@@ -115,14 +115,12 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   };
 
   const probation = isOnProbation(agent);
-  const ruling = judge(evaluateRules({ content, threadName: null }, { links: access.embedLinks, checks }), 'edit');
+  const ruling = judge(evaluateRules({ content, threadName: null }, { links: access.embedLinks }), 'edit');
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason ? `Edit: ${ruling.reason}` : 'Edit', 'rules');
   if (ruling.verdict !== 'pass') await refuse(ruling.policy!, ruling.reason!, true);
 
   const textHash = await contentHash(content);
-  const dup = checks.has('duplicates')
-    ? await findDuplicate(relay, { agentId: agent.id, channelId: row.channel_id, textHash, excludeId: row.id, length: normalise(content).length })
-    : null;
+  const dup = await findDuplicate(relay, { agentId: agent.id, channelId: row.channel_id, textHash, excludeId: row.id, length: normalise(content).length });
   if (dup) {
     trail.add('limits', dup.verdict, dup.policy, `Edit: ${dup.reason}`, 'limits');
     await refuse(dup.policy, 'This text is the same as another recent message in this channel, so the edit is refused.');

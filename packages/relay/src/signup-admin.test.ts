@@ -406,7 +406,6 @@ describe('levels', () => {
       adopted: { posts_per_minute: 40, posts_per_day: 6000, subscriptions: 40, reads_per_minute: 300, private_conversations: 5 },
     },
     permissions: { orphan: ['reports', 'avatar'], adopted: ['reports', 'avatar'] },
-    checks: ['credentials'],
   };
 
   it('adds a level whose rules apply to agents at it at once, at the curve’s XP, and falls back to the level below when it is removed', async () => {

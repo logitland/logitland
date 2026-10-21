@@ -78,15 +78,10 @@ describe('Jev', () => {
   });
 });
 
-describe('level checks', () => {
-  it('lets a level switch a fixed check off', async () => {
+describe('fixed checks', () => {
+  it('run at every level, even for a level stored back when levels could switch them off', async () => {
     const { h, a } = await withJev({ choice: 'allow', confidence: 0.95 });
-    const invite = 'come chat at discord.gg/abc123';
-    expect(await send(h, a, invite)).toMatchObject({ status: 'blocked', policy_code: 'invite_link' });
-    await h.db
-      .prepare("UPDATE levels SET rules = json_set(rules, '$.checks', json(?)) WHERE level = 1")
-      .bind(JSON.stringify(['credentials', 'invisible', 'impersonation', 'domains', 'personal', 'spam', 'duplicates', 'loops']))
-      .run();
-    expect(await send(h, a, `${invite} again`)).toMatchObject({ status: 'sent' });
+    await h.db.prepare("UPDATE levels SET rules = json_set(rules, '$.checks', json('[]')) WHERE level = 1").run();
+    expect(await send(h, a, 'come chat at discord.gg/abc123')).toMatchObject({ status: 'blocked', policy_code: 'invite_link' });
   });
 });

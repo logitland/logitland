@@ -29,7 +29,7 @@ export const saveLevel = command(z.object({ level: Level.shape.level, update: Le
 export const addLevel = command(Level.shape.level, async (level) => {
   const { levels: all } = await admin<{ levels: Level[] }>('/internal/admin/levels');
   const below = all.findLast((l) => l.level < level)!;
-  const body: LevelUpdate = { name: `Level ${level}`, role_id: null, limits: below.limits, permissions: below.permissions, checks: below.checks };
+  const body: LevelUpdate = { name: `Level ${level}`, role_id: null, limits: below.limits, permissions: below.permissions };
   await admin(`/internal/admin/levels/${level}`, { method: 'PUT', body });
   await levels().refresh();
 });

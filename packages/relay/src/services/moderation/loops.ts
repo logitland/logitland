@@ -42,12 +42,11 @@ export function inLoop(rowsNewestFirst: ConversationRow[], senderId: string, now
  */
 export async function checkLoop(
   relay: Relay,
-  input: { agentId: string; channelId: string; threadId: string | null; startsThread?: boolean; enabled?: boolean },
+  input: { agentId: string; channelId: string; threadId: string | null; startsThread?: boolean },
 ): Promise<ConversationRow[]> {
   if (input.startsThread) return [];
   const rows = await recentConversation(relay, input.channelId, input.threadId);
-  // A level can switch the loop breaker off; the conversation is still the classifier's context.
-  if (input.enabled !== false && inLoop(rows, input.agentId, relay.now()))
+  if (inLoop(rows, input.agentId, relay.now()))
     throw new PolicyError(429, 'rate_limited', 'loop', explain('loop'), { retryAfterSeconds: LOOP.retryAfterSeconds });
   return rows;
 }

@@ -12,15 +12,13 @@
   import { formatNumber, levelName, refusal } from '#lib/admin/format.js';
   import { DEFAULT_COLOURS, levelColour } from '#lib/levels.js';
   import { cn } from '#lib/utils.js';
-  import ChecksForm from './checks-form.svelte';
   import DefaultsForm from './defaults-form.svelte';
+  import LevelForm from './level-form.svelte';
   import { addLevel, levels, removeLevel } from './levels.remote.js';
-  import LimitsForm from './limits-form.svelte';
-  import RoleForm from './role-form.svelte';
 
   // Every agent's level comes from its XP on the curve, with no cap. The timeline lists the levels with overrides, probation
-  // first: each opens to its level role (whose overwrites set its Discord permissions), its limits and permissions outside
-  // Discord, and its moderation checks. The levels between them follow the one above, and the gaps say so.
+  // first: each opens to its level role (whose overwrites set its Discord permissions) and its limits and permissions outside
+  // Discord. Every level runs every moderation check. The levels between them follow the one above, and the gaps say so.
   const data = $derived(await levels());
 
   const MAX_LEVEL = Level.shape.level.maxValue ?? 1000;
@@ -118,17 +116,14 @@
         </button>
       </h2>
       {#if open}
-        <div id="level-{level.level}-panel" class="flex flex-col gap-6 px-3 pt-3 pb-6">
-          <RoleForm {level} levels={data.levels} roles={data.roles} settings={data.settings} />
-          <LimitsForm {level} />
-          <ChecksForm {level} />
-          {#if level.level !== 0}
-            <div>
-              <Button variant="ghost" size="sm" class="text-destructive" onclick={() => askRemove(level.level)}
-                >Remove {levelName(level.level)}’s overrides</Button
-              >
-            </div>
-          {/if}
+        <div id="level-{level.level}-panel" class="pt-1 pb-2">
+          <LevelForm
+            {level}
+            levels={data.levels}
+            roles={data.roles}
+            settings={data.settings}
+            onRemove={level.level === 0 ? undefined : () => askRemove(level.level)}
+          />
         </div>
       {/if}
       {#if gap}

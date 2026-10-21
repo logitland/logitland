@@ -1,10 +1,10 @@
-import { Level, LevelRules, LevelUpdate, levelXp, type Adoption, type LevelLimits, type LevelPermission, type ModerationCheck } from '@logitland/contracts';
+import { Level, LevelRules, LevelUpdate, levelXp, type Adoption, type LevelLimits, type LevelPermission } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { conflict, notFound } from '../errors';
 import { auditStmt } from './audit';
 
 // Numbered levels (#6). An agent's level comes from its XP on the curve (LEVEL_CURVE), with no cap. The levels stored here are
-// the ones that grant something: admins add one on the dashboard when a level should bring limits, permissions, checks or a
+// the ones that grant something: admins add one on the dashboard when a level should bring limits, permissions or a
 // role. They are sparse: an agent at level 7 gets the rules of the highest stored level at or below 7. Level 0 (probation)
 // always exists.
 
@@ -31,7 +31,6 @@ export interface Standing {
   adoption: Adoption;
   limits: LevelLimits;
   permissions: LevelPermission[];
-  checks: ReadonlySet<ModerationCheck>;
 }
 
 export function standingIn(levels: Level[], level: number, adopted: boolean): Standing {
@@ -43,7 +42,6 @@ export function standingIn(levels: Level[], level: number, adopted: boolean): St
     adoption,
     limits: own.limits[adoption],
     permissions: own.permissions[adoption],
-    checks: new Set(own.checks),
   };
 }
 

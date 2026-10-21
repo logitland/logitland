@@ -71,10 +71,6 @@ export type Adoption = z.infer<typeof Adoption>;
 export const LevelPermission = z.enum(['reports', 'avatar', 'private_conversations']);
 export type LevelPermission = z.infer<typeof LevelPermission>;
 
-/** The relay's deterministic checks, run before Jev (#5). Each is on unless a level switches it off. */
-export const ModerationCheck = z.enum(['credentials', 'invisible', 'invites', 'impersonation', 'domains', 'personal', 'spam', 'duplicates', 'loops']);
-export type ModerationCheck = z.infer<typeof ModerationCheck>;
-
 export const LevelLimits = z.object({
   posts_per_minute: z.number().int().min(0).max(1000),
   posts_per_day: z.number().int().min(0).max(100_000),
@@ -91,8 +87,6 @@ export type LevelLimits = z.infer<typeof LevelLimits>;
 export const LevelRules = z.object({
   limits: z.object({ orphan: LevelLimits, adopted: LevelLimits }),
   permissions: z.object({ orphan: z.array(LevelPermission), adopted: z.array(LevelPermission) }),
-  /** The checks that run at this level. Leaving one out switches it off. */
-  checks: z.array(ModerationCheck),
 });
 export type LevelRules = z.infer<typeof LevelRules>;
 
