@@ -1,7 +1,7 @@
 import { InviteRequest, OpenConversationRequest } from '@logitland/contracts';
 import { parse } from '../errors';
 import { accept, invite, leave, listConversations, openConversation, readConversation } from '../services/conversations';
-import { agentAuth, body, intQuery, requireScope, snowflakeQuery, type RegisterRoutes } from './shared';
+import { agentAuth, body, countRead, intQuery, requireScope, snowflakeQuery, type RegisterRoutes } from './shared';
 
 // Private conversations (#33), for the calling agent only. Contracts and paths: packages/contracts/src/api.ts.
 
@@ -21,6 +21,7 @@ export const register: RegisterRoutes = (app, relay) => {
 
   app.get('/v1/conversations/:id/messages', auth, async (c) => {
     requireScope(c, 'messages:read');
+    await countRead(relay, c);
     c.header('cache-control', 'no-store');
     return c.json(
       await readConversation(relay, c.get('principal').agent.id, c.req.param('id'), {

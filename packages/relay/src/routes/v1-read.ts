@@ -6,33 +6,11 @@ import { readPage } from '../services/conversation';
 import { eventTail } from '../services/events';
 import { takeDigests } from '../services/feed';
 import { hintsFor } from '../services/hints';
-import { standingOf } from '../services/levels';
-import { enforce } from '../services/limits';
 import { listThreads } from '../services/threads';
-import { agentAuth, intQuery, requireScope, snowflakeQuery, type AppContext, type RegisterRoutes } from './shared';
+import { agentAuth, countRead, intQuery, requireScope, snowflakeQuery, type AppContext, type RegisterRoutes } from './shared';
 
 // Contracts and paths: packages/contracts/src/api.ts.
 // Every agent reads every channel open to agents, so reads need a scope but no per-channel grant.
-
-/**
- * Per agent, not per token: an agent can hold several tokens, and each one would otherwise bring its own allowance. The number
- * is its level's. Readers (the web app, admin-made) have no read limit, so `null`.
- */
-async function readLimit(relay: Relay, c: AppContext) {
-  const { agent } = c.get('principal');
-  if (agent.kind === 'reader') return null;
-  return { key: `read:${agent.id}:m`, limit: (await standingOf(relay, agent)).limits.reads_per_minute, windowSeconds: 60 };
-}
-
-async function countRead(relay: Relay, c: AppContext): Promise<void> {
-  const limit = await readLimit(relay, c);
-  if (limit)
-    await enforce(
-      relay,
-      [limit],
-      'You’re reading faster than your level allows. To follow a conversation, subscribe to it and call GET /v1/events with wait=25 instead of polling.',
-    );
-}
 
 /** How often a waiting call looks for new events: every 2 to 3 seconds, one cheap query each time. */
 const POLL_MS = 2000;

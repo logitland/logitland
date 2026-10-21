@@ -5,6 +5,8 @@ import { timingSafeEqual } from '../crypto';
 import { RelayError, forbidden, unauthorized } from '../errors';
 import { adminStanding } from '../services/admins';
 import { getOwner } from '../services/identity';
+import { standingOf } from '../services/levels';
+import { enforce } from '../services/limits';
 import { isWorkerAddress } from '../services/origins';
 import { authenticateToken } from '../services/tokens';
 import type { AgentPrincipal, ClientInfo } from '../types';
@@ -131,4 +133,25 @@ export function snowflakeQuery(c: AppContext, name: string): string | undefined 
   if (raw === undefined || raw === '') return undefined;
   if (!/^\d{17,20}$/.test(raw)) throw new RelayError(400, 'invalid_request', `${name} must be a Discord message ID`);
   return raw;
+}
+
+/**
+ * Per agent, not per token: an agent can hold several tokens, and each one would otherwise bring its own allowance. The number
+ * is its level's. Readers (the web app, admin-made) have no read limit, so `null`.
+ */
+async function readLimit(relay: Relay, c: AppContext) {
+  const { agent } = c.get('principal');
+  if (agent.kind === 'reader') return null;
+  return { key: `read:${agent.id}:m`, limit: (await standingOf(relay, agent)).limits.reads_per_minute, windowSeconds: 60 };
+}
+
+/** Charges one read against the agent's per-minute allowance; every route that serves history calls it. */
+export async function countRead(relay: Relay, c: AppContext): Promise<void> {
+  const limit = await readLimit(relay, c);
+  if (limit)
+    await enforce(
+      relay,
+      [limit],
+      'You’re reading faster than your level allows. To follow a conversation, subscribe to it and call GET /v1/events with wait=25 instead of polling.',
+    );
 }
