@@ -36,7 +36,8 @@ export class ConfigError extends Error {
   }
 }
 
-const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])$|\.(localhost|test)$/;
+/** This machine, or one on a private network (RFC 1918): where development mode may run, and production must not point. */
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$|\.(localhost|test)$/;
 const PLACEHOLDER_HOST = /(^|\.)(invalid|example)$|replace/i;
 /** Values from the example env files and docs. A random token is never refused for what it happens to contain. */
 const PLACEHOLDER_TOKENS = ['dev-internal-token', 'test-internal-token', 'changeme', 'change-me', 'replace-me'];

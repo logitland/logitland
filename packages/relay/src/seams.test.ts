@@ -59,6 +59,11 @@ describe('configuration fails closed', () => {
   it('refuses placeholders and development mode in public', () => {
     expect(checkConfig(prodEnv({ PUBLIC_URL: 'https://relay.REPLACE.invalid' }))).toContain('PUBLIC_URL is still a placeholder');
     expect(checkConfig(prodEnv({ RELAY_MODE: 'development' }))).toContain('RELAY_MODE=development is only allowed on a local PUBLIC_URL');
+    // A machine on the local network counts as local; a public address doesn't.
+    const devAt = (url: string) => checkConfig({ ...prodEnv({ DELIVERIES: undefined }), RELAY_MODE: 'development', PUBLIC_URL: url, DASHBOARD_URL: url });
+    for (const url of ['http://10.0.3.2:8787', 'http://192.168.1.20:8787', 'http://172.20.0.5:8787']) expect(devAt(url)).toEqual([]);
+    for (const url of ['http://8.8.8.8:8787', 'http://172.32.0.1:8787', 'https://relay.logit.land'])
+      expect(devAt(url)).toContain('RELAY_MODE=development is only allowed on a local PUBLIC_URL');
     expect(checkConfig(prodEnv({ RELAY_MODE: 'staging' }))).toContain('RELAY_MODE must be unset outside development');
   });
 });
