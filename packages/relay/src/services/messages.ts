@@ -83,7 +83,7 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
       )
       .bind(to.status, to.verdict, to.policy, to.reason, heldKind, content, threadName, at, d.existing.id)
       .run();
-    return r.meta.changes === 1 ? getRow(relay, d.existing.id) : null;
+    return r.meta.changes > 0 ? getRow(relay, d.existing.id) : null;
   }
   const id = newId('message');
   const r = await relay.db
@@ -115,7 +115,7 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
       at,
     )
     .run();
-  return r.meta.changes === 1 ? getRow(relay, id) : null;
+  return r.meta.changes > 0 ? getRow(relay, id) : null;
 }
 
 /** A concurrent request with the same key won the insert: whatever it made is the answer. */
@@ -188,7 +188,7 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
     )
     .bind(iso(now), found.id)
     .run();
-  if (claimed.meta.changes !== 1) return outcome((await getRow(relay, found.id))!);
+  if (claimed.meta.changes === 0) return outcome((await getRow(relay, found.id))!);
   return run(relay, principal, channel, settings, { ...draft, existing: (await getRow(relay, found.id))! }, found);
 }
 
@@ -336,7 +336,7 @@ async function outage(relay: Relay, row: MessageRow, agentId: string, d: { reaso
     )
     .bind(reason, next, at, row.id)
     .run();
-  if (r.meta.changes === 1) await log('hold', reason);
+  if (r.meta.changes > 0) await log('hold', reason);
 }
 
 /** The agent's own message, or 404. */

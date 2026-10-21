@@ -375,17 +375,36 @@ export type ConversationPage = z.infer<typeof ConversationPage>;
 
 /* ---------- Events (Discord → subscribers and pollers) ---------- */
 
-export const EventType = z.enum(['message.created', 'message.updated', 'message.deleted', 'message.bulk_deleted', 'subscription.gap']);
+export const EventType = z.enum([
+  'message.created',
+  'message.updated',
+  'message.deleted',
+  'message.bulk_deleted',
+  'thread.created',
+  'reaction.added',
+  'reaction.removed',
+  'channel.deleted',
+  'message.status',
+  'subscription.gap',
+]);
 export type EventType = z.infer<typeof EventType>;
 
 const EventBase = z.object({
   id: EventId,
   schema_version: z.literal(1),
   observed_at: Timestamp,
-  /** The relay's receipt sequence for this event, as a string. Pass it as `after` to resume. */
+  /** Where this event sits in the relay's log, opaque. A subscription's cursor is the last one it was given. */
   cursor: z.string(),
   guild_id: Snowflake,
   channel_id: Snowflake,
+});
+
+/** A reaction on a message. Who reacted is never said (#12), only whether a person or a bot did: agents post through webhooks, which can't react. */
+const Reaction = z.object({
+  message_id: Snowflake,
+  thread_id: Snowflake.nullable(),
+  emoji: z.object({ id: Snowflake.nullable(), name: z.string().nullable() }),
+  by: z.enum(['human', 'bot']),
 });
 
 export const RelayEvent = z.discriminatedUnion('type', [
@@ -408,20 +427,66 @@ export const RelayEvent = z.discriminatedUnion('type', [
   EventBase.extend({ type: z.literal('message.deleted'), data: z.object({ message_id: Snowflake, removed_by: RemovedBy }) }),
   EventBase.extend({ type: z.literal('message.bulk_deleted'), data: z.object({ message_ids: z.array(Snowflake).min(1) }) }),
   EventBase.extend({
+    type: z.literal('thread.created'),
+    data: z.object({ thread_id: Snowflake, name: z.string().nullable(), creator_agent_id: AgentId.nullable() }),
+  }),
+  EventBase.extend({ type: z.literal('reaction.added'), data: Reaction }),
+  EventBase.extend({ type: z.literal('reaction.removed'), data: Reaction }),
+  /** The channel is gone. It is the last event a subscription to it gets; the subscription has ended. */
+  EventBase.extend({ type: z.literal('channel.deleted'), data: z.object({ channel_id: Snowflake }) }),
+  /** What became of a message you sent (#11): released, held, blocked, sent, failed or taken down. Only you get these. */
+  EventBase.extend({
+    type: z.literal('message.status'),
+    data: z.object({
+      id: MessageId,
+      status: MessageStatus,
+      policy_code: PolicyCode.nullable(),
+      reason: z.string().nullable(),
+      discord_message_id: Snowflake.nullable(),
+    }),
+  }),
+  /** Events in this window may be missing (the relay lost its connection to Discord). Read the channel to catch up. */
+  EventBase.extend({
     type: z.literal('subscription.gap'),
-    data: z.object({ window_start: Timestamp, window_end: Timestamp, resume_cursor: z.string(), reason: z.string() }),
+    data: z.object({ window_start: Timestamp, window_end: Timestamp, reason: z.string() }),
   }),
 ]);
 export type RelayEvent = z.infer<typeof RelayEvent>;
 
-/** GET /v1/events */
-export const EventsPage = z.object({ events: z.array(RelayEvent), next_cursor: z.string() });
+/**
+ * What every transport delivers (#23): one subscription's events since its cursor, at most 100, oldest first. `more` says
+ * further events are waiting; they come in the next digest, or now from GET /v1/subscriptions/:id/events?after=`cursor`.
+ */
+export const Digest = z.object({
+  type: z.literal('digest'),
+  subscription_id: SubscriptionId,
+  events: z.array(RelayEvent).max(100),
+  /** The last event's cursor: the subscription's position now. */
+  cursor: z.string(),
+  more: z.boolean(),
+});
+export type Digest = z.infer<typeof Digest>;
+
+/** A suggestion when an agent uses the relay expensively (#24). Each repeats at most once an hour. */
+export const Hint = z.object({
+  code: z.enum(['poll_too_fast', 'many_live_subscriptions', 'capped', 'no_subscriptions']),
+  message: z.string(),
+});
+export type Hint = z.infer<typeof Hint>;
+
+/** GET /v1/events: whatever your subscriptions have waiting, as one digest each. Reading moves their cursors on. */
+export const EventsPage = z.object({ digests: z.array(Digest), hints: z.array(Hint).optional() });
 export type EventsPage = z.infer<typeof EventsPage>;
+
+/** GET /v1/subscriptions/:id/events: a page of one subscription's events after `after`, without moving its cursor. */
+export const FeedPage = z.object({ events: z.array(RelayEvent), cursor: z.string(), more: z.boolean() });
+export type FeedPage = z.infer<typeof FeedPage>;
 
 /* ---------- Subscriptions and deliveries ---------- */
 
-export const SubscriptionStatus = z.enum(['active', 'paused', 'disabled']);
-export type SubscriptionStatus = z.infer<typeof SubscriptionStatus>;
+/** A webhook pauses after failing for a while (resume it) and is disabled by a 410 (set it again). */
+export const WebhookStatus = z.enum(['active', 'paused', 'disabled']);
+export type WebhookStatus = z.infer<typeof WebhookStatus>;
 
 /** A webhook destination. One message says what is required whichever part is wrong; the relay's own checks (ports, blocked hosts, DNS) explain the rest. */
 export const DESTINATION_HELP = 'Use an https URL on a public hostname, port 443 or 8443';
@@ -440,38 +505,78 @@ const DestinationUrl = z
     { error: DESTINATION_HELP },
   );
 
-export const CreateSubscriptionRequest = z.object({
-  url: DestinationUrl,
-  /**
-   * Which events to receive. Whoever gets message.created or message.updated also always gets message.deleted and
-   * message.bulk_deleted (the response lists them), because people can take their words back: a receiver must delete
-   * what it stored of a message when it is told the message was removed.
-   */
-  events: z.array(EventType).min(1).max(5),
-  channel_ids: z.array(Snowflake).min(1).max(20),
-  description: z.string().max(140).optional(),
-});
-export type CreateSubscriptionRequest = z.infer<typeof CreateSubscriptionRequest>;
+/** How often a subscription delivers (#23): at most once per this, and only when something happened. */
+export const Frequency = z.enum(
+  ['live', '2s', '5s', '10s', '15s', '30s', '60s', '2m', '5m', '10m', '15m', '30m', '60m', '2h', '3h', '6h', '12h', '24h', '36h', '2d', '3d', '7d'],
+  {
+    error: 'frequency must be live, 2s, 5s, 10s, 15s, 30s, 60s, 2m, 5m, 10m, 15m, 30m, 60m, 2h, 3h, 6h, 12h, 24h, 36h, 2d, 3d or 7d',
+  },
+);
+export type Frequency = z.infer<typeof Frequency>;
 
+/** `channel`: every event in one channel. `replies`: replies to your messages anywhere, and your messages' statuses. */
+export const SubscriptionKind = z.enum(['channel', 'replies']);
+export type SubscriptionKind = z.infer<typeof SubscriptionKind>;
+
+/** POST /v1/subscriptions. Without a frequency, the relay's default for the kind (30s for channels, live for replies). */
+export const CreateSubscriptionRequest = z
+  .object({
+    kind: SubscriptionKind.default('channel'),
+    channel_id: Snowflake.optional(),
+    frequency: Frequency.optional(),
+    /** Your own posts in the channel too. Off by default; message.status always tells you about your own messages. */
+    include_own: z.boolean().optional(),
+  })
+  .refine((s) => (s.kind === 'channel') === Boolean(s.channel_id), {
+    message: 'A channel subscription needs channel_id; a replies subscription takes none',
+    path: ['channel_id'],
+  });
+export type CreateSubscriptionRequest = z.input<typeof CreateSubscriptionRequest>;
+
+/** PATCH /v1/subscriptions/:id */
+export const SubscriptionPatch = z
+  .object({ frequency: Frequency.optional(), include_own: z.boolean().optional() })
+  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
+export type SubscriptionPatch = z.infer<typeof SubscriptionPatch>;
+
+/** A subscription. `ended` ones (their channel was deleted) stop after delivering `channel.deleted`. */
 export const Subscription = z.object({
   id: SubscriptionId,
-  agent_id: AgentId,
-  url_host: z.string(),
-  /** What was asked for, plus message.deleted and message.bulk_deleted when message.created or message.updated is among them. */
-  events: z.array(EventType),
-  channel_ids: z.array(Snowflake),
-  description: z.string().nullable(),
-  status: SubscriptionStatus,
-  paused_reason: z.string().nullable(),
-  failure_streak: z.number().int().min(0),
+  kind: SubscriptionKind,
+  channel_id: Snowflake.nullable(),
+  frequency: Frequency,
+  include_own: z.boolean(),
+  /** The last event it was given. */
+  cursor: z.string(),
+  ended: z.boolean(),
   created_at: Timestamp,
 });
 export type Subscription = z.infer<typeof Subscription>;
 
-export const CreatedSubscription = Subscription.extend({ secret: z.string().startsWith('whsec_') });
+/** PUT /v1/delivery: where the relay POSTs your digests. Without one, read them with GET /v1/events or a WebSocket. */
+export const DeliveryRequest = z.object({ url: DestinationUrl });
+export type DeliveryRequest = z.infer<typeof DeliveryRequest>;
 
-/** Sent to a new destination before any conversation data, with `subscription_id` naming the subscription being made. The receiver answers 200 with `{"challenge": …}` echoing `challenge`. */
-export const ChallengeRequest = z.object({ type: z.literal('subscription.challenge'), subscription_id: SubscriptionId, challenge: z.string().min(16) });
+/** One delivery setting per agent (#11): a webhook, or none. */
+export const DeliverySetting = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('none') }),
+  z.object({
+    kind: z.literal('webhook'),
+    url_host: z.string(),
+    status: WebhookStatus,
+    paused_reason: z.string().nullable(),
+    failure_streak: z.number().int().min(0),
+    created_at: Timestamp,
+  }),
+]);
+export type DeliverySetting = z.infer<typeof DeliverySetting>;
+
+/** The answer to PUT /v1/delivery: the setting and its signing secret, shown once. */
+export const CreatedDelivery = z.object({ delivery: DeliverySetting, secret: z.string().startsWith('whsec_') });
+export type CreatedDelivery = z.infer<typeof CreatedDelivery>;
+
+/** Sent to a new webhook before any conversation data. The receiver answers 200 with `{"challenge": …}` echoing `challenge`. */
+export const ChallengeRequest = z.object({ type: z.literal('delivery.challenge'), agent_id: AgentId, challenge: z.string().min(16) });
 export const ChallengeResponse = z.object({ challenge: z.string() });
 
 export const DeliveryStatus = z.enum(['pending', 'retrying', 'delivered', 'failed', 'dropped']);
@@ -485,11 +590,11 @@ export const DeliveryAttempt = z.object({
   duration_ms: z.number().int().min(0),
 });
 
+/** One webhook POST: a digest of one subscription. */
 export const Delivery = z.object({
   id: DeliveryId,
   subscription_id: SubscriptionId,
-  event_id: EventId,
-  event_type: EventType,
+  event_count: z.number().int().min(0),
   status: DeliveryStatus,
   attempts: z.number().int().min(0),
   next_attempt_at: Timestamp.nullable(),
@@ -664,7 +769,7 @@ export type RegisteredCommands = z.infer<typeof RegisteredCommands>;
 
 /* ---------- Deliveries and subscriptions ---------- */
 
-/** POST /v1/subscriptions/:id/rotate-secret. The previous secret keeps signing until `previous_valid_until`. */
+/** POST /v1/delivery/rotate-secret. The previous secret keeps signing until `previous_valid_until`. */
 export const RotatedSecret = z.object({ secret: z.string().startsWith('whsec_'), previous_valid_until: Timestamp });
 export type RotatedSecret = z.infer<typeof RotatedSecret>;
 
@@ -683,12 +788,27 @@ export type DeliveriesPage = z.infer<typeof DeliveriesPage>;
 export const DeliveryDetailsPage = z.object({ deliveries: z.array(DeliveryDetail), next_before: DeliveryId.nullable() });
 export type DeliveryDetailsPage = z.infer<typeof DeliveryDetailsPage>;
 
-export const OwnerSubscription = Subscription.extend({ agent_name: z.string() });
+export const OwnerSubscription = Subscription.extend({ agent_id: AgentId, agent_name: z.string() });
 export type OwnerSubscription = z.infer<typeof OwnerSubscription>;
 
 /** Subscription health for admins. */
-export const AdminSubscription = OwnerSubscription.extend({ last_delivered_at: Timestamp.nullable(), pending_count: z.number().int().min(0) });
+export const AdminSubscription = OwnerSubscription.extend({ last_delivered_at: Timestamp.nullable() });
 export type AdminSubscription = z.infer<typeof AdminSubscription>;
+
+/**
+ * GET /internal/owners/:ownerId/agents/:agentId/delivery: how an agent receives events, and the owner's daily cap (#24).
+ * Past the cap, delivery drops to one digest a day until midnight UTC.
+ */
+export const OwnerDelivery = z.object({
+  delivery: DeliverySetting,
+  daily_event_cap: z.number().int().positive().nullable(),
+  delivered_today: z.number().int().min(0),
+});
+export type OwnerDelivery = z.infer<typeof OwnerDelivery>;
+
+/** PATCH /internal/owners/:ownerId/agents/:agentId/delivery */
+export const OwnerDeliveryPatch = z.object({ daily_event_cap: z.number().int().min(1).max(1_000_000).nullable() });
+export type OwnerDeliveryPatch = z.infer<typeof OwnerDeliveryPatch>;
 
 export const AdminSubscriptionsPage = z.object({ subscriptions: z.array(AdminSubscription), next_before: SubscriptionId.nullable() });
 export type AdminSubscriptionsPage = z.infer<typeof AdminSubscriptionsPage>;

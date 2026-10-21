@@ -2,6 +2,8 @@
 
 import { newId } from '@logitland/contracts';
 import { agree } from './consent.testkit';
+import { accessFor } from './services/channels';
+import { DIGEST_MAX, readFeed, stillReadable, type SubscriptionRow } from './services/feed';
 import { ingest, type IntakeEventInput } from './services/intake';
 import { BENCH, FORUM, LOUNGE, harness, seedAgent, seedChannel, type Harness } from './testing';
 
@@ -80,22 +82,26 @@ export async function world(opts: { start?: string; agreed?: boolean } = {}) {
   return { h, agent };
 }
 
-/** An active subscription to a channel, so fan-out creates a delivery row for each event it wants. */
-export async function subscribe(
-  h: Harness,
-  agentId: string,
-  channelId = LOUNGE,
-  events = ['message.created', 'message.updated', 'message.deleted', 'message.bulk_deleted', 'subscription.gap'],
-) {
+/** A live subscription to a channel from the log's tail, inserted directly (the subscribe endpoint checks access first). */
+export async function subscribe(h: Harness, agentId: string, channelId = LOUNGE) {
   const id = newId('subscription');
   await h.db
     .prepare(
-      "INSERT INTO subscriptions (id, agent_id, url_ciphertext, url_host, events, channel_ids, description, secret_ciphertext, status, created_at) VALUES (?, ?, 'sealed', 'hooks.orrery.dev', ?, ?, NULL, 'sealed', 'active', ?)",
+      "INSERT INTO subscriptions (id, agent_id, kind, channel_id, frequency, frequency_seconds, cursor, created_at, updated_at) VALUES (?, ?, 'channel', ?, 'live', 0, (SELECT COALESCE(MAX(seq), 0) FROM events), ?, ?)",
     )
-    .bind(id, agentId, JSON.stringify(events), JSON.stringify([channelId]), h.now().toISOString())
+    .bind(id, agentId, channelId, h.now().toISOString(), h.now().toISOString())
     .run();
-  await h.db.prepare('INSERT INTO subscription_channels (subscription_id, channel_id) VALUES (?, ?)').bind(id, channelId).run();
   return id;
+}
+
+/** The types of the events a subscription has waiting after its cursor (what its next digests would carry), without taking them. */
+export async function waiting(h: Harness, subscriptionId: string): Promise<string[]> {
+  const sub = (await h.db
+    .prepare('SELECT s.*, a.level, a.owner_id FROM subscriptions s JOIN agents a ON a.id = s.agent_id WHERE s.id = ?')
+    .bind(subscriptionId)
+    .first<SubscriptionRow & { level: number; owner_id: string | null }>())!;
+  const readable = await stillReadable(h.relay, sub, await accessFor(h.relay, sub));
+  return (await readFeed(h.relay, sub, sub.cursor, DIGEST_MAX, readable)).events.map((e) => e.type);
 }
 
 export async function all<T>(h: Harness, sql: string, ...args: unknown[]): Promise<T[]> {
@@ -119,7 +125,6 @@ export const CONV =
 
 export const conversation = (h: Harness, n: number) => one<Record<string, any>>(h, `SELECT ${CONV} FROM conversation WHERE message_id = ?`, msg(n));
 export const eventTypes = async (h: Harness) => (await all<{ type: string }>(h, 'SELECT type FROM events ORDER BY seq')).map((e) => e.type);
-export const deliveryCount = async (h: Harness) => (await one<{ n: number }>(h, 'SELECT COUNT(*) AS n FROM deliveries'))!.n;
 
 /** Inserts a relay_messages row the way the posting pipeline leaves it mid-send. */
 export async function relayMessage(

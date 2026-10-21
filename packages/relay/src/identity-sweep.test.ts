@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { deleteOwner } from './services/identity';
 import { evaluateRules } from './services/moderation/rules';
 import { checkName, nameKey } from './services/names';
-import { asOwner, count, easyChallenges, ipHeader, registered, seedSubscription, signUp, tokenCall } from './signup.helpers';
+import { asOwner, count, easyChallenges, ipHeader, registered, signUp, tokenCall } from './signup.helpers';
 import { ADMIN_DISCORD, harness, seedAgent, seedOwner, type Harness } from './testing';
 
 const DAY = 86_400_000;
@@ -256,19 +256,5 @@ describe('R1-61 a revoked agent’s name leaves its messages', () => {
     expect((await h.db.prepare('SELECT display_name FROM conversation').first<{ display_name: string }>())!.display_name).toBe('Revoked agent');
     const ev = (await h.db.prepare('SELECT payload FROM events').first<{ payload: string }>())!.payload;
     expect(JSON.parse(ev).data.author.display_name).toBe('Revoked agent');
-  });
-});
-
-describe('R1-86 disabling sets paused_at', () => {
-  it('records when a revoked agent’s subscriptions stopped', async () => {
-    const h = harness();
-    const owner = await seedOwner(h.relay, '200000000000000001', 'ada');
-    const a = await seedAgent(h.relay, { ownerId: owner.id });
-    const sub = await seedSubscription(h, a.id);
-    await owned(h, owner.id, 'DELETE', `/agents/${a.id}`);
-    expect(await h.db.prepare('SELECT status, paused_at FROM subscriptions WHERE id = ?').bind(sub).first()).toEqual({
-      status: 'disabled',
-      paused_at: h.now().toISOString(),
-    });
   });
 });

@@ -1,7 +1,8 @@
 import { newId } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { all, edit, human, msg, one, push, relayMessage, remove, subscribe, world } from './intake-fixtures';
+import { all, edit, human, msg, one, push, relayMessage, remove, world } from './intake-fixtures';
 import { RULES, retentionJob } from './services/retention';
+import { seedDelivery } from './signup.helpers';
 
 const DAY = 86_400_000;
 
@@ -9,18 +10,15 @@ type World = Awaited<ReturnType<typeof world>>;
 const ago = (w: World, days: number) => new Date(w.h.now().getTime() - days * DAY).toISOString();
 
 describe('pruning by age, children first', () => {
-  it('deletes old attempts, then finished deliveries, then the events nothing refers to, without breaking a foreign key', async () => {
+  it('deletes old attempts, then the finished deliveries without any, then the old events but the newest of them', async () => {
     const w = await world();
     const { h, agent } = w;
-    await subscribe(h, agent.id);
     await push(h, human(1), human(2), human(3));
-    const deliveries = await all<{ id: string; event_id: string }>(h, 'SELECT id, event_id FROM deliveries ORDER BY id');
-    expect(deliveries).toHaveLength(3);
-    for (const d of deliveries) {
-      await h.db.prepare("UPDATE deliveries SET status = 'delivered', delivered_at = created_at, attempts = 1 WHERE id = ?").bind(d.id).run();
+    for (const status of ['delivered', 'failed'] as const) {
+      const id = await seedDelivery(h, agent.id, status);
       await h.db
         .prepare('INSERT INTO delivery_attempts (delivery_id, n, started_at, status_code, duration_ms) VALUES (?, 1, ?, 200, 5)')
-        .bind(d.id, h.now().toISOString())
+        .bind(id, h.now().toISOString())
         .run();
     }
     h.advance(31 * DAY);
@@ -28,33 +26,24 @@ describe('pruning by age, children first', () => {
 
     await retentionJob(h.relay);
     expect(await all(h, 'SELECT 1 FROM delivery_attempts')).toEqual([]);
-    expect(await all(h, 'SELECT 1 FROM deliveries WHERE created_at < ?', ago(w, 30))).toEqual([]);
-    // Left: the newest old event (how /v1/events knows a cursor is too old) and the new one, with its delivery.
+    expect(await all(h, 'SELECT 1 FROM deliveries')).toEqual([]);
     const events = await all<{ source_key: string }>(h, 'SELECT source_key FROM events ORDER BY seq');
     expect(events.map((e) => e.source_key)).toEqual([`create:${msg(3)}`, `create:${msg(4)}`]);
-    expect(await all(h, 'SELECT 1 FROM deliveries')).toHaveLength(1);
   });
 
-  it('keeps an event a delivery still waits on, and a finished delivery whose attempts are recent', async () => {
+  it('keeps a delivery still waiting, and a finished one whose attempts are recent', async () => {
     const w = await world();
     const { h, agent } = w;
-    await subscribe(h, agent.id);
-    await push(h, human(1), human(2), human(3));
-    const rows = await all<{ id: string }>(h, 'SELECT id FROM deliveries ORDER BY id');
-    await h.db.prepare("UPDATE deliveries SET status = 'failed', attempts = 24 WHERE id = ?").bind(rows[1]!.id).run();
+    const waiting = await seedDelivery(h, agent.id, 'pending');
+    const failed = await seedDelivery(h, agent.id, 'failed');
+    h.advance(31 * DAY);
     await h.db
       .prepare('INSERT INTO delivery_attempts (delivery_id, n, started_at, status_code, duration_ms) VALUES (?, 24, ?, 500, 5)')
-      .bind(rows[1]!.id, h.now().toISOString())
+      .bind(failed, ago(w, 1))
       .run();
-    h.advance(31 * DAY);
-    await h.db.prepare('UPDATE delivery_attempts SET started_at = ? WHERE delivery_id = ?').bind(ago(w, 1), rows[1]!.id).run();
-    await push(h, human(4));
 
     await retentionJob(h.relay);
-    const left = await all<{ id: string; status: string }>(h, 'SELECT id, status FROM deliveries ORDER BY id');
-    // Two pending ones (not finished) and the failed one with a recent attempt, plus the new event's.
-    expect(left.map((d) => d.status).sort()).toEqual(['failed', 'pending', 'pending', 'pending']);
-    expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(4);
+    expect((await all<{ id: string }>(h, 'SELECT id FROM deliveries ORDER BY id')).map((d) => d.id)).toEqual([waiting, failed]);
   });
 
   it('never deletes a removal event: intake needs it to stop a late create from bringing the text back', async () => {
@@ -80,23 +69,6 @@ describe('pruning by age, children first', () => {
     );
     expect(row!.content).toBeNull();
     expect(row!.deleted_at).not.toBeNull();
-  });
-
-  it('keeps telling a cursor from before the pruned events that it is too old', async () => {
-    const w = await world();
-    const { h, agent } = w;
-    await push(h, human(1), human(2), human(3));
-    h.advance(40 * DAY);
-    await push(h, human(4));
-    await retentionJob(h.relay);
-    expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(2);
-    const get = (path: string) => h.call('GET', path, undefined, h.as(agent.token));
-    expect((await get('/v1/events?after=1')).status).toBe(410);
-    expect((await get('/v1/events?after=0')).status).toBe(410);
-    const problem = (await (await get('/v1/events?after=1')).json()) as { oldest_cursor: string };
-    const resumed = await get(`/v1/events?after=${problem.oldest_cursor}`);
-    expect(resumed.status).toBe(200);
-    expect(((await resumed.json()) as { events: unknown[] }).events).toHaveLength(1);
   });
 
   it('leaves recent events alone', async () => {

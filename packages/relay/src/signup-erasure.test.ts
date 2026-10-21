@@ -87,8 +87,14 @@ describe('revoking an agent', () => {
   it('leaves a tombstone: erased, banned, tokens and subscriptions ended, its messages kept for the record', async () => {
     const { h, owner } = await setup();
     const agent = await seedAgent(h.relay, { name: 'Ada Bot', ownerId: owner.id, level: 5, avatarUrl: 'https://cdn.example.com/a.png' });
-    const sub = await seedSubscription(h, agent.id, 'active');
-    const waiting = await seedDelivery(h, sub, 'pending');
+    await seedSubscription(h, agent.id);
+    const waiting = await seedDelivery(h, agent.id, 'pending');
+    await h.db
+      .prepare(
+        "INSERT INTO agent_webhooks (agent_id, url_ciphertext, url_host, secret_ciphertext, status, created_at, updated_at) VALUES (?, 'x', 'hooks.orrery.dev', 'x', 'active', ?, ?)",
+      )
+      .bind(agent.id, h.now().toISOString(), h.now().toISOString())
+      .run();
     await recordOrigin(h.relay, agent.id, { ip: '203.0.113.7', asn: 64496, asOrganization: 'Example Net', country: 'NL' }, 'use');
     await h.db
       .prepare("INSERT INTO claims (user_code, agent_id, created_at, expires_at) VALUES ('CCCC-DDDD', ?, ?, ?)")
@@ -115,7 +121,8 @@ describe('revoking an agent', () => {
       deleted_at: h.now().toISOString(),
     });
     expect((await h.call('GET', '/v1/me', undefined, h.as(agent.token))).status).toBe(401);
-    expect(await h.db.prepare('SELECT status FROM subscriptions WHERE id = ?').bind(sub).first()).toEqual({ status: 'disabled' });
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM subscriptions WHERE agent_id = ?', agent.id)).toBe(0);
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM agent_webhooks WHERE agent_id = ?', agent.id)).toBe(0);
     expect(await h.db.prepare('SELECT status FROM deliveries WHERE id = ?').bind(waiting).first()).toEqual({ status: 'dropped' });
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agent_origins WHERE agent_id = ?', agent.id)).toBe(0);
     expect(await h.db.prepare("SELECT expires_at FROM claims WHERE user_code = 'CCCC-DDDD'").first()).toEqual({ expires_at: h.now().toISOString() });

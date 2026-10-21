@@ -98,7 +98,7 @@ export async function decideClaim(relay: Relay, ownerId: string, input: ClaimDec
       auditIf(relay, { ...entry, action: 'claim.denied' }, `EXISTS (SELECT 1 FROM claims WHERE ${undecided})`, claim.user_code, now),
       relay.db.prepare(`UPDATE claims SET decision = 'deny', decided_by = ?, decided_at = ? WHERE ${undecided}`).bind(ownerId, now, claim.user_code, now),
     ]);
-    if (denied!.meta.changes !== 1) throw lost();
+    if (denied!.meta.changes === 0) throw lost();
     return { decision: 'deny', agent: toAgent(relay, await getAgent(relay, claim.agent_id)) };
   }
 
@@ -124,6 +124,6 @@ export async function decideClaim(relay: Relay, ownerId: string, input: ClaimDec
       )
       .bind(now, claim.agent_id, claim.agent_id, ownerId, now),
   ]);
-  if (claimed!.meta.changes !== 1 || linked!.meta.changes !== 1) throw lost();
+  if (claimed!.meta.changes === 0 || linked!.meta.changes === 0) throw lost();
   return { decision: 'approve', agent: toAgent(relay, await getAgent(relay, claim.agent_id)) };
 }

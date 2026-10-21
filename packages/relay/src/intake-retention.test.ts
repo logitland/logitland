@@ -1,8 +1,9 @@
 import { newId } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { all, edit, human, msg, one, push, relayMessage, subscribe, world } from './intake-fixtures';
+import { all, edit, human, msg, one, push, relayMessage, world } from './intake-fixtures';
 import { handleScheduled } from './jobs';
 import { retentionJob } from './services/retention';
+import { seedDelivery } from './signup.helpers';
 
 const DAY = 86_400_000;
 
@@ -10,26 +11,24 @@ type World = Awaited<ReturnType<typeof world>>;
 const ago = (w: World, days: number) => new Date(w.h.now().getTime() - days * DAY).toISOString();
 
 describe('retention', () => {
-  it('blanks event text older than 30 days and keeps the events themselves', async () => {
+  it('blanks the text of the old event it keeps, and leaves the new ones and the conversation alone', async () => {
     const w = await world();
     const { h } = w;
-    // A subscriber, so the events have deliveries that refer to them (retention deletes an event nothing refers to).
-    await subscribe(h, w.agent.id);
-    await push(h, human(1, { content: 'old words' }), edit(1, 'old edit', 5), edit(1, undefined, 6));
+    await push(h, human(1, { content: 'old words' }));
+    h.advance(60_000);
+    await push(h, edit(1, 'old edit', 5));
     h.advance(31 * DAY);
     await push(h, human(2, { content: 'new words' }));
-    expect(await retentionJob(h.relay)).toBe(2);
+    await retentionJob(h.relay);
 
+    // The newest event older than 30 days is kept, without its text; the ones before it are gone.
     const events = await all<{ type: string; payload: string }>(h, 'SELECT type, payload FROM events ORDER BY seq');
-    expect(events).toHaveLength(4);
-    const data = events.map((e) => JSON.parse(e.payload).data);
-    expect(data[0].content).toBe('');
-    expect(data[1].content).toBe('');
-    // An edit that carried no text still carries none.
-    expect(data[2]).not.toHaveProperty('content');
-    expect(data[3].content).toBe('new words');
+    expect(events.map((e) => [e.type, JSON.parse(e.payload).data.content])).toEqual([
+      ['message.updated', ''],
+      ['message.created', 'new words'],
+    ]);
     // Everything but the text is untouched.
-    expect(data[0]).toMatchObject({ message_id: msg(1), author: { display_name: 'Luna' } });
+    expect(JSON.parse(events[0]!.payload).data).toMatchObject({ message_id: msg(1), edited_at: expect.any(String) });
     // The conversation is the live projection and keeps its text.
     expect((await one<{ content: string }>(h, 'SELECT content FROM conversation WHERE message_id = ?', msg(1)))!.content).toBe('old edit');
   });
@@ -67,9 +66,7 @@ describe('retention', () => {
   it('deletes delivery attempts older than 30 days', async () => {
     const w = await world();
     const { h, agent } = w;
-    await subscribe(h, agent.id);
-    await push(h, human(1));
-    const { id } = (await one<{ id: string }>(h, 'SELECT id FROM deliveries'))!;
+    const id = await seedDelivery(h, agent.id, 'failed');
     for (const [n, days] of [
       [1, 31],
       [2, 29],

@@ -1,4 +1,5 @@
 export { SqliteD1 } from './sqlite-d1';
+export { recorder } from './recorder';
 export {
   harness,
   seedAgent,

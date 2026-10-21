@@ -175,6 +175,11 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
   it('forgets a channel an admin closes to agents in Discord: agents can’t see it and its events stop', async () => {
     const visible = async () => ((await s.call('GET', '/v1/channels', { token: agent.token })).body.channels as { id: string }[]).map((c) => c.id);
     expect(await visible()).toContain(s.channels.media);
+    const subscribed = await s.call('POST', '/v1/subscriptions', {
+      token: agent.token,
+      body: { kind: 'channel', channel_id: s.channels.media, frequency: 'live' },
+    });
+    expect(subscribed.status).toBe(201);
 
     // The admin takes View Channel away from @agents; people and the bot keep what they had.
     const chatting = Permission.sendMessages | Permission.sendMessagesInThreads | Permission.createPublicThreads;
@@ -190,16 +195,12 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
     expect((await s.call('GET', `/v1/channels/${s.channels.media}/messages`, { token: agent.token })).status).toBe(404);
     expect((await post(agent.token, { channel_id: s.channels.media, content: unique('Nobody home'), thread_name: 'x' })).status).toBe(404);
 
-    const tail = (await s.call('GET', '/v1/events', { token: agent.token })).body.next_cursor;
-    const said = s.fake.say(s.channels.media, { as: DEV.newsbot, content: unique('Shout into the unlisted channel'), threadName: 'Unlisted' });
+    s.fake.say(s.channels.media, { as: DEV.newsbot, content: unique('Shout into the unlisted channel'), threadName: 'Unlisted' });
     await sleep(1200);
     expect((await s.sql('SELECT 1 FROM conversation WHERE channel_id = ?', s.channels.media)).length).toBe(0);
-    expect(
-      (await s.call('GET', `/v1/events?after=${tail}`, { token: agent.token })).body.events.filter(
-        (e: { channel_id: string }) => e.channel_id === s.channels.media,
-      ),
-    ).toEqual([]);
-    expect(said.id).toBeTruthy();
+    // The subscription made before the channel closed brings nothing from it.
+    const digests = (await s.call('GET', '/v1/events', { token: agent.token })).body.digests as { subscription_id: string; events: unknown[] }[];
+    expect(digests.filter((d) => d.subscription_id === subscribed.body.id).flatMap((d) => d.events)).toEqual([]);
   });
 
   it('ignores channels and threads it does not relay, without asking Discord about each message', async () => {
@@ -223,25 +224,5 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
     expect((await s.sql('SELECT 1 FROM conversation WHERE channel_id = ?', staff.id)).length).toBe(0);
     expect((await s.sql('SELECT 1 FROM events WHERE channel_id = ?', staff.id)).length).toBe(0);
     expect(s.fake.requestsTo('channel.get').filter((r) => [staff.id, thread.id].includes(r.params.channel!))).toEqual([]);
-  });
-
-  it('serves events by channel and refuses a cursor it can’t read', async () => {
-    const tail = (await s.call('GET', '/v1/events', { token: agent.token })).body.next_cursor;
-    const a = await post(agent.token, { channel_id: s.channels.lounge, content: unique('For the lounge') });
-    expect(a.status).toBe(201);
-    await eventually(
-      async () => (await s.call('GET', `/v1/events?after=${tail}&channel_id=${s.channels.lounge}`, { token: agent.token })).body.events.length >= 1,
-      { what: 'the event' },
-    );
-    const lounge = await s.call('GET', `/v1/events?after=${tail}&channel_id=${s.channels.lounge}`, { token: agent.token });
-    expect(lounge.body.events.every((e: { channel_id: string }) => e.channel_id === s.channels.lounge)).toBe(true);
-    const forum = await s.call('GET', `/v1/events?after=${tail}&channel_id=${s.channels.forum}`, { token: agent.token });
-    expect(forum.body.events).toEqual([]);
-    expect(Number(forum.body.next_cursor)).toBeGreaterThanOrEqual(Number(lounge.body.events[0].cursor));
-    expect((await s.call('GET', '/v1/events?after=not-a-cursor', { token: agent.token })).status).toBe(400);
-    const started = Date.now();
-    const quiet = await s.call('GET', `/v1/events?after=${forum.body.next_cursor}&channel_id=${s.channels.forum}&wait=2`, { token: agent.token });
-    expect(quiet.body.events).toEqual([]);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
   });
 });

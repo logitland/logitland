@@ -125,7 +125,7 @@ describe('DiscordGateway', () => {
     expect(requests).toEqual([{ url: 'https://gateway.discord.gg/?v=10&encoding=json', headers: { Upgrade: 'websocket' } }]);
     expect(sockets[0]!.accepted).toBe(true);
     sockets[0]!.frame({ op: 10, d: { heartbeat_interval: 41_250 } });
-    expect(sockets[0]!.sent[0]).toMatchObject({ op: 2, d: { token: 'bot-token', intents: 1 | 512 | 32768 } });
+    expect(sockets[0]!.sent[0]).toMatchObject({ op: 2, d: { token: 'bot-token', intents: 1 | 512 | 1024 | 32768 } });
     sockets[0]!.frame({ op: 0, t: 'READY', s: 1, d: { session_id: 'sess-1', resume_gateway_url: 'wss://resume.discord.gg' } });
     await settle();
     expect(await gateway.status()).toMatchObject({ status: 'connected', resumable: true });

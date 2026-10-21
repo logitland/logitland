@@ -72,21 +72,18 @@ export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedB
           `UPDATE events SET payload = json_set(payload, '$.data.content', '') WHERE message_id IN (${marks}) AND type IN ('message.created', 'message.updated') AND json_type(payload, '$.data.content') = 'text'`,
         )
         .bind(...part),
-      // The relay's own copy of a post an agent made: its text, thread title and reply line go too (the hash stays).
-      relay.db
-        .prepare(`UPDATE relay_messages SET content = NULL, thread_name = NULL, reply_prefix = NULL WHERE discord_message_id IN (${marks})`)
-        .bind(...part),
       // The title of a thread an agent started is its starter's words (the thread's ID is the starter's ID).
       relay.db.prepare(`UPDATE threads SET name = NULL WHERE creator_agent_id IS NOT NULL AND name IS NOT NULL AND id IN (${marks})`).bind(...part),
-      relay.db
-        .prepare(
-          `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL, last_error = 'The message was removed before it was delivered'
-           WHERE id IN (
-             SELECT d.id FROM events e JOIN deliveries d INDEXED BY deliveries_event ON d.event_id = e.id
-             WHERE e.message_id IN (${marks}) AND e.type IN ('message.created', 'message.updated') AND d.status IN ('pending', 'retrying'))`,
-        )
-        .bind(...part),
     );
+    // The relay's own copy of a post an agent made: its text, thread title and reply line go too (the hash stays). A
+    // moderator's removal keeps it a year for appeals (#30 Q7, retention.ts).
+    if (removedBy !== 'moderator')
+      stmts.push(
+        relay.db
+          .prepare(`UPDATE relay_messages SET content = NULL, thread_name = NULL, reply_prefix = NULL WHERE discord_message_id IN (${marks})`)
+          .bind(...part),
+      );
+    // Digests already queued for a webhook may hold the text; the removal event after them tells the receiver to delete it.
   }
   return opts.anonymise ? [...stmts, ...anonymiseStatements(relay, ids)] : stmts;
 }
@@ -95,6 +92,11 @@ export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedB
 export async function planRemoval(relay: Relay, job: Omit<ScrubJob, 'guildId'> & { guildId: string }): Promise<PlannedEvent> {
   if (job.kind === 'single') {
     const id = job.ids[0]!;
+    // A removed reply to an agent goes to that agent's replies subscription too, which had its text.
+    const replied = await relay.db
+      .prepare('SELECT p.agent_id FROM conversation c JOIN conversation p ON p.message_id = c.reply_to WHERE c.message_id = ? AND p.agent_id IS NOT NULL')
+      .bind(id)
+      .first<{ agent_id: string }>();
     return planEvent(relay, {
       type: 'message.deleted',
       guildId: job.guildId,
@@ -102,7 +104,8 @@ export async function planRemoval(relay: Relay, job: Omit<ScrubJob, 'guildId'> &
       messageId: id,
       sourceKey: `delete:${id}`,
       data: { message_id: id, removed_by: job.removedBy },
-      fan: job.fan,
+      replyAgentId: replied?.agent_id ?? null,
+      silent: job.fan === false,
     });
   }
   const sorted = [...job.ids].sort(compareSnowflakes);
@@ -113,16 +116,16 @@ export async function planRemoval(relay: Relay, job: Omit<ScrubJob, 'guildId'> &
     messageId: null,
     sourceKey: `bulk:${await sha256(sorted.join(','))}`,
     data: { message_ids: sorted },
-    fan: job.fan,
+    silent: job.fan === false,
   });
 }
 
-/** Blanks the text, drops queued deliveries and records the removal, in one transaction. Safe to repeat. */
-export async function scrubIds(relay: Relay, job: ScrubJob): Promise<{ recorded: boolean; deliveries: number }> {
+/** Blanks the text and records the removal, in one transaction. Safe to repeat. */
+export async function scrubIds(relay: Relay, job: ScrubJob): Promise<{ recorded: boolean }> {
   const stmts = scrubStatements(relay, job.ids, job.removedBy, { anonymise: job.anonymise });
   if (job.guildId === null) {
     await relay.db.batch(stmts);
-    return { recorded: false, deliveries: 0 };
+    return { recorded: false };
   }
   let fan = job.fan;
   if (fan === undefined) {
@@ -139,8 +142,8 @@ export async function scrubIds(relay: Relay, job: ScrubJob): Promise<{ recorded:
     fan = held > 0;
   }
   const event = await planRemoval(relay, { ...job, guildId: job.guildId, fan });
-  const { recorded, deliveries } = await commitPlan(relay, [...stmts, event.stmt], [{ at: stmts.length, event }]);
-  return { recorded: recorded > 0, deliveries };
+  const { recorded } = await commitPlan(relay, [...stmts, event.stmt], [{ at: stmts.length, event }]);
+  return { recorded: recorded > 0 };
 }
 
 /**

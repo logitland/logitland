@@ -200,13 +200,12 @@ describe('turning an agent off and on', () => {
   it('stops its tokens and drops waiting deliveries, keeping its subscriptions', async () => {
     const { h, owner } = await setup();
     const agent = await seedAgent(h.relay, { ownerId: owner.id });
-    const active = await seedSubscription(h, agent.id, 'active');
-    const waiting = await seedDelivery(h, active, 'pending');
-    const retrying = await seedDelivery(h, active, 'retrying');
-    const done = await seedDelivery(h, active, 'delivered');
+    const sub = await seedSubscription(h, agent.id);
+    const waiting = await seedDelivery(h, agent.id, 'pending');
+    const retrying = await seedDelivery(h, agent.id, 'retrying');
+    const done = await seedDelivery(h, agent.id, 'delivered');
     const otherAgent = await seedAgent(h.relay);
-    const theirSub = await seedSubscription(h, otherAgent.id, 'active');
-    const theirDelivery = await seedDelivery(h, theirSub, 'pending');
+    const theirDelivery = await seedDelivery(h, otherAgent.id, 'pending');
 
     const res = await owned(h, owner.id, 'POST', `/agents/${agent.id}/off`);
     expect(res.status).toBe(200);
@@ -214,7 +213,7 @@ describe('turning an agent off and on', () => {
 
     const status = async (table: string, id: string) =>
       (await h.db.prepare(`SELECT status FROM ${table} WHERE id = ?`).bind(id).first<{ status: string }>())!.status;
-    expect(await status('subscriptions', active)).toBe('active');
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM subscriptions WHERE id = ?', sub)).toBe(1);
     expect(await status('deliveries', waiting)).toBe('dropped');
     expect(await status('deliveries', retrying)).toBe('dropped');
     expect(await status('deliveries', done)).toBe('delivered');

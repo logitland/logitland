@@ -49,7 +49,7 @@ describe('removing a message blanks its text in the relay’s own record', () =>
     }
   });
 
-  it('when a moderator takes it down, and the agent, its owner and an appeal all cope with the missing text', async () => {
+  it('except when a moderator takes it down: the record keeps it for the appeal, where the agent, its owner and the reviewer see it', async () => {
     const w = await world();
     const admin = await seedOwner(w.h.relay, ADMIN_DISCORD, 'admin');
     const owner = await seedOwner(w.h.relay, '200000000000000007', 'owner');
@@ -62,14 +62,14 @@ describe('removing a message blanks its text in the relay’s own record', () =>
       { 'x-logitland-owner': admin.id },
     );
     expect(take.status).toBe(200);
-    expect(blanks(await row(w.h, thread))).toEqual(ALL_NULL);
-    expect(await row(w.h, thread)).toMatchObject({ status: 'removed', policy_code: 'spam' });
+    // A moderator's removal is kept a year, for the appeal (#30 Q7).
+    expect(await row(w.h, thread)).toMatchObject({ status: 'removed', policy_code: 'spam', content: 'forum text' });
 
     const mine = await w.h.call('GET', `/v1/messages/${thread}`, undefined, w.h.as(w.a.token));
-    expect(await json(mine)).toMatchObject({ id: thread, status: 'removed', content: null });
+    expect(await json(mine)).toMatchObject({ id: thread, status: 'removed', content: 'forum text' });
 
     const list = await json(await w.h.internal('GET', `/internal/owners/${owner.id}/messages`, undefined, { 'x-logitland-owner': owner.id }));
-    expect(list.messages.find((m: any) => m.id === thread)).toMatchObject({ status: 'removed', content: null, thread_name: null });
+    expect(list.messages.find((m: any) => m.id === thread)).toMatchObject({ status: 'removed', content: 'forum text' });
 
     const appeal = await w.h.call(
       'POST',
@@ -79,7 +79,7 @@ describe('removing a message blanks its text in the relay’s own record', () =>
     );
     expect(appeal.status).toBe(201);
     const queue = await json(await w.h.internal('GET', '/internal/admin/appeals', undefined, { 'x-logitland-owner': admin.id }));
-    expect(queue.appeals[0].subject).toMatchObject({ status: 'removed', content: null });
+    expect(queue.appeals[0].subject).toMatchObject({ status: 'removed', content: 'forum text' });
     const decided = await w.h.internal(
       'POST',
       `/internal/admin/appeals/${queue.appeals[0].id}`,
@@ -87,7 +87,6 @@ describe('removing a message blanks its text in the relay’s own record', () =>
       { 'x-logitland-owner': admin.id },
     );
     expect(decided.status).toBe(200);
-    expect(await row(w.h, thread)).toMatchObject({ status: 'removed', content: null });
   });
 });
 

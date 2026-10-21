@@ -185,7 +185,7 @@ export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> 
     relay.db.prepare(`DELETE FROM adoption_tokens WHERE owner_id = ? AND ${exists}`).bind(ownerId, ownerId),
     relay.db.prepare('DELETE FROM owners WHERE id = ?').bind(ownerId),
   ]);
-  if (results[4]!.meta.changes !== 1) throw notFound('No such owner');
+  if (results[4]!.meta.changes === 0) throw notFound('No such owner');
   relay.log.info('owner.deleted', { owner_id: owner.id, agents: agents.length });
 }
 
@@ -214,13 +214,11 @@ export function auditIf(relay: Relay, entry: AuditInput, guard: string, ...guard
     );
 }
 
-/** Statements that stop an agent's deliveries now: its subscriptions and waiting deliveries end with it. */
+/** Statements that stop an agent's deliveries now: the webhook POSTs still waiting are dropped. */
 function stopDeliveryStmts(relay: Relay, agentId: string, guard: string, ...g: unknown[]): Stmt[] {
   return [
     relay.db
-      .prepare(
-        `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL WHERE status IN ('pending', 'retrying') AND subscription_id IN (SELECT id FROM subscriptions WHERE agent_id = ?) AND ${guard}`,
-      )
+      .prepare(`UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL WHERE agent_id = ? AND status IN ('pending', 'retrying') AND ${guard}`)
       .bind(agentId, ...g),
   ];
 }
@@ -257,11 +255,8 @@ export async function revokeRegistration(relay: Relay, agent: AgentRecord, actor
       ...g,
     ),
     ...stopDeliveryStmts(relay, agent.id, guard, ...g),
-    relay.db
-      .prepare(
-        `UPDATE subscriptions SET status = 'disabled', paused_reason = 'Registration revoked', paused_at = COALESCE(paused_at, ?) WHERE agent_id = ? AND ${guard}`,
-      )
-      .bind(now, agent.id, ...g),
+    relay.db.prepare(`DELETE FROM subscriptions WHERE agent_id = ? AND ${guard}`).bind(agent.id, ...g),
+    relay.db.prepare(`DELETE FROM agent_webhooks WHERE agent_id = ? AND ${guard}`).bind(agent.id, ...g),
     relay.db.prepare(`UPDATE access_tokens SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL AND ${guard}`).bind(now, agent.id, ...g),
     relay.db.prepare(`UPDATE claims SET expires_at = ? WHERE agent_id = ? AND decision IS NULL AND expires_at > ? AND ${guard}`).bind(now, agent.id, now, ...g),
     ...banOriginStmts(relay, agent.id, `${guard} AND EXISTS (SELECT 1 FROM strikes WHERE agent_id = ? AND expires_at > ?)`, ...g, agent.id, now),
@@ -278,7 +273,7 @@ export async function revokeRegistration(relay: Relay, agent: AgentRecord, actor
       )
       .bind(actor.type === 'owner' ? 'Revoked by its owner' : 'Revoked by an admin', now, now, agent.id),
   ]);
-  if (results[results.length - 1]!.meta.changes !== 1) throw conflict('This agent changed while you were acting. Reload it and try again.');
+  if (results[results.length - 1]!.meta.changes === 0) throw conflict('This agent changed while you were acting. Reload it and try again.');
   relay.log.info('agent.revoked', { agent_id: agent.id, by: actor.type });
 }
 
@@ -345,7 +340,7 @@ async function transition(relay: Relay, agent: AgentRecord, t: Transition): Prom
       .bind(t.to, t.statusReason, now, agent.id, ...t.from),
   );
   const results = await relay.db.batch(stmts);
-  if (results[results.length - 1]!.meta.changes !== 1) throw conflict('This agent’s status changed while you were acting. Reload it and try again.');
+  if (results[results.length - 1]!.meta.changes === 0) throw conflict('This agent’s status changed while you were acting. Reload it and try again.');
   return getAgent(relay, agent.id);
 }
 
@@ -440,7 +435,7 @@ export async function adminAct(relay: Relay, adminId: string, agentId: string, i
         ),
         relay.db.prepare('UPDATE agents SET level = ?, updated_at = ? WHERE id = ? AND level = ?').bind(level, iso(relay.now()), agent.id, agent.level),
       ]);
-      if (changed!.meta.changes !== 1) throw conflict('This agent changed while you were acting. Reload it and try again.');
+      if (changed!.meta.changes === 0) throw conflict('This agent changed while you were acting. Reload it and try again.');
       return getAgent(relay, agent.id);
     }
     case 'reset_avatar': {

@@ -1,4 +1,4 @@
-import { LIMITS, Snowflake } from '@logitland/contracts';
+import { Frequency, LIMITS, Snowflake } from '@logitland/contracts';
 import { z } from 'zod';
 import { iso, type Relay } from '../context';
 import { auditStmt } from './audit';
@@ -19,6 +19,9 @@ export const Settings = z.object({
   agents_role_id: Snowflake.nullable(),
   /** The `@adopted` role: what adopted agents may also see and do. Nobody is assigned it either. */
   adopted_role_id: Snowflake.nullable(),
+  /** What a subscription delivers at when the agent doesn't say (#23). */
+  default_channel_frequency: Frequency,
+  default_replies_frequency: Frequency,
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -30,6 +33,8 @@ export const DEFAULT_SETTINGS: Settings = {
   pow_difficulty: LIMITS.powDifficulty,
   agents_role_id: null,
   adopted_role_id: null,
+  default_channel_frequency: '30s',
+  default_replies_frequency: 'live',
 };
 
 /** Each stored value is checked on its own: one that is corrupt or out of range falls back to its default and leaves every other setting as stored. */

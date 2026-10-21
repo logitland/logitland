@@ -33,7 +33,7 @@ async function dropWebhook(relay: Relay, channelId: string, webhookId: string): 
     .prepare('UPDATE channels SET webhook_ciphertext = NULL, webhook_id = NULL, updated_at = ? WHERE id = ? AND webhook_id = ?')
     .bind(iso(relay.now()), channelId, webhookId)
     .run();
-  if (r.meta.changes !== 1) return;
+  if (r.meta.changes === 0) return;
   relay.log.warn('send.webhook_dropped', { channel_id: channelId });
   await audit(relay, {
     actor_type: 'system',
@@ -156,7 +156,7 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
       .prepare("UPDATE relay_messages SET status = 'failed', status_reason = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
       .bind(reason, iso(relay.now()), row.id)
       .run();
-    if (r.meta.changes === 1) relay.log.warn('send.failed', { message_id: row.id, channel_id: row.channel_id });
+    if (r.meta.changes > 0) relay.log.warn('send.failed', { message_id: row.id, channel_id: row.channel_id });
     return {};
   };
 
@@ -191,7 +191,7 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
     .prepare("UPDATE relay_messages SET status = 'sending', status_reason = NULL, updated_at = ? WHERE id = ? AND status = 'queued'")
     .bind(iso(relay.now()), messageId)
     .run();
-  if (claimed.meta.changes !== 1) return {};
+  if (claimed.meta.changes === 0) return {};
 
   const end = async (status: 'failed' | 'uncertain', reason: string): Promise<SendResult> => {
     await relay.db

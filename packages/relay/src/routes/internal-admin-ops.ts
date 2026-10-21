@@ -53,7 +53,7 @@ export async function health(relay: Relay): Promise<AdminHealth> {
       due: await count(relay, "SELECT COUNT(*) AS n FROM deliveries WHERE status IN ('pending', 'retrying') AND next_attempt_at <= ?", iso(now)),
       last_hour: await counts(relay, 'SELECT status AS k, COUNT(*) AS n FROM deliveries WHERE created_at > ? GROUP BY status', hourAgo),
     },
-    subscriptions: await counts(relay, 'SELECT status AS k, COUNT(*) AS n FROM subscriptions GROUP BY status'),
+    subscriptions: await counts(relay, 'SELECT frequency AS k, COUNT(*) AS n FROM subscriptions GROUP BY frequency'),
     agents: {
       by_level: await counts(relay, "SELECT level AS k, COUNT(*) AS n FROM agents WHERE status = 'active' AND kind = 'agent' GROUP BY level"),
       by_status: await counts(relay, "SELECT status AS k, COUNT(*) AS n FROM agents WHERE kind = 'agent' GROUP BY status"),

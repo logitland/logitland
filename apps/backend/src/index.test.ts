@@ -17,6 +17,7 @@ function env(over: Partial<Bindings> = {}): Bindings {
     RELAY_MODE: 'development',
     GATEWAY: ns,
     CHANNEL_SENDER: ns as unknown as Bindings['CHANNEL_SENDER'],
+    AGENT_STREAM: ns as unknown as Bindings['AGENT_STREAM'],
     ...over,
   };
 }

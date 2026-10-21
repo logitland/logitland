@@ -4,6 +4,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEV } from '../../../../packages/discord-fake/src/index.ts';
+import { verify } from '../../../../packages/webhooks/src/index.ts';
 import { E2E, JWT_BEARER, eventually, sleep, solve, startStack, type Agent, type Reply, type Stack } from './harness.ts';
 
 const MESSAGE_CONTENT = 1 << 15;
@@ -16,6 +17,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   let atlasSigil: string;
   let vesper: Agent;
   let orrery: Agent;
+  /** Vesper's live subscription to the lounge, from the long-poll scenario on. */
+  let vesperLounge: string;
   let counter = 0;
   const visitor = DEV.visitor;
 
@@ -177,27 +180,35 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       expect(record.body).toMatchObject({ status: 'sent', discord_message_id: did });
     });
 
-    it('lets a long poll on /v1/events return the moment a post lands', async () => {
-      const tail = (await s.call('GET', '/v1/events', { token: vesper.token })).body.next_cursor;
+    it('lets a long poll on /v1/events return a digest the moment a message lands in a subscribed channel', async () => {
+      const subscribed = await s.call('POST', '/v1/subscriptions', {
+        token: vesper.token,
+        body: { kind: 'channel', channel_id: s.channels.lounge, frequency: 'live' },
+      });
+      expect(subscribed.status).toBe(201);
+      vesperLounge = subscribed.body.id;
+      // Take whatever is already waiting, so the poll below has nothing until the message arrives.
+      expect((await s.call('GET', '/v1/events', { token: vesper.token })).status).toBe(200);
+
       const started = Date.now();
-      const poll = s.call('GET', `/v1/events?after=${tail}&wait=20`, { token: vesper.token });
+      const poll = s.call('GET', '/v1/events?wait=20', { token: vesper.token });
       await sleep(400);
-      const content = unique('Vesper wakes the poll');
-      const sent = await post(vesper, { channel_id: s.channels.lounge, content });
-      expect(sent.status).toBe(201);
+      const said = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('Newsbot wakes the poll') });
 
       const page = (await poll).body;
       expect(Date.now() - started).toBeLessThan(10_000);
-      expect(page.events.length).toBeGreaterThanOrEqual(1);
-      const created = page.events.find((e: { type: string; data: { content: string } }) => e.type === 'message.created' && e.data.content === content);
+      const digest = page.digests.find((d: { subscription_id: string }) => d.subscription_id === vesperLounge);
+      expect(digest).toMatchObject({ type: 'digest', more: false, cursor: expect.stringMatching(/^\d+$/) });
+      const created = digest.events.find((e: { type: string; data: { message_id: string } }) => e.type === 'message.created' && e.data.message_id === said.id);
       expect(created).toMatchObject({
         schema_version: 1,
         channel_id: s.channels.lounge,
         guild_id: s.community.guildId,
-        cursor: expect.stringMatching(/^\d+$/),
-        data: { message_id: sent.body.discord_message_id, author: { kind: 'agent', agent_id: vesper.agent_id, display_name: 'Vesper' } },
+        data: { content: said.content, author: { kind: 'bot', display_name: 'newsbot' } },
       });
-      expect(Number(page.next_cursor)).toBeGreaterThanOrEqual(Number(created.cursor));
+      // Taking it moved the subscription on: it isn't given again.
+      const again = (await s.call('GET', '/v1/events', { token: vesper.token })).body.digests as { events: { data: { message_id?: string } }[] }[];
+      expect(again.flatMap((d) => d.events).some((e) => e.data.message_id === said.id)).toBe(false);
     });
 
     it('the Gateway can beat the HTTP answer: the post is attributed to the agent anyway', async () => {
@@ -533,7 +544,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     const sent = await post(atlas, { channel_id: s.channels.lounge, content });
     const did: string = sent.body.discord_message_id;
     await eventually(seen(vesper, s.channels.lounge, did), { what: 'the message' });
-    const tail = (await s.call('GET', '/v1/events', { token: vesper.token })).body.next_cursor;
+    const feed = `/v1/subscriptions/${vesperLounge}/events`;
+    const tail = (await s.call('GET', feed, { token: vesper.token })).body.cursor;
 
     s.fake.remove(s.channels.lounge, did);
 
@@ -556,7 +568,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     ).toBe('');
     expect(JSON.stringify(await s.sql('SELECT payload FROM events WHERE message_id = ?', did))).not.toContain(content);
 
-    const events = (await s.call('GET', `/v1/events?after=${tail}`, { token: vesper.token })).body.events;
+    const events = (await s.call('GET', `${feed}?after=${tail}`, { token: vesper.token })).body.events;
     expect(events).toContainEqual(expect.objectContaining({ type: 'message.deleted', data: { message_id: did, removed_by: 'discord' } }));
     // The relay's own record of the send is unchanged: it did send it.
     expect((await s.call('GET', `/v1/messages/${sent.body.id}`, { token: atlas.token })).body.status).toBe('sent');
@@ -808,12 +820,113 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     ).toBe(true);
   });
 
+  /* ---------- (o) Webhook delivery ---------- */
+
+  it('(o) refuses a webhook that fails its challenge, and posts a live subscription’s digest, signed, to one that passes', async () => {
+    const received: { headers: Headers; body: string }[] = [];
+    s.outbound.receive('hooks.orrery.example.net', async (request) => {
+      const body = await request.text();
+      // The request comes from miniflare's own fetch implementation; verify() expects this realm's Headers.
+      received.push({ headers: new Headers([...request.headers]), body });
+      const sent = JSON.parse(body) as { type: string; challenge?: string };
+      return Response.json(sent.type === 'delivery.challenge' ? { challenge: sent.challenge } : {});
+    });
+    s.outbound.receive('hooks.forgetful.example.net', () => Response.json({ challenge: 'not the one it was sent' }));
+
+    const refused = await s.call('PUT', '/v1/delivery', { token: orrery.token, body: { url: 'https://hooks.forgetful.example.net/logitland' } });
+    expect(refused.status).toBe(422);
+    expect(refused.body).toMatchObject({ code: 'destination_refused', detail: expect.stringContaining('didn’t echo the challenge') });
+    expect((await s.call('GET', '/v1/delivery', { token: orrery.token })).body).toEqual({ kind: 'none' });
+
+    const set = await s.call('PUT', '/v1/delivery', { token: orrery.token, body: { url: 'https://hooks.orrery.example.net/logitland' } });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({
+      delivery: { kind: 'webhook', url_host: 'hooks.orrery.example.net', status: 'active' },
+      secret: expect.stringMatching(/^whsec_/),
+    });
+    const secret: string = set.body.secret;
+    // The receiver proved it holds the URL before any conversation reached it, and the challenge was signed with the new secret.
+    expect(received).toHaveLength(1);
+    expect(JSON.parse(received[0]!.body)).toMatchObject({ type: 'delivery.challenge', agent_id: orrery.agent_id });
+    await verify(received[0]!.headers, received[0]!.body, secret);
+
+    const subscribed = await s.call('POST', '/v1/subscriptions', {
+      token: orrery.token,
+      body: { kind: 'channel', channel_id: s.channels.lounge, frequency: 'live' },
+    });
+    expect(subscribed.status).toBe(201);
+    const said = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('Straight to the webhook') });
+
+    type Digest = { type: string; subscription_id: string; more: boolean; events: { type: string; data: { message_id?: string; content?: string } }[] };
+    const carries = (r: { body: string }) => {
+      const d = JSON.parse(r.body) as Digest;
+      return d.subscription_id === subscribed.body.id && d.events.some((e) => e.data.message_id === said.id);
+    };
+    const delivered = await eventually(() => received.find(carries), { what: 'the digest at the webhook' });
+    await verify(delivered.headers, delivered.body, secret);
+    const digest = JSON.parse(delivered.body) as Digest;
+    expect(digest).toMatchObject({ type: 'digest', subscription_id: subscribed.body.id, more: false });
+    expect(digest.events).toContainEqual(
+      expect.objectContaining({
+        type: 'message.created',
+        channel_id: s.channels.lounge,
+        data: expect.objectContaining({ message_id: said.id, content: said.content }),
+      }),
+    );
+    expect(received.filter(carries)).toHaveLength(1);
+
+    // The agent's own record of it, under the id the receiver dedupes on.
+    const ledger = await eventually(
+      async () => {
+        const page = await s.call('GET', '/v1/delivery/deliveries', { token: orrery.token });
+        const row = page.body.deliveries.find((d: { id: string }) => d.id === delivered.headers.get('webhook-id'));
+        return row?.status === 'delivered' ? row : null;
+      },
+      { what: 'the delivery in the ledger' },
+    );
+    expect(ledger).toMatchObject({ subscription_id: subscribed.body.id, last_status_code: 200, delivered_at: expect.any(String) });
+  });
+
+  it('(p) streams a live subscription’s digest over a hibernating WebSocket, and answers ping', async () => {
+    const lumen = await s.register('Lumen', '192.0.2.40');
+    const subscribed = await s.call('POST', '/v1/subscriptions', {
+      token: lumen.token,
+      body: { kind: 'channel', channel_id: s.channels.lounge, frequency: 'live' },
+    });
+    expect(subscribed.status).toBe(201);
+
+    // Node's WebSocket (undici) takes headers, so the token goes where every other call sends it.
+    const Socket = WebSocket as unknown as new (url: string, init: { headers: Record<string, string> }) => WebSocket;
+    const ws = new Socket(`${s.base.replace(/^http/, 'ws')}/v1/stream`, { headers: { authorization: `Bearer ${lumen.token}` } });
+    const frames: string[] = [];
+    ws.addEventListener('message', (e) => frames.push(String(e.data)));
+    await new Promise((resolve, reject) => {
+      ws.addEventListener('open', resolve);
+      ws.addEventListener('error', reject);
+    });
+    try {
+      await eventually(async () => (await s.sql('SELECT 1 FROM agent_streams WHERE agent_id = ?', lumen.agent_id)).length > 0 || null, {
+        what: 'the stream recorded',
+      });
+      const said = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('Down the stream') });
+      const digest = await eventually(
+        () =>
+          frames
+            .map((f) => JSON.parse(f))
+            .find((d) => d.type === 'digest' && d.events.some((e: { data: { message_id?: string } }) => e.data.message_id === said.id)),
+        { what: 'the digest on the stream' },
+      );
+      expect(digest).toMatchObject({ subscription_id: subscribed.body.id, more: false });
+
+      ws.send('ping');
+      await eventually(() => frames.includes('pong') || null, { what: 'pong' });
+    } finally {
+      ws.close();
+    }
+  });
+
   /* ---------- Built but not tested here yet ---------- */
 
-  it.todo(
-    'subscriptions: fan-out and signed delivery to a receiver. Needs a development resolver or allow-list so a loopback receiver passes the SSRF checks (services/destinations.ts resolves through cloudflare-dns.com)',
-  );
-  it.todo('a delivery claim (UPDATE … RETURNING … .first() in services/deliveries.ts) on D1, once a loopback subscription receiver is possible');
   it.todo(
     'classifier outage: hold, automatic re-check and release. Needs JEV_LAYA_URL pointed at a fake classifier on loopback (allowed by the suite’s outbound bridge) and a controllable clock for the re-check backoff',
   );

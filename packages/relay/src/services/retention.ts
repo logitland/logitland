@@ -6,11 +6,12 @@ import { EVENT_TEXT_DAYS } from './events';
 // A run stops at its statement or time budget and the next one continues, because every rule finds its rows again by
 // age or by what is left to blank (see the indexes under "Retention" in the migration).
 //
-//   Event text ................................. blanked after EVENT_TEXT_DAYS (30 days); the event stays while a delivery refers to it
-//   Events ..................................... deleted after 30 days if no delivery refers to them, except removal events
-//                                                (type message.deleted: intake finds them to stop a late create bringing a
-//                                                removed message's text back, and they hold no text) and the newest event
-//                                                older than that, which is how GET /v1/events tells a cursor is too old
+//   Event text ................................. blanked after EVENT_TEXT_DAYS (30 days)
+//   Events ..................................... deleted after 30 days, except removal events (type message.deleted: intake
+//                                                finds them to stop a late create bringing a removed message's text back,
+//                                                and they hold no text) and the newest event older than that. A subscription
+//                                                not read for 30 days loses what is older: its next digest starts after it.
+//                                                A delivery holds its own copy of the digest, so retries never need the log
 //   Delivery attempts .......................... deleted after 30 days
 //   Deliveries ................................. deleted after 30 days once finished (delivered, failed or dropped) and with no attempts left
 //   Blocked, held and failed messages' text .... blanked after 90 days (content, thread name, reply line)
@@ -47,7 +48,7 @@ export const RULES: Rule[] = [
             SELECT seq FROM events WHERE observed_at < ? AND json_extract(payload, '$.data.content') != '' LIMIT ?)`,
     args: (ago) => [ago(EVENT_TEXT_DAYS)],
   },
-  // Children first: attempts, then the deliveries without any, then the events nothing refers to.
+  // Children first: attempts, then the deliveries without any.
   {
     name: 'delivery_attempts',
     sql: 'DELETE FROM delivery_attempts WHERE rowid IN (SELECT rowid FROM delivery_attempts WHERE started_at < ? LIMIT ?)',
@@ -66,7 +67,7 @@ export const RULES: Rule[] = [
     name: 'events',
     sql: `DELETE FROM events WHERE seq IN (
             SELECT e.seq FROM events e
-            WHERE e.type != 'message.deleted' AND e.observed_at < ? AND e.seq < ? AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.event_id = e.id) LIMIT ?)`,
+            WHERE e.type != 'message.deleted' AND e.observed_at < ? AND e.seq < ? LIMIT ?)`,
   },
   {
     // What its author removed goes at once; what a moderator took down is kept a year, for appeals (#30 Q7).
@@ -110,8 +111,7 @@ export const RULES: Rule[] = [
 export async function retentionJob(relay: Relay, ctx: { deadline?: number } = {}): Promise<number> {
   const ago = (days: number) => iso(new Date(relay.now().getTime() - days * DAY));
   const deadline = ctx.deadline ?? Date.now() + DEFAULT_BUDGET_MS;
-  // GET /v1/events says a cursor is too old when an event older than the window follows it, so the newest such event
-  // is kept; everything before it is gone.
+  // Events go up to the newest one older than the window, which is kept so the rule never deletes the log's tail.
   const anchor = await relay.db
     .prepare('SELECT seq FROM events WHERE observed_at < ? ORDER BY observed_at DESC LIMIT 1')
     .bind(ago(EVENT_TEXT_DAYS))

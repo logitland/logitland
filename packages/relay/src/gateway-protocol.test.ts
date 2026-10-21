@@ -86,7 +86,7 @@ function rig({ random = 0.5, ...over }: Omit<Partial<GatewayDeps>, 'random'> & {
 const resumable: GatewaySession = { sessionId: 'sess-1', resumeUrl: 'wss://resume.discord.gg', seq: 7 };
 
 describe('connecting', () => {
-  it('opens a JSON v10 connection, jitters the first heartbeat and identifies with the three intents', async () => {
+  it('opens a JSON v10 connection, jitters the first heartbeat and identifies with the four intents', async () => {
     const r = rig({ random: 0.25 });
     await r.conn.start();
     expect(r.last().url).toBe('wss://gateway.discord.gg/?v=10&encoding=json');
@@ -96,7 +96,8 @@ describe('connecting', () => {
     expect(r.last().socket.sent).toEqual([
       { op: 2, d: { token: 'bot-token', intents: INTENTS, properties: { os: 'linux', browser: 'logitland', device: 'logitland' } } },
     ]);
-    expect(INTENTS).toBe(1 | 512 | 32768);
+    // Guilds, guild messages, guild message reactions, message content.
+    expect(INTENTS).toBe(1 | 512 | 1024 | 32768);
 
     await r.advance(9_999);
     expect(r.last().socket.sent).toHaveLength(1);

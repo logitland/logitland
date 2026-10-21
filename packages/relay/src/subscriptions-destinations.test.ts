@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { HOOK_HOST, one, recorder, setup, subscribeRaw } from './deliveries.testkit';
+import { HOOK, HOOK_HOST, setup, type Setup } from './deliveries.testkit';
 import { DestinationRefused, checkUrl, dohResolver, isPublicAddress, preflightDestination, type Resolver } from './services/destinations';
+import { recorder } from './testing';
 
-const problem = async (res: Response) => (await res.json()) as { code: string; detail?: string };
+// Where an agent's webhook may point (PUT /v1/delivery): the destination is untrusted input.
+
+const problem = async (res: Response) => (await res.json()) as { code: string; detail?: string; errors?: { path: string; message: string }[] };
+const setWebhook = (s: Setup, url: string = HOOK) => s.call('PUT', '/v1/delivery', { url }, s.auth);
+const webhooks = async (s: Setup) => (await s.db.prepare('SELECT COUNT(*) AS n FROM agent_webhooks').first<{ n: number }>())!.n;
 
 /** A DoH endpoint that answers per record type. A Response is passed through; anything else is the JSON body. */
 const doh = (answer: (type: string) => unknown) =>
@@ -20,20 +25,20 @@ describe('refused destinations', () => {
     const s = await setup();
     const sneaky = recorder();
     s.receivers['sneaky.example.org'] = sneaky.handler;
-    const res = await subscribeRaw(s, { url: 'https://sneaky.example.org/in' });
+    const res = await setWebhook(s, 'https://sneaky.example.org/in');
     expect(res.status).toBe(422);
     const body = await problem(res);
     expect(body.code).toBe('destination_refused');
     expect(body.detail).toContain('non-public');
     expect(JSON.stringify(body)).not.toContain('10.0.0.5');
     expect(sneaky.requests).toHaveLength(0);
-    expect(await one(s, 'SELECT COUNT(*) AS n FROM subscriptions')).toEqual({ n: 0 });
+    expect(await webhooks(s)).toBe(0);
   });
 
   it('refuses a host that hides a private IPv6 address next to a public IPv4 one', async () => {
     const s = await setup();
     s.dns['dual.orrery.dev'] = ['93.184.216.34', 'fd00::5'];
-    const res = await subscribeRaw(s, { url: 'https://dual.orrery.dev/in' });
+    const res = await setWebhook(s, 'https://dual.orrery.dev/in');
     expect(res.status).toBe(422);
     expect(JSON.stringify(await res.json())).not.toContain('fd00');
   });
@@ -48,7 +53,7 @@ describe('refused destinations', () => {
       'https://logitland.test/hook',
       'https://relay.logitland.test/hook',
     ]) {
-      const res = await subscribeRaw(s, { url });
+      const res = await setWebhook(s, url);
       expect(res.status, url).toBe(422);
       expect((await problem(res)).code).toBe('destination_refused');
     }
@@ -56,20 +61,43 @@ describe('refused destinations', () => {
 
   it('refuses hosts that don’t resolve, and plain HTTP', async () => {
     const s = await setup();
-    const missing = await subscribeRaw(s, { url: 'https://nowhere.orrery.dev/in' });
+    const missing = await setWebhook(s, 'https://nowhere.orrery.dev/in');
     expect(missing.status).toBe(422);
     expect((await problem(missing)).detail).toContain('doesn’t resolve');
-    expect((await subscribeRaw(s, { url: 'http://hooks.orrery.dev/in' as `https://${string}` })).status).toBe(400);
+    expect((await setWebhook(s, 'http://hooks.orrery.dev/in')).status).toBe(400);
   });
 
   it('refuses when the DNS lookup itself fails', async () => {
     const s = await setup();
     s.relay.resolver = doh((type) => (type === 'AAAA' ? { Status: 2 } : ok(A('93.184.216.34'))));
     s.receivers[HOOK_HOST] = recorder().handler;
-    const res = await subscribeRaw(s);
+    const res = await setWebhook(s);
     expect(res.status).toBe(422);
     expect((await problem(res)).detail).toContain('looked up');
-    expect(await one(s, 'SELECT COUNT(*) AS n FROM subscriptions')).toEqual({ n: 0 });
+    expect(await webhooks(s)).toBe(0);
+  });
+
+  it('says once what is required when the URL itself is wrong, whichever part it is', async () => {
+    const s = await setup();
+    for (const url of [
+      'http://hooks.orrery.dev/in',
+      'https://localhost/in',
+      'https://10.0.0.1/in',
+      'https://[::1]/in',
+      'not a url',
+      'ftp://hooks.orrery.dev/in',
+      'https://intranet/in',
+    ]) {
+      const res = await setWebhook(s, url);
+      expect(res.status, url).toBe(400);
+      expect((await problem(res)).errors, url).toEqual([{ path: 'url', message: 'Use an https URL on a public hostname, port 443 or 8443' }]);
+    }
+  });
+
+  it('still explains the rest in plain words', async () => {
+    const s = await setup();
+    expect((await problem(await setWebhook(s, 'https://hooks.orrery.dev:22/in'))).detail).toBe('Use port 443 or 8443');
+    expect((await problem(await setWebhook(s, 'https://my.workers.dev/in'))).detail).toBe('That host belongs to Logitland');
   });
 });
 

@@ -1,6 +1,6 @@
 import { Permission } from '@logitland/discord';
 import { describe, expect, it } from 'vitest';
-import { all, conversation, human, moreChannels, msg, one, push, remove, subscribe, thread, world } from './intake-fixtures';
+import { conversation, human, moreChannels, msg, one, push, remove, subscribe, thread, waiting, world } from './intake-fixtures';
 import { AGENT_BASE, FORUM, GUILD, LOUNGE, setAccess } from './testing';
 
 type Kind = 'text' | 'announcement' | 'forum' | 'media';
@@ -80,9 +80,9 @@ describe('forum tags', () => {
 describe('a channel closed to agents while people delete in Discord', () => {
   it('applies the deletes quietly, so the text does not come back when the channel opens again', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
+    const sub = await subscribe(h, agent.id);
     await push(h, human(1), human(2), thread(msg(5)), human(6, { thread_id: msg(5) }));
-    const before = (await one<{ n: number }>(h, 'SELECT COUNT(*) AS n FROM deliveries'))!.n;
+    const before = await waiting(h, sub);
     await setAccess(h.db, LOUNGE, 'off');
     await push(
       h,
@@ -93,7 +93,6 @@ describe('a channel closed to agents while people delete in Discord', () => {
     await setAccess(h.db, LOUNGE, 'post');
     for (const n of [1, 2, 6]) expect(await conversation(h, n)).toMatchObject({ content: null, removed_by: 'discord' });
     // Nobody was told while the channel was closed.
-    expect((await one<{ n: number }>(h, 'SELECT COUNT(*) AS n FROM deliveries'))!.n).toBe(before);
-    expect(await all(h, "SELECT 1 FROM events WHERE type LIKE '%deleted' AND fanned_out_at IS NULL")).toHaveLength(0);
+    expect(await waiting(h, sub)).toEqual(before);
   });
 });

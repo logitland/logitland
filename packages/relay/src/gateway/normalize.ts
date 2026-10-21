@@ -208,6 +208,29 @@ export function normalizeDispatch(t: string, d: unknown, ctx: NormalizeContext):
       const c = d as DiscordChannelLike;
       return inGuild(c.guild_id) && CHANNEL_TYPES[c.type] ? [{ kind: 'channel_delete', channel_id: c.id }] : [];
     }
+    case 'MESSAGE_REACTION_ADD':
+    case 'MESSAGE_REACTION_REMOVE': {
+      const r = d as {
+        message_id: string;
+        channel_id: string;
+        guild_id?: string;
+        user_id: string;
+        member?: { user?: { bot?: boolean } };
+        emoji: { id: string | null; name: string | null };
+      };
+      if (!inGuild(r.guild_id)) return [];
+      return [
+        {
+          kind: 'reaction',
+          added: t === 'MESSAGE_REACTION_ADD',
+          ...locate(r.channel_id, ctx.threads),
+          message_id: r.message_id,
+          user_id: r.user_id,
+          bot: r.member?.user?.bot ?? false,
+          emoji: { id: r.emoji.id ?? null, name: r.emoji.name ?? null },
+        },
+      ];
+    }
     case 'GUILD_ROLE_CREATE':
     case 'GUILD_ROLE_UPDATE': {
       const r = d as { guild_id: string; role: DiscordRoleLike };

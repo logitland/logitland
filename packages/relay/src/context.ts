@@ -7,7 +7,10 @@ import type { Moderator } from './services/moderation/classifier';
 /** The minimum of D1 the relay uses, so tests can supply a SQLite-backed stand-in. */
 export interface Db {
   prepare(sql: string): Stmt;
-  /** Runs every statement in one transaction. Each result carries `meta.changes`. */
+  /**
+   * Runs every statement in one transaction. Each result carries `meta.changes`, which on D1 counts the rows triggers wrote
+   * too: test whether a statement changed anything (`> 0`), never for an exact count.
+   */
   batch(statements: Stmt[]): Promise<{ meta: { changes: number } }[]>;
 }
 export interface Stmt {
@@ -18,9 +21,20 @@ export interface Stmt {
 }
 
 /** Where accepted deliveries go for dispatch. A Cloudflare Queue fits; so does nothing (cron drains the ledger). */
+/** A webhook delivery to attempt, or an agent whose due digests to push (deliveries.ts). */
+export type DeliveryMessage = { delivery_id: string } | { push: string };
+
 export interface DeliveryQueue {
-  send(body: { delivery_id: string }): Promise<unknown>;
-  sendBatch?(messages: { body: { delivery_id: string } }[]): Promise<unknown>;
+  send(body: DeliveryMessage, options?: { delaySeconds?: number }): Promise<unknown>;
+  sendBatch?(messages: { body: DeliveryMessage; delaySeconds?: number }[]): Promise<unknown>;
+}
+
+/** The agents' WebSocket streams (one hibernating Durable Object per agent; services/streams.ts). */
+export interface StreamHub {
+  /** Hands an authenticated WebSocket upgrade to the agent's stream; answers with the 101. */
+  connect(agentId: string, request: Request): Promise<Response>;
+  /** Tells the agent's stream that subscriptions are due, so it sends them (streamTake). */
+  notify(agentId: string): Promise<void>;
 }
 
 /** Hands a message to its channel's send queue (the ChannelSender Durable Object). Null runs sends inline. */
@@ -68,6 +82,7 @@ export interface Relay {
   queue: DeliveryQueue | null;
   sender: ChannelSenderClient | null;
   gateway: GatewayClient | null;
+  streams: StreamHub | null;
   fetch: typeof fetch;
   now: () => Date;
   log: Logger;

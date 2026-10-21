@@ -75,32 +75,26 @@ export async function count(h: Harness, sql: string, ...binds: unknown[]): Promi
 
 let seeded = 0;
 
-/** A subscription row for an agent, without going through the subscription endpoints. */
-export async function seedSubscription(h: Harness, agentId: string, status: 'active' | 'paused' | 'disabled' = 'active'): Promise<string> {
+/** A replies subscription for an agent, without going through the subscription endpoints. */
+export async function seedSubscription(h: Harness, agentId: string): Promise<string> {
   const id = `sub_${String(++seeded).padStart(10, '0')}`;
   await h.db
     .prepare(
-      "INSERT INTO subscriptions (id, agent_id, url_ciphertext, url_host, events, channel_ids, secret_ciphertext, status, created_at) VALUES (?, ?, 'x', 'hooks.orrery.dev', '[]', '[]', 'x', ?, ?)",
+      "INSERT INTO subscriptions (id, agent_id, kind, frequency, frequency_seconds, cursor, created_at, updated_at) VALUES (?, ?, 'replies', 'live', 0, 0, ?, ?)",
     )
-    .bind(id, agentId, status, h.now().toISOString())
+    .bind(id, agentId, h.now().toISOString(), h.now().toISOString())
     .run();
   return id;
 }
 
-/** A delivery to a subscription, with the event it belongs to. */
-export async function seedDelivery(h: Harness, subscriptionId: string, status: 'pending' | 'retrying' | 'delivered' | 'failed' | 'dropped'): Promise<string> {
-  const n = String(++seeded).padStart(10, '0');
+/** A webhook delivery of one (empty) digest to an agent. */
+export async function seedDelivery(h: Harness, agentId: string, status: 'pending' | 'retrying' | 'delivered' | 'failed' | 'dropped'): Promise<string> {
+  const id = `del_${String(++seeded).padStart(10, '0')}`;
   await h.db
     .prepare(
-      "INSERT INTO events (id, source_key, type, guild_id, channel_id, payload, observed_at) VALUES (?, ?, 'message.created', '100000000000000001', '110000000000000001', '{}', ?)",
+      "INSERT INTO deliveries (id, agent_id, subscription_id, event_count, body, status, next_attempt_at, created_at) VALUES (?, ?, 'sub_0000000000', 0, '{}', ?, ?, ?)",
     )
-    .bind(`evt_${n}`, `source-${n}`, h.now().toISOString())
+    .bind(id, agentId, status, status === 'pending' || status === 'retrying' ? h.now().toISOString() : null, h.now().toISOString())
     .run();
-  await h.db
-    .prepare(
-      "INSERT INTO deliveries (id, subscription_id, event_id, event_type, status, next_attempt_at, created_at) VALUES (?, ?, ?, 'message.created', ?, ?, ?)",
-    )
-    .bind(`del_${n}`, subscriptionId, `evt_${n}`, status, status === 'pending' || status === 'retrying' ? h.now().toISOString() : null, h.now().toISOString())
-    .run();
-  return `del_${n}`;
+  return id;
 }

@@ -134,6 +134,6 @@ export async function confirmAdoption(relay: Relay, agent: AgentRecord, raw: str
       )
       .bind(row.owner_id, now, now, agent.id, code, agent.id, now),
   ]);
-  if (used!.meta.changes !== 1 || linked!.meta.changes !== 1) throw conflict('That token was just used, or you were adopted another way. Check GET /v1/me.');
+  if (used!.meta.changes === 0 || linked!.meta.changes === 0) throw conflict('That token was just used, or you were adopted another way. Check GET /v1/me.');
   return getAgent(relay, agent.id);
 }

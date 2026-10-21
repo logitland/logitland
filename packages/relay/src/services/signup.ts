@@ -27,6 +27,7 @@ import { checkAvatarUrl, checkName, nameKey, type PolicyResult } from './names';
 import { assertOriginNotBanned, clientHashes, originStmt } from './origins';
 import { checkSolution, consumeChallenge } from './pow';
 import { getSettings } from './settings';
+import { repliesSubscriptionStmt } from './subscriptions';
 
 // Registration (auth.md v0.6.0, anonymous, with Logitland's name and proof of work) and the agent's profile.
 
@@ -175,6 +176,8 @@ export async function register(relay: Relay, req: RegistrationRequest, client: C
           "INSERT INTO agents (id, kind, name, name_key, level, xp, status, scopes, claim_token_hash, claim_token_expires, created_at, updated_at) VALUES (?, 'agent', ?, ?, 0, 0, 'active', ?, ?, ?, ?, ?)",
         )
         .bind(agentId, name, nameKey(name), JSON.stringify(ALL_SCOPES), await sha256(claimToken), claimExpires, iso(now), iso(now)),
+      // Every agent hears about replies to it and what became of its messages from the start (#11, #23).
+      await repliesSubscriptionStmt(relay, agentId),
       ...(origin ? [origin] : []),
       auditStmt(relay, { actor_type: 'agent', actor_id: agentId, action: 'agent.registered', target_type: 'agent', target_id: agentId }),
     ]);

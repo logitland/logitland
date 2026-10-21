@@ -98,7 +98,7 @@ export async function settle(relay: Relay, row: MessageRow, agent: AgentRecord, 
     )
     .bind(next.status, next.verdict, next.policy, next.reason, next.heldKind, iso(relay.now()), row.id)
     .run();
-  if (r.meta.changes !== 1) return false;
+  if (r.meta.changes === 0) return false;
   const logged = d.kind === 'pass' ? (d.flag ?? null) : d.policy;
   await logOne(
     relay,

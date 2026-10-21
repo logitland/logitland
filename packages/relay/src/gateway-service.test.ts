@@ -12,7 +12,7 @@ import {
 } from './gateway';
 import { snowflakeTime } from './services/events';
 import { AGENT_POST, NEWS, all, at, conversation, moreChannels, msg, one, subscribe, world } from './intake-fixtures';
-import { BENCH, FORUM, GUILD as GUILD_ID, LOUNGE, setAccess, type Harness } from './testing';
+import { BENCH, FORUM, GUILD as GUILD_ID, LOUNGE, seedAgent, setAccess, type Harness } from './testing';
 
 // WebCrypto answers on the thread pool, so the work behind a dispatch takes a few turns of the event loop.
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
@@ -173,7 +173,7 @@ describe('connecting and recording', () => {
     expect((await g.state())!.status).toBe('connecting');
 
     g.hello();
-    expect(g.last().socket.sent[0]).toMatchObject({ op: 2, d: { token: 'bot-token', intents: 33281 } });
+    expect(g.last().socket.sent[0]).toMatchObject({ op: 2, d: { token: 'bot-token', intents: 34305 } });
     g.ready(1);
     await settle();
     expect(await g.state()).toMatchObject({ status: 'connected', session_id: 'sess-1', seq: 1, last_event_at: null });
@@ -352,7 +352,7 @@ describe('a lost session', () => {
     );
     expect(gaps.map((g) => g.channel_id)).toEqual([LOUNGE]);
     const data = JSON.parse(gaps[0]!.payload).data;
-    expect(data).toMatchObject({ window_start: lastEvent, window_end: h.now().toISOString(), resume_cursor: String(gaps[0]!.seq) });
+    expect(data).toMatchObject({ window_start: lastEvent, window_end: h.now().toISOString() });
     expect(data.reason).toContain('edits and deletions made during it can’t be recovered');
 
     expect(calls.filter((c) => c.includes('after='))).toEqual([`GET /channels/${LOUNGE}/messages?limit=100&after=${msg(2)}`]);
@@ -982,10 +982,13 @@ describe('a full buffer', () => {
 });
 
 describe('a backlog of events', () => {
+  /** More than one invocation's query budget can write. */
+  const BACKLOG = 600;
+
   it('is written a share per flush, within the D1 query budget, and the rest at the next alarm', async () => {
-    const { h, agent } = await world();
-    // Three subscribers per event make every event cost a fan-out each, so a round of 100 is expensive.
-    for (let i = 0; i < 3; i++) await subscribe(h, agent.id);
+    const { h } = await world();
+    // Three subscribers, so every event recorded makes subscriptions due, as in use.
+    for (let i = 0; i < 3; i++) await subscribe(h, (await seedAgent(h.relay)).id);
     const hook = { author: { id: '600000000000000555', username: 'hook', bot: true }, webhook_id: '600000000000000555' };
     const clock = clockFor(h);
     discord(h);
@@ -994,15 +997,15 @@ describe('a backlog of events', () => {
     g.hello();
     g.ready(1);
     await settle();
-    // The database is out of reach while 300 events arrive; nothing is dropped (the cap is 5,000).
+    // The database is out of reach while the backlog arrives; nothing is dropped (the cap is 5,000).
     const batch = h.db.batch.bind(h.db);
     h.db.batch = async () => {
       throw new Error('D1 is down');
     };
-    for (let n = 1; n <= 300; n++) g.message(n + 1, n, hook);
+    for (let n = 1; n <= BACKLOG; n++) g.message(n + 1, n, hook);
     await settle();
     await clock.advance(500);
-    expect(g.svc.snapshot()).toMatchObject({ buffered: 300, events_dropped: false });
+    expect(g.svc.snapshot()).toMatchObject({ buffered: BACKLOG, events_dropped: false });
 
     // Counts every D1 call the way the budget does: each statement of a batch separately.
     let queries = 0;
@@ -1035,7 +1038,7 @@ describe('a backlog of events', () => {
     // Some rounds fit; the next might not, so the rest waits for a fresh invocation (the next alarm).
     const left = g.svc.snapshot().buffered as number;
     expect(left).toBeGreaterThan(0);
-    expect(left).toBeLessThan(300);
+    expect(left).toBeLessThan(BACKLOG);
     expect(queries).toBeLessThanOrEqual(QUERY_BUDGET + 350);
     expect(g.wakes.at(-1)! - clock.now()).toBeGreaterThan(0);
     expect(g.wakes.at(-1)! - clock.now()).toBeLessThanOrEqual(CONTINUE_MS);
@@ -1043,13 +1046,13 @@ describe('a backlog of events', () => {
     for (let i = 0; i < 10 && (g.svc.snapshot().buffered as number) > 0; i++) {
       queries = 0;
       await g.svc.tick();
-      await vi.waitFor(async () => expect((await all(h, `SELECT 1 ${FED}`)).length).toBeGreaterThan(300 - left), { timeout: 10_000 });
+      await vi.waitFor(async () => expect((await all(h, `SELECT 1 ${FED}`)).length).toBeGreaterThan(BACKLOG - left), { timeout: 10_000 });
       await settle();
       expect(queries).toBeLessThanOrEqual(QUERY_BUDGET + 350);
     }
-    expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(300);
+    expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(BACKLOG);
     expect(g.svc.snapshot().buffered).toBe(0);
-    expect(g.storage.get('session')).toMatchObject({ seq: 301 });
+    expect(g.storage.get('session')).toMatchObject({ seq: BACKLOG + 1 });
   }, 30_000);
 });
 

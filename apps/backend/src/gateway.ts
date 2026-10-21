@@ -11,6 +11,7 @@ import {
   type SocketEvents,
 } from '@logitland/relay';
 import type { Bindings } from './index';
+import { streamHub } from './stream';
 
 // The Discord Gateway client. One instance, named "discord".
 // This class only owns the outbound WebSocket, the timers and the storage; what to do with them is
@@ -36,7 +37,8 @@ export class DiscordGateway extends DurableObject<Bindings> {
   }
 
   protected buildRelay(): Relay {
-    return createRelay(this.env as unknown as RelayBindings, { log });
+    // Events it records wake the agents' streams.
+    return createRelay(this.env as unknown as RelayBindings, { streams: streamHub(this.env.AGENT_STREAM), log });
   }
 
   /** An outbound WebSocket is a fetch with `Upgrade: websocket` to the https form of the URL. Outbound sockets don't hibernate. */

@@ -37,12 +37,18 @@ class SqliteStmt implements Stmt {
   }
 
   async run(): Promise<{ meta: { changes: number } }> {
-    const r = this.db.prepare(this.sql).run(...this.params);
-    return { meta: { changes: Number(r.changes) } };
+    return { meta: { changes: this.runSync() } };
   }
 
-  runSync() {
-    return this.db.prepare(this.sql).run(...this.params);
+  /** Rows changed, counting what triggers wrote, as D1 does (SQLite's own `changes` leaves those out). */
+  runSync(): number {
+    const before = this.totalChanges();
+    this.db.prepare(this.sql).run(...this.params);
+    return this.totalChanges() - before;
+  }
+
+  private totalChanges(): number {
+    return Number((this.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n);
   }
 }
 
@@ -61,7 +67,7 @@ export class SqliteD1 implements Db {
   async batch(statements: Stmt[]): Promise<{ meta: { changes: number } }[]> {
     this.raw.exec('BEGIN');
     try {
-      const out = statements.map((s) => ({ meta: { changes: Number((s as SqliteStmt).runSync().changes) } }));
+      const out = statements.map((s) => ({ meta: { changes: (s as SqliteStmt).runSync() } }));
       this.raw.exec('COMMIT');
       return out;
     } catch (err) {

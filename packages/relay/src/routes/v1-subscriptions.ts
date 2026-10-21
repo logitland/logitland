@@ -1,10 +1,14 @@
-import { CreateSubscriptionRequest, DeliveryId, DeliveryStatus, IdempotencyKey } from '@logitland/contracts';
+import { CreateSubscriptionRequest, DeliveryId, DeliveryRequest, DeliveryStatus, SubscriptionPatch } from '@logitland/contracts';
 import { invalid, parse } from '../errors';
 import { listDeliveries } from '../services/deliveries';
-import { createSubscription, deleteSubscription, listSubscriptions, ownSubscription, resumeSubscription, rotateSecret } from '../services/subscriptions';
+import { accessFor } from '../services/channels';
+import { DIGEST_MAX, readFeed, stillReadable } from '../services/feed';
+import { listSubscriptions, ownSubscription, subscribe, unsubscribe, updateSubscription } from '../services/subscriptions';
+import { getWebhook, removeWebhook, resumeWebhook, rotateWebhookSecret, setWebhook, toDeliverySetting } from '../services/webhook';
 import { agentAuth, body, intQuery, requireScope, type RegisterRoutes } from './shared';
 
-// Webhook subscriptions, for the calling agent only. Contracts and paths: packages/contracts/src/api.ts.
+// Subscriptions and the agent's one delivery setting (#11, #23), for the calling agent only.
+// Contracts and paths: packages/contracts/src/api.ts.
 
 export const register: RegisterRoutes = (app, relay) => {
   const auth = agentAuth(relay);
@@ -14,42 +18,69 @@ export const register: RegisterRoutes = (app, relay) => {
     return c.json({ subscriptions: await listSubscriptions(relay, c.get('principal').agent.id) });
   });
 
-  // Delivery reads conversation data, so creating a subscription needs both scopes. An Idempotency-Key makes a retry
-  // return the first subscription instead of adding a second.
+  // Delivery reads conversation data, so subscribing needs both scopes.
   app.post('/v1/subscriptions', auth, async (c) => {
     requireScope(c, 'subscriptions:manage');
     requireScope(c, 'messages:read');
-    const raw = c.req.header('idempotency-key');
-    const key = raw === undefined ? undefined : IdempotencyKey.safeParse(raw);
-    if (key && !key.success) throw invalid('An Idempotency-Key is 8 to 128 printable characters. Send one so a retry can’t add the same subscription twice.');
-    const { replayed, ...created } = await createSubscription(relay, c.get('principal'), parse(CreateSubscriptionRequest, await body(c)), {
-      ...(key?.success ? { idempotencyKey: key.data } : {}),
-    });
-    if (replayed) c.header('idempotent-replayed', 'true');
-    return c.json(created, 201);
+    const { subscription, created } = await subscribe(relay, c.get('principal').agent, parse(CreateSubscriptionRequest, await body(c)));
+    return c.json(subscription, created ? 201 : 200);
+  });
+
+  app.patch('/v1/subscriptions/:id', auth, async (c) => {
+    requireScope(c, 'subscriptions:manage');
+    return c.json(await updateSubscription(relay, c.get('principal').agent.id, c.req.param('id'), parse(SubscriptionPatch, await body(c))));
   });
 
   app.delete('/v1/subscriptions/:id', auth, async (c) => {
     requireScope(c, 'subscriptions:manage');
-    await deleteSubscription(relay, c.get('principal').agent.id, c.req.param('id'));
+    await unsubscribe(relay, c.get('principal').agent.id, c.req.param('id'));
     return c.body(null, 204);
   });
 
-  app.post('/v1/subscriptions/:id/resume', auth, async (c) => {
-    requireScope(c, 'subscriptions:manage');
-    return c.json(await resumeSubscription(relay, c.get('principal').agent.id, c.req.param('id')));
+  app.get('/v1/subscriptions/:id/events', auth, async (c) => {
+    requireScope(c, 'messages:read');
+    const { agent } = c.get('principal');
+    const sub = await ownSubscription(relay, agent.id, c.req.param('id'));
+    const raw = c.req.query('after');
+    if (raw !== undefined && !/^\d{1,15}$/.test(raw)) throw invalid('after must be a cursor from an earlier digest or event');
+    const readable = await stillReadable(relay, sub, await accessFor(relay, agent));
+    const page = await readFeed(relay, sub, raw === undefined ? sub.cursor : Number(raw), intQuery(c, 'limit', DIGEST_MAX, 1, DIGEST_MAX), readable);
+    c.header('cache-control', 'no-store');
+    return c.json({ events: page.events, cursor: String(page.last), more: page.more });
   });
 
-  app.post('/v1/subscriptions/:id/rotate-secret', auth, async (c) => {
+  app.get('/v1/delivery', auth, async (c) => {
     requireScope(c, 'subscriptions:manage');
-    return c.json(await rotateSecret(relay, c.get('principal').agent.id, c.req.param('id')));
+    return c.json(toDeliverySetting(await getWebhook(relay, c.get('principal').agent.id)));
   });
 
-  app.get('/v1/subscriptions/:id/deliveries', auth, async (c) => {
+  app.put('/v1/delivery', auth, async (c) => {
     requireScope(c, 'subscriptions:manage');
-    const sub = await ownSubscription(relay, c.get('principal').agent.id, c.req.param('id'));
+    c.header('cache-control', 'no-store');
+    return c.json(await setWebhook(relay, c.get('principal').agent.id, parse(DeliveryRequest, await body(c)).url));
+  });
+
+  app.delete('/v1/delivery', auth, async (c) => {
+    requireScope(c, 'subscriptions:manage');
+    await removeWebhook(relay, c.get('principal').agent.id);
+    return c.body(null, 204);
+  });
+
+  app.post('/v1/delivery/resume', auth, async (c) => {
+    requireScope(c, 'subscriptions:manage');
+    return c.json(await resumeWebhook(relay, c.get('principal').agent.id));
+  });
+
+  app.post('/v1/delivery/rotate-secret', auth, async (c) => {
+    requireScope(c, 'subscriptions:manage');
+    c.header('cache-control', 'no-store');
+    return c.json(await rotateWebhookSecret(relay, c.get('principal').agent.id));
+  });
+
+  app.get('/v1/delivery/deliveries', auth, async (c) => {
+    requireScope(c, 'subscriptions:manage');
     const page = await listDeliveries(relay, {
-      subscriptionId: sub.id,
+      agentId: c.get('principal').agent.id,
       status: parse(DeliveryStatus.optional(), c.req.query('status') || undefined),
       before: parse(DeliveryId.optional(), c.req.query('before') || undefined),
       limit: intQuery(c, 'limit', 50, 1, 100),

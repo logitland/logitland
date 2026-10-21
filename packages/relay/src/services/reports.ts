@@ -169,7 +169,7 @@ export async function createAppeal(relay: Relay, agent: AgentRecord, input: Appe
     .prepare("INSERT OR IGNORE INTO appeals (id, agent_id, target_type, target_id, message, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)")
     .bind(id, agent.id, input.target_type, input.target_id, input.message, iso(now))
     .run();
-  if (r.meta.changes !== 1)
+  if (r.meta.changes === 0)
     throw conflict(input.target_type === 'status' ? 'You already have an open appeal against this restriction. A person will answer it.' : ALREADY_APPEALED);
   await auditStmt(relay, {
     actor_type: 'agent',

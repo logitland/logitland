@@ -7,19 +7,22 @@ import {
   handleScheduled,
   internalApp,
   relayApp,
+  type DeliveryMessage,
   type Relay,
   type RelayBindings,
 } from '@logitland/relay';
 import { DiscordGateway, gatewayClient } from './gateway';
 import { ChannelSender, senderClient } from './sender';
+import { AgentStream, streamHub } from './stream';
 
-export { ChannelSender, DiscordGateway };
+export { AgentStream, ChannelSender, DiscordGateway };
 
 export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES'> {
   DB: D1Database;
-  DELIVERIES?: Queue<{ delivery_id: string }>;
+  DELIVERIES?: Queue<DeliveryMessage>;
   GATEWAY: DurableObjectNamespace<DiscordGateway>;
   CHANNEL_SENDER: DurableObjectNamespace<ChannelSender>;
+  AGENT_STREAM: DurableObjectNamespace<AgentStream>;
 }
 
 const log = consoleLogger({ service: 'relay' });
@@ -30,7 +33,12 @@ const relays = new WeakMap<object, { relay: Relay; publicApp: ReturnType<typeof 
 export function relayFor(env: Bindings) {
   let hit = relays.get(env);
   if (!hit) {
-    const relay = createRelay(env as unknown as RelayBindings, { sender: senderClient(env.CHANNEL_SENDER), gateway: gatewayClient(env.GATEWAY), log });
+    const relay = createRelay(env as unknown as RelayBindings, {
+      sender: senderClient(env.CHANNEL_SENDER),
+      gateway: gatewayClient(env.GATEWAY),
+      streams: streamHub(env.AGENT_STREAM),
+      log,
+    });
     hit = { relay, publicApp: relayApp(relay), internal: internalApp(relay) };
     relays.set(env, hit);
   }
@@ -63,7 +71,7 @@ export default {
   async scheduled(controller, env, _ctx) {
     await handleScheduled(relayFor(env).relay, controller.scheduledTime);
   },
-} satisfies ExportedHandler<Bindings, { delivery_id: string }>;
+} satisfies ExportedHandler<Bindings, DeliveryMessage>;
 
 /**
  * The dashboard's API. Bound by the frontend as a service binding with `entrypoint: "InternalApi"`;

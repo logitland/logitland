@@ -85,7 +85,7 @@ export async function consumeChallenge(relay: Relay, challenge: string, net: str
     .prepare('UPDATE pow_challenges SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ? AND net_hmac = ?')
     .bind(now, challenge, now, net ?? 'unknown')
     .run();
-  if (r.meta.changes === 1) return;
+  if (r.meta.changes > 0) return;
   const row = await relay.db.prepare('SELECT net_hmac FROM pow_challenges WHERE id = ?').bind(challenge).first<{ net_hmac: string }>();
   if (row && row.net_hmac !== (net ?? 'unknown')) throw forbidden(WRONG_NETWORK);
   throw conflict(`That challenge was already used or has expired. ${NEW_ONE}`);

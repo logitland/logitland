@@ -1,4 +1,4 @@
-import { DeliveryId, DeliveryStatus, SubscriptionId, SubscriptionStatus } from '@logitland/contracts';
+import { DeliveryId, DeliveryStatus, SubscriptionId } from '@logitland/contracts';
 import { conflict, notFound, parse } from '../errors';
 import { listDeliveries, replayDelivery } from '../services/deliveries';
 import { listAdminSubscriptions } from '../services/subscriptions';
@@ -29,7 +29,6 @@ export const register: RegisterRoutes = (app, relay) => {
   app.get('/internal/admin/subscriptions', async (c) =>
     c.json(
       await listAdminSubscriptions(relay, {
-        status: parse(SubscriptionStatus.optional(), c.req.query('status') || undefined),
         before: parse(SubscriptionId.optional(), c.req.query('before') || undefined),
         limit: intQuery(c, 'limit', 50, 1, 100),
       }),

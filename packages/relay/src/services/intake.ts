@@ -6,8 +6,7 @@ import { auditStmt } from './audit';
 import { anyAgentAccess } from './channels';
 import { authorRef } from './conversation';
 import { applyGuildEvents, isGuildEvent, type GuildEvent } from './guild';
-import { chunk, commitPlan, compareSnowflakes, fanOutAll, MAX_PARAMS, placeholders, planEvent, snowflakeTime, type PlannedEvent } from './events';
-import type { EventRow } from './deliveries';
+import { chunk, commitPlan, compareSnowflakes, MAX_PARAMS, placeholders, planEvent, snowflakeTime, type PlannedEvent } from './events';
 import { contentHash } from './moderation/rows';
 import { planRemoval, scrubStatements, type RemovedBy } from './scrub';
 import { awardSent } from './xp/award';
@@ -49,6 +48,16 @@ export const IntakeEvent = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('message_update'), ...Located, message_id: Snowflake, content: z.string().optional(), edited_timestamp: Timestamp }),
   z.object({ kind: z.literal('message_delete'), ...Located, message_id: Snowflake }),
   z.object({ kind: z.literal('message_delete_bulk'), ...Located, message_ids: z.array(Snowflake).min(1).max(100) }),
+  // Who reacted is used only to tell repeats apart; it is never stored or announced.
+  z.object({
+    kind: z.literal('reaction'),
+    added: z.boolean(),
+    ...Located,
+    message_id: Snowflake,
+    user_id: Snowflake,
+    bot: z.boolean(),
+    emoji: z.object({ id: Snowflake.nullable(), name: z.string().max(100).nullable() }),
+  }),
   z.object({
     kind: z.literal('thread_upsert'),
     thread_id: Snowflake,
@@ -152,6 +161,9 @@ async function sourceKey(e: MessageEvent): Promise<string | null> {
       return `delete:${e.message_id}`;
     case 'message_delete_bulk':
       return `bulk:${await sha256([...e.message_ids].sort(compareSnowflakes).join(','))}`;
+    // The reactor stays out of the key as stored: hashed, it still tells a replayed dispatch from a new reaction.
+    case 'reaction':
+      return `reaction:${e.added ? 'add' : 'remove'}:${e.message_id}:${await sha256(`${e.user_id}:${e.emoji.id ?? e.emoji.name}`)}`;
     default:
       return null;
   }
@@ -168,7 +180,6 @@ const bigger = (a: string | undefined, b: string) => (a === undefined || compare
 export interface IngestResult {
   /** Events newly written to the log. */
   recorded: number;
-  deliveries: number;
   /** Events that were repeats, stale, or for channels agents can't use. */
   ignored: number;
   /** Events that failed validation. */
@@ -177,7 +188,7 @@ export interface IngestResult {
 
 export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestResult> {
   const { source, events: raw, history } = IntakeBatch.parse(batch);
-  const total: IngestResult = { recorded: 0, deliveries: 0, ignored: 0, invalid: 0 };
+  const total: IngestResult = { recorded: 0, ignored: 0, invalid: 0 };
   const events: IntakeEvent[] = [];
   for (const r of raw) {
     const parsed = IntakeEvent.safeParse(r);
@@ -201,7 +212,6 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
   for (const part of chunk(messages, EVENTS_PER_ROUND)) {
     const r = await ingestRound(relay, ctx, part);
     total.recorded += r.recorded;
-    total.deliveries += r.deliveries;
     total.ignored += r.ignored;
   }
   if (total.invalid) relay.log.warn('intake.invalid_events', { source, count: total.invalid });
@@ -278,14 +288,19 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
       .all<{ discord_user_id: string; granted_at: string }>();
     for (const r of results) agreedAt.set(r.discord_user_id, r.granted_at);
   }
-  const agentMessages = new Set<string>();
-  const targets = [...new Set(fromPeople.flatMap((e) => (e.reply_to && agreedAt.has(e.author.id) ? [e.reply_to] : [])))];
+  // Which messages replied to are agents' (and whose): a person's reply is kept only if it answers one, and every reply to an
+  // agent goes to that agent's replies subscription.
+  const agentMessages = new Map<string, string>();
+  // Threads' starters too: a thread's ID is its starter message's, so this says which agent started a new thread.
+  const targets = [
+    ...new Set(keyed.flatMap(({ e }) => (e.kind === 'message_create' && e.reply_to ? [e.reply_to] : e.kind === 'thread_upsert' ? [e.thread_id] : []))),
+  ];
   for (const part of chunk(targets, MAX_PARAMS)) {
     const { results } = await relay.db
-      .prepare(`SELECT CAST(message_id AS TEXT) AS id FROM conversation WHERE author_kind = 'agent' AND message_id IN (${placeholders(part.length)})`)
+      .prepare(`SELECT CAST(message_id AS TEXT) AS id, agent_id FROM conversation WHERE author_kind = 'agent' AND message_id IN (${placeholders(part.length)})`)
       .bind(...part)
-      .all<{ id: string }>();
-    for (const r of results) agentMessages.add(r.id);
+      .all<{ id: string; agent_id: string }>();
+    for (const r of results) agentMessages.set(r.id, r.agent_id);
   }
 
   const stmts: Stmt[] = [];
@@ -313,6 +328,22 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         // A title is the words of whoever named the thread, so it is kept only when the relay's webhook (an agent's forum
         // post) or the bot (a thread started from an agent's message) made the thread. A person's title is never stored.
         const named = Number(e.owner_id == null || e.owner_id === ch.webhook_id || e.owner_id === relay.config.discord.applicationId);
+        // A thread the relay hasn't seen is announced (#11), before the insert that makes it known.
+        if (!closed && !ctx.history) {
+          const creator = agentMessages.get(e.thread_id) ?? null;
+          record(
+            planEvent(relay, {
+              type: 'thread.created',
+              guildId: ch.guild_id,
+              channelId: e.parent_id,
+              messageId: null,
+              sourceKey: `thread:${e.thread_id}`,
+              authorAgentId: creator,
+              data: { thread_id: e.thread_id, name: named ? (e.name ?? null) : null, creator_agent_id: creator },
+              when: { sql: 'NOT EXISTS (SELECT 1 FROM threads WHERE id = ?)', args: [e.thread_id] },
+            }),
+          );
+        }
         // Two statements rather than ON CONFLICT: the count, time and creator below are read only when the thread is new.
         stmts.push(
           relay.db
@@ -398,7 +429,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           out.ignored++;
           break;
         }
-        if (who.kind === 'agent') agentMessages.add(e.message_id);
+        if (who.kind === 'agent' && who.agent_id) agentMessages.set(e.message_id, who.agent_id);
         // A delete that came first leaves a tombstone: the late create is kept as a removed message, without its text.
         const tomb = tombs.get(e.message_id);
         const reply_to = e.reply_to ?? who.reply_to;
@@ -416,6 +447,8 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
               unless: `delete:${e.message_id}`,
               // So does a person withdrawing after this round read their agreement.
               ...(who.discord_user_id ? { when: agreedWhen(who.discord_user_id, e.timestamp) } : {}),
+              authorAgentId: who.agent_id,
+              replyAgentId: reply_to ? (agentMessages.get(reply_to) ?? null) : null,
               data: {
                 message_id: e.message_id,
                 thread_id: e.thread_id ?? null,
@@ -449,7 +482,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
             messageId: e.message_id,
             sourceKey: key!,
             data: { message_id: e.message_id, ...(e.content === undefined || !k ? {} : { content: e.content }), edited_at: e.edited_timestamp },
-            fan: Boolean(k),
+            silent: !k,
             // A person who withdrew since the round read their message gets no new text recorded or sent.
             when: {
               sql: 'NOT EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = ? AND c.discord_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = c.discord_user_id AND k.revoked_at IS NULL))',
@@ -471,6 +504,26 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           );
           k.edited_at = e.edited_timestamp;
         }
+        break;
+      }
+
+      case 'reaction': {
+        // Only on messages the relay holds: a reaction to a person's message it dropped would say that message exists.
+        if (closed || ctx.history || !(await relay.db.prepare('SELECT 1 AS x FROM conversation WHERE message_id = ?').bind(e.message_id).first())) {
+          out.ignored++;
+          break;
+        }
+        const type = e.added ? 'reaction.added' : 'reaction.removed';
+        record(
+          planEvent(relay, {
+            type,
+            guildId: ch.guild_id,
+            channelId: e.channel_id,
+            messageId: e.message_id,
+            sourceKey: key!,
+            data: { message_id: e.message_id, thread_id: e.thread_id ?? null, emoji: e.emoji, by: e.bot ? 'bot' : 'human' },
+          }),
+        );
         break;
       }
 
@@ -513,7 +566,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   stmts.push(...scrubStatements(relay, removed, 'discord'));
   for (const [channelId, messageId] of cursors) stmts.push(cursorStmt(relay, channelId, messageId));
   const r = await commitPlan(relay, stmts, planned);
-  return { recorded: r.recorded, deliveries: r.deliveries, ignored: out.ignored };
+  return { recorded: r.recorded, ignored: out.ignored };
 }
 
 /** The newest message seen per channel (or thread), for backfill after a gap. Compared as integers. */
@@ -543,7 +596,7 @@ async function resolveAuthor(
   e: Create,
   sent: Map<string, Sent>,
   agreedAt: Map<string, string>,
-  agentMessages: ReadonlySet<string>,
+  agentMessages: ReadonlyMap<string, string>,
 ): Promise<Who | null> {
   const a = e.author;
   if (a.webhook_id) {
@@ -646,7 +699,7 @@ async function settleSend(relay: Relay, e: Create): Promise<Sent | null> {
       )
       .bind(e.message_id, e.timestamp, iso(relay.now()), candidate.id)
       .run();
-    if (claimed.meta.changes === 1) {
+    if (claimed.meta.changes > 0) {
       relay.log.info('intake.send_settled', { relay_message_id: candidate.id, agent_id: candidate.agent_id });
       await awardSent(relay, candidate.id);
       return candidate;
@@ -718,12 +771,17 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
   ];
   const planned: { at: number; event: PlannedEvent }[] = [];
   if (!tomb) {
+    const replied = replyTo
+      ? await relay.db.prepare("SELECT agent_id FROM conversation WHERE message_id = ? AND author_kind = 'agent'").bind(replyTo).first<{ agent_id: string }>()
+      : null;
     const event = planEvent(relay, {
       type: 'message.created',
       guildId: channel.guild_id,
       channelId: post.channelId,
       messageId: post.discordMessageId,
       sourceKey: key,
+      authorAgentId: post.agentId,
+      replyAgentId: replied?.agent_id ?? null,
       data: {
         message_id: post.discordMessageId,
         thread_id: post.threadId,
@@ -740,13 +798,10 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
 }
 
 /**
- * Records a subscription.gap event per channel (fanned out like any event), e.g. after a Gateway session is lost
- * or a paused subscription resumes. Returns how many were newly recorded.
+ * Records a subscription.gap event per channel after the Gateway lost its session: events in that window may be missing.
+ * What is backfilled follows it in the log. Returns how many were newly recorded.
  */
-export async function recordGap(
-  relay: Relay,
-  gap: { channelIds: string[]; windowStart: string; windowEnd: string; reason: string; subscriptionId?: string },
-): Promise<number> {
+export async function recordGap(relay: Relay, gap: { channelIds: string[]; windowStart: string; windowEnd: string; reason: string }): Promise<number> {
   const start = new Date(gap.windowStart).toISOString();
   const end = new Date(gap.windowEnd).toISOString();
   const channels: { id: string; guild_id: string }[] = [];
@@ -757,41 +812,24 @@ export async function recordGap(
       .all<{ id: string; guild_id: string }>();
     channels.push(...results);
   }
-  // A gap for a subscription that was paused covers events the log already holds, so "resume after the gap" would skip them:
-  // it resumes after the last event from before the window instead. A Gateway gap is followed by what is backfilled, so it
-  // resumes after itself.
-  const before = gap.subscriptionId
-    ? ((await relay.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM events WHERE observed_at < ?').bind(start).first<{ seq: number }>())?.seq ?? 0)
-    : null;
-  const stmts: Stmt[] = [];
-  const events: { at: number; event: PlannedEvent }[] = [];
-  for (const c of channels) {
-    const event = planEvent(relay, {
+  const events = channels.map((c, at) => ({
+    at,
+    event: planEvent(relay, {
       type: 'subscription.gap',
       guildId: c.guild_id,
       channelId: c.id,
       messageId: null,
-      sourceKey: `gap:${gap.subscriptionId ? `${gap.subscriptionId}:` : ''}${c.id}:${start}:${end}`,
-      data: { window_start: start, window_end: end, resume_cursor: before === null ? '0' : String(before), reason: gap.reason },
-      ...(gap.subscriptionId ? { subscriptionId: gap.subscriptionId } : {}),
-    });
-    events.push({ at: stmts.length, event });
-    // Resume after the gap event itself: what was backfilled follows it in the log.
-    stmts.push(event.stmt);
-    if (before === null)
-      stmts.push(relay.db.prepare("UPDATE events SET payload = json_set(payload, '$.data.resume_cursor', CAST(seq AS TEXT)) WHERE id = ?").bind(event.row.id));
-  }
-  if (!stmts.length) return 0;
-  const results = await relay.db.batch(stmts);
-  const fresh: EventRow[] = [];
-  for (const { at, event } of events) {
-    if (results[at]!.meta.changes !== 1) continue;
-    const row = await relay.db.prepare('SELECT payload FROM events WHERE id = ?').bind(event.row.id).first<{ payload: string }>();
-    fresh.push({ ...event.row, payload: row!.payload });
-  }
-  await fanOutAll(relay, fresh);
-  relay.log.info('intake.gap', { channels: fresh.length });
-  return fresh.length;
+      sourceKey: `gap:${c.id}:${start}:${end}`,
+      data: { window_start: start, window_end: end, reason: gap.reason },
+    }),
+  }));
+  const { recorded } = await commitPlan(
+    relay,
+    events.map((e) => e.event.stmt),
+    events,
+  );
+  if (recorded) relay.log.info('intake.gap', { channels: recorded });
+  return recorded;
 }
 
 export interface IntakeStateRow {

@@ -95,7 +95,7 @@ export async function release(relay: Relay, adminId: string, messageId: string, 
     )
     .bind(adminId, iso(relay.now()), messageId)
     .run();
-  if (r.meta.changes !== 1) throw conflict(`Only a held message can be released, and this one is ${row.status}.`);
+  if (r.meta.changes === 0) throw conflict(`Only a held message can be released, and this one is ${row.status}.`);
   await logOne(relay, row.agent_id, row.id, 'review', 'pass', null, note ?? 'Released by an admin', `admin:${adminId}`);
   await auditStmt(relay, {
     ...admin(adminId),
@@ -120,7 +120,7 @@ export async function reject(relay: Relay, adminId: string, messageId: string, b
     )
     .bind(body.policy_code, reason, adminId, iso(relay.now()), messageId)
     .run();
-  if (r.meta.changes !== 1) throw conflict(`Only a held message can be rejected, and this one is ${row.status}.`);
+  if (r.meta.changes === 0) throw conflict(`Only a held message can be rejected, and this one is ${row.status}.`);
   await logOne(relay, row.agent_id, row.id, 'review', 'block', body.policy_code, reason, `admin:${adminId}`);
   await auditStmt(relay, {
     ...admin(adminId),
@@ -184,7 +184,7 @@ export async function takedownOnReports(relay: Relay, messageId: string): Promis
     .bind(REPORTED_REASON, iso(relay.now()), row.id)
     .run();
   await scrubMessage(relay, row.discord_message_id, 'moderator', { channelId: row.channel_id });
-  if (r.meta.changes === 1) {
+  if (r.meta.changes > 0) {
     await auditStmt(relay, {
       actor_type: 'system',
       actor_id: 'reports',
@@ -195,7 +195,7 @@ export async function takedownOnReports(relay: Relay, messageId: string): Promis
       diff: { status: { from: 'sent', to: 'held' } },
     }).run();
   }
-  return r.meta.changes === 1;
+  return r.meta.changes > 0;
 }
 
 const REPORTED_REASON = `Taken down after reports from ${TAKEDOWN_REPORTERS} independent agents. A moderator will restore it or confirm the takedown.`;
@@ -218,7 +218,7 @@ export async function takedown(relay: Relay, adminId: string, messageId: string,
     .bind(body.policy_code, `Removed by a moderator. ${reason}`, adminId, iso(relay.now()), messageId)
     .run();
   await scrubMessage(relay, row.discord_message_id, 'moderator', { channelId: row.channel_id });
-  if (r.meta.changes === 1) {
+  if (r.meta.changes > 0) {
     await logOne(relay, row.agent_id, row.id, 'enforcement', 'block', body.policy_code, reason, `admin:${adminId}`);
     await auditStmt(relay, {
       ...admin(adminId),
@@ -389,7 +389,7 @@ async function confirmTakedown(relay: Relay, adminId: string, row: MessageRow, p
     )
     .bind(policy, `Removed by a moderator after reports. ${reason}`, adminId, iso(relay.now()), row.id)
     .run();
-  if (r.meta.changes !== 1) throw conflict('This message was decided already.');
+  if (r.meta.changes === 0) throw conflict('This message was decided already.');
   await logOne(relay, row.agent_id, row.id, 'enforcement', 'block', policy, reason, `admin:${adminId}`);
   await strikeFor(relay, adminId, row, policy, `Removed by a moderator after reports. ${reason}`);
 }
@@ -402,7 +402,7 @@ async function restore(relay: Relay, adminId: string, row: MessageRow): Promise<
     )
     .bind(adminId, iso(relay.now()), row.id)
     .run();
-  if (r.meta.changes !== 1) throw conflict('This message was decided already.');
+  if (r.meta.changes === 0) throw conflict('This message was decided already.');
   await logOne(relay, row.agent_id, row.id, 'review', 'pass', null, 'Restored after reports', `admin:${adminId}`);
   await dispatch(relay, row);
 }
@@ -468,7 +468,7 @@ async function undo(relay: Relay, adminId: string, appeal: AppealRow, response: 
         )
         .bind(adminId, iso(relay.now()), m.id)
         .run();
-      if (q.meta.changes === 1) await dispatch(relay, m);
+      if (q.meta.changes > 0) await dispatch(relay, m);
     }
     return;
   }
@@ -516,7 +516,7 @@ export async function decideAppeal(relay: Relay, adminId: string, appealId: stri
     .prepare("UPDATE appeals SET status = ?, response = ?, resolved_by = ?, resolved_at = ? WHERE id = ? AND status = 'open'")
     .bind(status, body.response, adminId, iso(relay.now()), appealId)
     .run();
-  if (r.meta.changes !== 1) throw conflict(`This appeal was already ${appeal.status}.`);
+  if (r.meta.changes === 0) throw conflict(`This appeal was already ${appeal.status}.`);
 
   try {
     if (body.decision === 'overturn') await undo(relay, adminId, appeal, body.response);

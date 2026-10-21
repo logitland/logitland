@@ -1,19 +1,22 @@
-// Shared setup for deliveries*.test.ts and subscriptions*.test.ts (not a test file itself).
+// Shared setup for the subscription and delivery tests (not a test file itself): a relay with channels, an agent with a
+// token, Discord messages arriving through intake, and a webhook receiver that records what it gets.
 
-import { newId, type CreateSubscriptionRequest } from '@logitland/contracts';
+import type { CreateSubscriptionRequest, Digest, EventsPage, Subscription } from '@logitland/contracts';
 import { expect } from 'vitest';
-import { fanOut, type EventRow } from './services/deliveries';
-import { BENCH, GUILD, LOUNGE, harness, seedAgent, seedChannel, type Harness } from './testing';
+import { ingest } from './services/intake';
+import { BENCH, LOUNGE, harness, seedAgent, seedChannel, type Harness, type HarnessOptions } from './testing';
 
 export type Receiver = (req: Request) => Response | Promise<Response>;
 
 export const HOOK_HOST = 'hooks.orrery.dev';
 export const HOOK = `https://${HOOK_HOST}/logitland`;
+export const BOT = '200000000000000050';
 
-/** Answers the subscription challenge the way a well-behaved receiver does. */
+/** Answers the delivery challenge the way a well-behaved receiver does. */
 export const echoChallenge: Receiver = async (req) => Response.json({ challenge: ((await req.json()) as { challenge: string }).challenge });
 
-export type Setup = Harness & { agent: Awaited<ReturnType<typeof seedAgent>>; auth: Record<string, string> };
+/** `received` holds every digest the webhook got, and `signatures` their webhook-signature headers. */
+export type Setup = Harness & { agent: Awaited<ReturnType<typeof seedAgent>>; auth: Record<string, string>; received: Digest[]; signatures: string[] };
 
 /** Sets how many subscriptions an agent may hold, orphan and adopted alike: at `level` only, or at every level. */
 export const allowSubscriptions = (h: Pick<Harness, 'db'>, n: number, level?: number) =>
@@ -25,90 +28,67 @@ export const allowSubscriptions = (h: Pick<Harness, 'db'>, n: number, level?: nu
     .run();
 
 /**
- * A relay with the lounge (post) and the bench (read only) open to agents, one agent, and a receiver that echoes challenges.
- * `subscriptions` raises every level's cap, for tests that need more than TEST_LIMITS allows.
+ * A relay with the lounge (post) and the bench (read only) open to agents, one agent, and a webhook receiver at HOOK that
+ * echoes challenges and keeps every digest it is sent in `received`. `subscriptions` raises every level's cap.
  */
-export async function setup(opts: { level?: number; subscriptions?: number } = {}): Promise<Setup> {
-  const h = harness();
+export async function setup(opts: { level?: number; subscriptions?: number; harness?: HarnessOptions } = {}): Promise<Setup> {
+  const h = harness(opts.harness);
   if (opts.subscriptions !== undefined) await allowSubscriptions(h, opts.subscriptions);
   await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post' });
   await seedChannel(h.relay, { id: BENCH, name: 'lab-bench', access: 'read_only' });
   const agent = await seedAgent(h.relay, { name: 'Orrery', level: opts.level });
-  h.receivers[HOOK_HOST] = echoChallenge;
-  return { ...h, agent, auth: h.as(agent.token) };
-}
-
-export interface Created {
-  id: string;
-  agent_id: string;
-  url_host: string;
-  events: string[];
-  channel_ids: string[];
-  status: string;
-  secret: string;
-  failure_streak: number;
-}
-
-export const subscribeRaw = (s: Setup, body: Partial<CreateSubscriptionRequest> = {}, auth = s.auth) =>
-  s.call('POST', '/v1/subscriptions', { url: HOOK, events: ['message.created'], channel_ids: [LOUNGE], ...body }, auth);
-
-export async function subscribe(s: Setup, body: Partial<CreateSubscriptionRequest> = {}, auth = s.auth): Promise<Created> {
-  const res = await subscribeRaw(s, body, auth);
-  expect(res.status).toBe(201);
-  return (await res.json()) as Created;
+  const received: Digest[] = [];
+  const signatures: string[] = [];
+  h.receivers[HOOK_HOST] = async (req) => {
+    const body = (await req.clone().json()) as { type: string };
+    if (body.type === 'delivery.challenge') return echoChallenge(req);
+    received.push(body as Digest);
+    signatures.push(req.headers.get('webhook-signature') ?? '');
+    return new Response(null, { status: 204 });
+  };
+  return { ...h, agent, auth: h.as(agent.token), received, signatures };
 }
 
 let counter = 0;
 
-/** Inserts an event row directly, with a payload that has no cursor (as intake stores it). */
-export async function insertEvent(s: Pick<Harness, 'relay'>, o: { channel?: string; type?: string; data?: unknown } = {}): Promise<EventRow & { seq: number }> {
-  const id = newId('event');
-  const type = o.type ?? 'message.created';
-  const channel = o.channel ?? LOUNGE;
-  const n = ++counter;
-  const messageId = `31000000000000${String(n).padStart(4, '0')}`;
-  const at = s.relay.now().toISOString();
-  const data = o.data ?? {
-    message_id: messageId,
-    thread_id: null,
-    author: { kind: 'human', agent_id: null, author_id: 'p_test', display_name: 'tessellate' },
-    content: `hello ${n}`,
-    created_at: at,
-  };
-  const payload = JSON.stringify({ id, type, schema_version: 1, observed_at: at, guild_id: GUILD, channel_id: channel, data });
-  await s.relay.db
-    .prepare('INSERT INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, `test:${id}`, type, GUILD, channel, type === 'message.created' ? messageId : null, payload, at)
-    .run();
-  const row = (await s.relay.db.prepare('SELECT seq FROM events WHERE id = ?').bind(id).first<{ seq: number }>())!;
-  return { id, type, guild_id: GUILD, channel_id: channel, payload, seq: row.seq };
+/** A bot's message in a channel, through intake as the Gateway would deliver it. Returns its Discord ID. */
+export async function say(s: Pick<Harness, 'relay' | 'now'>, content = 'hello', o: { channel?: string; replyTo?: string } = {}): Promise<string> {
+  const id = String(310000000000000000n + BigInt(++counter));
+  await ingest(s.relay, {
+    source: 'test',
+    events: [
+      {
+        kind: 'message_create',
+        channel_id: o.channel ?? LOUNGE,
+        message_id: id,
+        author: { id: BOT, username: 'newsbot', bot: true },
+        content,
+        timestamp: s.now().toISOString(),
+        ...(o.replyTo ? { reply_to: o.replyTo } : {}),
+      },
+    ],
+  });
+  return id;
 }
 
-/** A new event, fanned out. Returns the event and the delivery IDs created. */
-export async function publish(s: Pick<Harness, 'relay'>, o: Parameters<typeof insertEvent>[1] = {}) {
-  const event = await insertEvent(s, o);
-  return { event, ids: await fanOut(s.relay, event) };
+export async function subscribe(s: Setup, body: Partial<CreateSubscriptionRequest> = {}, auth = s.auth): Promise<Subscription> {
+  const res = await s.call('POST', '/v1/subscriptions', body.kind === 'replies' ? body : { kind: 'channel', channel_id: LOUNGE, ...body }, auth);
+  expect([200, 201]).toContain(res.status);
+  return (await res.json()) as Subscription;
 }
 
-export const one = async <T>(s: Pick<Harness, 'db'>, sql: string, ...args: unknown[]) =>
-  (await s.db
-    .prepare(sql)
-    .bind(...args)
-    .first<T>())!;
-export const all = async <T>(s: Pick<Harness, 'db'>, sql: string, ...args: unknown[]) =>
-  (
-    await s.db
-      .prepare(sql)
-      .bind(...args)
-      .all<T>()
-  ).results;
-
-/** A receiver that records what it gets and answers with `reply`. */
-export function recorder(reply: Receiver = () => new Response(null, { status: 200 })) {
-  const requests: { headers: Headers; body: string; redirect: string; url: string }[] = [];
-  const handler: Receiver = async (req) => {
-    requests.push({ headers: req.headers, body: await req.clone().text(), redirect: req.redirect, url: req.url });
-    return reply(req);
-  };
-  return { requests, handler };
+/** GET /v1/events without waiting. */
+export async function poll(s: Setup, auth = s.auth): Promise<EventsPage> {
+  const res = await s.call('GET', '/v1/events', undefined, auth);
+  expect(res.status).toBe(200);
+  return (await res.json()) as EventsPage;
 }
+
+/** Points the agent's delivery at HOOK. Returns the signing secret. */
+export async function useWebhook(s: Setup, auth = s.auth): Promise<string> {
+  const res = await s.call('PUT', '/v1/delivery', { url: HOOK }, auth);
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { secret: string }).secret;
+}
+
+export const contents = (d: Digest) => d.events.map((e) => (e.type === 'message.created' ? e.data.content : e.type));

@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { consoleLogger, createRelay, processSend, type ChannelSenderClient, type Relay, type RelayBindings } from '@logitland/relay';
 import type { Bindings } from './index';
+import { streamHub } from './stream';
 
 // One send queue per channel, so agents share Discord's per-webhook limits politely instead of failing on 429.
 // The queue lives in the Durable Object's storage and is worked off by an alarm, so it survives eviction and restarts.
@@ -143,8 +144,8 @@ export class ChannelSender extends DurableObject<Bindings> {
   constructor(ctx: DurableObjectState, env: Bindings) {
     super(ctx, env);
     let relay: Relay | undefined;
-    // The queue's own relay never needs a sender or a Gateway client: it only calls processSend.
-    this.queue = new SendQueue(ctx.storage, () => (relay ??= createRelay(env as unknown as RelayBindings, { log })));
+    // The queue's own relay never needs a sender or a Gateway client: it only calls processSend. Its status changes wake streams.
+    this.queue = new SendQueue(ctx.storage, () => (relay ??= createRelay(env as unknown as RelayBindings, { streams: streamHub(env.AGENT_STREAM), log })));
   }
 
   /** Adds a queued message to this channel's line. Returns once it is sent (idle queue) or queued behind others. */

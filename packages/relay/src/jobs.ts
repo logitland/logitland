@@ -1,13 +1,13 @@
 import type { Relay } from './context';
 import { consentSweepJob } from './services/consent';
 import { drainDue } from './services/deliveries';
-import { refanJob } from './services/events';
 import { sweepCountersJob } from './services/limits';
 import { pruneOriginsJob, purgeRawIpsJob } from './services/origins';
 import { resealJob } from './services/reseal';
 import { retentionJob } from './services/retention';
 import { reviewHeldJob } from './services/review';
 import { sweepStuckJob } from './services/sending';
+import { wakeStreams } from './services/streams';
 
 /** What a job is told about its run. Jobs that can stop early check `deadline` (Date.now() milliseconds). */
 export interface JobContext {
@@ -28,8 +28,9 @@ const JOBS: Job[] = [
   { name: 'gateway', every: 'minute', budgetMs: 10_000, run: async (relay) => (relay.gateway ? (await relay.gateway.ensure(), 1) : 0) },
   { name: 'held', every: 'minute', budgetMs: 30_000, run: (relay, ctx) => reviewHeldJob(relay, Math.max(0, ctx.deadline - Date.now())) },
   { name: 'stuck', every: 'minute', budgetMs: 15_000, run: sweepStuckJob },
-  { name: 'refan', every: 'minute', budgetMs: 20_000, run: refanJob },
   { name: 'deliveries', every: 'minute', budgetMs: 20_000, run: drainDue },
+  // WebSocket subscriptions of a minute and longer fall due without a new event to wake them.
+  { name: 'streams', every: 'minute', budgetMs: 10_000, run: async (relay) => (relay.streams ? (await wakeStreams(relay), 1) : 0) },
   { name: 'consent', every: 'minute', budgetMs: 20_000, run: (relay, ctx) => consentSweepJob(relay, ctx) },
   { name: 'retention', every: 'quarter-hour', budgetMs: 25_000, run: retentionJob },
   { name: 'raw-ips', every: 'quarter-hour', budgetMs: 10_000, run: purgeRawIpsJob },

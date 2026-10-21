@@ -357,17 +357,22 @@ CREATE TABLE events (
   message_id INTEGER,
   payload TEXT NOT NULL,
   observed_at TEXT NOT NULL,
-  -- When subscribers were told. Null until fan-out succeeds; the refan job retries those.
-  fanned_out_at TEXT,
-  -- Set on an event meant for one subscription (the gap after it is resumed): other subscriptions and GET /v1/events never see it.
-  subscription_id TEXT
+  -- For one agent only (message.status): it rides that agent's replies subscription, and no channel subscription sees it.
+  agent_id TEXT,
+  -- The agent that wrote the message (left out of its own channel subscriptions unless include_own), and the agent whose
+  -- message it replies to (whose replies subscription gets it).
+  author_agent_id TEXT,
+  reply_agent_id TEXT,
+  -- 1: recorded but announced to nobody (a channel's history on first look).
+  silent INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX events_channel ON events(channel_id, seq);
 CREATE INDEX events_message ON events(message_id);
 CREATE INDEX events_observed ON events(observed_at);
+CREATE INDEX events_for_agent ON events(agent_id, seq) WHERE agent_id IS NOT NULL;
+CREATE INDEX events_replies ON events(reply_agent_id, seq) WHERE reply_agent_id IS NOT NULL;
 -- Events that still hold message text, so the retention job finds the old ones without scanning the blanked ones.
 CREATE INDEX events_with_text ON events(observed_at) WHERE json_extract(payload, '$.data.content') != '';
-CREATE INDEX events_unfanned ON events(observed_at) WHERE fanned_out_at IS NULL;
 -- What retention may delete once it is old. Removal events ('delete:<id>' tombstones) are kept for good: intake finds them
 -- to stop a late create from bringing back a removed message's text, and they hold no text.
 CREATE INDEX events_prunable ON events(observed_at) WHERE type != 'message.deleted';
@@ -469,14 +474,36 @@ CREATE INDEX consent_history_person ON consent_history(discord_user_id);
 
 /* ---------- Subscriptions and deliveries ---------- */
 
+-- What an agent follows (#11, #23): one channel, or the replies to its messages (which also carry its messages' statuses).
+-- Delivery is a pull from the event log: `cursor` is the last event seq the subscription was given, and `next_due_ms` is
+-- when its next digest may go (set by the events_due trigger when something arrives, cleared when it is drained).
 CREATE TABLE subscriptions (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
+  kind TEXT NOT NULL CHECK (kind IN ('channel', 'replies')),
+  channel_id TEXT,
+  frequency TEXT NOT NULL,
+  frequency_seconds INTEGER NOT NULL,
+  include_own INTEGER NOT NULL DEFAULT 0 CHECK (include_own IN (0, 1)),
+  cursor INTEGER NOT NULL,
+  next_due_ms INTEGER,
+  last_delivered_ms INTEGER,
+  -- Its channel was deleted: it delivers what is left, ending with channel.deleted, and is then removed.
+  ended_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK ((kind = 'channel') = (channel_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX subscriptions_channel ON subscriptions(agent_id, channel_id) WHERE kind = 'channel';
+CREATE UNIQUE INDEX subscriptions_replies ON subscriptions(agent_id) WHERE kind = 'replies';
+CREATE INDEX subscriptions_by_channel ON subscriptions(channel_id) WHERE kind = 'channel';
+CREATE INDEX subscriptions_due ON subscriptions(next_due_ms) WHERE next_due_ms IS NOT NULL;
+
+-- One webhook per agent (#11). The secret signs every POST (Standard Webhooks).
+CREATE TABLE agent_webhooks (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(id),
   url_ciphertext TEXT NOT NULL,
   url_host TEXT NOT NULL,
-  events TEXT NOT NULL,
-  channel_ids TEXT NOT NULL,
-  description TEXT,
   secret_ciphertext TEXT NOT NULL,
   -- After a rotation the previous secret keeps signing alongside the new one until secret_previous_until (24 hours).
   secret_previous_ciphertext TEXT,
@@ -486,30 +513,28 @@ CREATE TABLE subscriptions (
   paused_at TEXT,
   -- Consecutive failed deliveries (not attempts).
   failure_streak INTEGER NOT NULL DEFAULT 0,
-  -- When the current run of unsuccessful attempts began (cleared by a success); 24 hours of it pauses the subscription.
+  -- When the current run of unsuccessful attempts began (cleared by a success); 24 hours of it pauses the webhook.
   failing_since TEXT,
-  -- The Idempotency-Key of the request that created it and a digest of what that request asked for, so a retried create returns this subscription.
-  idempotency_key TEXT,
-  payload_digest TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX subscriptions_agent ON subscriptions(agent_id);
-CREATE INDEX subscriptions_status ON subscriptions(status);
-CREATE UNIQUE INDEX subscriptions_idempotency ON subscriptions(agent_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
-
--- Fan-out index: which active subscription wants which channel.
-CREATE TABLE subscription_channels (
-  subscription_id TEXT NOT NULL REFERENCES subscriptions(id),
-  channel_id TEXT NOT NULL,
-  PRIMARY KEY (channel_id, subscription_id)
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
--- The delivery ledger. The delivery ID is the Standard Webhooks webhook-id and stays stable across retries.
+-- Agents with a WebSocket stream open, and how many sockets it holds (the stream's Durable Object keeps this current), so
+-- events can wake the streams they concern.
+CREATE TABLE agent_streams (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+  sockets INTEGER NOT NULL CHECK (sockets > 0),
+  updated_at TEXT NOT NULL
+);
+
+-- The delivery ledger: one row per webhook POST, holding the digest it carries, so a retry sends exactly the same body.
+-- The delivery ID is the Standard Webhooks webhook-id and stays stable across retries.
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
-  subscription_id TEXT NOT NULL REFERENCES subscriptions(id),
-  event_id TEXT NOT NULL REFERENCES events(id),
-  event_type TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  subscription_id TEXT NOT NULL,
+  event_count INTEGER NOT NULL,
+  body TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'retrying', 'delivered', 'failed', 'dropped')),
   attempts INTEGER NOT NULL DEFAULT 0,
   -- Set when an admin replays an exhausted delivery to grant a few more attempts; NULL means LIMITS.deliveryMaxAttempts.
@@ -521,16 +546,41 @@ CREATE TABLE deliveries (
   last_status_code INTEGER,
   last_error TEXT,
   created_at TEXT NOT NULL,
-  delivered_at TEXT,
-  UNIQUE (subscription_id, event_id)
+  delivered_at TEXT
 );
 CREATE INDEX deliveries_due ON deliveries(status, next_attempt_at);
--- One subscription's deliveries newest first, paged by id (GET /v1/subscriptions/:id/deliveries and the dashboards).
-CREATE INDEX deliveries_subscription ON deliveries(subscription_id, id);
--- What a subscription still has waiting, so pausing, disabling or removing it doesn't walk its whole history.
-CREATE INDEX deliveries_open ON deliveries(subscription_id) WHERE status IN ('pending', 'retrying');
+-- One agent's deliveries newest first, paged by id (GET /v1/delivery/deliveries and the dashboards).
+CREATE INDEX deliveries_agent ON deliveries(agent_id, id);
+CREATE INDEX deliveries_open ON deliveries(agent_id) WHERE status IN ('pending', 'retrying');
 CREATE INDEX deliveries_created ON deliveries(created_at);
-CREATE INDEX deliveries_event ON deliveries(event_id);
+
+-- Something new for a subscription: it is due now, or once its frequency has passed since its last digest. Own posts in a
+-- channel only count with include_own; the replies subscription takes replies to the agent's messages and the events
+-- addressed to it. The time is the event's own (relay.now() when it was recorded), so tests with a fake clock agree.
+CREATE TRIGGER events_due AFTER INSERT ON events WHEN NEW.silent = 0
+BEGIN
+  UPDATE subscriptions
+  SET next_due_ms = MAX(CAST(ROUND((julianday(NEW.observed_at) - 2440587.5) * 86400000) AS INTEGER), COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000)
+  WHERE next_due_ms IS NULL AND ended_at IS NULL AND (
+    (kind = 'channel' AND channel_id = NEW.channel_id AND NEW.agent_id IS NULL AND (include_own = 1 OR NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))
+    OR (kind = 'replies' AND (agent_id = NEW.agent_id OR (agent_id = NEW.reply_agent_id AND (NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))))
+  );
+END;
+
+-- message.status (#11): the agent hears what became of its message when it is held, blocked, sent, fails, goes uncertain or
+-- is removed, whichever code path changed it. Addressed to the agent alone.
+CREATE TRIGGER relay_messages_status AFTER UPDATE OF status ON relay_messages
+WHEN NEW.status != OLD.status AND NEW.status IN ('held', 'blocked', 'sent', 'failed', 'uncertain', 'removed')
+BEGIN
+  INSERT OR IGNORE INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at, agent_id)
+  SELECT e.id, 'status:' || NEW.id || ':' || NEW.status || ':' || NEW.updated_at, 'message.status', c.guild_id, NEW.channel_id,
+    CAST(NEW.discord_message_id AS INTEGER),
+    json_object('id', e.id, 'schema_version', 1, 'type', 'message.status', 'observed_at', NEW.updated_at, 'guild_id', c.guild_id, 'channel_id', NEW.channel_id,
+      'data', json_object('id', NEW.id, 'status', NEW.status, 'policy_code', NEW.policy_code, 'reason', NEW.status_reason, 'discord_message_id', NEW.discord_message_id)),
+    NEW.updated_at, NEW.agent_id
+  -- Hex digits are all Crockford base32, so this is a valid event ID (not time-ordered; the seq orders events).
+  FROM (SELECT 'evt_' || upper(hex(randomblob(13))) AS id) e, channels c WHERE c.id = NEW.channel_id;
+END;
 
 CREATE TABLE delivery_attempts (
   delivery_id TEXT NOT NULL REFERENCES deliveries(id),

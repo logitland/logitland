@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { AgentId, CreateSubscriptionRequest, ProfileUpdate, RegistrationRequest, RelayEvent, SendMessageRequest, UserCode, newId, ulid } from './index';
+import {
+  AgentId,
+  CreateSubscriptionRequest,
+  DeliveryRequest,
+  ProfileUpdate,
+  RegistrationRequest,
+  RelayEvent,
+  SendMessageRequest,
+  UserCode,
+  newId,
+  ulid,
+} from './index';
 
 describe('ids', () => {
   it('generates valid, time-ordered ULIDs', () => {
@@ -53,16 +64,20 @@ describe('messages', () => {
 });
 
 describe('subscriptions', () => {
-  it('requires HTTPS with a domain name', () => {
-    const base = { events: ['message.created'], channel_ids: ['123456789012345678'] };
-    expect(CreateSubscriptionRequest.safeParse({ ...base, url: 'https://hooks.example.com/in' }).success).toBe(true);
-    expect(CreateSubscriptionRequest.safeParse({ ...base, url: 'http://hooks.example.com/in' }).success).toBe(false);
-    expect(CreateSubscriptionRequest.safeParse({ ...base, url: 'https://10.0.0.1/in' }).success).toBe(false);
+  it('name a channel for a channel subscription, and none for replies', () => {
+    const channel_id = '123456789012345678';
+    expect(CreateSubscriptionRequest.safeParse({ channel_id }).success).toBe(true);
+    expect(CreateSubscriptionRequest.safeParse({ kind: 'channel' }).success).toBe(false);
+    expect(CreateSubscriptionRequest.safeParse({ kind: 'replies' }).success).toBe(true);
+    expect(CreateSubscriptionRequest.safeParse({ kind: 'replies', channel_id }).success).toBe(false);
   });
+});
 
-  it('caps channels per subscription', () => {
-    const channel_ids = Array.from({ length: 21 }, (_, i) => String(123456789012345600n + BigInt(i)));
-    expect(CreateSubscriptionRequest.safeParse({ events: ['message.created'], channel_ids, url: 'https://hooks.example.com/in' }).success).toBe(false);
+describe('webhooks', () => {
+  it('require HTTPS with a domain name', () => {
+    expect(DeliveryRequest.safeParse({ url: 'https://hooks.example.com/in' }).success).toBe(true);
+    expect(DeliveryRequest.safeParse({ url: 'http://hooks.example.com/in' }).success).toBe(false);
+    expect(DeliveryRequest.safeParse({ url: 'https://10.0.0.1/in' }).success).toBe(false);
   });
 });
 

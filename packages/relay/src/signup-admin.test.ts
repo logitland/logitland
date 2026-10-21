@@ -153,12 +153,12 @@ describe('the agent registry', () => {
 describe('changing an agent’s status', () => {
   async function withActivity(h: Harness) {
     const agent = await seedAgent(h.relay, { name: 'busy' });
-    const sub = await seedSubscription(h, agent.id, 'active');
-    const waiting = await seedDelivery(h, sub, 'pending');
-    const delivered = await seedDelivery(h, sub, 'delivered');
+    const sub = await seedSubscription(h, agent.id);
+    const waiting = await seedDelivery(h, agent.id, 'pending');
+    const delivered = await seedDelivery(h, agent.id, 'delivered');
     const bystander = await seedAgent(h.relay, { name: 'bystander' });
-    const bystanderSub = await seedSubscription(h, bystander.id, 'active');
-    return { agent, sub, waiting, delivered, bystander, bystanderSub };
+    const bystanderWaiting = await seedDelivery(h, bystander.id, 'pending');
+    return { agent, sub, waiting, delivered, bystander, bystanderWaiting };
   }
   const state = async (h: Harness, table: string, id: string) =>
     (await h.db.prepare(`SELECT status FROM ${table} WHERE id = ?`).bind(id).first<{ status: string }>())!.status;
@@ -173,10 +173,10 @@ describe('changing an agent’s status', () => {
       status: 'suspended',
       status_reason: 'posting spam',
     });
-    expect(await state(h, 'subscriptions', a.sub)).toBe('active');
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM subscriptions WHERE id = ?', a.sub)).toBe(1);
     expect(await state(h, 'deliveries', a.waiting)).toBe('dropped');
     expect(await state(h, 'deliveries', a.delivered)).toBe('delivered');
-    expect(await state(h, 'subscriptions', a.bystanderSub)).toBe('active');
+    expect(await state(h, 'deliveries', a.bystanderWaiting)).toBe('pending');
     expect(await statusOf(h, a.bystander.id)).toBe('active');
     // Only its own status stays readable, so it can see why and appeal.
     expect((await h.call('GET', '/v1/channels', undefined, h.as(a.agent.token))).status).toBe(403);

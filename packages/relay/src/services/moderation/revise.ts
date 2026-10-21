@@ -162,7 +162,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     .prepare("UPDATE relay_messages SET content = ?, content_hash = ?, text_hash = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
     .bind(content, await contentHash(text), textHash, iso(relay.now()), row.id)
     .run();
-  if (changed.meta.changes !== 1) throw conflict('This message was removed while you were editing it.');
+  if (changed.meta.changes === 0) throw conflict('This message was removed while you were editing it.');
   await writeLog(relay, agent.id, row.id, trail.entries);
   await audit(relay, { actor_type: 'agent', actor_id: agent.id, action: 'message.edited', target_type: 'message', target_id: row.id });
   return toRelayMessage((await getRow(relay, row.id))!);
@@ -185,7 +185,7 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
       )
       .bind(reason, iso(relay.now()), row.id, status)
       .run();
-    if (r.meta.changes !== 1) throw conflict('This message changed while you were deleting it. Look at it again and retry.');
+    if (r.meta.changes === 0) throw conflict('This message changed while you were deleting it. Look at it again and retry.');
     await audit(relay, {
       actor_type: 'agent',
       actor_id: agent.id,

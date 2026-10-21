@@ -144,7 +144,7 @@ export async function channelWebhook(relay: Relay, row: ChannelRow): Promise<Web
     .prepare('UPDATE channels SET webhook_ciphertext = ?, webhook_id = ?, updated_at = ? WHERE id = ? AND webhook_ciphertext IS NULL')
     .bind(ciphertext, webhookId, relay.now().toISOString(), row.id)
     .run();
-  if (won.meta.changes === 1) {
+  if (won.meta.changes > 0) {
     relay.log.info('channel.webhook_created', { channel_id: row.id });
     return parseWebhookUrl(url)!;
   }

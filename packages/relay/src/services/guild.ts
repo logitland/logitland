@@ -1,4 +1,5 @@
 import { iso, type Relay, type Stmt } from '../context';
+import { commitPlan, planEvent, type PlannedEvent } from './events';
 import type { IntakeEvent } from './intake';
 
 // The server's shape as the Gateway reports it: its channels and roles (#9). Kept so the relay can work out, for any agent,
@@ -47,11 +48,36 @@ function statement(relay: Relay, e: GuildEvent, now: string): Stmt {
 export const isGuildEvent = (e: IntakeEvent): e is GuildEvent =>
   e.kind === 'channel_update' || e.kind === 'channel_hidden' || e.kind === 'channel_delete' || e.kind === 'role_update' || e.kind === 'role_delete';
 
-/** Stores the channels and roles the events describe, in order, in one batch. */
+/**
+ * Stores the channels and roles the events describe, in order, in one batch. A deleted channel's subscriptions end (#9): the
+ * channel.deleted event is the last thing they deliver.
+ */
 export async function applyGuildEvents(relay: Relay, events: GuildEvent[]): Promise<void> {
   if (!events.length) return;
   const now = iso(relay.now());
-  await relay.db.batch(events.map((e) => statement(relay, e, now)));
-  const deleted = events.filter((e) => e.kind === 'channel_delete').length;
-  if (deleted) relay.log.info('guild.channels_deleted', { count: deleted });
+  const stmts = events.map((e) => statement(relay, e, now));
+  const planned: { at: number; event: PlannedEvent }[] = [];
+  for (const e of events) {
+    if (e.kind !== 'channel_delete') continue;
+    const channel = await relay.db
+      .prepare('SELECT guild_id FROM channels WHERE id = ? AND deleted_at IS NULL')
+      .bind(e.channel_id)
+      .first<{ guild_id: string }>();
+    if (!channel) continue;
+    const event = planEvent(relay, {
+      type: 'channel.deleted',
+      guildId: channel.guild_id,
+      channelId: e.channel_id,
+      messageId: null,
+      sourceKey: `channel-deleted:${e.channel_id}`,
+      data: { channel_id: e.channel_id },
+    });
+    planned.push({ at: stmts.length, event });
+    stmts.push(
+      event.stmt,
+      relay.db.prepare("UPDATE subscriptions SET ended_at = ? WHERE kind = 'channel' AND channel_id = ? AND ended_at IS NULL").bind(now, e.channel_id),
+    );
+  }
+  await commitPlan(relay, stmts, planned);
+  if (planned.length) relay.log.info('guild.channels_deleted', { count: planned.length });
 }

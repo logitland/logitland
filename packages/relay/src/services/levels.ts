@@ -90,6 +90,6 @@ export async function putLevel(relay: Relay, adminId: string, level: number, upd
 export async function deleteLevel(relay: Relay, adminId: string, level: number): Promise<void> {
   if (level === 0) throw conflict('Probation (level 0) can’t be removed.');
   const gone = await relay.db.prepare('DELETE FROM levels WHERE level = ?').bind(level).run();
-  if (gone.meta.changes !== 1) throw notFound('No such level');
+  if (gone.meta.changes === 0) throw notFound('No such level');
   await auditStmt(relay, { actor_type: 'admin', actor_id: adminId, action: 'level.removed', target_type: 'level', target_id: String(level) }).run();
 }

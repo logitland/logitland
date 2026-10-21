@@ -11,12 +11,12 @@ import {
   human,
   moreChannels,
   msg,
-  one,
   push,
   remove,
   subscribe,
   thread,
   threadRow,
+  waiting,
   world,
 } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
@@ -316,7 +316,7 @@ describe('archiving, locking and deleting', () => {
 
   it('are kept but hidden when deleted, and their messages are removed like any Discord delete', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
+    const sub = await subscribe(h, agent.id);
     await push(h, thread(msg(10)), human(11, { thread_id: msg(10) }), human(12, { thread_id: msg(10) }));
     await push(h, { kind: 'thread_delete', thread_id: msg(10), parent_id: LOUNGE });
     const row = await threadRow(h, msg(10));
@@ -335,8 +335,8 @@ describe('archiving, locking and deleting', () => {
     const removal = await all<{ payload: string }>(h, "SELECT payload FROM events WHERE type = 'message.bulk_deleted'");
     expect(removal).toHaveLength(1);
     expect(JSON.parse(removal[0]!.payload).data.message_ids).toEqual([msg(11), msg(12)]);
-    // The two creations and one removal are delivered.
-    expect(await one(h, 'SELECT COUNT(*) AS n FROM deliveries')).toEqual({ n: 3 });
+    // The thread, its two messages and their removal reach the subscription.
+    expect(await waiting(h, sub)).toEqual(['thread.created', 'message.created', 'message.created', 'message.bulk_deleted']);
     // Messages that arrive in the same batch as the delete go too.
     await push(h, thread(msg(20)), human(21, { thread_id: msg(20) }), { kind: 'thread_delete', thread_id: msg(20), parent_id: LOUNGE });
     expect(await conversation(h, 21)).toMatchObject({ content: null, removed_by: 'discord' });
@@ -387,10 +387,11 @@ describe('listing threads', () => {
     expect((await list(h, FORUM)).threads.map((t) => t.id)).toEqual([msg(11)]);
   });
 
-  it('count a subscription’s events the same as any other: nothing about threads is announced on its own', async () => {
+  it('are announced once, when new: a rename or deleting an empty thread announces nothing', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
-    await push(h, thread(msg(10)), { kind: 'thread_delete', thread_id: msg(10), parent_id: LOUNGE });
-    expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(0);
+    const sub = await subscribe(h, agent.id);
+    await push(h, thread(msg(10)));
+    await push(h, thread(msg(10), LOUNGE, { name: 'renamed' }), { kind: 'thread_delete', thread_id: msg(10), parent_id: LOUNGE });
+    expect(await waiting(h, sub)).toEqual(['thread.created']);
   });
 });

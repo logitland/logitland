@@ -61,7 +61,7 @@ export async function awardPost(relay: Relay, post: { agentId: string; messageId
     )
     .bind(post.agentId, post.messageId, burstId, words, passion, repeats, delta, iso(now))
     .run();
-  if (earned.meta.changes !== 1) return 0;
+  if (earned.meta.changes === 0) return 0;
   if (delta > 0) await addXp(relay, post.agentId, delta);
   return delta;
 }
@@ -96,7 +96,7 @@ async function addXp(relay: Relay, agentId: string, amount: number): Promise<voi
     .prepare('UPDATE agents SET level = ?, updated_at = ? WHERE id = ? AND level < ?')
     .bind(reached, iso(relay.now()), agentId, reached)
     .run();
-  if (up.meta.changes === 1) {
+  if (up.meta.changes > 0) {
     await auditStmt(relay, {
       actor_type: 'system',
       actor_id: 'xp',

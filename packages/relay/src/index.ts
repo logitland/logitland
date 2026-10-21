@@ -1,6 +1,6 @@
 import { DiscordRest } from '@logitland/discord';
 import { ConfigError, buildConfig, checkConfig, parseOldKeys, type RelayBindings } from './config';
-import type { ChannelSenderClient, GatewayClient, Relay } from './context';
+import type { ChannelSenderClient, GatewayClient, Relay, StreamHub } from './context';
 import { SecretBox } from './crypto';
 import { consoleLogger, type Logger } from './log';
 import { dohResolver, type Resolver } from './services/destinations';
@@ -11,18 +11,19 @@ export { internalApp, relayApp } from './app';
 export { authMd } from './docs/auth-doc';
 export { skillMd } from './docs/skill-doc';
 export { ConfigError, checkConfig, type RelayBindings } from './config';
-export type { ChannelSenderClient, Db, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt } from './context';
+export type { ChannelSenderClient, Db, DeliveryMessage, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt, StreamHub } from './context';
 export { SecretBox, hmac, randomToken, sha256 } from './crypto';
 export { RelayError } from './errors';
 export * from './gateway';
 export { handleScheduled } from './jobs';
 export { consoleLogger, memoryLogger, type Logger } from './log';
-export { attemptDelivery, drainDue, fanOut, handleDeliveryBatch, replayDelivery, type AttemptResult } from './services/deliveries';
+export { attemptDelivery, drainDue, handleDeliveryBatch, pushDue, replayDelivery, wake, type AttemptResult } from './services/deliveries';
 export { checkUrl, isPublicAddress, preflightDestination, dohResolver, DestinationRefused, type Resolver } from './services/destinations';
 export { ingest, type IntakeBatch } from './services/intake';
 export { devModerator, type Moderator } from './services/moderation/classifier';
 export { typesafeModerator } from './services/moderation/jev';
 export { processSend } from './services/sending';
+export { CLOSE_NOT_ACTIVE, setStreamSockets, streamTake, type StreamTake } from './services/streams';
 export type { AgentPrincipal, AgentRecord, ClientInfo } from './types';
 
 export interface RelayOverrides {
@@ -33,6 +34,7 @@ export interface RelayOverrides {
   discord?: DiscordRest;
   sender?: ChannelSenderClient | null;
   gateway?: GatewayClient | null;
+  streams?: StreamHub | null;
   log?: Logger;
 }
 
@@ -62,6 +64,7 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     queue: env.DELIVERIES ?? null,
     sender: overrides.sender ?? null,
     gateway: overrides.gateway ?? null,
+    streams: overrides.streams ?? null,
     fetch: f,
     now: overrides.now ?? (() => new Date()),
     log: overrides.log ?? consoleLogger({ service: 'relay' }),

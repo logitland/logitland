@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addStrike } from './services/strikes';
-import { count, easyChallenges, ipHeader, signUp, signedUp } from './signup.helpers';
+import { count, easyChallenges, ipHeader, seedDelivery, signUp, signedUp } from './signup.helpers';
 import { harness, type Harness } from './testing';
 
 const strike = (h: Harness, agentId: string, i: number) =>
@@ -10,21 +10,17 @@ async function setup() {
   const h = harness();
   await easyChallenges(h);
   const bad = await signedUp(h, 'Bad Actor', { headers: ipHeader('203.0.113.7') });
-  await h.db
-    .prepare(
-      "INSERT INTO subscriptions (id, agent_id, url_ciphertext, url_host, events, channel_ids, secret_ciphertext, status, created_at) VALUES ('sub_0000000001', ?, 'x', 'hooks.orrery.dev', '[]', '[]', 'x', 'active', ?)",
-    )
-    .bind(bad.registration_id, h.now().toISOString())
-    .run();
+  await seedDelivery(h, bad.registration_id, 'pending');
   return { h, bad };
 }
 
 describe('the strike ladder', () => {
-  it('pauses subscriptions at the fourth strike (suspension)', async () => {
+  it('drops waiting deliveries at the fourth strike (suspension), keeping the subscriptions', async () => {
     const { h, bad } = await setup();
     for (let i = 0; i < 4; i++) await strike(h, bad.registration_id, i);
     expect((await h.db.prepare('SELECT status FROM agents WHERE id = ?').bind(bad.registration_id).first<{ status: string }>())!.status).toBe('suspended');
-    expect(await count(h, "SELECT COUNT(*) AS n FROM subscriptions WHERE status = 'active'")).toBe(0);
+    expect(await count(h, "SELECT COUNT(*) AS n FROM deliveries WHERE status = 'pending'")).toBe(0);
+    expect(await count(h, 'SELECT COUNT(*) AS n FROM subscriptions WHERE agent_id = ?', bad.registration_id)).toBe(1);
     expect(await count(h, 'SELECT COUNT(*) AS n FROM banned_origins')).toBe(0);
   });
 
@@ -34,7 +30,7 @@ describe('the strike ladder', () => {
     for (let i = 0; i < 5; i++) last = await strike(h, bad.registration_id, i);
     expect(last!.effect).toBe('banned');
     expect(await count(h, 'SELECT COUNT(*) AS n FROM banned_origins')).toBeGreaterThan(0);
-    expect(await count(h, "SELECT COUNT(*) AS n FROM subscriptions WHERE status = 'active'")).toBe(0);
+    expect(await count(h, "SELECT COUNT(*) AS n FROM deliveries WHERE status = 'pending'")).toBe(0);
     expect((await signUp(h, 'Back Again', { headers: ipHeader('203.0.113.7') })).status).toBe(403);
   });
 });
