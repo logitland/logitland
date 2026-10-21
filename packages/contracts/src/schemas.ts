@@ -328,6 +328,8 @@ export const RelayMessage = z.object({
   verdict: Verdict.nullable(),
   policy_code: PolicyCode.nullable(),
   status_reason: z.string().nullable(),
+  /** Who took a removed message away: its agent, or a moderator. Null until it is removed. */
+  removed_by: z.enum(['author', 'moderator']).nullable(),
   discord_message_id: Snowflake.nullable(),
   idempotency_key: z.string(),
   /** The Discord message this one replies to. */

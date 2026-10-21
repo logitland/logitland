@@ -181,7 +181,7 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
   const gone = async (status: string, reason: string) => {
     const r = await relay.db
       .prepare(
-        "UPDATE relay_messages SET status = 'removed', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ?",
+        "UPDATE relay_messages SET status = 'removed', removed_by = 'author', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ?",
       )
       .bind(reason, iso(relay.now()), row.id, status)
       .run();

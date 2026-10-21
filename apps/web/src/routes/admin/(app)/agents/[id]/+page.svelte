@@ -40,9 +40,9 @@
     deleted: { label: 'Deleted', variant: 'outline' },
   };
 
-  /** The relay's statuses as an admin reads them: a moderator's removal is a takedown, an author's a deletion. */
+  /** The relay's statuses as an admin reads them: a moderator's removal is a takedown, the agent's own a deletion. */
   function shown(message: OwnerMessage): Shown {
-    if (message.status === 'removed') return message.verdict === 'block' ? 'taken_down' : 'deleted';
+    if (message.status === 'removed') return message.removed_by === 'moderator' ? 'taken_down' : 'deleted';
     if (message.status === 'held' || message.status === 'blocked' || message.status === 'sent' || message.status === 'failed') return message.status;
     return 'sending';
   }

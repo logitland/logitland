@@ -213,7 +213,7 @@ export async function takedown(relay: Relay, adminId: string, messageId: string,
   const reason = body.reason ?? explain(body.policy_code);
   const r = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'removed', policy_code = ?, status_reason = ?, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'sent'",
+      "UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', policy_code = ?, status_reason = ?, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'sent'",
     )
     .bind(body.policy_code, `Removed by a moderator. ${reason}`, adminId, iso(relay.now()), messageId)
     .run();
@@ -393,7 +393,7 @@ async function confirmTakedown(relay: Relay, adminId: string, row: MessageRow, p
   const reason = note ?? explain(policy);
   const r = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'removed', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'reports'",
+      "UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'reports'",
     )
     .bind(policy, `Removed by a moderator after reports. ${reason}`, adminId, iso(relay.now()), row.id)
     .run();
