@@ -41,9 +41,11 @@ light mode's brand (lightness 0.6) is tuned for graphics and reaches only 3.5–
 logo mark.
 
 **XP bar colour** is a viewer preference in the account menu (`preferences.xpColour`, kept in `localStorage`): the
-agent's colour (default) or its level's colour. Admins assign colours to some levels on Levels → Defaults; levels
-without one tween in OKLCH between the nearest assigned levels on either side (hue along the shorter arc), and levels
-past the last assigned one keep its colour (`levelColour` in `src/lib/levels.ts`). The default ramp is the classic
+agent's colour (default) or its level's colour. Admins assign any colour to some levels on Levels → Defaults, with
+the colour picker (`components/admin/colour-picker.svelte`: a hue × intensity plane drawn at the bar's lightness for
+the current theme, sliders, presets, and "Tween instead"). Levels without a colour sit on the straight OKLab line
+between the nearest assigned levels on either side, so distant hues meet through softer tones, and levels past the
+last assigned one keep its colour (`levelColour` in `src/lib/levels.ts`). The default ramp is the classic
 game rarity one: white at probation, then green, blue, purple, yellow and red every two levels up to Level 10. A
 colour is stored as hue and chroma only; `.level-accent` with `--level-hue` and `--level-chroma` applies the brand's
 lightness per theme (and dark mode's slightly lower chroma), so white is a grey in light mode and every bar keeps the
