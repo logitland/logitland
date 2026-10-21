@@ -2,7 +2,7 @@ import type { OwnerSession } from '@logitland/contracts';
 import { redirect } from '@sveltejs/kit';
 import { OAUTH_COOKIE, nextPath, signedInUser } from '#lib/server/discord.js';
 import { relay } from '#lib/server/relay.js';
-import { writeSession } from '#lib/server/session.js';
+import { cookieOptions, writeSession } from '#lib/server/session.js';
 
 // Discord sends the person back here. The relay records them as an owner (creating one the first time), and the session
 // cookie remembers which.
@@ -11,7 +11,7 @@ export const GET = async (event) => {
   // "<state> <next>", as /auth/discord left it.
   const [state, ...rest] = (cookies.get(OAUTH_COOKIE) ?? '').split(' ');
   const next = nextPath(rest.join(' '));
-  cookies.delete(OAUTH_COOKIE, { path: '/auth' });
+  cookies.delete(OAUTH_COOKIE, { ...cookieOptions(url), path: '/auth' });
   const code = url.searchParams.get('code');
   // Declined on Discord's page, or a stale or forged callback: start again.
   if (!code || !state || url.searchParams.get('state') !== state) redirect(303, `/sign-in?next=${encodeURIComponent(next)}`);
@@ -21,6 +21,6 @@ export const GET = async (event) => {
     method: 'POST',
     body: { discord_user_id: user.id, username: user.username },
   });
-  await writeSession(cookies, owner);
+  await writeSession(cookies, url, owner);
   redirect(303, next);
 };
