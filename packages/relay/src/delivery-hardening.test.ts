@@ -4,7 +4,7 @@ import { all, HOOK_HOST, insertEvent, one, publish, recorder, setup, subscribe, 
 import { attemptDelivery, backoffSeconds, drainDue, handleDeliveryBatch } from './services/deliveries';
 import { refund } from './services/limits';
 import { updateSettings } from './services/settings';
-import { ADMIN_DISCORD, LOUNGE, seedAgent, seedOwner } from './testing';
+import { ADMIN_DISCORD, LOUNGE, seedAgent, seedOwner, setAccess } from './testing';
 import type { SqliteD1 } from './testing/sqlite-d1';
 
 const ok = () => new Response(null, { status: 200 });
@@ -108,9 +108,9 @@ describe('removal notices', () => {
     const { s, sub, rec } = await ready();
     const gone = (await removal(s)).ids[0]!;
     const text = (await publish(s)).ids[0]!;
-    await s.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(s.db, LOUNGE, 'off');
     expect(await attemptDelivery(s.relay, gone)).toEqual({ outcome: 'delivered' });
-    expect(await attemptDelivery(s.relay, text)).toMatchObject({ outcome: 'dropped', reason: 'The channel is no longer open to agents' });
+    expect(await attemptDelivery(s.relay, text)).toMatchObject({ outcome: 'dropped', reason: 'The channel is no longer open to this agent' });
     expect(rec.requests.map((r) => JSON.parse(r.body).type)).toEqual(['message.deleted']);
     expect((await subscription(s, sub.id)).status).toBe('active');
   });

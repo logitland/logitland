@@ -12,7 +12,7 @@ import {
 } from './gateway';
 import { snowflakeTime } from './services/events';
 import { AGENT_POST, NEWS, all, at, conversation, moreChannels, msg, one, subscribe, world } from './intake-fixtures';
-import { BENCH, FORUM, GUILD as GUILD_ID, LOUNGE, type Harness } from './testing';
+import { BENCH, FORUM, GUILD as GUILD_ID, LOUNGE, setAccess, type Harness } from './testing';
 
 // WebCrypto answers on the thread pool, so the work behind a dispatch takes a few turns of the event loop.
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
@@ -168,7 +168,7 @@ describe('connecting and recording', () => {
     const g = service(h, clock);
     await g.svc.ensure();
     // A channel with no cursor is looked at once, so the mirror isn't empty.
-    expect(calls).toEqual(['GET /gateway/bot', `GET /channels/${LOUNGE}/messages?limit=100`]);
+    await vi.waitFor(() => expect(calls).toEqual(['GET /gateway/bot', `GET /channels/${LOUNGE}/messages?limit=100`]));
     expect(g.last().url).toBe('wss://gateway.discord.gg/?v=10&encoding=json');
     expect((await g.state())!.status).toBe('connecting');
 
@@ -372,7 +372,8 @@ describe('a lost session', () => {
     const prepare = h.db.prepare.bind(h.db);
     let failures = 1;
     h.db.prepare = (sql: string) => {
-      if (failures > 0 && sql === "SELECT id FROM channels WHERE agent_access != 'off'") {
+      // The open-channel lookup (openChannelIds) the gap starts with.
+      if (failures > 0 && sql === 'SELECT * FROM channels WHERE deleted_at IS NULL ORDER BY name, id') {
         failures--;
         throw new Error('D1 hiccup');
       }
@@ -678,7 +679,7 @@ describe('threads that were already there when their channel was relayed', () =>
     await clock.advance(500);
     expect(await one(h, 'SELECT 1 AS found FROM threads WHERE id = ?', THREAD)).toBeNull();
 
-    await h.db.prepare("UPDATE channels SET agent_access = 'post' WHERE id = ?").bind(BENCH).run();
+    await setAccess(h.db, BENCH, 'post');
     await clock.advance(SEED_CHECK_MS + 1_000);
     await g.svc.ensure();
     await settle();
@@ -796,7 +797,7 @@ describe('when writing fails', () => {
 describe('a channel new to the relay', () => {
   it('has its latest page fetched once, and kept for readers without being announced', async () => {
     const { h } = await world();
-    await h.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'off');
     const clock = clockFor(h);
     const calls = discord(h, {
       messages: (_channel, after) =>
@@ -813,7 +814,7 @@ describe('a channel new to the relay', () => {
     expect(calls.filter((c) => c.includes('/messages'))).toEqual([]);
 
     // An admin opens the channel; the first ensure (cron, or the alarm) after SEED_CHECK_MS looks at it.
-    await h.db.prepare("UPDATE channels SET agent_access = 'read_only' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'read_only');
     await g.svc.ensure();
     await settle();
     expect(calls.filter((c) => c.includes('/messages'))).toEqual([]);
@@ -834,7 +835,7 @@ describe('a channel new to the relay', () => {
   it('looks at every new channel, with a few REST calls', async () => {
     const { h } = await world();
     await moreChannels(h);
-    await h.db.prepare("UPDATE channels SET type = 'text', agent_access = 'read_only' WHERE id != ?").bind(BENCH).run();
+    await h.db.prepare("UPDATE channels SET type = 'text' WHERE id != ?").bind(BENCH).run();
     const clock = clockFor(h);
     const calls = discord(h);
     const g = service(h, clock);
@@ -857,17 +858,9 @@ describe('a channel that changes in Discord', () => {
     await clock.advance(500);
     expect(await one(h, 'SELECT name, type FROM channels WHERE id = ?', LOUNGE)).toEqual({ name: 'common-room', type: 'text' });
 
-    g.dispatch('GUILD_CREATE', 3, {
-      id: GUILD_ID,
-      channels: [
-        { id: LOUNGE, guild_id: GUILD_ID, name: 'lounge-again', type: 5 },
-        { id: BENCH, guild_id: GUILD_ID, name: 'not relayed', type: 0 },
-      ],
-      threads: [],
-    });
+    g.dispatch('GUILD_CREATE', 3, { id: GUILD_ID, channels: [{ id: LOUNGE, guild_id: GUILD_ID, name: 'lounge-again', type: 5 }], threads: [] });
     await clock.advance(500);
     expect(await one(h, 'SELECT name, type FROM channels WHERE id = ?', LOUNGE)).toEqual({ name: 'lounge-again', type: 'announcement' });
-    expect(await one(h, 'SELECT name FROM channels WHERE id = ?', BENCH)).toEqual({ name: 'bench' });
   });
 });
 

@@ -270,6 +270,31 @@ export class World {
     return c;
   }
 
+  /** Changes a channel's overwrites, slowmode or flags, as an admin would in Discord, and announces CHANNEL_UPDATE. */
+  updateChannel(id: string, patch: { overwrites?: NewChannel['overwrites']; slowmode?: number; flags?: number; name?: string }): Channel {
+    const channel = this.channel(id);
+    if (patch.overwrites)
+      channel.permission_overwrites = patch.overwrites.map((o) => ({
+        id: o.id,
+        type: o.type === 'member' ? 1 : 0,
+        allow: String(o.allow ?? 0n),
+        deny: String(o.deny ?? 0n),
+      }));
+    if (patch.slowmode !== undefined) channel.rate_limit_per_user = patch.slowmode;
+    if (patch.flags !== undefined) channel.flags = patch.flags;
+    if (patch.name !== undefined) channel.name = patch.name;
+    this.emit(channel.guild_id!, 'CHANNEL_UPDATE', { ...channel });
+    return channel;
+  }
+
+  /** Deletes a channel and announces CHANNEL_DELETE. */
+  deleteChannel(id: string): void {
+    const channel = this.channel(id);
+    this.channels.delete(id);
+    this.guild(channel.guild_id!).channelIds.delete(id);
+    this.emit(channel.guild_id!, 'CHANNEL_DELETE', { ...channel });
+  }
+
   addWebhook(channelId: string, w: { id?: string; token?: string; name?: string } = {}): Webhook {
     const channel = this.channel(channelId);
     const webhook: Webhook = {

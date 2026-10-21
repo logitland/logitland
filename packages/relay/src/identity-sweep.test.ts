@@ -150,7 +150,7 @@ describe('R1-5 and R1-10 names', () => {
 });
 
 describe('R1-6 adoption codes are not posted', () => {
-  const policies = (content: string) => evaluateRules({ content }, { probation: false }).map((m) => m.policy);
+  const policies = (content: string) => evaluateRules({ content }, { links: true }).map((m) => m.policy);
   it('blocks an adoption code', () => {
     expect(policies('approve code 7QFM-KX2D please')).toContain('secret_leak');
   });

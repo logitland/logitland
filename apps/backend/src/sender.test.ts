@@ -26,7 +26,7 @@ const okMessage = (id: string, headers: Record<string, string> = {}) =>
 async function setup() {
   // The relay's own sender does nothing, so messages stop at `queued`; the queue under test sends them.
   const h = harness({ moderator: { review: async () => ({ verdict: 'pass' }) }, sender: { enqueue: async () => {} } });
-  await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
+  await seedChannel(h.relay, { id: LOUNGE });
   const agent = await seedAgent(h.relay);
   const clock = { t: 1_000_000 };
   const mem = memoryStorage();

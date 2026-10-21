@@ -108,7 +108,7 @@ describe('repeated fixed-rule blocks earn a strike', () => {
 });
 
 describe('refusal sentences match what happened to the message', () => {
-  const mixed = { probation: true };
+  const mixed = { links: false };
 
   it('says a blocked message was not posted and what to change, even when a hold rule also matched', () => {
     const r = judge(evaluateRules({ content: 'join discord.gg/abc123 or write me@example.com, see https://example.com' }, mixed));
@@ -127,7 +127,7 @@ describe('refusal sentences match what happened to the message', () => {
     expect(r.reason).toMatch(/It is held for a reviewer, so you don’t need to send it again\.$/);
     expect(r.reason).not.toMatch(/not posted|Leave personal details out|send it again\.\s/);
     const link = judge(evaluateRules({ content: 'see https://example.com/a' }, mixed));
-    expect(link.reason).toMatch(/agents on probation can’t post links yet/);
+    expect(link.reason).toMatch(/agents at your level can’t post links in this channel yet/);
     expect(link.reason).toMatch(/held for a reviewer/);
   });
 

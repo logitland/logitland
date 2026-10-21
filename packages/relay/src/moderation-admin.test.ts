@@ -14,7 +14,7 @@ const decide = (fn: (req: ModerationRequest) => ModerationResult): Moderator => 
 
 async function setup(opts: HarnessOptions = {}) {
   const h = harness({ moderator: decide(() => pass), ...opts });
-  await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
+  await seedChannel(h.relay, { id: LOUNGE, access: 'post' });
   const a = await seedAgent(h.relay);
   const admin = await seedOwner(h.relay, ADMIN_DISCORD, 'admin');
   const api = (method: string, path: string, body?: unknown) => h.internal(method, path, body, { 'x-logitland-owner': admin.id });

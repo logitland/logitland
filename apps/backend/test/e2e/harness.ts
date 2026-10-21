@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SecretBox } from '@logitland/relay';
-import { DEV, DiscordFake, seedDevCommunity, type FakeOptions, type SeededCommunity } from '../../../../packages/discord-fake/src/index.ts';
+import { DEV, DiscordFake, seedDevCommunity, type FakeOptions, type SeededCommunity, type Webhook } from '../../../../packages/discord-fake/src/index.ts';
 import { outbound, type Outbound } from './outbound.ts';
 
 /** Set by vitest.e2e.config.ts, so `pnpm test` (which also finds these files) skips them. */
@@ -47,7 +47,6 @@ export interface Stack {
   outbound: Outbound;
   /** The fake's channel IDs, by name. */
   channels: { lounge: string; forum: string; media: string; announcements: string };
-  secretKey: string;
   internalToken: string;
   /** A request to the Worker's public entrypoint: `body` is sent as JSON, `form` form-encoded (as /oauth2/token takes it). */
   call(
@@ -61,9 +60,13 @@ export interface Stack {
   adminOwner(): Promise<string>;
   /** What cron does every minute. */
   cron(): Promise<Reply<string>>;
+  /** Cron wakes the Gateway; resolves once it is connected and the relay has stored the server's channels and roles. */
+  connect(): Promise<void>;
   /** Everything the Worker logged, as `message` lines. */
   logs: string[];
   sql<T = Record<string, unknown>>(query: string, ...binds: unknown[]): Promise<T[]>;
+  /** The webhook the relay made in a channel and posts through, as the fake Discord holds it. */
+  relayWebhook(channelId: string): Promise<Webhook | undefined>;
   /** Registers an agent the way auth.md describes (challenge, proof of work, registration, token exchange) from `ip`. */
   register(name: string, ip: string): Promise<Agent>;
   dispose(): Promise<void>;
@@ -80,8 +83,11 @@ export interface StackOptions {
   /** Extra or replacement bindings (RELAY_SECRET_KEY, INTERNAL_TOKEN and DISCORD_BOT_TOKEN are bound as secrets). A value of null removes a default. */
   env?: Record<string, string | null>;
   fake?: FakeOptions;
-  /** Seed the relay's channels with webhooks the fake knows, and lift probation's post and read limits (default true). */
-  channels?: boolean;
+  /**
+   * Do what an admin does before agents arrive (default true): map the community's agents role to `@agents`, so its channel
+   * overwrites decide what agents may do, and lift probation's post and read limits. The admin has also agreed through /consent.
+   */
+  ready?: boolean;
   /** Apply the migrations (default true). */
   migrate?: boolean;
 }
@@ -219,41 +225,14 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     }
 
     const channels = { lounge: DEV.channels.lounge, forum: DEV.channels.labBench, media: DEV.channels.showAndTell, announcements: DEV.channels.announcements };
-    if (options.channels !== false && options.migrate !== false) {
-      const box = new SecretBox({ id: 'k1', key: secretKey });
-      const now = new Date().toISOString();
+    const ready = options.ready !== false && options.migrate !== false;
+    if (ready) {
       // The community's admin agreed through /consent before the suite starts, so their replies to agents are relayed.
       // The visitor has not: nothing they write reaches agents until a scenario has them agree.
       await db
         .prepare("INSERT INTO consents (discord_user_id, guild_id, method, notice_version, granted_at) VALUES (?, ?, 'command', 'e2e', ?)")
         .bind(community.adminId, community.guildId, new Date(Date.now() - 3_600_000).toISOString())
         .run();
-      const rows = [
-        { key: 'lounge', type: 'text', access: 'post' },
-        { key: 'labBench', type: 'forum', access: 'post_new_threads' },
-        { key: 'showAndTell', type: 'media', access: 'post_new_threads' },
-        { key: 'announcements', type: 'announcement', access: 'read_only' },
-      ] as const;
-      for (const r of rows) {
-        const c = community.channels.find((x) => x.key === r.key)!;
-        await db
-          .prepare(
-            'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          )
-          .bind(
-            c.id,
-            community.guildId,
-            c.name,
-            r.type,
-            r.access,
-            60,
-            await box.seal(c.webhook.url, `channels.webhook:${c.id}`),
-            c.webhook.id,
-            JSON.stringify((fake.world.channel(c.id).available_tags ?? []).map((t) => ({ id: t.id, name: t.name, moderated: t.moderated }))),
-            now,
-          )
-          .run();
-      }
     }
 
     fake.application.interactions_endpoint_url = `${base}/v1/discord/interactions`;
@@ -287,6 +266,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       (admin ??= (await dashboard('POST', '/internal/owners', { body: { discord_user_id: community.adminId, username: 'luna-admin' } })).body.owner
         .id as string);
     let restarts = 0;
+    const cron = () => call('GET', '/cdn-cgi/handler/scheduled?cron=*+*+*+*+*') as Promise<Reply<string>>;
 
     const call: Stack['call'] = async (method, path, opts = {}) => {
       const headers: Record<string, string> = { ...opts.headers };
@@ -296,10 +276,13 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       return parse(await fetch(`${base}${path}`, { method, headers, body }));
     };
 
-    if (options.channels !== false && options.migrate !== false) {
+    if (ready) {
+      const owner = await adminOwner();
+      // The relay learns the server's channels and roles from the Gateway once a scenario connects it; the mapping is all it keeps.
+      const mapped = await dashboard('PATCH', '/internal/admin/settings', { owner, body: { agents_role_id: community.agentsRoleId } });
+      if (mapped.status !== 200) throw new Error(`Mapping @agents failed (${mapped.status}): ${JSON.stringify(mapped.body)}`);
       // Every agent starts on probation, whose placeholder limits (a couple of posts and ten reads a minute) the suite's
       // polling would use up at once. An admin raises them, as they would for a busy server; probation's rules stay.
-      const owner = await adminOwner();
       const levels = (await dashboard('GET', '/internal/admin/levels', { owner })).body.levels as { level: number; limits: Record<string, unknown> }[];
       const { level, ...probation } = levels.find((l) => l.level === 0)!;
       const roomy = { posts_per_minute: 1000, posts_per_day: 100_000, subscriptions: 10, reads_per_minute: 10_000 };
@@ -314,7 +297,6 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       db,
       outbound: out,
       channels,
-      secretKey,
       internalToken,
       call,
       dashboard,
@@ -330,7 +312,15 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
         env = await fresh.getBindings<Env>();
       },
       adminOwner,
-      cron: () => call('GET', '/cdn-cgi/handler/scheduled?cron=*+*+*+*+*') as Promise<Reply<string>>,
+      cron,
+      async connect() {
+        await cron();
+        const row = () => db.prepare("SELECT status FROM intake_state WHERE source = 'gateway'").first<{ status: string }>();
+        await eventually(async () => (await row())?.status === 'connected', { what: 'the Gateway to connect' });
+        // READY comes first; the channels and roles arrive with GUILD_CREATE right after it.
+        const known = () => db.prepare('SELECT COUNT(*) AS n FROM channels').first<{ n: number }>();
+        await eventually(async () => (await known())!.n >= Object.keys(channels).length, { what: 'the relay to learn the server’s channels' });
+      },
       async sql(query, ...binds) {
         return (
           await db
@@ -338,6 +328,10 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
             .bind(...binds)
             .all()
         ).results as never;
+      },
+      async relayWebhook(channelId) {
+        const row = await db.prepare('SELECT webhook_id FROM channels WHERE id = ?').bind(channelId).first<{ webhook_id: string | null }>();
+        return row?.webhook_id ? fake.world.webhooks.get(row.webhook_id) : undefined;
       },
       async register(name, ip) {
         const headers = { 'cf-connecting-ip': ip };

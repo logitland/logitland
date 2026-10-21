@@ -235,18 +235,52 @@ describe('replies', () => {
 describe('channel updates', () => {
   const channel = (over: Record<string, unknown> = {}) => ({ id: LOUNGE, guild_id: GUILD, name: 'lounge', type: 0, ...over });
 
-  it('carry the name and type of the channels the relay can use', () => {
+  it('carry the name, type, category, overwrites and slowmode of the channels the relay can use', () => {
+    const overwrites = [{ id: GUILD, type: 0, allow: '0', deny: '1024' }];
     for (const [type, name] of [
       [0, 'text'],
       [5, 'announcement'],
       [15, 'forum'],
       [16, 'media'],
     ] as const)
-      expect(normalizeDispatch('CHANNEL_UPDATE', channel({ type }), ctx())).toEqual([
-        { kind: 'channel_update', channel_id: LOUNGE, name: 'lounge', type: name },
+      expect(
+        normalizeDispatch(
+          'CHANNEL_UPDATE',
+          channel({ type, parent_id: '110000000000000030', permission_overwrites: overwrites, rate_limit_per_user: 30 }),
+          ctx(),
+        ),
+      ).toEqual([
+        {
+          kind: 'channel_update',
+          channel_id: LOUNGE,
+          guild_id: GUILD,
+          parent_id: '110000000000000030',
+          name: 'lounge',
+          type: name,
+          overwrites,
+          slowmode_seconds: 30,
+        },
       ]);
     expect(normalizeDispatch('CHANNEL_UPDATE', channel({ type: 2 }), ctx())).toEqual([]);
     expect(normalizeDispatch('CHANNEL_UPDATE', channel({ guild_id: '199999999999999999' }), ctx())).toEqual([]);
+  });
+
+  it('mark a channel Discord obfuscates as hidden, without taking its stand-in name, until an update without the flag', () => {
+    const OBFUSCATED = 1 << 17;
+    expect(normalizeDispatch('CHANNEL_UPDATE', channel({ name: 'xxxxxxx', flags: OBFUSCATED }), ctx())).toEqual([
+      { kind: 'channel_hidden', channel_id: LOUNGE, guild_id: GUILD, type: 'text' },
+    ]);
+    expect(normalizeDispatch('CHANNEL_UPDATE', channel({ flags: 0 }), ctx())).toMatchObject([{ kind: 'channel_update', name: 'lounge' }]);
+  });
+
+  it('turn deletions and role changes into events', () => {
+    const role = { id: '130000000000000001', name: 'agents', permissions: '1024', position: 2 };
+    const roleEvent = { kind: 'role_update', role_id: role.id, guild_id: GUILD, name: 'agents', permissions: '1024', position: 2 };
+    expect(normalizeDispatch('CHANNEL_DELETE', channel(), ctx())).toEqual([{ kind: 'channel_delete', channel_id: LOUNGE }]);
+    expect(normalizeDispatch('GUILD_ROLE_UPDATE', { guild_id: GUILD, role }, ctx())).toEqual([roleEvent]);
+    expect(normalizeDispatch('GUILD_ROLE_DELETE', { guild_id: GUILD, role_id: role.id }, ctx())).toEqual([{ kind: 'role_delete', role_id: role.id }]);
+    expect(normalizeDispatch('GUILD_CREATE', { id: GUILD, roles: [role], channels: [], threads: [] }, ctx())[0]).toEqual(roleEvent);
+    expect(normalizeDispatch('GUILD_ROLE_UPDATE', { guild_id: '199999999999999999', role }, ctx())).toEqual([]);
   });
 
   it('carry a forum’s tags', () => {

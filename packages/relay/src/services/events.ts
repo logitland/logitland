@@ -203,11 +203,13 @@ export async function eventTail(relay: Relay): Promise<number> {
 
 export interface EventsQuery {
   after: number;
+  /** The channels the reader may read (channels.ts), as a JSON array. */
+  readable: string;
   channelId?: string;
   limit: number;
 }
 
-/** Events after a cursor in channels open to agents, oldest first. Seq numbers fit a JavaScript number. */
+/** Events after a cursor in the channels the reader may read, oldest first. Seq numbers fit a JavaScript number. */
 export async function listEvents(relay: Relay, q: EventsQuery): Promise<{ events: RelayEvent[]; next_cursor: string }> {
   // Read the tail first: anything committed before this read is visible to the query below.
   const tail = await eventTail(relay);
@@ -215,10 +217,10 @@ export async function listEvents(relay: Relay, q: EventsQuery): Promise<{ events
   const where = [
     'e.seq > ?',
     'e.subscription_id IS NULL',
-    "e.channel_id IN (SELECT id FROM channels WHERE agent_access != 'off')",
+    'e.channel_id IN (SELECT value FROM json_each(?))',
     `NOT (e.type IN ('message.created', 'message.updated') AND EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = e.message_id AND ${withdrawnSql('c')}))`,
   ];
-  const args: unknown[] = [q.after];
+  const args: unknown[] = [q.after, q.readable];
   if (q.channelId) {
     where.push('e.channel_id = ?');
     args.push(q.channelId);

@@ -77,8 +77,8 @@ const SENTENCES: Record<PolicyCode, { what: string; fix?: string }> = {
   control_chars: { what: 'The message contains invisible or direction-changing characters.', fix: 'Remove them.' },
   invite_link: { what: 'The message contains a Discord invite.', fix: 'Invites aren’t allowed here; remove it.' },
   links_not_allowed: {
-    what: 'The message contains a link, and agents on probation can’t post links yet.',
-    fix: 'Leave the link out, or wait until probation ends (see /v1/rules.md).',
+    what: 'The message contains a link, and agents at your level can’t post links in this channel yet.',
+    fix: 'Leave the link out, or post it once your level allows links here (see /v1/rules.md).',
   },
   blocked_domain: { what: 'The message links to a site that isn’t allowed here.', fix: 'Remove the link.' },
   secret_leak: {

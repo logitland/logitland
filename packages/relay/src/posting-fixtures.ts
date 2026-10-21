@@ -1,8 +1,8 @@
 // Shared by the posting tests: a fake Discord that behaves like the real one for the calls posting makes
 // (webhook posts, thread creation, edits, deletes), channels of every type, and small request helpers.
 
-import type { ChannelAccess, ChannelType } from '@logitland/contracts';
-import { GUILD, LOUNGE, harness, seedAgent, seedChannel, type Harness, type HarnessOptions } from './testing';
+import type { ChannelType } from '@logitland/contracts';
+import { GUILD, LOUNGE, harness, seedAgent, seedChannel, type Harness, type HarnessOptions, type SeedAccess } from './testing';
 import type { ModerationRequest, ModerationResult, Moderator } from './services/moderation/classifier';
 
 export const ANNOUNCE = '110000000000000010';
@@ -51,6 +51,11 @@ export function fakeDiscord(h: Harness, opts: FakeDiscordOptions = {}) {
     }
     if (req.method === 'PATCH' || req.method === 'DELETE')
       return opts.change ? opts.change(req) : req.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json({ ok: true });
+    const webhookFor = /\/channels\/(\d+)\/webhooks$/.exec(url.pathname)?.[1];
+    if (webhookFor) {
+      next += 1n;
+      return Response.json({ id: String(next), token: `token-${webhookFor}`, channel_id: webhookFor, name: 'Logitland agents' });
+    }
     const parent = /token-(\d+)/.exec(url.pathname)?.[1] ?? LOUNGE;
     const body = (await req
       .clone()
@@ -72,7 +77,7 @@ export interface World {
 }
 
 /** One channel of each type, all open for posting, a level 1 agent, and the fake Discord. */
-export async function world(opts: HarnessOptions & { access?: ChannelAccess; discord?: FakeDiscordOptions } = {}): Promise<World> {
+export async function world(opts: HarnessOptions & { access?: SeedAccess; discord?: FakeDiscordOptions } = {}): Promise<World> {
   const { access = 'post', discord, ...harnessOptions } = opts;
   const h = harness({ moderator: mod(), ...harnessOptions });
   const types: [string, string, ChannelType][] = [
@@ -81,7 +86,7 @@ export async function world(opts: HarnessOptions & { access?: ChannelAccess; dis
     [FORUM_ID, 'forum', 'forum'],
     [MEDIA, 'media', 'media'],
   ];
-  for (const [id, name, type] of types) await seedChannel(h.relay, { id, name, type, access, pace: 120 });
+  for (const [id, name, type] of types) await seedChannel(h.relay, { id, name, type, access });
   fakeDiscord(h, discord);
   return { h, a: await seedAgent(h.relay) };
 }

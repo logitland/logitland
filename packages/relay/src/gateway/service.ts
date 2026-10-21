@@ -1,5 +1,6 @@
 import { DiscordError } from '@logitland/discord';
 import { iso, type Relay } from '../context';
+import { openChannelIds } from '../services/channels';
 import { MAX_PARAMS, chunk, placeholders } from '../services/events';
 import { ingest, recordGap, saveIntakeState, type IntakeEventInput } from '../services/intake';
 import { backfill, seedHistory } from './backfill';
@@ -350,8 +351,8 @@ export class GatewayService {
     if (!dropped.length) return;
     const channels = new Set(this.lost?.channels);
     for (const { event } of dropped) {
-      if ('parent_id' in event) channels.add(event.parent_id);
-      else if ('channel_id' in event) channels.add(event.channel_id);
+      if (event.kind === 'thread_upsert' || event.kind === 'thread_delete') channels.add(event.parent_id);
+      else if (event.kind.startsWith('message_') && 'channel_id' in event) channels.add(event.channel_id);
     }
     const first = this.lost === null;
     const grew = channels.size > (this.lost?.channels.length ?? 0);
@@ -483,19 +484,20 @@ export class GatewayService {
    * otherwise recovering the messages matters more than announcing the gap.
    */
   private async openGap(since: string, until: string, channelIds: string[] | null, strict: boolean): Promise<void> {
-    const { results: open } = await this.relay.db.prepare("SELECT id FROM channels WHERE agent_access != 'off'").all<{ id: string }>();
+    const openIds = await openChannelIds(this.relay);
+    const open = JSON.parse(openIds) as string[];
     // Taken before any live event of the new session is written, so the live events can't move the starting point past the gap.
     // Only places that can still have news: relayed channels, and their threads that are live or were active lately. A forum with
     // thousands of old posts would otherwise cost a Discord call per post after every lost session, with the real gap waiting behind.
     const { results: cursors } = await this.relay.db
       .prepare(
         `SELECT cc.channel_id, CAST(cc.last_message_id AS TEXT) AS last FROM channel_cursors cc
-         WHERE cc.channel_id IN (SELECT id FROM channels WHERE agent_access != 'off')
+         WHERE cc.channel_id IN (SELECT value FROM json_each(?))
             OR cc.channel_id IN (
-              SELECT CAST(t.id AS TEXT) FROM threads t JOIN channels c ON c.id = t.parent_id
-              WHERE c.agent_access != 'off' AND t.deleted_at IS NULL AND (t.archived = 0 OR t.updated_at >= ?))`,
+              SELECT CAST(t.id AS TEXT) FROM threads t
+              WHERE t.parent_id IN (SELECT value FROM json_each(?)) AND t.deleted_at IS NULL AND (t.archived = 0 OR t.updated_at >= ?))`,
       )
-      .bind(iso(new Date(this.relay.now().getTime() - RECENT_THREAD_MS)))
+      .bind(openIds, openIds, iso(new Date(this.relay.now().getTime() - RECENT_THREAD_MS)))
       .all<{ channel_id: string; last: string }>();
     await this.withBackfillLock(async () => {
       const pending = (await this.host.storage.get<Record<string, string>>('backfill')) ?? {};
@@ -513,7 +515,7 @@ export class GatewayService {
       this.pendingBackfill = true;
     });
     try {
-      await recordGap(this.relay, { channelIds: channelIds ?? open.map((c) => c.id), windowStart: since, windowEnd: until, reason: GAP_REASON });
+      await recordGap(this.relay, { channelIds: channelIds ?? open, windowStart: since, windowEnd: until, reason: GAP_REASON });
     } catch (error) {
       if (strict) throw error;
       this.relay.log.error('gateway.gap_not_recorded', { error });
@@ -552,8 +554,7 @@ export class GatewayService {
   private async offerThreads(): Promise<void> {
     const todo = [...this.threadEvents.values()].filter((e) => !this.offered.has(e.thread_id));
     if (!todo.length) return;
-    const { results: open } = await this.relay.db.prepare("SELECT id FROM channels WHERE agent_access != 'off'").all<{ id: string }>();
-    const relayed = new Set(open.map((c) => c.id));
+    const relayed = new Set(JSON.parse(await openChannelIds(this.relay)) as string[]);
     const ready = todo.filter((e) => relayed.has(e.parent_id));
     const stored = new Set<string>();
     for (const part of chunk(

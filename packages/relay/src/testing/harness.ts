@@ -1,10 +1,11 @@
 // A relay wired to in-memory SQLite and a fake network, shared by every test file.
 // Seed helpers insert rows directly, so each part can be tested without the others' endpoints.
 
-import { ALL_SCOPES, newId, type ChannelAccess, type ChannelType, type LevelLimits, type Scope } from '@logitland/contracts';
+import { ALL_SCOPES, newId, type ChannelType, type LevelLimits, type Scope } from '@logitland/contracts';
+import { Permission, type Overwrite } from '@logitland/discord';
 import { fileURLToPath } from 'node:url';
 import { internalApp, relayApp } from '../app';
-import type { ChannelSenderClient, GatewayClient, Relay } from '../context';
+import type { ChannelSenderClient, Db, GatewayClient, Relay } from '../context';
 import { SecretBox, randomToken, sha256 } from '../crypto';
 import { createRelay } from '../index';
 import type { RelayBindings } from '../config';
@@ -85,6 +86,10 @@ export function harness(opts: HarnessOptions = {}) {
     const limits = JSON.stringify(TEST_LIMITS);
     db.raw.prepare("UPDATE levels SET rules = json_set(rules, '$.limits.orphan', json(?), '$.limits.adopted', json(?))").run(limits, limits);
   }
+  // The server's @everyone role (its ID is the guild's), as the Gateway would report it.
+  db.raw
+    .prepare("INSERT INTO guild_roles (id, guild_id, name, permissions, updated_at) VALUES (?, ?, '@everyone', ?, ?)")
+    .run(GUILD, GUILD, String(AGENT_BASE), clock.toISOString());
   const log = memoryLogger();
   const relay: Relay = createRelay(
     {
@@ -233,24 +238,55 @@ export async function seedAgent(
   return { id, token, tokenId, name };
 }
 
+/**
+ * What agents may do in a seeded channel, as shorthand for Discord overwrites on @everyone (whose base role, seeded by the
+ * harness, allows everything agents use): `post`, `read_only` (no posting, threads or replies) or `off` (not even view it).
+ */
+export type SeedAccess = 'post' | 'read_only' | 'off';
+
+const P = Permission;
+const POSTING = P.SEND_MESSAGES | P.SEND_MESSAGES_IN_THREADS | P.CREATE_PUBLIC_THREADS;
+/** @everyone's base permissions in tests: view, read history, post, use threads and post links. */
+export const AGENT_BASE = P.VIEW_CHANNEL | P.READ_MESSAGE_HISTORY | POSTING | P.EMBED_LINKS;
+
+const overwritesFor = (access: SeedAccess): Overwrite[] =>
+  access === 'post' ? [] : [{ id: GUILD, type: 0, allow: '0', deny: String(access === 'off' ? P.VIEW_CHANNEL : POSTING) }];
+
+/** Opens or closes a seeded channel to agents, as an admin changing its @everyone overwrite in Discord would. */
+export async function setAccess(db: Db, channelId: string, access: SeedAccess): Promise<void> {
+  await db
+    .prepare('UPDATE channels SET overwrites = ? WHERE id = ?')
+    .bind(JSON.stringify(overwritesFor(access)), channelId)
+    .run();
+}
+
 export async function seedChannel(
   relay: Relay,
-  opts: { id?: string; name?: string; type?: ChannelType; access?: ChannelAccess; pace?: number; webhookUrl?: string | null } = {},
+  opts: {
+    id?: string;
+    name?: string;
+    type?: ChannelType;
+    access?: SeedAccess;
+    /** Overwrites as Discord stores them; replaces `access`. */
+    overwrites?: Overwrite[];
+    slowmode?: number;
+    webhookUrl?: string | null;
+  } = {},
 ): Promise<string> {
   const id = opts.id ?? LOUNGE;
   const url = opts.webhookUrl === undefined ? `https://discord.com/api/webhooks/600000000000000001/token-${id}` : opts.webhookUrl;
   const sealed = url ? await relay.secrets.seal(url, `channels.webhook:${id}`) : null;
   await relay.db
     .prepare(
-      'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_ciphertext, webhook_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO channels (id, guild_id, name, type, overwrites, slowmode_seconds, webhook_ciphertext, webhook_id, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
     .bind(
       id,
       GUILD,
       opts.name ?? 'lounge',
       opts.type ?? 'text',
-      opts.access ?? 'post',
-      opts.pace ?? 10,
+      JSON.stringify(opts.overwrites ?? overwritesFor(opts.access ?? 'post')),
+      opts.slowmode ?? 0,
       sealed,
       url ? '600000000000000001' : null,
       relay.now().toISOString(),

@@ -153,7 +153,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]!.body).toEqual({ content, username: 'Atlas-7', avatar_url: atlasSigil, allowed_mentions: { parse: [] } });
       expect(requests[0]!.query).toEqual({ wait: 'true' });
-      expect(requests[0]!.params.id).toBe(s.community.channels.find((c) => c.key === 'lounge')!.webhook.id);
+      expect(requests[0]!.params.id).toBe((await s.relayWebhook(s.channels.lounge))!.id);
       expect(requests[0]!.headers['user-agent']).toMatch(/^DiscordBot \(/);
       expect(s.fake.messages(s.channels.lounge).find((m) => m.id === did)).toMatchObject({
         content,
@@ -225,7 +225,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     });
 
     it('treats a message posted straight to the webhook, outside the relay, as a webhook and not as any agent', async () => {
-      const hook = s.community.channels.find((c) => c.key === 'lounge')!.webhook;
+      const hook = (await s.relayWebhook(s.channels.lounge))!;
       const content = unique('Posted around the relay');
       const res = await fetch(`${s.fake.apiBase}/webhooks/${hook.id}/${hook.token}?wait=true`, {
         method: 'POST',

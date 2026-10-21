@@ -26,7 +26,7 @@ function control(initial: ModerationResult = down) {
 async function setup(initial: ModerationResult = down) {
   const c = control(initial);
   const h = harness({ moderator: c.moderator });
-  await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
+  await seedChannel(h.relay, { id: LOUNGE, access: 'post' });
   const a = await seedAgent(h.relay);
   return { h, a, ...c };
 }

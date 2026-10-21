@@ -1,6 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ANNOUNCE, FORUM_ID, NEW_THREAD, calls, converse, down, json, mod, pass, patch, post, remove, row, say, seedThread, world } from './posting-fixtures';
-import { LOUNGE, seedAgent, type Harness } from './testing';
+import {
+  ANNOUNCE,
+  FORUM_ID,
+  NEW_THREAD,
+  calls,
+  converse,
+  down,
+  fakeDiscord,
+  json,
+  mod,
+  pass,
+  patch,
+  post,
+  remove,
+  row,
+  say,
+  seedThread,
+  world,
+} from './posting-fixtures';
+import { LOUNGE, seedAgent, setAccess, type Harness } from './testing';
 import { getAgent, adminAct } from './services/identity';
 import { decideAppeal, takedown } from './services/moderation/admin';
 import { inLoop } from './services/moderation/loops';
@@ -13,21 +31,17 @@ import { addStrike, escalateRuleBlocks, removeStrike } from './services/strikes'
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
-const rules = (content: string, probation = false) => evaluateRules({ content }, { probation }).map((m) => m.policy);
+const rules = (content: string) => evaluateRules({ content }, { links: true }).map((m) => m.policy);
 const agentRow = (h: Harness, id: string) => h.db.prepare('SELECT * FROM agents WHERE id = ?').bind(id).first<Record<string, any>>();
 const strike = (w: { h: Harness }, agentId: string, policy: 'harassment' | 'spam' = 'harassment') =>
   addStrike(w.h.relay, { agentId, policy, reason: `${policy} test`, createdBy: 'admin', actor: { type: 'admin', id: 'adm' } });
 
 describe('edits after a channel closes', () => {
-  it.each([
-    ['read_only', "UPDATE channels SET agent_access = 'read_only' WHERE id = ?"],
-    ['off', "UPDATE channels SET agent_access = 'off' WHERE id = ?"],
-    ['pace 0', 'UPDATE channels SET pace_per_agent_per_minute = 0 WHERE id = ?'],
-  ])('are refused when the channel is %s', async (_name, sql) => {
+  it.each(['read_only', 'off'] as const)('are refused when the channel is %s', async (access) => {
     const w = await world();
     const msg = await json(await post(w.h, w.a, say('before the raid started')));
     expect(msg.status).toBe('sent');
-    await w.h.db.prepare(sql).bind(LOUNGE).run();
+    await setAccess(w.h.db, LOUNGE, access);
     const res = await patch(w.h, w.a, msg.id, { content: 'after the raid started' });
     expect(res.status).toBe(403);
     expect(await calls(w.h, 'PATCH')).toHaveLength(0);
@@ -278,17 +292,20 @@ describe('takedowns', () => {
 });
 
 describe('a webhook Discord does not know', () => {
-  it('is forgotten after a 404, so it is not used again', async () => {
+  it('is forgotten after a 404, and the next post makes a new one instead of using it again', async () => {
     const w = await world();
     w.h.setDiscord(() => Response.json({ code: 10015, message: 'Unknown Webhook' }, { status: 404 }));
     const first = await json(await post(w.h, w.a, say('into the void')));
     expect(first.status).toBe('failed');
     expect((await w.h.db.prepare('SELECT webhook_ciphertext AS c FROM channels WHERE id = ?').bind(LOUNGE).first<{ c: string | null }>())!.c).toBeNull();
-    const seen = w.h.discordCalls.length;
-    const second = await json(await post(w.h, w.a, say('into the void again')));
-    expect(second.status).toBe('failed');
-    expect(w.h.discordCalls).toHaveLength(seen);
     expect((await w.h.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'channel.webhook_dropped'").first<{ n: number }>())!.n).toBe(1);
+
+    fakeDiscord(w.h);
+    const second = await json(await post(w.h, w.a, say('into the void again')));
+    expect(second.status).toBe('sent');
+    const paths = w.h.discordCalls.map((r) => `${r.method} ${new URL(r.url).pathname.replace('/api/v10', '')}`);
+    expect(paths.filter((p) => p.includes('/webhooks/600000000000000001/'))).toHaveLength(1);
+    expect(paths).toContain(`POST /channels/${LOUNGE}/webhooks`);
   });
 
   it('is kept when only a thread is gone', async () => {

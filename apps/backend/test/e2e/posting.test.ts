@@ -1,20 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { SecretBox } from '@logitland/relay';
-import { DEV } from '../../../../packages/discord-fake/src/index.ts';
+import { ALL_BOT_PERMISSIONS, DEV, Permission, type Webhook } from '../../../../packages/discord-fake/src/index.ts';
 import { E2E, eventually, sleep, startStack, type Agent, type Stack } from './harness.ts';
 
 // What happens around a post when things go wrong, repeat or pile up: repeats, many agents at once, a webhook or thread that
-// has gone, an agent that is suspended, a channel that is switched off. A fresh Worker, database and fake Discord.
+// has gone, an agent that is suspended, a channel closed to agents. A fresh Worker, database and fake Discord.
 describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
   let s: Stack;
   let agent: Agent;
   let n = 0;
-  const hook = () => s.community.channels.find((c) => c.key === 'lounge')!.webhook;
-  // What an admin does after the relay drops a dead webhook: give the channel its webhook again.
-  const restoreWebhook = async () => {
-    const sealed = await new SecretBox({ id: 'k1', key: s.secretKey }).seal(hook().url, `channels.webhook:${s.channels.lounge}`);
-    await s.sql('UPDATE channels SET webhook_ciphertext = ?, webhook_id = ? WHERE id = ?', sealed, hook().id, s.channels.lounge);
-  };
   const unique = (what: string) => `${what} (${Date.now().toString(36)}-${n++})`;
   const post = (token: string, body: Record<string, unknown>, idem = `stress-${Date.now().toString(36)}-${n++}`) =>
     s.call('POST', '/v1/messages', { token, body, headers: { 'idempotency-key': idem } });
@@ -28,10 +21,7 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
       .bind(new Date().toISOString())
       .run();
     agent = await s.register('Stressor', '198.51.100.10');
-    await s.cron();
-    await eventually(async () => (await s.sql<{ status: string }>("SELECT status FROM intake_state WHERE source = 'gateway'"))[0]?.status === 'connected', {
-      what: 'the Gateway',
-    });
+    await s.connect();
   });
   afterAll(async () => {
     const blocked = s?.outbound.blocked ?? [];
@@ -97,55 +87,51 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
     }
   });
 
-  it('holds a link from an agent on probation, and says why', async () => {
+  it('holds a link where Discord doesn’t let agents embed links, and says why', async () => {
     const before = executions().length;
     const held = await post(agent.token, { channel_id: s.channels.lounge, content: unique('See https://example.org/lanterns') });
     expect(held.status).toBe(202);
     expect(held.body).toMatchObject({ status: 'held', verdict: 'hold', policy_code: 'links_not_allowed' });
-    expect(held.body.status_reason).toContain('probation');
+    expect(held.body.status_reason).toMatch(/can’t post links/);
     await sleep(300);
     expect(executions()).toHaveLength(before);
   });
 
-  it('turns Discord’s refusals into plain advice that never repeats Discord’s words or the webhook', async () => {
-    const real = s.fake.world.webhooks.get(hook().id)!;
-    const leaks = (body: unknown) => {
+  it('makes a new webhook when Discord has forgotten the old one, and never repeats Discord’s words or the webhook', async () => {
+    const leaks = (body: unknown, hook: Webhook) => {
       const text = JSON.stringify(body);
-      return [real.token, 'Unknown Webhook', 'Invalid Webhook Token', 'discord.com/api/webhooks', real.id].filter((x) => text.includes(x));
+      return [hook.token, 'Unknown Webhook', 'Invalid Webhook Token', 'discord.com/api/webhooks', hook.id].filter((x) => text.includes(x));
     };
 
     // The webhook was deleted in Discord.
-    s.fake.world.webhooks.delete(real.id);
+    const first = (await s.relayWebhook(s.channels.lounge))!;
+    s.fake.world.webhooks.delete(first.id);
     const deleted = await post(agent.token, { channel_id: s.channels.lounge, content: unique('Into the void') });
     expect(deleted.status).toBe(200);
     expect(deleted.body).toMatchObject({ status: 'failed', discord_message_id: null });
-    expect(deleted.body.status_reason).toMatch(/webhook is missing; an admin needs to set it again/);
-    expect(leaks(deleted.body)).toEqual([]);
-    // Discord asks that a webhook it called unknown is never used again, so the relay drops it: the next post fails without calling Discord.
+    expect(deleted.body.status_reason).toMatch(/no longer knows this channel’s webhook/);
+    expect(leaks(deleted.body, first)).toEqual([]);
+    // Discord asks that a webhook it called unknown is never used again, so the relay forgets it and the next post makes a new one.
     expect(await s.sql('SELECT webhook_id FROM channels WHERE id = ?', s.channels.lounge)).toEqual([{ webhook_id: null }]);
-    s.fake.world.webhooks.set(real.id, real);
-    const calls = executions().length;
-    const after = await post(agent.token, { channel_id: s.channels.lounge, content: unique('Still nothing') });
-    expect(after.body.status_reason).toMatch(/webhook is missing/);
-    expect(executions()).toHaveLength(calls);
-    await restoreWebhook();
+    expect((await post(agent.token, { channel_id: s.channels.lounge, content: unique('Through a new webhook') })).status).toBe(201);
+    const second = (await s.relayWebhook(s.channels.lounge))!;
+    expect(second.id).not.toBe(first.id);
+    expect(executions().at(-1)!.params.id).toBe(second.id);
 
-    // Its token was changed.
-    s.fake.world.webhooks.set(real.id, { ...real, token: 'a-different-token-entirely' });
+    // Its token was changed: no good either.
+    s.fake.world.webhooks.set(second.id, { ...second, token: 'a-different-token-entirely' });
     const wrong = await post(agent.token, { channel_id: s.channels.lounge, content: unique('Wrong key') });
     expect(wrong.body).toMatchObject({ status: 'failed' });
-    expect(wrong.body.status_reason).toMatch(/refused this channel’s webhook/);
-    expect(leaks(wrong.body)).toEqual([]);
-    await restoreWebhook();
+    expect(wrong.body.status_reason).toMatch(/no longer knows this channel’s webhook/);
+    expect(leaks(wrong.body, second)).toEqual([]);
 
     // Discord is down.
-    s.fake.world.webhooks.set(real.id, real);
     s.fake.fail({ route: 'webhook.execute' }, { type: 'status', status: 503 });
     const down = await post(agent.token, { channel_id: s.channels.lounge, content: unique('Is anyone there') });
     expect(down.status).toBe(202);
     expect(down.body.status).toBe('uncertain');
     expect(down.body.status_reason).toMatch(/may or may not have been posted/);
-    expect(leaks(down.body)).toEqual([]);
+    expect(leaks(down.body, (await s.relayWebhook(s.channels.lounge))!)).toEqual([]);
 
     // Fixed again: the same text posts under a new key.
     const ok = await post(agent.token, { channel_id: s.channels.lounge, content: unique('Back again') });
@@ -186,14 +172,21 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
     expect((await post(victim.token, { channel_id: s.channels.lounge, content: unique('After the suspension') })).status).toBe(201);
   });
 
-  it('forgets a channel the admin switches off: agents can’t see it and its events stop', async () => {
-    const owner = await s.adminOwner();
+  it('forgets a channel an admin closes to agents in Discord: agents can’t see it and its events stop', async () => {
     const visible = async () => ((await s.call('GET', '/v1/channels', { token: agent.token })).body.channels as { id: string }[]).map((c) => c.id);
     expect(await visible()).toContain(s.channels.media);
 
-    const off = await s.dashboard('PATCH', `/internal/admin/channels/${s.channels.media}`, { owner, body: { agent_access: 'off' } });
-    expect(off.status).toBe(200);
-    expect(await visible()).not.toContain(s.channels.media);
+    // The admin takes View Channel away from @agents; people and the bot keep what they had.
+    const chatting = Permission.sendMessages | Permission.sendMessagesInThreads | Permission.createPublicThreads;
+    s.fake.world.updateChannel(s.channels.media, {
+      overwrites: [
+        { id: s.community.guildId, deny: chatting },
+        { id: s.community.consentRoleId, allow: chatting },
+        { id: s.community.agentsRoleId, deny: Permission.viewChannel },
+        { id: s.fake.world.guild(s.community.guildId).botRoleId, allow: ALL_BOT_PERMISSIONS },
+      ],
+    });
+    await eventually(async () => !(await visible()).includes(s.channels.media), { what: 'the relay to see the channel close' });
     expect((await s.call('GET', `/v1/channels/${s.channels.media}/messages`, { token: agent.token })).status).toBe(404);
     expect((await post(agent.token, { channel_id: s.channels.media, content: unique('Nobody home'), thread_name: 'x' })).status).toBe(404);
 
@@ -210,7 +203,14 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
   });
 
   it('ignores channels and threads it does not relay, without asking Discord about each message', async () => {
-    const staff = s.fake.addChannel(s.community.guildId, { name: 'staff-room' });
+    // Private to staff: nobody else may view it, the bot may.
+    const staff = s.fake.addChannel(s.community.guildId, {
+      name: 'staff-room',
+      overwrites: [
+        { id: s.community.guildId, deny: Permission.viewChannel },
+        { id: s.fake.world.guild(s.community.guildId).botRoleId, allow: ALL_BOT_PERMISSIONS },
+      ],
+    });
     const first = s.fake.say(staff.id, { as: DEV.newsbot, content: unique('Private business') });
     const thread = s.fake.startThread(staff.id, first.id, 'Private thread', DEV.admin);
     s.fake.say(thread.id, { as: DEV.newsbot, content: unique('More private business') });

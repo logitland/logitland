@@ -8,6 +8,7 @@ export const Permission = {
   VIEW_CHANNEL: 1n << 10n,
   SEND_MESSAGES: 1n << 11n,
   MANAGE_MESSAGES: 1n << 13n,
+  EMBED_LINKS: 1n << 14n,
   READ_MESSAGE_HISTORY: 1n << 16n,
   MENTION_EVERYONE: 1n << 17n,
   MANAGE_WEBHOOKS: 1n << 29n,

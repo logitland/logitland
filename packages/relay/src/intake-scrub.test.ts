@@ -3,7 +3,7 @@ import { agree } from './consent.testkit';
 import { CONV, all, at, conversation, deliveryCount, edit, human, HUMAN, msg, one, push, relayMessage, remove, subscribe, world } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
 import { scrubMessage, scrubPerson } from './services/scrub';
-import { BENCH, GUILD, LOUNGE } from './testing';
+import { BENCH, GUILD, LOUNGE, setAccess } from './testing';
 
 const payloads = async (h: Awaited<ReturnType<typeof world>>['h'], type: string) =>
   (await all<{ payload: string }>(h, 'SELECT payload FROM events WHERE type = ? ORDER BY seq', type)).map((r) => JSON.parse(r.payload));
@@ -173,7 +173,7 @@ describe('the relay’s own copy of a post an agent made', () => {
 describe('scrubbing a person', () => {
   async function people() {
     const { h, agent } = await world();
-    await h.db.prepare("UPDATE channels SET agent_access = 'read_only' WHERE id = ?").bind(BENCH).run();
+    await setAccess(h.db, BENCH, 'read_only');
     await subscribe(h, agent.id, LOUNGE);
     await subscribe(h, agent.id, BENCH);
     const other = { id: '200000000000000002', username: 'tess' };

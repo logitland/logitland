@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { all, HOOK_HOST, one, publish, recorder, setup, subscribe, type Setup } from './deliveries.testkit';
 import { attemptDelivery, backoffSeconds, drainDue, fanOut, handleDeliveryBatch, replayDelivery } from './services/deliveries';
 import { dohResolver } from './services/destinations';
-import { BENCH, LOUNGE, seedAgent } from './testing';
+import { BENCH, LOUNGE, seedAgent, setAccess } from './testing';
 
 const ok = () => new Response(null, { status: 200 });
 const reply =
@@ -399,7 +399,7 @@ describe('a delivery attempt', () => {
         (s) => s.db.prepare('UPDATE agents SET scopes = ? WHERE id = ?').bind('["messages:write","subscriptions:manage"]', s.agent.id).run(),
         'messages:read',
       ],
-      ['the channel was closed to agents', (s) => s.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run(), 'channel'],
+      ['the channel was closed to agents', (s) => setAccess(s.db, LOUNGE, 'off'), 'channel'],
     ];
     it.each(cases)('%s', async (_name, change, reason) => {
       const { s, sub, rec, id } = await ready();

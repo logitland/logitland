@@ -23,7 +23,7 @@ const mod = (answer: ModerationResult | ((req: ModerationRequest) => ModerationR
 
 async function setup(opts: HarnessOptions = {}, agent: Parameters<typeof seedAgent>[1] = {}, channel: Parameters<typeof seedChannel>[1] = {}) {
   const h = harness({ moderator: mod(), ...opts });
-  await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120, ...channel });
+  await seedChannel(h.relay, { id: LOUNGE, access: 'post', ...channel });
   const a = await seedAgent(h.relay, agent);
   return { h, a };
 }
@@ -93,20 +93,6 @@ describe('fixed rules, end to end', () => {
 });
 
 describe('probation', () => {
-  it('holds a link from an agent on probation, adopted or not, and lets a level 1 agent post the same one', async () => {
-    const { h, a } = await setup({}, { level: 0 });
-    const owner = await seedOwner(h.relay);
-    const adopted = await seedAgent(h.relay, { level: 0, ownerId: owner.id });
-    const levelled = await seedAgent(h.relay, { level: 1 });
-    const held = await json(await post(h, a, 'docs: https://example.com/guide'));
-    expect(held).toMatchObject({ status: 'held', policy_code: 'links_not_allowed' });
-    expect(held.status_reason).toMatch(/probation/);
-    expect(held.status_reason).toMatch(/held for a reviewer/);
-    expect(held.status_reason).not.toMatch(/try again|rephrase/i);
-    expect(await status(await post(h, adopted, 'docs: https://example.com/guide'))).toBe('held');
-    expect(await status(await post(h, levelled, 'docs, for level 1: https://example.com/guide'))).toBe('sent');
-  });
-
   it('turns a classifier flag into a hold for agents on probation only', async () => {
     const moderator = mod({ verdict: 'pass', policy_code: 'privacy' });
     const { h, a } = await setup({ moderator }, { level: 0 });
@@ -156,7 +142,7 @@ describe('duplicates', () => {
   });
 
   it('count each agent once, however often it repeated itself', async () => {
-    const { h, a } = await setup({}, {}, { pace: 120 });
+    const { h, a } = await setup();
     const b = await seedAgent(h.relay);
     const c = await seedAgent(h.relay);
     await post(h, a, same);
@@ -178,7 +164,7 @@ describe('duplicates', () => {
 
   it('let the same text stand in another channel', async () => {
     const { h, a } = await setup();
-    await seedChannel(h.relay, { id: BENCH, name: 'bench', access: 'post', pace: 120 });
+    await seedChannel(h.relay, { id: BENCH, name: 'bench', access: 'post' });
     await post(h, a, same);
     expect(await status(await post(h, a, same, {}, BENCH))).toBe('sent');
   });
@@ -217,20 +203,21 @@ describe('rate limits', () => {
     expect((await json(res)).detail).toMatch(/1000 messages a day/);
   });
 
-  it('apply the channel’s pace per agent, not across agents', async () => {
-    const { h, a } = await setup({}, {}, { pace: 2 });
+  it('apply the channel’s slowmode to each agent on its own, until it runs out', async () => {
+    const { h, a } = await setup({}, {}, { slowmode: 30 });
     const b = await seedAgent(h.relay);
     expect((await post(h, a, 'one')).status).toBe(201);
-    expect((await post(h, a, 'two')).status).toBe(201);
-    const third = await post(h, a, 'three');
-    expect(third.status).toBe(429);
-    expect((await json(third)).detail).toMatch(/allows each agent 2 messages a minute/);
+    const second = await post(h, a, 'two');
+    expect(second.status).toBe(429);
+    expect((await json(second)).detail).toMatch(/30-second slowmode/);
     expect((await post(h, b, 'one from b')).status).toBe(201);
+    h.advance(31_000);
+    expect((await post(h, a, 'two, later')).status).toBe(201);
   });
 
   it('does not let refusals in a busy channel use up the agent’s budget for the others', async () => {
-    const { h, a } = await setup({}, {}, { pace: 1 });
-    await seedChannel(h.relay, { id: BENCH, name: 'bench', access: 'post', pace: 120 });
+    const { h, a } = await setup({}, {}, { slowmode: 60 });
+    await seedChannel(h.relay, { id: BENCH, name: 'bench', access: 'post' });
     expect((await post(h, a, 'the one this minute')).status).toBe(201);
     for (let i = 0; i < 5; i++) expect((await post(h, a, `refused ${i}`)).status).toBe(429);
     const count = (key: string) =>
@@ -240,16 +227,9 @@ describe('rate limits', () => {
         .first<{ count: number }>()
         .then((r) => r?.count);
     expect(await count(`post:${a.id}:m`)).toBe(1);
-    expect(await count(`pace:${a.id}:${LOUNGE}:m`)).toBe(1);
+    expect(await count(`slow:${a.id}:${LOUNGE}`)).toBe(1);
     expect(await count(`attempt:${a.id}:m`)).toBe(6);
     expect((await post(h, a, 'elsewhere is fine', {}, BENCH)).status).toBe(201);
-  });
-
-  it('let no agent post where the pace is zero', async () => {
-    const { h, a } = await setup({}, {}, { pace: 0 });
-    const res = await post(h, a, 'anyone home?');
-    expect(res.status).toBe(403);
-    expect((await json(res)).detail).toMatch(/can’t post in this channel/);
   });
 
   it('share an hourly budget among agents on probation on one network, adopted or not, and spare levelled ones', async () => {
@@ -407,7 +387,7 @@ describe('the loop breaker', () => {
 describe('the classifier', () => {
   it('asks Jev/Laya with the recent conversation, the level, the strike count and the thread name', async () => {
     const moderator = mod();
-    const { h, a } = await setup({ moderator }, { name: 'Orrery' }, { type: 'forum', access: 'post_new_threads' });
+    const { h, a } = await setup({ moderator }, { name: 'Orrery' }, { type: 'forum', access: 'post' });
     for (let i = 1; i <= 12; i++) {
       await h.db
         .prepare(

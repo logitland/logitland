@@ -1,12 +1,11 @@
 import { LIMITS, type ChannelList, type ExpiredCursorProblem } from '@logitland/contracts';
 import type { Relay } from '../context';
 import { RelayError, invalid } from '../errors';
-import { listChannels, toChannel, usableChannel } from '../services/channels';
+import { agentChannels, toAgentChannel, usableChannel } from '../services/channels';
 import { readPage } from '../services/conversation';
-import { standingOf } from '../services/levels';
 import { EVENT_TEXT_DAYS, eventTail, expiredCursor, listEvents } from '../services/events';
+import { standingOf } from '../services/levels';
 import { enforce, refund } from '../services/limits';
-import { parseTags } from '../services/setup';
 import { listThreads } from '../services/threads';
 import { agentAuth, intQuery, requireScope, snowflakeQuery, type AppContext, type RegisterRoutes } from './shared';
 
@@ -63,14 +62,14 @@ export const register: RegisterRoutes = (app, relay) => {
     await countRead(relay, c);
     c.header('cache-control', 'no-store');
     return c.json({
-      channels: (await listChannels(relay, { openToAgents: true })).map((r) => ({ ...toChannel(r), tags: parseTags(r) })),
+      channels: (await agentChannels(relay, c.get('principal').agent)).map((ch) => toAgentChannel(ch.row, ch.access)),
     } satisfies ChannelList);
   });
 
   app.get('/v1/channels/:id/messages', agentAuth(relay), async (c) => {
     requireScope(c, 'messages:read');
     await countRead(relay, c);
-    const channel = await usableChannel(relay, c.req.param('id'), 'read');
+    const { row: channel } = await usableChannel(relay, c.get('principal').agent, c.req.param('id'), 'read');
     c.header('cache-control', 'no-store');
     return c.json(
       await readPage(relay, channel.id, {
@@ -84,7 +83,7 @@ export const register: RegisterRoutes = (app, relay) => {
   app.get('/v1/channels/:id/threads', agentAuth(relay), async (c) => {
     requireScope(c, 'messages:read');
     await countRead(relay, c);
-    const channel = await usableChannel(relay, c.req.param('id'), 'read');
+    const { row: channel } = await usableChannel(relay, c.get('principal').agent, c.req.param('id'), 'read');
     const archived = c.req.query('include_archived');
     if (archived !== undefined && !['true', 'false', '1', '0', ''].includes(archived)) throw invalid('include_archived must be true or false');
     c.header('cache-control', 'no-store');
@@ -104,7 +103,7 @@ export const register: RegisterRoutes = (app, relay) => {
     const wait = intQuery(c, 'wait', 0, 0, LIMITS.longPollMaxSeconds);
     const limit = intQuery(c, 'limit', 100, 1, 100);
     const channelId = idQuery(c, 'channel_id', 'a Discord channel ID');
-    if (channelId) await usableChannel(relay, channelId, 'read');
+    if (channelId) await usableChannel(relay, c.get('principal').agent, channelId, 'read');
     c.header('cache-control', 'no-store');
 
     const raw = c.req.query('after');
@@ -126,7 +125,8 @@ export const register: RegisterRoutes = (app, relay) => {
       }
     }
 
-    const first = await listEvents(relay, { after, channelId, limit });
+    const readable = JSON.stringify((await agentChannels(relay, c.get('principal').agent)).filter((ch) => ch.access.read).map((ch) => ch.row.id));
+    const first = await listEvents(relay, { after, readable, channelId, limit });
     if (first.events.length || wait === 0) return c.json(first);
     // Nothing yet, so the call has to wait, and the waiting is what it pays for (one read was counted above).
     const charged = relay.now();
@@ -142,7 +142,7 @@ export const register: RegisterRoutes = (app, relay) => {
     for (;;) {
       await sleep(Math.min(deadline - Date.now(), POLL_MS + Math.random() * POLL_JITTER_MS));
       if ((await eventTail(relay)) > after) {
-        const page = await listEvents(relay, { after, channelId, limit });
+        const page = await listEvents(relay, { after, readable, channelId, limit });
         if (page.events.length) {
           await early();
           return c.json(page);

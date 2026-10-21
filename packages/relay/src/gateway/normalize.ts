@@ -38,7 +38,21 @@ export interface DiscordChannelLike {
   available_tags?: { id: string; name: string; moderated?: boolean }[];
   /** On forum and media posts: the tags applied to them. */
   applied_tags?: string[];
+  permission_overwrites?: { id: string; type: 0 | 1; allow: string; deny: string }[];
+  /** Slowmode, in seconds. */
+  rate_limit_per_user?: number;
+  flags?: number;
 }
+
+export interface DiscordRoleLike {
+  id: string;
+  name: string;
+  permissions: string;
+  position?: number;
+}
+
+/** Discord's flag on a channel the bot can't view: from 2026-11-16 its name and overwrites are hidden (#9). */
+export const CHANNEL_OBFUSCATED = 1 << 17;
 
 export interface NormalizeContext {
   /** Only this guild's events are kept. Null keeps every guild's. */
@@ -95,19 +109,38 @@ export function threadEvents(channels: DiscordChannelLike[], ctx: NormalizeConte
   return out;
 }
 
-function channelUpdate(c: DiscordChannelLike): IntakeEventInput[] {
+/**
+ * A channel the relay can use, with what decides who may use it. An obfuscated one carries only `hidden`: its name and
+ * overwrites aren't real, so they aren't stored, and a CHANNEL_UPDATE with the real ones arrives when the bot gains access.
+ */
+function channelUpdate(c: DiscordChannelLike, guildId: string | undefined): IntakeEventInput[] {
   const type = CHANNEL_TYPES[c.type];
-  if (!type || !c.name) return [];
+  const guild = c.guild_id ?? guildId;
+  if (!type || !c.name || !guild) return [];
+  if ((c.flags ?? 0) & CHANNEL_OBFUSCATED) return [{ kind: 'channel_hidden', channel_id: c.id, guild_id: guild, type }];
   return [
     {
       kind: 'channel_update',
       channel_id: c.id,
+      guild_id: guild,
+      parent_id: c.parent_id ?? null,
       name: c.name,
       type,
+      overwrites: c.permission_overwrites ?? [],
+      slowmode_seconds: c.rate_limit_per_user ?? 0,
       ...(c.available_tags ? { tags: c.available_tags.map((t) => ({ id: t.id, name: t.name, moderated: t.moderated ?? false })) } : {}),
     },
   ];
 }
+
+const roleUpdate = (r: DiscordRoleLike, guildId: string): IntakeEventInput => ({
+  kind: 'role_update',
+  role_id: r.id,
+  guild_id: guildId,
+  name: r.name,
+  permissions: r.permissions,
+  position: r.position ?? 0,
+});
 
 /** The intake events a dispatch produces, in order. Dispatches the relay doesn't use produce none. */
 export function normalizeDispatch(t: string, d: unknown, ctx: NormalizeContext): IntakeEventInput[] {
@@ -155,19 +188,34 @@ export function normalizeDispatch(t: string, d: unknown, ctx: NormalizeContext):
       return [...upserts, { kind: 'thread_sync', parent_ids: g.channel_ids ?? null, active_ids: (g.threads ?? []).map((c) => c.id) }];
     }
     case 'GUILD_CREATE': {
-      const g = d as { id: string; unavailable?: boolean; channels?: DiscordChannelLike[]; threads?: DiscordChannelLike[] };
+      const g = d as { id: string; unavailable?: boolean; roles?: DiscordRoleLike[]; channels?: DiscordChannelLike[]; threads?: DiscordChannelLike[] };
       // An outage sends only {id, unavailable: true}; a thread sync from that would archive every live thread.
       if (!inGuild(g.id) || g.unavailable) return [];
       const upserts = threadEvents(g.threads ?? [], ctx);
       return [
-        ...(g.channels ?? []).flatMap(channelUpdate),
+        ...(g.roles ?? []).map((r) => roleUpdate(r, g.id)),
+        ...(g.channels ?? []).flatMap((c) => channelUpdate(c, g.id)),
         ...upserts,
         { kind: 'thread_sync', parent_ids: null, active_ids: (g.threads ?? []).map((c) => c.id) },
       ];
     }
+    case 'CHANNEL_CREATE':
     case 'CHANNEL_UPDATE': {
       const c = d as DiscordChannelLike;
-      return inGuild(c.guild_id) ? channelUpdate(c) : [];
+      return inGuild(c.guild_id) ? channelUpdate(c, c.guild_id) : [];
+    }
+    case 'CHANNEL_DELETE': {
+      const c = d as DiscordChannelLike;
+      return inGuild(c.guild_id) && CHANNEL_TYPES[c.type] ? [{ kind: 'channel_delete', channel_id: c.id }] : [];
+    }
+    case 'GUILD_ROLE_CREATE':
+    case 'GUILD_ROLE_UPDATE': {
+      const r = d as { guild_id: string; role: DiscordRoleLike };
+      return inGuild(r.guild_id) ? [roleUpdate(r.role, r.guild_id)] : [];
+    }
+    case 'GUILD_ROLE_DELETE': {
+      const r = d as { guild_id: string; role_id: string };
+      return inGuild(r.guild_id) ? [{ kind: 'role_delete', role_id: r.role_id }] : [];
     }
     default:
       return [];

@@ -8,7 +8,7 @@ const passAll: Moderator = { review: async () => ({ verdict: 'pass' }) };
 
 async function setup() {
   const h = harness({ moderator: passAll });
-  await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
+  await seedChannel(h.relay, { id: LOUNGE, access: 'post' });
   const mine = await seedOwner(h.relay, '200000000000000001', 'mine');
   const theirs = await seedOwner(h.relay, '200000000000000002', 'theirs');
   const a1 = await seedAgent(h.relay, { name: 'Alder', ownerId: mine.id });

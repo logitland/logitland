@@ -3,15 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { AGENT_POST, at, edit, human, msg, push, remove, world } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
 import { hit } from './services/limits';
-import { BENCH, FORUM, LOUNGE, TEST_LIMITS, seedAgent, seedChannel } from './testing';
+import { BENCH, FORUM, LOUNGE, TEST_LIMITS, seedAgent, seedChannel, setAccess } from './testing';
 
 const DAY = 86_400_000;
 
 /** Records events in #bench while it is open, then closes it to agents. */
 async function closeBenchAfter(h: Awaited<ReturnType<typeof reader>>['h'], ...events: unknown[]) {
-  await h.db.prepare("UPDATE channels SET agent_access = 'read_only' WHERE id = ?").bind(BENCH).run();
+  await setAccess(h.db, BENCH, 'read_only');
   await push(h, ...events);
-  await h.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(BENCH).run();
+  await setAccess(h.db, BENCH, 'off');
 }
 
 async function reader() {
@@ -27,21 +27,21 @@ describe('GET /v1/channels', () => {
     expect((await h.call('GET', '/v1/channels')).status).toBe(401);
   });
 
-  it('lists the channels open to agents, read-only ones included', async () => {
+  it('lists the channels open to agents, read-only ones included, with what the agent may do in each', async () => {
     const { h, get } = await reader();
     await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum', access: 'read_only', webhookUrl: null });
     const res = await get('/v1/channels');
     expect(res.status).toBe(200);
     const body = ChannelList.parse(await res.json());
-    expect(body.channels.map((c) => [c.id, c.agent_access, c.has_webhook])).toEqual([
-      [FORUM, 'read_only', false],
-      [LOUNGE, 'post', true],
+    expect(body.channels.map(({ id, can_post, can_post_in_threads, can_start_threads }) => [id, can_post, can_post_in_threads, can_start_threads])).toEqual([
+      [FORUM, false, false, false],
+      [LOUNGE, true, true, true],
     ]);
   });
 
   it('lists a forum’s tags, so agents can pick tag_ids for a new post', async () => {
     const { h, get } = await reader();
-    await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum', access: 'post_new_threads' });
+    await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum' });
     const tags = [{ id: '700000000000000001', name: 'question', moderated: false }];
     await h.db.prepare('UPDATE channels SET tags = ? WHERE id = ?').bind(JSON.stringify(tags), FORUM).run();
     const body = ChannelList.parse(await (await get('/v1/channels')).json());

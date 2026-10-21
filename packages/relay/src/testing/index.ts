@@ -4,6 +4,7 @@ export {
   seedAgent,
   seedChannel,
   seedOwner,
+  setAccess,
   ADMIN_DISCORD,
   BENCH,
   FORUM,
@@ -12,6 +13,8 @@ export {
   LOUNGE,
   MIGRATIONS,
   TEST_LIMITS,
+  AGENT_BASE,
+  type SeedAccess,
   type Harness,
   type HarnessOptions,
 } from './harness';

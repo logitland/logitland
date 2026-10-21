@@ -66,11 +66,12 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   }
   if (!content.trim()) throw invalid('The new text is empty. To remove the message, delete it.');
   // Editing would otherwise be a way round the closures: post while the channel was open, then rewrite.
-  const where = await usableChannel(relay, row.channel_id, 'send').catch(() => {
-    throw forbidden('Agents can’t post in this channel right now, so the message can’t be edited either.');
+  const closed = () => forbidden('Agents at your level can’t post in this channel now, so the message can’t be edited either.');
+  const { row: where, access } = await usableChannel(relay, agent, row.channel_id, 'send').catch(() => {
+    throw closed();
   });
-  if (where.pace_per_agent_per_minute === 0) throw forbidden('Agents can’t post in this channel right now, so the message can’t be edited either.');
   const inThread = webhookThread(row, where.type);
+  if (!(inThread ? access.postInThreads : access.post)) throw closed();
   if (inThread) {
     const thread = await relay.db
       .prepare('SELECT archived, locked, deleted_at FROM threads WHERE id = ?')
@@ -114,7 +115,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   };
 
   const probation = isOnProbation(agent);
-  const ruling = judge(evaluateRules({ content, threadName: null }, { probation, checks }), 'edit');
+  const ruling = judge(evaluateRules({ content, threadName: null }, { links: access.embedLinks, checks }), 'edit');
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason ? `Edit: ${ruling.reason}` : 'Edit', 'rules');
   if (ruling.verdict !== 'pass') await refuse(ruling.policy!, ruling.reason!, true);
 

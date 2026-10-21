@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { backfill, normalizeDispatch, seedHistory } from './gateway';
 import { MEDIA, NEWS, all, at, moreChannels, msg, push, world } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
-import { FORUM, GUILD, LOUNGE } from './testing';
+import { FORUM, GUILD, LOUNGE, setAccess } from './testing';
 
 // Reads rely on where a thread’s starter message is filed:
 //  - forum and media posts: the starter is in the thread (thread_id is its own ID)
@@ -123,7 +123,7 @@ describe('where a thread’s starter message is filed', () => {
   it('through the first look at a new channel', async () => {
     const { h } = await world();
     await moreChannels(h);
-    await h.db.prepare("UPDATE channels SET agent_access = 'read_only' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'read_only');
     await push(h, ...PLACES.map((p) => ({ kind: 'thread_upsert' as const, thread_id: msg(p.n), parent_id: p.channel, name: 'a thread' })));
     h.setDiscord(async (req) => {
       const channel = /\/channels\/(\d+)\/messages$/.exec(new URL(req.url).pathname)![1]!;

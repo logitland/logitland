@@ -396,6 +396,11 @@ export function routes(): Route[] {
     return ok(webhookFor(fake, params.id!, params.token!));
   });
 
+  add('webhook.delete', 'DELETE', '/webhooks/:id/:token', 'none', 'webhook', ({ fake, params }) => {
+    fake.world.webhooks.delete(webhookFor(fake, params.id!, params.token!).id);
+    return noContent;
+  });
+
   add('webhook.execute', 'POST', '/webhooks/:id/:token', 'none', 'webhook', ({ fake, params, query, body }) => {
     if (params.id === fake.application.id) return fake.interactions.followUp(params.token!, objectBody(body));
     const hook = webhookFor(fake, params.id!, params.token!);

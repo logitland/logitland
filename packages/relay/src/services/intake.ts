@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { iso, type Relay, type Stmt } from '../context';
 import { hmac, sha256 } from '../crypto';
 import { auditStmt } from './audit';
+import { anyAgentAccess } from './channels';
 import { authorRef } from './conversation';
+import { applyGuildEvents, isGuildEvent, type GuildEvent } from './guild';
 import { chunk, commitPlan, compareSnowflakes, fanOutAll, MAX_PARAMS, placeholders, planEvent, snowflakeTime, type PlannedEvent } from './events';
 import type { EventRow } from './deliveries';
 import { contentHash } from './moderation/rows';
@@ -23,8 +25,9 @@ const Snowflake = z.string().regex(/^\d{17,20}$/);
 const Timestamp = z.iso.datetime({ offset: true }).transform((s) => new Date(s).toISOString());
 const Located = { channel_id: Snowflake, thread_id: Snowflake.nullish() };
 
-// The shape the admin console saves with a channel (ChannelTag in packages/contracts).
+// The shape stored with a channel (ChannelTag in packages/contracts).
 const ChannelTag = z.object({ id: Snowflake, name: z.string().max(100), moderated: z.boolean() });
+const ChannelKind = z.enum(['text', 'announcement', 'forum', 'media']);
 
 export const IntakeEvent = z.discriminatedUnion('kind', [
   z.object({
@@ -64,10 +67,26 @@ export const IntakeEvent = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('channel_update'),
     channel_id: Snowflake,
+    guild_id: Snowflake,
+    parent_id: Snowflake.nullish(),
     name: z.string().min(1).max(100),
-    type: z.enum(['text', 'announcement', 'forum', 'media']),
+    type: ChannelKind,
+    overwrites: z.array(z.object({ id: Snowflake, type: z.union([z.literal(0), z.literal(1)]), allow: z.string(), deny: z.string() })).max(500),
+    slowmode_seconds: z.number().int().min(0).max(21_600),
     tags: z.array(ChannelTag).optional(),
   }),
+  // The bot can't view the channel (#9): its real name and overwrites aren't known, so no agent may use it.
+  z.object({ kind: z.literal('channel_hidden'), channel_id: Snowflake, guild_id: Snowflake, type: ChannelKind }),
+  z.object({ kind: z.literal('channel_delete'), channel_id: Snowflake }),
+  z.object({
+    kind: z.literal('role_update'),
+    role_id: Snowflake,
+    guild_id: Snowflake,
+    name: z.string().max(100),
+    permissions: z.string().regex(/^\d+$/),
+    position: z.number().int(),
+  }),
+  z.object({ kind: z.literal('role_delete'), role_id: Snowflake }),
 ]);
 export type IntakeEvent = z.output<typeof IntakeEvent>;
 export type IntakeEventInput = z.input<typeof IntakeEvent>;
@@ -91,10 +110,10 @@ interface Relayed {
   webhook_id: string | null;
   name: string;
   type: 'text' | 'announcement' | 'forum' | 'media';
-  agent_access: string;
 }
 
 interface Context {
+  /** Channels some agent can see: their messages are kept and announced. */
   relayed: Map<string, Relayed & { id: string }>;
   /** Every channel the relay has a row for, closed ones too: deletes are applied there, quietly, so text removed in Discord never comes back. */
   known: Map<string, Relayed & { id: string }>;
@@ -120,8 +139,10 @@ interface Sent {
 }
 
 type Create = Extract<IntakeEvent, { kind: 'message_create' }>;
+/** Messages and threads: everything but the server's shape (guild.ts). */
+type MessageEvent = Exclude<IntakeEvent, GuildEvent>;
 
-async function sourceKey(e: IntakeEvent): Promise<string | null> {
+async function sourceKey(e: MessageEvent): Promise<string | null> {
   switch (e.kind) {
     case 'message_create':
       return `create:${e.message_id}`;
@@ -164,13 +185,20 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
     else total.invalid++;
   }
   if (!events.length) return total;
-  const { results } = await relay.db.prepare('SELECT id, guild_id, webhook_id, name, type, agent_access FROM channels').all<Relayed & { id: string }>();
+  await applyGuildEvents(relay, events.filter(isGuildEvent));
+  const messages = events.filter((e): e is MessageEvent => !isGuildEvent(e));
+  if (!messages.length) return total;
+  const { results } = await relay.db
+    .prepare('SELECT id, guild_id, webhook_id, name, type, overwrites, hidden FROM channels WHERE deleted_at IS NULL')
+    .all<Relayed & { id: string; overwrites: string; hidden: number }>();
+  // Only channels some agent can see are relayed (#9): a staff channel's messages are never stored.
+  const visible = await anyAgentAccess(relay);
   const ctx: Context = {
-    relayed: new Map(results.filter((c) => c.agent_access !== 'off').map((c) => [c.id, c])),
+    relayed: new Map(results.filter((c) => visible(c).view).map((c) => [c.id, c])),
     known: new Map(results.map((c) => [c.id, c])),
     history: history ?? false,
   };
-  for (const part of chunk(events, EVENTS_PER_ROUND)) {
+  for (const part of chunk(messages, EVENTS_PER_ROUND)) {
     const r = await ingestRound(relay, ctx, part);
     total.recorded += r.recorded;
     total.deliveries += r.deliveries;
@@ -181,10 +209,10 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
   return total;
 }
 
-async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): Promise<Omit<IngestResult, 'invalid'>> {
+async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): Promise<Omit<IngestResult, 'invalid'>> {
   const { relayed } = ctx;
   const out = { ignored: 0 };
-  const keyed: { e: IntakeEvent; key: string | null }[] = [];
+  const keyed: { e: MessageEvent; key: string | null }[] = [];
   for (const e of events) {
     const removal = e.kind === 'message_delete' || e.kind === 'message_delete_bulk' || e.kind === 'thread_delete';
     const places = removal ? ctx.known : relayed;
@@ -275,7 +303,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
     const where = 'parent_id' in e ? e.parent_id : 'channel_id' in e ? e.channel_id : '';
     const ch = (e.kind === 'thread_sync' ? undefined : (relayed.get(where) ?? ctx.known.get(where))) as Relayed & { id: string };
     // Closed to agents: removals are still applied, but nobody is told.
-    const closed = ch?.agent_access === 'off';
+    const closed = !relayed.has(where);
     switch (e.kind) {
       case 'thread_upsert': {
         const flag = (v: boolean | null | undefined) => (v == null ? null : Number(v));
@@ -353,47 +381,6 @@ async function ingestRound(relay: Relay, ctx: Context, events: IntakeEvent[]): P
             )
             .bind(iso(relay.now()), JSON.stringify(parents), JSON.stringify(e.active_ids)),
         );
-        break;
-      }
-
-      case 'channel_update': {
-        const current = relayed.get(e.channel_id)!;
-        if (current.name !== e.name || current.type !== e.type) {
-          // A forum that became a text channel can no longer take new-thread posts; a plain rename keeps the access.
-          const forumLike = (t: string) => t === 'forum' || t === 'media';
-          const access = current.agent_access === 'post_new_threads' && forumLike(current.type) && !forumLike(e.type) ? 'post' : current.agent_access;
-          stmts.push(
-            relay.db
-              .prepare(
-                "UPDATE channels SET name = ?, type = ?, agent_access = CASE WHEN agent_access = 'post_new_threads' AND type IN ('forum', 'media') AND ? NOT IN ('forum', 'media') THEN 'post' ELSE agent_access END, updated_at = ? WHERE id = ?",
-              )
-              .bind(e.name, e.type, e.type, iso(relay.now()), e.channel_id),
-            auditStmt(relay, {
-              actor_type: 'system',
-              actor_id: 'gateway',
-              action: 'channel.synced',
-              target_type: 'channel',
-              target_id: e.channel_id,
-              reason: 'Discord changed the channel',
-              diff: {
-                name: { from: current.name, to: e.name },
-                type: { from: current.type, to: e.type },
-                ...(access !== current.agent_access ? { agent_access: { from: current.agent_access, to: access } } : {}),
-              },
-            }),
-          );
-          current.name = e.name;
-          current.type = e.type;
-          current.agent_access = access;
-        }
-        // Forum and media tags come with the update; a channel that stopped being a forum has none. Saved the way the admin console saves them.
-        const tags = e.tags ?? (e.type === 'text' || e.type === 'announcement' ? [] : undefined);
-        if (tags) {
-          const json = JSON.stringify(tags);
-          stmts.push(
-            relay.db.prepare('UPDATE channels SET tags = ?, updated_at = ? WHERE id = ? AND tags IS NOT ?').bind(json, iso(relay.now()), e.channel_id, json),
-          );
-        }
         break;
       }
 

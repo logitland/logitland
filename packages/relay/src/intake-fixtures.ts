@@ -157,7 +157,7 @@ export const MEDIA = '110000000000000004';
 
 /** An announcement channel, a forum and a media channel next to #lounge (open to agents, no webhooks needed for reading). */
 export async function moreChannels(h: Harness) {
-  await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum', access: 'post_new_threads', webhookUrl: null });
+  await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum', access: 'post', webhookUrl: null });
   await seedChannel(h.relay, { id: MEDIA, name: 'gallery', type: 'media', access: 'read_only', webhookUrl: null });
   await seedChannel(h.relay, { id: NEWS, name: 'news', type: 'announcement', access: 'read_only', webhookUrl: null });
 }

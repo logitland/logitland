@@ -162,7 +162,6 @@ export async function enforceRates(
 ): Promise<void> {
   const { channel, limits, probation } = input;
   const threadsPerHour = probation ? PROBATION_THREADS_PER_HOUR : THREADS_PER_HOUR;
-  if (channel.pace_per_agent_per_minute === 0) throw new RelayError(403, 'forbidden', 'Agents can’t post in this channel right now.');
   const checks: { key: string; limit: number; windowSeconds: number; message: (wait: number) => string }[] = [
     {
       key: `post:${input.agentId}:m`,
@@ -182,13 +181,15 @@ export async function enforceRates(
       windowSeconds: MINUTE,
       message: (w) => `This channel is receiving as many agent posts as it allows a minute. Try again in ${w} seconds.`,
     },
-    {
-      key: `pace:${input.agentId}:${channel.id}:m`,
-      limit: channel.pace_per_agent_per_minute,
-      windowSeconds: MINUTE,
-      message: (w) => `This channel allows each agent ${channel.pace_per_agent_per_minute} messages a minute. Try again in ${w} seconds.`,
-    },
   ];
+  // Discord's slowmode doesn't hold back webhooks, so the relay keeps it for each agent (#9).
+  if (channel.slowmode_seconds > 0)
+    checks.push({
+      key: `slow:${input.agentId}:${channel.id}`,
+      limit: 1,
+      windowSeconds: channel.slowmode_seconds,
+      message: (w) => `This channel has a ${channel.slowmode_seconds}-second slowmode. Try again in ${w} seconds.`,
+    });
   if (input.startsThread) {
     // Discord caps a server's open threads; without limits a few agents could use them all up and stop everyone starting one.
     checks.push(

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The whole Logitland stack on this machine, without a real Discord:
 //
-//   fake Discord  127.0.0.1:8790   packages/discord-fake, seeded with a small server (text, announcement, forum, media, a consent role, an admin)
+//   fake Discord  127.0.0.1:8790   packages/discord-fake, seeded with a small server (text, announcement, forum, media, a consent role, an agents role, an admin)
 //   relay         localhost:8787   apps/backend under `wrangler dev`, pointed at the fake (RELAY_MODE=development + DISCORD_API_BASE)
 //   dashboard     localhost:5173   apps/frontend under `vite dev`, in relay mode (DATA_SOURCE=relay), not the example fixtures
 //
@@ -255,7 +255,6 @@ const fakeInfo = await new Promise((resolvePromise, reject) => {
   });
 });
 const community = fakeInfo.community;
-const fakeState = await (await fetch(`${fakeUrl}/_fake/state`)).json();
 
 /* ---------- 3. Settings for the relay and the dashboard ---------- */
 
@@ -302,42 +301,24 @@ const backendEnvFile = join(state, 'backend.env');
 generatedFiles.push(backendEnvFile);
 writeEnv(backendEnvFile, backendEnv);
 
-/* ---------- 4. The relay's database: migrations, then the fake's channels with their webhooks ---------- */
+/* ---------- 4. The relay's database: migrations, then @agents mapped to the fake's agents role ---------- */
 
 console.log('Applying migrations…');
 await run('d1', ...wrangler(['d1', 'migrations', 'apply', 'logitland', '--local']));
 
-console.log('Giving the relay the fake’s channels and their webhooks…');
-const { SecretBox } = await import(join(root, 'packages/relay/src/crypto.ts'));
-const box = new SecretBox({ id: 'k1', key: secrets.RELAY_SECRET_KEY });
-const access = { lounge: 'post', labBench: 'post_new_threads', showAndTell: 'post_new_threads', announcements: 'read_only' };
-const now = new Date().toISOString();
-const rows = [];
-for (const c of community.channels) {
-  const live = fakeState.guilds[0].channels.find((x) => x.id === c.id);
-  const tags = (live.available_tags ?? []).map((t) => ({ id: t.id, name: t.name, moderated: t.moderated }));
-  const sealed = await box.seal(c.webhook.url, `channels.webhook:${c.id}`);
-  rows.push(
-    `INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (${[
-      c.id,
-      community.guildId,
-      c.name,
-      c.kind,
-      access[c.key],
-      10,
-      sealed,
-      c.webhook.id,
-      JSON.stringify(tags),
-      now,
-    ]
-      .map((v) => (typeof v === 'number' ? v : sql(v)))
-      .join(
-        ', ',
-      )}) ON CONFLICT (id) DO UPDATE SET guild_id = excluded.guild_id, name = excluded.name, type = excluded.type, webhook_ciphertext = excluded.webhook_ciphertext, webhook_id = excluded.webhook_id, tags = excluded.tags, updated_at = excluded.updated_at;`,
-  );
-}
-const seedFile = join(state, 'channels.sql');
-writeFileSync(seedFile, rows.join('\n') + '\n');
+// The relay learns the fake's channels and roles from its Gateway; it only needs to know which role is @agents (kept if an
+// admin already picked one). The fake starts empty every run, so the webhooks the relay made in an earlier run are gone: it
+// makes new ones on the next posts.
+console.log('Mapping @agents to the fake’s agents role…');
+const seedFile = join(state, 'relay.sql');
+writeFileSync(
+  seedFile,
+  [
+    `INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('agents_role_id', ${sql(JSON.stringify(community.agentsRoleId))}, 'dev-full', ${sql(new Date().toISOString())}) ON CONFLICT (key) DO NOTHING;`,
+    'UPDATE channels SET webhook_ciphertext = NULL, webhook_id = NULL;',
+    '',
+  ].join('\n'),
+);
 await run('d1', ...wrangler(['d1', 'execute', 'logitland', '--local', '--file', seedFile]));
 
 /* ---------- 5. The relay ---------- */

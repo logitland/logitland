@@ -8,7 +8,7 @@ import { processSend, sweepStuckJob } from './services/sending';
 import { updateSettings } from './services/settings';
 import { NO_CLIENT } from './types';
 import type { Relay, Stmt } from './context';
-import { BENCH, FORUM, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness, type HarnessOptions } from './testing';
+import { BENCH, FORUM, LOUNGE, harness, seedAgent, seedChannel, seedOwner, setAccess, type Harness, type HarnessOptions } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -70,6 +70,18 @@ const post = (h: Harness, a: { token: string }, body: Record<string, unknown>, i
 const say = (text: string, extra: Record<string, unknown> = {}) => ({ channel_id: LOUNGE, content: text, ...extra });
 const row = (h: Harness, id: string) => h.db.prepare('SELECT * FROM relay_messages WHERE id = ?').bind(id).first<Record<string, unknown>>();
 const json = async (res: Response) => (await res.json()) as Record<string, any>;
+
+/** A Discord where the bot lacks Manage Webhooks until `allow()`; every webhook post is accepted. */
+function refuseWebhooks(h: Harness) {
+  let allowed = false;
+  h.setDiscord(async (req) => {
+    if (!/\/channels\/\d+\/webhooks$/.test(new URL(req.url).pathname))
+      return Response.json({ id: '300000000000000001', channel_id: LOUNGE, content: '', timestamp: h.now().toISOString(), edited_timestamp: null });
+    if (!allowed) return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
+    return Response.json({ id: '600000000000000001', token: 'fixed', channel_id: LOUNGE, name: 'Logitland agents' });
+  });
+  return { allow: () => void (allowed = true) };
+}
 
 describe('POST /v1/messages', () => {
   it('needs an Idempotency-Key, and says why', async () => {
@@ -151,7 +163,7 @@ describe('POST /v1/messages', () => {
     await seedChannel(h.relay, { id: BENCH, name: 'bench', access: 'read_only' });
     expect((await post(h, a, say('hi there', { channel_id: BENCH }))).status).toBe(403);
     expect((await post(h, a, say('hi there', { channel_id: '119999999999999999' }))).status).toBe(404);
-    await h.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'off');
     expect((await post(h, a, say('hi there'))).status).toBe(404);
   });
 });
@@ -252,13 +264,11 @@ describe('idempotency', () => {
     await seedChannel(h.relay, { id: LOUNGE, access: 'post', webhookUrl: null });
     const a = await seedAgent(h.relay);
     const k = key();
+    const webhooks = refuseWebhooks(h);
     const failed = await json(await post(h, a, say('send me when the hook is back'), k));
-    expect(failed).toMatchObject({ status: 'failed', status_reason: expect.stringContaining('webhook is missing') });
-    expect(h.discordCalls).toHaveLength(0);
+    expect(failed).toMatchObject({ status: 'failed', status_reason: expect.stringContaining('couldn’t make a webhook') });
 
-    const sealed = await h.relay.secrets.seal('https://discord.com/api/webhooks/600000000000000001/fixed', `channels.webhook:${LOUNGE}`);
-    await h.db.prepare('UPDATE channels SET webhook_ciphertext = ?, webhook_id = ? WHERE id = ?').bind(sealed, '600000000000000001', LOUNGE).run();
-
+    webhooks.allow();
     const principal = await asAgent(h, a);
     const writes = interleave(h.relay, { sql: 'idempotency_key = ?', parties: 3 });
     const opts = { idempotencyKey: k, net: null };
@@ -266,7 +276,7 @@ describe('idempotency', () => {
     expect(new Set(results.map((r) => r.message.id))).toEqual(new Set([failed.id]));
     const claims = writes.filter((w) => w.sql.includes("SET status = 'moderating'"));
     expect(claims.map((w) => w.changes).sort()).toEqual([0, 0, 1]);
-    expect(h.discordCalls).toHaveLength(1);
+    expect(h.discordCalls.filter((r) => r.url.includes('/webhooks/600000000000000001/fixed'))).toHaveLength(1);
     expect((await row(h, failed.id))!.status).toBe('sent');
     // Only the winner counted as an attempt: the first failed try, and the retry.
     expect((await h.db.prepare("SELECT SUM(count) AS n FROM rate_counters WHERE key LIKE 'attempt:%:m'").first<{ n: number }>())!.n).toBe(2);
@@ -277,8 +287,10 @@ describe('idempotency', () => {
     await seedChannel(h.relay, { id: LOUNGE, access: 'post', webhookUrl: null });
     const a = await seedAgent(h.relay);
     const k = key();
+    refuseWebhooks(h);
     const failed = await json(await post(h, a, say('retry me later'), k));
-    await h.db.prepare('UPDATE channels SET pace_per_agent_per_minute = 0 WHERE id = ?').bind(LOUNGE).run();
+    expect(failed.status).toBe('failed');
+    await setAccess(h.db, LOUNGE, 'read_only');
     expect((await post(h, a, say('retry me later'), k)).status).toBe(403);
     expect((await row(h, failed.id))!).toMatchObject({ status: 'failed', status_reason: failed.status_reason });
   });
@@ -358,7 +370,7 @@ describe('what Discord answers', () => {
 
   it('finishes the send when the Gateway reported the message before Discord answered', async () => {
     const { h, a } = await setup();
-    await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum', access: 'post_new_threads' });
+    await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum' });
     // Intake settles a send it recognises: same text, same agent name, still `sending`.
     h.setDiscord(async () => {
       await h.db.prepare("UPDATE relay_messages SET status = 'sent', discord_message_id = '300000000000000808' WHERE status = 'sending'").run();
@@ -380,12 +392,15 @@ describe('what Discord answers', () => {
     );
   });
 
-  it('fails with the webhook-missing sentence on a 404', async () => {
+  it('fails a 404 with a sentence saying to send it again', async () => {
     const { h, a } = await setup();
     h.setDiscord(() => Response.json({ message: 'Unknown Webhook', code: 10015 }, { status: 404 }));
     const res = await post(h, a, say('hello webhook'));
     expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ status: 'failed', status_reason: 'This channel’s webhook is missing; an admin needs to set it again.' });
+    expect(await json(res)).toMatchObject({
+      status: 'failed',
+      status_reason: 'Discord no longer knows this channel’s webhook, so the message wasn’t sent. Send it again with the same Idempotency-Key.',
+    });
   });
 
   it('says the thread is gone when a thread post gets Unknown Channel', async () => {
@@ -400,7 +415,7 @@ describe('what Discord answers', () => {
     for (const [status, text] of [
       [400, /refused the message/],
       [403, /refused this channel’s webhook/],
-      [401, /refused this channel’s webhook/],
+      [401, /no longer knows this channel’s webhook/],
     ] as const) {
       const { h, a } = await setup();
       h.setDiscord(() => Response.json({ message: 'INTERNAL DISCORD DETAIL https://discord.com/api/webhooks/1/secret', code: 50035 }, { status }));

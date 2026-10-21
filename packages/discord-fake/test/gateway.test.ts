@@ -3,7 +3,7 @@
 
 import { DiscordRest } from '@logitland/discord';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { CloseCode, Intent, encodeFrame, type DiscordFake } from '../src/index.ts';
+import { CloseCode, Intent, Permission, encodeFrame, type DiscordFake } from '../src/index.ts';
 import { fixture, sleep, type Fixture } from './helpers.ts';
 import { RawClient } from './ws-client.ts';
 
@@ -245,6 +245,27 @@ describe('dispatch', () => {
     expect(await client.nextJson()).toMatchObject({ t: 'THREAD_UPDATE', d: { id: m.id, name: 'Renamed', thread_metadata: { archived: true } } });
     fake.world.deleteThread(m.id);
     expect(await client.nextJson()).toMatchObject({ t: 'THREAD_DELETE', d: { id: m.id, guild_id: f.guild.id, parent_id: f.text.id, type: 11 } });
+  });
+
+  it('announces a channel’s creation, its changes as an admin makes them, and its deletion', async () => {
+    const { client } = await session();
+    const c = fake.addChannel(f.guild.id, { name: 'workshop' });
+    expect(await client.nextJson()).toMatchObject({ t: 'CHANNEL_CREATE', d: { id: c.id, name: 'workshop', permission_overwrites: [] } });
+    fake.world.updateChannel(c.id, { overwrites: [{ id: f.guild.everyoneRoleId, deny: Permission.viewChannel }], slowmode: 30, flags: 1 << 17, name: 'den' });
+    expect(await client.nextJson()).toMatchObject({
+      t: 'CHANNEL_UPDATE',
+      d: {
+        id: c.id,
+        guild_id: f.guild.id,
+        name: 'den',
+        rate_limit_per_user: 30,
+        flags: 1 << 17,
+        permission_overwrites: [{ id: f.guild.everyoneRoleId, type: 0, allow: '0', deny: String(Permission.viewChannel) }],
+      },
+    });
+    fake.world.deleteChannel(c.id);
+    expect(await client.nextJson()).toMatchObject({ t: 'CHANNEL_DELETE', d: { id: c.id, guild_id: f.guild.id } });
+    expect(fake.world.channels.has(c.id)).toBe(false);
   });
 
   it('delivers system messages and replies with their types', async () => {

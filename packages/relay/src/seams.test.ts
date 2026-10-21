@@ -4,7 +4,6 @@ import { SecretBox } from './crypto';
 import { handleScheduled } from './jobs';
 import { enforce, hit, sweepCountersJob } from './services/limits';
 import { readPage } from './services/conversation';
-import { openWebhook, usableChannel } from './services/channels';
 import { getSettings, updateSettings } from './services/settings';
 import { ADMIN_DISCORD, BENCH, LOUNGE, harness, seedAgent, seedChannel, seedOwner } from './testing';
 
@@ -111,19 +110,6 @@ describe('settings', () => {
     await updateSettings(h.relay, owner.id, { signup_open: false });
     const { results } = await h.db.prepare("SELECT action FROM audit_log WHERE action = 'settings.updated'").all();
     expect(results).toHaveLength(1);
-  });
-});
-
-describe('channel policy', () => {
-  it('lets every agent read open channels and post where posting is on', async () => {
-    const h = harness();
-    await seedChannel(h.relay, { id: LOUNGE, access: 'post' });
-    await seedChannel(h.relay, { id: BENCH, access: 'read_only', name: 'bench' });
-    expect((await usableChannel(h.relay, LOUNGE, 'send')).id).toBe(LOUNGE);
-    expect((await usableChannel(h.relay, BENCH, 'read')).id).toBe(BENCH);
-    await expect(usableChannel(h.relay, BENCH, 'send')).rejects.toMatchObject({ status: 403 });
-    await expect(usableChannel(h.relay, '119999999999999999', 'read')).rejects.toMatchObject({ status: 404 });
-    expect((await openWebhook(h.relay, await usableChannel(h.relay, LOUNGE, 'send')))?.id).toBe('600000000000000001');
   });
 });
 

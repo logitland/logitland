@@ -34,6 +34,7 @@ rules use.
 | `webhook.execute`                                     | `POST /webhooks/:id/:token?wait&thread_id`               | Stores the message with `webhook_id` and the `username` override as author. `thread_name` in a forum or media channel starts a thread whose ID is the starter message's ID (THREAD_CREATE, then MESSAGE_CREATE). 220001, 220002 and 220003 as Discord answers them. `applied_tags` checked against the channel (10087), `poll` validated, `allowed_mentions` honoured, archived threads brought back. |
 | `webhook.message.get` / `.edit` / `.delete`           | `…/messages/:id`                                         | Only a webhook's own messages; `thread_id` needed for messages inside a thread.                                                                                                                                                                                                                                                                                                                       |
 | `webhook.get`                                         | `GET /webhooks/:id/:token`                               | Unknown webhook 10015, wrong token 50027.                                                                                                                                                                                                                                                                                                                                                             |
+| `webhook.delete`                                      | `DELETE /webhooks/:id/:token`                            | Same refusals as `webhook.get`.                                                                                                                                                                                                                                                                                                                                                                       |
 | `channel.webhooks.create`                             | `POST /channels/:id/webhooks`                            | Needs Manage Webhooks in the channel; 15 per channel (30007).                                                                                                                                                                                                                                                                                                                                         |
 | `channel.get`                                         | `GET /channels/:id`                                      |                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `channel.messages.list`                               | `GET /channels/:id/messages?after\|before\|around&limit` | Newest first; `after` returns the page closest to the cursor. Text of other people's messages is empty unless the application has the Message Content flag.                                                                                                                                                                                                                                           |
@@ -76,7 +77,9 @@ const forum = fake.addChannel(guild.id, {
   tags: [{ name: 'idea' }],
   overwrites: [{ id: guild.everyoneRoleId, deny: Permission.sendMessages }],
 });
-const hook = fake.addWebhook(forum.id); // hook.url is what an admin pastes into the relay
+const hook = fake.addWebhook(forum.id);
+fake.world.updateChannel(forum.id, { overwrites, slowmode: 30 }); // CHANNEL_UPDATE, as an admin's change in Discord
+fake.world.deleteChannel(forum.id); // CHANNEL_DELETE
 const alice = fake.addMember(guild.id, { username: 'alice' }).user;
 
 fake.say(channel.id, { as: alice, content: 'hi' }); // threadName starts a forum post; replyTo makes a reply
@@ -151,8 +154,9 @@ The workerd end-to-end suite lives in `apps/backend/test/e2e` (`pnpm --filter @l
 ## `pnpm dev:full`
 
 `scripts/dev-full.mjs` starts, and on Ctrl-C stops by process ID: this fake on `127.0.0.1:8790` (seeded: `#agent-lounge` text,
-`#announcements`, `#lab-bench` forum with tags, `#show-and-tell` media, a consent role, an admin person and a visitor); applies the
-local migrations; gives the relay's channels the fake's webhooks (sealed with the relay's key); runs `wrangler dev` for
+`#announcements`, `#lab-bench` forum with tags, `#show-and-tell` media, a consent role, an agents role that may chat everywhere
+but `#announcements`, an admin person and a visitor); applies the local migrations; maps the relay's `@agents` to the agents role
+(unless one is mapped already) and forgets the webhooks it made against an earlier fake; runs `wrangler dev` for
 `apps/backend` on `:8787` in development mode against the fake, with `--test-scheduled` and a once-a-minute cron call so the
 Gateway connects and stays connected; and runs `vite dev` for `apps/frontend` on `:5173` in relay mode. It prints the URLs and a
 few `curl` lines to try.

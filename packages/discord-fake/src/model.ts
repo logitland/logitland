@@ -25,6 +25,7 @@ export const Permission = {
   viewChannel: 1n << 10n,
   sendMessages: 1n << 11n,
   manageMessages: 1n << 13n,
+  embedLinks: 1n << 14n,
   readMessageHistory: 1n << 16n,
   manageRoles: 1n << 28n,
   manageWebhooks: 1n << 29n,

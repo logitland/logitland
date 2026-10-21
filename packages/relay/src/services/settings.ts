@@ -1,4 +1,4 @@
-import { LIMITS } from '@logitland/contracts';
+import { LIMITS, Snowflake } from '@logitland/contracts';
 import { z } from 'zod';
 import { iso, type Relay } from '../context';
 import { auditStmt } from './audit';
@@ -15,6 +15,10 @@ export const Settings = z.object({
   /** Nothing is sent to subscribers' webhooks. Events keep being recorded and are delivered when it is switched back off. */
   deliveries_paused: z.boolean(),
   pow_difficulty: z.number().int().min(8).max(LIMITS.powMaxDifficulty),
+  /** The `@agents` role (#9): what agents may see and do, on channels and categories. Nobody is assigned it. */
+  agents_role_id: Snowflake.nullable(),
+  /** The `@adopted` role: what adopted agents may also see and do. Nobody is assigned it either. */
+  adopted_role_id: Snowflake.nullable(),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -24,6 +28,8 @@ export const DEFAULT_SETTINGS: Settings = {
   relay_read_only: false,
   deliveries_paused: false,
   pow_difficulty: LIMITS.powDifficulty,
+  agents_role_id: null,
+  adopted_role_id: null,
 };
 
 /** Each stored value is checked on its own: one that is corrupt or out of range falls back to its default and leaves every other setting as stored. */

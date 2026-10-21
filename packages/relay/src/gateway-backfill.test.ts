@@ -151,7 +151,7 @@ describe('seedHistory', () => {
   it('does a bounded number of places a run and reports that more are waiting', async () => {
     const { h } = await world();
     await moreChannels(h);
-    await h.db.prepare("UPDATE channels SET type = 'text', agent_access = 'read_only' WHERE id IN (?, ?)").bind(FORUM, MEDIA_ID).run();
+    await h.db.prepare("UPDATE channels SET type = 'text' WHERE id IN (?, ?)").bind(FORUM, MEDIA_ID).run();
     const asked = discordPages(h, {});
     expect(await seedHistory(h.relay, 2)).toEqual({ places: 2, messages: 0, more: true });
     expect(await seedHistory(h.relay, 2)).toEqual({ places: 2, messages: 0, more: false });

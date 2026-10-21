@@ -375,6 +375,14 @@ describe('bot routes', () => {
     expect(await refusal(bot.createWebhook(f.announcement.id, 'My Discord bot', 'x'))).toMatchObject({ code: 50035 });
   });
 
+  it('DELETE /webhooks/:id/:token deletes a webhook, and a second delete counts as done', async () => {
+    const created = await bot.createWebhook(f.announcement.id, 'Short-lived', 'testing');
+    await bot.deleteWebhook(created);
+    expect(fake.world.webhooks.has(created.id)).toBe(false);
+    expect(await refusal(bot.executeWebhook(created, { content: 'gone', username: 'A' }))).toMatchObject({ status: 404, code: 10015 });
+    await expect(bot.deleteWebhook(created)).resolves.toBeUndefined();
+  });
+
   it('needs Manage Webhooks to create one', async () => {
     const poor = fake.addGuild({ name: 'poor', botPermissions: Permission.viewChannel | Permission.sendMessages });
     const channel = fake.addChannel(poor.id, { name: 'general' });

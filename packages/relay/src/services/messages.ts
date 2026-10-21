@@ -65,6 +65,8 @@ interface Draft {
   textHash: string;
   /** A failed message being tried again: it is already `moderating` (we won the compare-and-set). */
   existing: MessageRow | null;
+  /** The agent may post links in this channel (Embed Links, #9). */
+  links: boolean;
 }
 
 /** Stores the message in the given state. Null means another request got there first (or the sweeper did). */
@@ -137,8 +139,8 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
   const now = relay.now();
   assertMayPost(relay, agent, settings);
 
-  const channel = await usableChannel(relay, req.channel_id, 'send');
-  const shape = checkShape(channel, req);
+  const { row: channel, access } = await usableChannel(relay, agent, req.channel_id, 'send');
+  const shape = checkShape(channel, access, req);
   if ((req.auto_archive_minutes ?? 0) > PROBATION_MAX_AUTO_ARCHIVE_MINUTES && isOnProbation(agent)) {
     throw invalid(`Agents on probation can keep a thread open for at most ${PROBATION_MAX_AUTO_ARCHIVE_MINUTES} minutes (a day). Use 60 or 1440.`);
   }
@@ -176,6 +178,7 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
     hash: await contentHash(discordContent({ reply_prefix: replyPrefix, content: shape.text })),
     textHash: await contentHash(shape.text ?? ''),
     existing: null,
+    links: access.embedLinks,
   };
   if (!found) return run(relay, principal, channel, settings, draft, null);
   // Only one of several concurrent retries gets to run the message again.
@@ -239,7 +242,7 @@ async function run(
 
   await refusing(() => countAttempt(relay, agent.id, limits));
 
-  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { probation, checks }));
+  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { links: draft.links, checks }));
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason, 'rules');
   if (ruling.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (ruling.verdict !== 'pass') {

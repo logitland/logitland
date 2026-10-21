@@ -249,6 +249,16 @@ export class DiscordRest {
     return this.send<CreatedWebhook>('POST', `/channels/${channelId}/webhooks`, { name }, true, false, reason);
   }
 
+  /** Deletes a webhook with its own token. One that is already gone counts as deleted. */
+  async deleteWebhook(hook: WebhookRef): Promise<void> {
+    try {
+      await this.send<void>('DELETE', `/webhooks/${hook.id}/${hook.token}`, undefined, false);
+    } catch (err) {
+      if (err instanceof DiscordError && err.status === 404) return;
+      throw err;
+    }
+  }
+
   /** Text and announcement channels only; a message can have one thread. Needs Create Public Threads. */
   startThreadFromMessage(
     channelId: string,

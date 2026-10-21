@@ -16,7 +16,7 @@ import {
 } from './deliveries.testkit';
 import { recordGap } from './services/intake';
 import type { SubscriptionRow } from './services/subscriptions';
-import { BENCH, LOUNGE, seedAgent, seedChannel } from './testing';
+import { BENCH, LOUNGE, seedAgent, seedChannel, setAccess } from './testing';
 
 // Replacing recordGap shows how resume calls it.
 vi.mock('./services/intake', async (importOriginal) => ({ ...(await importOriginal<typeof import('./services/intake')>()), recordGap: vi.fn(async () => 1) }));
@@ -331,12 +331,12 @@ describe('resuming a subscription', () => {
     const s = await setup();
     const sub = await subscribe(s, { channel_ids: [LOUNGE, BENCH] });
     await pause(s, sub.id);
-    await s.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(BENCH).run();
+    await setAccess(s.db, BENCH, 'off');
     await s.call('POST', `/v1/subscriptions/${sub.id}/resume`, undefined, s.auth);
     expect(vi.mocked(recordGap).mock.calls[0]![1].channelIds).toEqual([LOUNGE]);
 
     await pause(s, sub.id);
-    await s.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(s.db, LOUNGE, 'off');
     vi.mocked(recordGap).mockClear();
     expect((await s.call('POST', `/v1/subscriptions/${sub.id}/resume`, undefined, s.auth)).status).toBe(200);
     expect(recordGap).not.toHaveBeenCalled();

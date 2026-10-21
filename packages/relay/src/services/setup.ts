@@ -1,34 +1,18 @@
-import type {
-  BotChannelPermissions,
-  Channel,
-  ChannelAccess,
-  ChannelTag,
-  ChannelType,
-  DiscordChannelListing,
-  RegisteredCommands,
-  RelayChannelRequest,
-  RelayChannelResult,
-  SetupCheck,
-  SetupReport,
-} from '@logitland/contracts';
-import { DiscordError, MESSAGE_CONTENT_FLAGS, Permission, channelPermissions, has, type ForumTag, type GuildChannel, type Role } from '@logitland/discord';
-import { iso, type Relay } from '../context';
-import { RelayError, conflict } from '../errors';
-import { audit, auditStmt } from './audit';
-import { getChannel, listChannels, openWebhook, sealWebhook, toChannel, type ChannelRow } from './channels';
+import type { BotChannelPermissions, ChannelTag, RegisteredCommands, SetupCheck, SetupReport } from '@logitland/contracts';
+import { DiscordError, MESSAGE_CONTENT_FLAGS, Permission, channelPermissions, has, type Overwrite, type Role } from '@logitland/discord';
+import type { Relay } from '../context';
+import { RelayError } from '../errors';
+import { audit } from './audit';
+import { anyAgentAccess, listChannels, type ChannelRow } from './channels';
 import { CONSENT_COMMAND } from './interactions';
+import { getSettings } from './settings';
 
-// Admin setup: what the relay needs from Discord, checked and (where Discord allows it) done for the admin.
+// Admin setup: what the relay needs from Discord, checked for the admin. Channels need no setup in the relay (#9): agents may
+// use what Discord's overwrites give the agent roles, and each channel's webhook is made the first time an agent posts there.
 // Discord facts used here, from https://docs.discord.com/developers/:
-//   resources/channel (types 0 text, 5 announcement, 15 forum, 16 media; 4 category), resources/guild (roles, members, channels),
-//   topics/permissions (bits, overwrite order), resources/application (flags 1<<18 and 1<<19, interactions_endpoint_url).
+//   resources/guild (roles, members), topics/permissions (bits, overwrite order),
+//   resources/application (flags 1<<18 and 1<<19, interactions_endpoint_url).
 
-const CHANNEL_TYPES: Record<number, ChannelType> = { 0: 'text', 5: 'announcement', 15: 'forum', 16: 'media' };
-const CATEGORY = 4;
-const TYPE_LABELS: Record<ChannelType, string> = { text: 'Text', announcement: 'Announcement', forum: 'Forum', media: 'Media' };
-const WEBHOOK_NAME = 'Logitland relay';
-/** What a channel gets when it is relayed and nobody says otherwise: the schema's default, the seed and the dialog all use 10. */
-export const DEFAULT_PACE = 10;
 const DEVELOPER_PORTAL = 'the Discord Developer Portal (discord.com/developers/applications) → your application';
 
 export const unprocessable = (detail: string) => new RelayError(422, 'invalid_request', detail);
@@ -70,7 +54,6 @@ function discordFacts(relay: Relay, guildId: string) {
     user,
     roles,
     application: memo(() => relay.discord.getCurrentApplication()),
-    channels: memo(() => relay.discord.getGuildChannels(guildId)),
     member: memo(async () => relay.discord.getGuildMember(guildId, (await user()).id)),
   };
 }
@@ -80,12 +63,10 @@ export function parseTags(row: { tags?: string | null }): ChannelTag[] {
   return JSON.parse(row.tags ?? '[]') as ChannelTag[];
 }
 
-export const mapTags = (tags: ForumTag[] | undefined): ChannelTag[] => (tags ?? []).map((t) => ({ id: t.id, name: t.name, moderated: Boolean(t.moderated) }));
-
 /* ---------- What the bot may do ---------- */
 
-function standing(guildId: string, roles: GuildRole[], botUserId: string, botRoleIds: string[], channel: GuildChannel): BotChannelPermissions {
-  const mine = channelPermissions(guildId, roles, { userId: botUserId, roleIds: botRoleIds }, channel.permission_overwrites ?? []);
+function standing(guildId: string, roles: GuildRole[], botUserId: string, botRoleIds: string[], channel: ChannelRow): BotChannelPermissions {
+  const mine = channelPermissions(guildId, roles, { userId: botUserId, roleIds: botRoleIds }, JSON.parse(channel.overwrites) as Overwrite[]);
   // Without View Channel everything else in the channel is denied.
   const canView = has(mine, Permission.VIEW_CHANNEL);
   const also = (flag: bigint) => canView && has(mine, flag);
@@ -96,11 +77,6 @@ function standing(guildId: string, roles: GuildRole[], botUserId: string, botRol
     can_create_threads: also(Permission.CREATE_PUBLIC_THREADS),
     can_send_in_threads: also(Permission.SEND_MESSAGES_IN_THREADS),
   };
-}
-
-async function standingIn(f: Facts, channel: GuildChannel): Promise<BotChannelPermissions> {
-  const [roles, user, member] = await Promise.all([f.roles(), f.user(), f.member()]);
-  return standing(f.guildId, roles, user.id, member.roles, channel);
 }
 
 /* ---------- The checklist ---------- */
@@ -266,98 +242,56 @@ function commandsCheck(relay: Relay): CheckDef {
   };
 }
 
-const needsWebhook = (c: ChannelRow) => c.agent_access === 'post' || c.agent_access === 'post_new_threads';
-
-function channelChecks(relay: Relay, f: Facts, c: ChannelRow): CheckDef[] {
-  const label = `#${c.name}`;
-  const listed = async () => {
-    requireGuild(relay);
-    const found = (await f.channels()).find((x) => x.id === c.id);
-    if (!found)
-      throw new Ended(
-        fail(
-          `Discord doesn’t show ${label} to the bot: it was deleted, or the bot can’t view it.`,
-          `Give the bot View Channel on ${label} (Edit Channel → Permissions), or stop relaying it if it’s gone.`,
-        ),
-      );
-    return found;
+/** `@agents` and `@adopted` are mapped to roles that exist in the server (#9). Without `@agents` only `@everyone` and level roles count. */
+function agentRolesCheck(relay: Relay): CheckDef {
+  return {
+    id: 'agent-roles',
+    title: 'The agent roles are mapped',
+    async run() {
+      const { agents_role_id, adopted_role_id } = await getSettings(relay);
+      const { results } = await relay.db.prepare('SELECT id FROM guild_roles').all<{ id: string }>();
+      const known = new Set(results.map((r) => r.id));
+      const fix =
+        'Create an “agents” and an “adopted” role in Discord (assign them to nobody), put them on the channels agents may use, and pick them in the relay’s settings.';
+      if (!agents_role_id) return fail('No @agents role is mapped, so agents only get what @everyone and the level roles allow.', fix);
+      if (!known.size) return warn('The Gateway hasn’t reported the server’s roles yet.', 'Wait for “The Gateway is connected”, then run the checklist again.');
+      if (!known.has(agents_role_id)) return fail('The mapped @agents role isn’t in the server any more.', fix);
+      if (adopted_role_id && !known.has(adopted_role_id)) return fail('The mapped @adopted role isn’t in the server any more.', fix);
+      if (!adopted_role_id) return warn('No @adopted role is mapped, so adopted agents see what orphans see.', fix);
+      return ok('@agents and @adopted are mapped to roles in the server.');
+    },
   };
-  const checks: CheckDef[] = [
-    {
-      id: `channel:${c.id}:webhook`,
-      title: `${label}: webhook`,
-      async run() {
-        if (!c.webhook_ciphertext) {
-          if (!needsWebhook(c)) return ok('Agents only read here, so no webhook is needed.');
-          return fail(
-            `${label} has no webhook, so agents can’t post.`,
-            `Press “Relay” for ${label} on the Channels page: the bot creates the webhook itself (it needs Manage Webhooks there).`,
-          );
-        }
-        const hook = await openWebhook(relay, c);
-        try {
-          const info = await relay.discord.getWebhook(hook!);
-          if (info.channel_id !== c.id)
-            return fail(
-              `The stored webhook posts to a different channel, not ${label}.`,
-              `Clear the webhook on ${label} and relay the channel again so the bot creates a fresh one.`,
-            );
-          return ok('The webhook exists and posts to this channel.');
-        } catch (err) {
-          if (err instanceof DiscordError && (err.status === 404 || err.status === 401))
-            return fail(
-              `Discord no longer knows the stored webhook for ${label}; it was probably deleted.`,
-              `Clear the webhook on ${label} (Channels → Edit), then relay the channel again so the bot creates a fresh one.`,
-            );
-          throw err;
-        }
-      },
-    },
-    {
-      id: `channel:${c.id}:history`,
-      title: `${label}: bot can read it`,
-      async run() {
-        const s = await standingIn(f, await listed());
-        if (!s.can_view)
-          return fail(
-            `The bot can’t view ${label}, so it can’t see new messages there.`,
-            `In Discord, Edit Channel → Permissions on ${label}: allow the bot’s role “View Channel”.`,
-          );
-        if (!s.can_read_history)
-          return fail(
-            `The bot can’t read the message history of ${label}, so it can’t fill in what it missed after a disconnect.`,
-            `In Edit Channel → Permissions on ${label}, allow the bot’s role “Read Message History”.`,
-          );
-        return ok('The bot can view the channel and read its history.');
-      },
-    },
-  ];
-  if (c.type === 'text' || c.type === 'announcement') {
-    checks.push({
-      id: `channel:${c.id}:threads`,
-      title: `${label}: bot can start threads`,
-      async run() {
-        const s = await standingIn(f, await listed());
-        const missing = [!s.can_create_threads && 'Create Public Threads', !s.can_send_in_threads && 'Send Messages in Threads'].filter(Boolean) as string[];
-        if (!missing.length) return ok('The bot can create public threads and send messages in them.');
-        const detail = `The bot lacks ${missing.join(' and ')} in ${label}.`;
-        const fix = `In Edit Channel → Permissions on ${label}, add the bot’s role and allow ${missing.map((m) => `“${m}”`).join(' and ')}. Do it on the channel itself: a server-wide permission doesn’t count once @everyone is denied there.`;
-        return c.agent_access === 'post_new_threads'
-          ? fail(`${detail} Agents can’t start new threads here.`, fix)
-          : warn(`${detail} Agents couldn’t start new threads here if you turned that on.`, fix);
-      },
-    });
-  }
-  return checks;
 }
 
-function channelsExistCheck(count: number): CheckDef {
+/**
+ * The channels agents can use, and what the bot needs in them: View Channel (or Discord hides the channel from the relay, and
+ * from 2026-11-16 obfuscates it) and, where agents post, Manage Webhooks so the relay can make the channel's webhook.
+ */
+function agentChannelsCheck(relay: Relay, f: Facts): CheckDef {
   return {
-    id: 'channels-relayed',
-    title: 'At least one channel is relayed',
+    id: 'agent-channels',
+    title: 'Agents have channels, and the bot can serve them',
     async run() {
-      if (count > 0) return ok(`${count} ${count === 1 ? 'channel is' : 'channels are'} relayed.`);
-      return warn('No channels are relayed yet, so agents have nowhere to talk.', 'Open the Channels page and press “Relay” on a channel.');
+      const guildId = requireGuild(relay);
+      const channels = await listChannels(relay);
+      const hidden = channels.filter((c) => c.hidden);
+      const visible = await anyAgentAccess(relay);
+      const open = channels.filter((c) => visible(c).view);
+      if (!open.length && !hidden.length)
+        return warn('No channel is open to agents yet, so they have nowhere to talk.', 'Allow @agents “View Channel” on a channel or category in Discord.');
+      const [roles, user, member] = await Promise.all([f.roles(), f.user(), f.member()]);
+      const noWebhook = open.filter((c) => !c.webhook_ciphertext && visible(c).post && !standing(guildId, roles, user.id, member.roles, c).can_manage_webhooks);
+      if (hidden.length)
+        return fail(
+          `The bot can’t view ${hidden.length} ${hidden.length === 1 ? 'channel' : 'channels'} (${hidden.map((c) => c.id).join(', ')}), so no agent can use them.`,
+          'Give the bot’s role View Channel on those channels or their category, or give it Administrator.',
+        );
+      if (noWebhook.length)
+        return fail(
+          `Agents may post in ${noWebhook.map((c) => `#${c.name}`).join(', ')}, but the bot can’t make a webhook there.`,
+          'Allow the bot’s role “Manage Webhooks” on those channels or their category.',
+        );
+      return ok(`${open.length} ${open.length === 1 ? 'channel is' : 'channels are'} open to agents.`);
     },
   };
 }
@@ -453,240 +387,19 @@ function adminsCheck(relay: Relay): CheckDef {
 /** Every check, each isolated: one that errors becomes “unknown” with the reason, and the rest still run. */
 export async function runSetup(relay: Relay): Promise<SetupReport> {
   const f = discordFacts(relay, relay.config.discord.guildId ?? '');
-  const { results: relayed } = await relay.db.prepare("SELECT * FROM channels WHERE agent_access != 'off' ORDER BY name").all<ChannelRow>();
   const defs: CheckDef[] = [
     tokenCheck(f),
     guildCheck(relay, f),
     intentCheck(f),
     interactionsUrlCheck(relay, f),
     commandsCheck(relay),
-    channelsExistCheck(relayed.length),
-    ...relayed.flatMap((c) => channelChecks(relay, f, c)),
+    agentRolesCheck(relay),
+    agentChannelsCheck(relay, f),
     gatewayCheck(relay),
     classifierCheck(relay),
     adminsCheck(relay),
   ];
   return { checks: await Promise.all(defs.map((d) => runCheck(relay, d))) };
-}
-
-/* ---------- Discord's channels, for the relay picker ---------- */
-
-export async function listDiscordChannels(relay: Relay): Promise<DiscordChannelListing> {
-  const guildId = relay.config.discord.guildId;
-  if (!guildId) throw misconfigured('DISCORD_GUILD_ID isn’t set, so the relay doesn’t know which server to list.');
-  const f = discordFacts(relay, guildId);
-  const refused = () => 'Discord won’t show the server’s channels to the relay. Check the bot is in the server and the bot token is right.';
-  const [all, roles, user, member] = await askDiscord(
-    relay,
-    'list the server’s channels',
-    () => Promise.all([f.channels(), f.roles(), f.user(), f.member()]),
-    refused,
-  );
-  const rows = new Map((await listChannels(relay)).map((r) => [r.id, r]));
-  const categories = all
-    .filter((c) => c.type === CATEGORY)
-    .map((c) => ({ id: c.id, name: c.name, position: c.position ?? 0 }))
-    .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
-  const order = new Map(categories.map((c, i) => [c.id, i]));
-  const channels = all
-    .filter((c) => c.type in CHANNEL_TYPES)
-    .map((c) => {
-      const type = CHANNEL_TYPES[c.type]!;
-      const row = rows.get(c.id);
-      return {
-        id: c.id,
-        name: c.name,
-        type,
-        type_label: TYPE_LABELS[type],
-        category_id: c.parent_id && order.has(c.parent_id) ? c.parent_id : null,
-        position: c.position ?? 0,
-        available_tags: type === 'forum' || type === 'media' ? mapTags(c.available_tags) : [],
-        relay: row ? toChannel(row) : null,
-        bot: standing(guildId, roles, user.id, member.roles, c),
-      };
-    })
-    .sort(
-      (a, b) =>
-        (a.category_id ? order.get(a.category_id)! : -1) - (b.category_id ? order.get(b.category_id)! : -1) ||
-        a.position - b.position ||
-        a.id.localeCompare(b.id),
-    );
-  return { guild_id: guildId, categories, channels };
-}
-
-/* ---------- Saving a channel (used by PATCH and by relay) ---------- */
-
-export interface ChannelState {
-  name: string;
-  guild_id: string;
-  type: ChannelType;
-  agent_access: ChannelAccess;
-  pace_per_agent_per_minute: number;
-  tags: ChannelTag[];
-}
-
-export type ChannelRowWithTags = ChannelRow & { tags: string };
-
-/** undefined: leave the webhook alone. null: remove it. */
-export type WebhookChange = { ciphertext: string; webhookId: string } | null | undefined;
-
-const FIELDS = ['name', 'guild_id', 'type', 'agent_access', 'pace_per_agent_per_minute'] as const;
-
-/** What an admin changed, as audit-log pairs. The webhook appears only as “set”, “replaced” or removed, never as the URL. */
-export function channelDiff(before: ChannelRowWithTags | null, next: ChannelState, webhook: WebhookChange): Record<string, { from: unknown; to: unknown }> {
-  const diff: Record<string, { from: unknown; to: unknown }> = {};
-  const was: Record<string, unknown> = { ...before };
-  for (const key of FIELDS) if (was[key] !== next[key]) diff[key] = { from: was[key] ?? null, to: next[key] };
-  const had = Boolean(before?.webhook_ciphertext);
-  if (webhook) diff.webhook = { from: had ? 'set' : null, to: had ? 'replaced' : 'set' };
-  else if (webhook === null && had) diff.webhook = { from: 'set', to: null };
-  return diff;
-}
-
-/** Writes the channel and its audit entry together. Returns the channel as the admin API shows it. */
-export async function saveChannel(
-  relay: Relay,
-  adminId: string,
-  channelId: string,
-  before: ChannelRowWithTags | null,
-  next: ChannelState,
-  webhook: WebhookChange,
-  reason: string | null = null,
-): Promise<{ channel: Channel; created: boolean }> {
-  const diff = channelDiff(before, next, webhook);
-  const tags = JSON.stringify(next.tags);
-  if (before && Object.keys(diff).length === 0 && tags === before.tags) return { channel: toChannel(before), created: false };
-  const ciphertext = webhook === undefined ? (before?.webhook_ciphertext ?? null) : (webhook?.ciphertext ?? null);
-  const webhookId = webhook === undefined ? (before?.webhook_id ?? null) : (webhook?.webhookId ?? null);
-  const now = iso(relay.now());
-  const entry = {
-    actor_type: 'admin',
-    actor_id: adminId,
-    action: before ? 'channel.updated' : 'channel.added',
-    target_type: 'channel',
-    target_id: channelId,
-    reason,
-    diff,
-  } as const;
-  if (before) {
-    // Only what this save changes is written. The Gateway keeps name and type up to date on its own, and writing every
-    // column from the copy read earlier would put a stale one back over a CHANNEL_UPDATE that landed in between.
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    for (const key of FIELDS)
-      if (key in diff) {
-        sets.push(`${key} = ?`);
-        values.push(next[key]);
-      }
-    if (tags !== before.tags) {
-      sets.push('tags = ?');
-      values.push(tags);
-    }
-    if (webhook !== undefined) {
-      sets.push('webhook_ciphertext = ?', 'webhook_id = ?');
-      values.push(ciphertext, webhookId);
-    }
-    const write = relay.db.prepare(`UPDATE channels SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`).bind(...values, now, channelId);
-    await relay.db.batch(Object.keys(diff).length ? [write, auditStmt(relay, entry)] : [write]);
-  } else {
-    const r = await relay.db
-      .prepare(
-        'INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
-      )
-      .bind(channelId, next.guild_id, next.name, next.type, next.agent_access, next.pace_per_agent_per_minute, ciphertext, webhookId, tags, now)
-      .run();
-    if (r.meta.changes === 0) throw conflict('Someone just added that channel. Reload and check its settings.');
-    await audit(relay, entry);
-  }
-  relay.log.info(before ? 'channel.updated' : 'channel.added', { channel: channelId, fields: Object.keys(diff).join(',') });
-  return { channel: toChannel((await getChannel(relay, channelId))!), created: !before };
-}
-
-/* ---------- Relaying a channel ---------- */
-
-/** The channel as Discord describes it, if it is in the Logitland server and of a kind the relay can use. */
-export async function logitlandChannel(relay: Relay, channelId: string, action: string): Promise<{ channel: GuildChannel; type: ChannelType }> {
-  const guildId = relay.config.discord.guildId;
-  if (!guildId) throw misconfigured('DISCORD_GUILD_ID isn’t set, so the relay doesn’t know which server is Logitland.');
-  const channel = await askDiscord(
-    relay,
-    action,
-    () => relay.discord.getChannel(channelId),
-    () => 'Discord won’t show that channel to the relay. Check the ID, and that the bot is in the server and can see the channel.',
-  );
-  if (channel.guild_id !== guildId) throw unprocessable('That channel isn’t in the Logitland server, so the relay won’t use it.');
-  const type = CHANNEL_TYPES[channel.type];
-  if (!type)
-    throw unprocessable(
-      'The relay can only use text, announcement, forum and media channels. That one is a different kind (a thread, voice channel or category).',
-    );
-  return { channel, type };
-}
-
-/**
- * Reads the channel from Discord, creates its webhook if it has none, and saves it. A new channel defaults to agents
- * posting (starting threads, in a forum or media channel) and DEFAULT_PACE; an existing one keeps whatever the request leaves out.
- */
-export async function relayChannel(
-  relay: Relay,
-  adminId: string,
-  channelId: string,
-  req: RelayChannelRequest,
-): Promise<RelayChannelResult & { created: boolean }> {
-  const { channel, type } = await logitlandChannel(relay, channelId, 'read the channel');
-  const before = (await getChannel(relay, channelId)) as ChannelRowWithTags | null;
-  const live = Boolean(before && before.agent_access !== 'off');
-  const threadsOnly = type === 'forum' || type === 'media';
-
-  const next: ChannelState = {
-    name: channel.name,
-    guild_id: channel.guild_id,
-    type,
-    agent_access: req.agent_access ?? (live ? before!.agent_access : threadsOnly ? 'post_new_threads' : 'post'),
-    pace_per_agent_per_minute: req.pace_per_agent_per_minute ?? before?.pace_per_agent_per_minute ?? DEFAULT_PACE,
-    tags: threadsOnly ? mapTags(channel.available_tags) : [],
-  };
-
-  let webhook: WebhookChange;
-  let made: { id: string; token: string } | undefined;
-  if (!before?.webhook_ciphertext) {
-    made = await askDiscord(
-      relay,
-      'create the webhook',
-      () => relay.discord.createWebhook(channelId, WEBHOOK_NAME, 'Relaying this channel to Logitland'),
-      (err) =>
-        err.status === 403
-          ? 'Give the bot Manage Webhooks in this channel'
-          : err.code === 30007
-            ? 'This channel already has the most webhooks Discord allows (15). Delete one in Channel Settings → Integrations, then try again.'
-            : 'Discord refused to create a webhook in this channel. Check the bot can see it and has Manage Webhooks there.',
-    );
-  }
-  try {
-    if (made) webhook = await sealWebhook(relay, channelId, `https://discord.com/api/webhooks/${made.id}/${made.token}`);
-    const saved = await saveChannel(relay, adminId, channelId, before, next, webhook, 'relayed from the setup page');
-    return { channel: saved.channel, webhook_created: Boolean(webhook), tags: next.tags, created: saved.created };
-  } catch (err) {
-    // Someone relayed the channel first, or the save failed: the webhook just made belongs to nobody, and Discord allows 15 a channel.
-    if (made) await dropUnusedWebhook(relay, channelId, made);
-    throw err;
-  }
-}
-
-/**
- * Deletes a webhook this request made but didn't save (best effort: a failure is logged, not raised). It leaves the
- * webhook alone if the channel's saved webhook is that one after all, which can happen if the save succeeded and a
- * later step failed. DiscordRest has no delete call yet, so this uses the token-in-URL form, which needs no
- * authentication (https://docs.discord.com/developers/resources/webhook#delete-webhook-with-token).
- */
-async function dropUnusedWebhook(relay: Relay, channelId: string, made: { id: string; token: string }): Promise<void> {
-  try {
-    if ((await getChannel(relay, channelId))?.webhook_id === made.id) return;
-    const res = await relay.fetch(`${relay.discord.apiBase}/webhooks/${made.id}/${made.token}`, { method: 'DELETE', signal: AbortSignal.timeout(10_000) });
-    relay.log.info('channel.webhook_dropped', { channel: channelId, status: res.status });
-  } catch (error) {
-    relay.log.warn('channel.webhook_drop_failed', { channel: channelId, error });
-  }
 }
 
 /* ---------- Commands ---------- */

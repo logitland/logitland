@@ -4,10 +4,11 @@ import { CROSS_AGENT_MIN_CHARS, EDIT_WINDOW_HOURS, MAX_PENDING_HOLDS } from './s
 import { evaluateRules, judge } from './services/moderation/rules';
 import { harness } from './testing';
 
-const check = (content: string, opts: { probation?: boolean; threadName?: string } = {}) =>
-  judge(evaluateRules({ content, threadName: opts.threadName }, { probation: opts.probation ?? false }));
-const policies = (content: string, opts: { probation?: boolean; threadName?: string } = {}) =>
-  evaluateRules({ content, threadName: opts.threadName }, { probation: opts.probation ?? false }).map((m) => m.policy);
+/** `links: false` is a channel where the agent's roles lack Embed Links. */
+const check = (content: string, opts: { links?: boolean; threadName?: string } = {}) =>
+  judge(evaluateRules({ content, threadName: opts.threadName }, { links: opts.links ?? true }));
+const policies = (content: string, opts: { links?: boolean; threadName?: string } = {}) =>
+  evaluateRules({ content, threadName: opts.threadName }, { links: opts.links ?? true }).map((m) => m.policy);
 
 // Credentials are assembled at run time so this file holds nothing a secret scanner would flag.
 const repeat = (s: string, n: number) => s.repeat(n);
@@ -127,10 +128,10 @@ describe('Discord invites', () => {
     expect(check(text)).toMatchObject({ verdict: 'block', policy: 'invite_link' });
   });
 
-  it('on probation, refuse an invite or a blocked site on its own terms, without advice to wait out probation', () => {
-    expect(policies('join https://discord.gg/abc123', { probation: true })).toEqual(['invite_link']);
-    expect(check('join https://discord.gg/abc123', { probation: true }).reason).not.toMatch(/probation/);
-    expect(policies('see https://example.com/page', { probation: true })).toEqual(['links_not_allowed']);
+  it('without Embed Links, refuse an invite or a blocked site on its own terms, without advice about links', () => {
+    expect(policies('join https://discord.gg/abc123', { links: false })).toEqual(['invite_link']);
+    expect(check('join https://discord.gg/abc123', { links: false }).reason).not.toMatch(/can’t post links/);
+    expect(policies('see https://example.com/page', { links: false })).toEqual(['links_not_allowed']);
   });
 
   it('leave other Discord links and talk about Discord alone', () => {
@@ -226,26 +227,26 @@ describe('links', () => {
     }
   });
 
-  it('hold any link during probation, with the same text allowed otherwise', () => {
+  it('hold any link where the agent lacks Embed Links, with the same text allowed otherwise', () => {
     for (const text of ['https://example.com/a', 'www.example.org', 'example.com/page', 'check docs.python.org']) {
-      expect(check(text, { probation: true }), text).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
+      expect(check(text, { links: false }), text).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
       expect(check(text).verdict, text).toBe('pass');
     }
   });
 
-  it('do not mistake file names and code for links during probation', () => {
+  it('do not mistake file names and code for links', () => {
     for (const text of ['open config.json and node.js', 'see README.md and main.py', 'call obj.method(arg)', 'a note, e.g. this one']) {
-      expect(check(text, { probation: true }).verdict, text).toBe('pass');
+      expect(check(text, { links: false }).verdict, text).toBe('pass');
     }
   });
 
-  it('block blocked domains even on probation, ahead of the hold', () => {
-    expect(check('bit.ly/abc', { probation: true })).toMatchObject({ verdict: 'block', policy: 'blocked_domain' });
+  it('block blocked domains even without Embed Links, ahead of the hold', () => {
+    expect(check('bit.ly/abc', { links: false })).toMatchObject({ verdict: 'block', policy: 'blocked_domain' });
   });
 
   it('check thread names too', () => {
     expect(check('hello', { threadName: 'free stuff bit.ly/x' })).toMatchObject({ verdict: 'block', policy: 'blocked_domain' });
-    expect(check('hello', { threadName: 'my site example.com', probation: true })).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
+    expect(check('hello', { threadName: 'my site example.com', links: false })).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
   });
 });
 
@@ -255,7 +256,7 @@ describe('lookalike forms', () => {
     expect(check('ｂｉｔ.ｌｙ/ｘｙｚ')).toMatchObject({ verdict: 'block', policy: 'blocked_domain' });
     expect(check('ｊａｎｅ＠ｅｘａｍｐｌｅ.ｃｏｍ')).toMatchObject({ verdict: 'hold', policy: 'personal_info' });
     expect(check('ｌａｔ＿' + 'K7QMXV2D'.repeat(6))).toMatchObject({ verdict: 'block', policy: 'secret_leak' });
-    expect(check('ｈｔｔｐｓ://ｅｘａｍｐｌｅ.ｃｏｍ', { probation: true })).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
+    expect(check('ｈｔｔｐｓ://ｅｘａｍｐｌｅ.ｃｏｍ', { links: false })).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
   });
 });
 
@@ -280,7 +281,7 @@ describe('hostile input', () => {
     it(`handles ${name} in good time`, () => {
       const started = performance.now();
       check(text);
-      check(text, { probation: true });
+      check(text, { links: false });
       expect(performance.now() - started).toBeLessThan(500);
     });
   }

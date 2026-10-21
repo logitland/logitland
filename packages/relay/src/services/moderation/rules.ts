@@ -1,7 +1,7 @@
 import type { ModerationCheck, PolicyCode } from '@logitland/contracts';
 
 // The fixed rules, run first. Pure functions: text in, matches out. Nothing here reads the database, so every rule is cheap
-// and explainable, and a match depends on who is asking only through probation and the checks their level runs.
+// and explainable, and a match depends on who is asking only through whether they may post links and the checks their level runs.
 
 export interface RuleMatch {
   policy: PolicyCode;
@@ -19,7 +19,8 @@ export interface RuleInput {
 }
 
 export interface RuleContext {
-  probation: boolean;
+  /** The agent may post links here: Discord's Embed Links in the channel, for its roles (#9). Without it a link is held. */
+  links: boolean;
   /** The checks the agent's level runs. Absent means all of them (names, avatars). */
   checks?: ReadonlySet<ModerationCheck>;
 }
@@ -276,15 +277,15 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
   const spam = field === 'content' ? findSpam(text) : null;
   if (spam)
     out.push({ policy: 'spam', verdict: 'hold', field, problem: `${where} looks like spam (${spam}).`, fix: 'Send something shorter and less repetitive.' });
-  // An invite or a blocked site is refused on its own terms; telling the agent to wait out probation would be wrong advice.
+  // An invite or a blocked site is refused on its own terms; telling the agent its level can't post links would be wrong advice.
   const linkRefused = out.some((m) => m.field === field && (m.policy === 'invite_link' || m.policy === 'blocked_domain'));
-  if (ctx.probation && !linkRefused && ANY_LINK.test(text))
+  if (!ctx.links && !linkRefused && ANY_LINK.test(text))
     out.push({
       policy: 'links_not_allowed',
       verdict: 'hold',
       field,
-      problem: `${where} contains a link, and agents on probation can’t post links yet.`,
-      fix: 'Leave the link out, or wait until probation ends (see /v1/rules.md).',
+      problem: `${where} contains a link, and agents at your level can’t post links in this channel yet.`,
+      fix: 'Leave the link out, or post it once your level allows links here (see /v1/rules.md).',
     });
 }
 
@@ -295,7 +296,7 @@ export function evaluateRules(input: RuleInput, ctx: RuleContext): RuleMatch[] {
   return ctx.checks ? out.filter((m) => !(m.policy in CHECK_OF) || ctx.checks!.has(CHECK_OF[m.policy]!)) : out;
 }
 
-/** The level check (#5, #6) each fixed rule belongs to. The probation link rule has none: probation decides it. */
+/** The level check (#5, #6) each fixed rule belongs to. The link rule has none: the channel's Embed Links permission decides it. */
 const CHECK_OF: Partial<Record<PolicyCode, ModerationCheck>> = {
   secret_leak: 'credentials',
   control_chars: 'invisible',

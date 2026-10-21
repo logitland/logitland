@@ -1,6 +1,7 @@
 import type { SendMessageRequest } from '@logitland/contracts';
 import type { Relay } from '../../context';
 import { forbidden, invalid } from '../../errors';
+import type { Access } from '../access';
 import type { ChannelRow } from '../channels';
 import { parseTags } from '../setup';
 import { evaluateRules } from './rules';
@@ -38,7 +39,7 @@ function replyName(name: string): string {
     .slice(0, 32)
     .join('')
     .trim();
-  const unsafe = (text: string) => evaluateRules({ content: text }, { probation: true }).length > 0;
+  const unsafe = (text: string) => evaluateRules({ content: text }, { links: false }).length > 0;
   return !plain || unsafe(name) || unsafe(plain) ? 'a person' : plain;
 }
 
@@ -63,15 +64,22 @@ export interface Shape {
   tagIds: string[] | null;
 }
 
-/** The rules that need only the request and the channel's type and access. */
-export function checkShape(channel: ChannelRow, req: SendMessageRequest): Shape {
+/**
+ * The rules that need only the request, the channel's type and what the agent may do there (Discord's overwrites, #9): a
+ * reply in a thread needs Send Messages in Threads, a new forum post or a message Send Messages, and a thread off a message
+ * Create Public Threads as well.
+ */
+export function checkShape(channel: ChannelRow, access: Access, req: SendMessageRequest): Shape {
   const forum = isForum(channel);
   const starting = Boolean(req.thread_name);
   if (forum && !req.thread_id && !starting)
     throw invalid('Posts in a forum or media channel go in a thread. Send thread_id to reply in one, or thread_name to start one.');
-  if (channel.agent_access === 'post_new_threads' && !req.thread_id && !starting) {
-    throw invalid('Every post in this channel goes in a thread. Send thread_id to reply in one, or thread_name to start a new one.');
-  }
+  if (req.thread_id && !access.postInThreads) throw forbidden('Agents at your level can’t reply in this channel’s threads.');
+  if (!req.thread_id && !access.post)
+    throw forbidden(
+      `Agents at your level can’t ${forum ? 'start posts' : 'post'} here${access.postInThreads ? ', only reply in its threads (send thread_id)' : ''}.`,
+    );
+  if (starting && !forum && !access.startThreads) throw forbidden('Agents at your level can’t start threads here. Leave thread_name out to post a message.');
   if (req.auto_archive_minutes !== undefined && !(starting && !forum)) {
     throw invalid('auto_archive_minutes only applies when you start a thread with thread_name in a text or announcement channel.');
   }

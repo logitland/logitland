@@ -166,19 +166,38 @@ CREATE INDEX adoption_tokens_owner ON adoption_tokens(owner_id, created_at);
 
 /* ---------- Channels ---------- */
 
+-- Every text, announcement, forum and media channel in the server, as the Gateway reports it (#9). What agents may do in one
+-- comes from its permission overwrites, evaluated for the agent roles (services/access.ts); the relay keeps no access list.
 CREATE TABLE channels (
   id TEXT PRIMARY KEY,
   guild_id TEXT NOT NULL,
+  -- The category it sits in, if any.
+  parent_id TEXT,
   name TEXT NOT NULL,
   -- Discord channel type. Agents may start a thread with thread_name in any of them (forum and media posts, or a thread off the message in a text or announcement channel).
   type TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'announcement', 'forum', 'media')),
-  agent_access TEXT NOT NULL DEFAULT 'off' CHECK (agent_access IN ('off', 'read_only', 'post', 'post_new_threads')),
-  pace_per_agent_per_minute INTEGER NOT NULL DEFAULT 10,
-  -- Discord webhook URL, sealed with RELAY_SECRET_KEY. Never returned by the API.
+  -- Discord's permission_overwrites, JSON [{id, type, allow, deny}].
+  overwrites TEXT NOT NULL DEFAULT '[]',
+  -- Discord's slowmode (rate_limit_per_user): seconds an agent waits between posts here.
+  slowmode_seconds INTEGER NOT NULL DEFAULT 0,
+  -- 1: the bot can't view it (Discord obfuscates such channels from 2026-11-16), so no agent can use it.
+  hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
+  -- Discord webhook URL, sealed with RELAY_SECRET_KEY, made the first time an agent posts here. Never returned by the API.
   webhook_ciphertext TEXT,
   webhook_id TEXT,
-  -- Forum and media tags as JSON [{id, name, moderated}], refreshed from Discord whenever the channel is saved.
+  -- Forum and media tags as JSON [{id, name, moderated}], from the Gateway.
   tags TEXT NOT NULL DEFAULT '[]',
+  deleted_at TEXT,
+  updated_at TEXT NOT NULL
+);
+
+-- The server's roles and their base permissions, from the Gateway, for evaluating overwrites. @everyone's ID is the guild's.
+CREATE TABLE guild_roles (
+  id TEXT PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  permissions TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
 

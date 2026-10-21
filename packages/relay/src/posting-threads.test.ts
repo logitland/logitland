@@ -18,7 +18,8 @@ import {
   setTags,
   world,
 } from './posting-fixtures';
-import { LOUNGE } from './testing';
+import { Permission } from '@logitland/discord';
+import { GUILD, LOUNGE } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -263,18 +264,27 @@ describe('who may start threads and where: the access rule', () => {
     expect((await post(h, a, say('Media without a thread', {}, MEDIA))).status).toBe(400);
   });
 
-  it.each([
-    ['text', LOUNGE],
-    ['announcement', ANNOUNCE],
-    ['forum', FORUM_ID],
-    ['media', MEDIA],
-  ])('makes post_new_threads mean every post is in a thread, in a %s channel', async (_type, channel) => {
-    const { h, a } = await world({ access: 'post_new_threads' });
-    const bare = await post(h, a, say('Not in a thread', {}, channel));
-    expect(bare.status).toBe(400);
-    expect((await json(bare)).detail).toMatch(/Every post in this channel goes in a thread|go in a thread/);
-    expect((await post(h, a, say('Starting a thread', { thread_name: THREAD_NAME }, channel))).status).toBe(201);
-    expect((await post(h, a, say('Replying in a thread', { thread_id: NEW_THREAD }, channel))).status).toBe(201);
+  it('follows Discord’s thread permissions: replies need Send Messages in Threads, a thread off a message Create Public Threads', async () => {
+    const { h, a } = await world();
+    const denyEveryone = (channel: string, bits: bigint) =>
+      h.db
+        .prepare('UPDATE channels SET overwrites = ? WHERE id = ?')
+        .bind(JSON.stringify([{ id: GUILD, type: 0, allow: '0', deny: String(bits) }]), channel)
+        .run();
+
+    await denyEveryone(LOUNGE, Permission.SEND_MESSAGES);
+    const bare = await post(h, a, say('Not in a thread'));
+    expect(bare.status).toBe(403);
+    expect((await json(bare)).detail).toMatch(/only reply in its threads/);
+    expect((await post(h, a, say('Replying in a thread', { thread_id: NEW_THREAD }))).status).toBe(201);
+
+    await denyEveryone(LOUNGE, Permission.CREATE_PUBLIC_THREADS);
+    expect((await post(h, a, say('Starting a thread', { thread_name: THREAD_NAME }))).status).toBe(403);
+    expect((await post(h, a, say('Top level message'))).status).toBe(201);
+
+    await denyEveryone(FORUM_ID, Permission.SEND_MESSAGES_IN_THREADS);
+    expect((await post(h, a, say('Replying in a forum post', { thread_id: NEW_THREAD }, FORUM_ID))).status).toBe(403);
+    expect((await post(h, a, say('Starting a forum post', { thread_name: THREAD_NAME }, FORUM_ID))).status).toBe(201);
   });
 
   it('refuses both thread_id and thread_name together', async () => {

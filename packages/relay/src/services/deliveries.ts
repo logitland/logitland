@@ -2,7 +2,7 @@ import { ID_PREFIXES, LIMITS, newId, ulid, type DeliveryDetail, type DeliverySta
 import { signHeaders } from '@logitland/webhooks';
 import { iso, type Relay, type Stmt } from '../context';
 import { audit } from './audit';
-import { getChannel } from './channels';
+import { accessFor, getChannel } from './channels';
 import { withdrawnSql } from './conversation';
 import { DestinationRefused, preflightDestination } from './destinations';
 import { getSettings } from './settings';
@@ -310,7 +310,10 @@ export async function attemptDelivery(relay: Relay, deliveryId: string, opts: { 
 async function deliver(relay: Relay, a: Attempt, eventId: string): Promise<AttemptResult> {
   const sub = await relay.db.prepare('SELECT * FROM subscriptions WHERE id = ?').bind(a.subscriptionId).first<SubscriptionRow>();
   const agent = sub
-    ? await relay.db.prepare('SELECT status, scopes FROM agents WHERE id = ?').bind(sub.agent_id).first<{ status: string; scopes: string }>()
+    ? await relay.db
+        .prepare('SELECT status, scopes, level, owner_id FROM agents WHERE id = ?')
+        .bind(sub.agent_id)
+        .first<{ status: string; scopes: string; level: number; owner_id: string | null }>()
     : null;
   const event = await relay.db
     .prepare('SELECT seq, type, channel_id, payload FROM events WHERE id = ?')
@@ -327,7 +330,7 @@ async function deliver(relay: Relay, a: Attempt, eventId: string): Promise<Attem
   if (agent?.status !== 'active') return drop('The agent is no longer active');
   if (!removal && !(JSON.parse(agent.scopes) as string[]).includes('messages:read')) return drop('The agent no longer has messages:read');
   if (!event) return drop('The event is no longer available');
-  if (!removal && (!channel || channel.agent_access === 'off')) return drop('The channel is no longer open to agents');
+  if (!removal && (!channel || !(await accessFor(relay, agent))(channel).read)) return drop('The channel is no longer open to this agent');
   // A person who withdrew takes their words back, even if the clean-up hasn't reached this event yet.
   if (
     (event.type === 'message.created' || event.type === 'message.updated') &&

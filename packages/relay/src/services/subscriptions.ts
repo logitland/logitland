@@ -16,7 +16,7 @@ import { randomToken, sha256 } from '../crypto';
 import { RelayError, conflict, notFound, unavailable } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit, auditStmt } from './audit';
-import { usableChannel } from './channels';
+import { openChannelIds, usableChannel, type Viewer } from './channels';
 import { DestinationRefused, checkUrl, preflightDestination } from './destinations';
 import { recordGap } from './intake';
 import { standingOf } from './levels';
@@ -169,9 +169,9 @@ async function refusing<T>(work: () => T | Promise<T>): Promise<T> {
   }
 }
 
-async function readableChannel(relay: Relay, channelId: string): Promise<void> {
+async function readableChannel(relay: Relay, viewer: Viewer, channelId: string): Promise<void> {
   try {
-    await usableChannel(relay, channelId, 'read');
+    await usableChannel(relay, viewer, channelId, 'read');
   } catch (err) {
     if (err instanceof RelayError && err.status === 404) throw notFound(`Channel ${channelId} isn’t open to agents. List the open ones with GET /v1/channels.`);
     throw err;
@@ -237,7 +237,7 @@ export async function createSubscription(
     const found = await known();
     if (found) return replay(relay, found, digest!);
   }
-  for (const channelId of channelIds) await readableChannel(relay, channelId);
+  for (const channelId of channelIds) await readableChannel(relay, agent, channelId);
   // Creating one contacts the destination, which a switched-off delivery path should not do.
   if ((await getSettings(relay)).deliveries_paused)
     throw unavailable('Deliveries are switched off by an admin at the moment, so subscriptions can’t be added. Try again later.', 300);
@@ -377,8 +377,10 @@ export async function resumeSubscription(relay: Relay, agentId: string, id: stri
     .first<{ t: string | null }>();
   const windowStart = [sub.paused_at, earliest?.t].filter((t): t is string => Boolean(t)).sort()[0] ?? iso(now);
   const { results: channels } = await relay.db
-    .prepare("SELECT c.id FROM subscription_channels sc JOIN channels c ON c.id = sc.channel_id WHERE sc.subscription_id = ? AND c.agent_access != 'off'")
-    .bind(id)
+    .prepare(
+      'SELECT c.id FROM subscription_channels sc JOIN channels c ON c.id = sc.channel_id WHERE sc.subscription_id = ? AND c.id IN (SELECT value FROM json_each(?))',
+    )
+    .bind(id, await openChannelIds(relay))
     .all<{ id: string }>();
 
   const resumed = await relay.db

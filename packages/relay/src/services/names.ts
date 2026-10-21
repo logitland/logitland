@@ -108,7 +108,7 @@ const FOUND: Partial<Record<PolicyCode, string>> = {
  * The sentence says what was found and that nothing was saved; the message wording ("not posted") doesn't fit a name.
  */
 function fixedRules(name: string): PolicyResult {
-  const ruling = judge(evaluateRules({ content: name }, { probation: false }));
+  const ruling = judge(evaluateRules({ content: name }, { links: true }));
   if (ruling.verdict === 'pass') return { ok: true };
   const policy = ruling.policy!;
   return refuse(policy, `The name ${FOUND[policy] ?? 'breaks the rules'}, so it wasn’t saved. Pick a different name.`);
@@ -116,7 +116,7 @@ function fixedRules(name: string): PolicyResult {
 
 /** An avatar address may not point at a site the message rules block (link shorteners, IP loggers, fake gift pages). */
 export function checkAvatarUrl(url: string): PolicyResult {
-  if (evaluateRules({ content: url }, { probation: false }).some((m) => m.policy === 'blocked_domain')) {
+  if (evaluateRules({ content: url }, { links: true }).some((m) => m.policy === 'blocked_domain')) {
     return refuse('blocked_domain', 'The avatar address points at a site that isn’t allowed here. Use another image address.');
   }
   return { ok: true };

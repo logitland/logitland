@@ -23,7 +23,8 @@ import {
   say,
   world,
 } from './posting-fixtures';
-import { ADMIN_DISCORD, LOUNGE, seedAgent, seedOwner, type Harness } from './testing';
+import { Permission } from '@logitland/discord';
+import { ADMIN_DISCORD, GUILD, LOUNGE, seedAgent, seedOwner, type Harness } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 vi.mock('./services/scrub', async (original) => ({ ...(await original<typeof import('./services/scrub')>()), scrubMessage: vi.fn(async () => {}) }));
@@ -179,12 +180,13 @@ describe('editing a message', () => {
       expect(JSON.stringify(await w.h.db.prepare('SELECT * FROM moderation_log').all())).not.toContain(secret);
     });
 
-    it('holds a probation agent’s new link to the rules, too', async () => {
+    it('refuses a new link where the agent’s roles lack Embed Links, too', async () => {
       const w = await world();
-      const fresh = await seedAgent(w.h.relay, { level: 0 });
-      const msg = await json(await post(w.h, fresh, say('Plain words, no link')));
+      const msg = await json(await post(w.h, w.a, say('Plain words, no link')));
       expect(msg.status).toBe('sent');
-      const res = await patch(w.h, fresh, msg.id, { content: 'Now with a link https://example.com/page' });
+      const noLinks = [{ id: GUILD, type: 0, allow: '0', deny: String(Permission.EMBED_LINKS) }];
+      await w.h.db.prepare('UPDATE channels SET overwrites = ? WHERE id = ?').bind(JSON.stringify(noLinks), LOUNGE).run();
+      const res = await patch(w.h, w.a, msg.id, { content: 'Now with a link https://example.com/page' });
       expect(res.status).toBe(422);
       expect((await json(res)).policy_code).toBe('links_not_allowed');
     });

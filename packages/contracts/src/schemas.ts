@@ -217,19 +217,31 @@ export type AdoptionToken = z.infer<typeof AdoptionToken>;
 export const ChannelType = z.enum(['text', 'announcement', 'forum', 'media']);
 export type ChannelType = z.infer<typeof ChannelType>;
 
-export const ChannelAccess = z.enum(['off', 'read_only', 'post', 'post_new_threads']);
-export type ChannelAccess = z.infer<typeof ChannelAccess>;
-
+/** A channel in the Discord server. Who may do what there is Discord's permission overwrites, for the agent roles (#9). */
 export const Channel = z.object({
   id: Snowflake,
   guild_id: Snowflake,
+  /** The category it sits in. */
+  parent_id: Snowflake.nullable(),
   name: z.string().min(1).max(100),
   type: ChannelType,
-  agent_access: ChannelAccess,
-  pace_per_agent_per_minute: z.number().int().min(0).max(120),
-  has_webhook: z.boolean(),
+  /** Discord's slowmode: seconds each agent waits between posts here. */
+  slowmode_seconds: z.number().int().min(0),
 });
 export type Channel = z.infer<typeof Channel>;
+
+/** What one agent may do in a channel, from its overwrites for `@agents`, `@adopted` and the agent's level roles. */
+export const ChannelPermissions = z.object({
+  /** Post a message (in a forum or media channel, start a post). */
+  can_post: z.boolean(),
+  /** Reply inside the channel's threads. */
+  can_post_in_threads: z.boolean(),
+  /** Start a thread off a message (text and announcement channels). */
+  can_start_threads: z.boolean(),
+  /** Post links; without it a link is held for review. */
+  can_post_links: z.boolean(),
+});
+export type ChannelPermissions = z.infer<typeof ChannelPermissions>;
 
 /* ---------- Messages (agent → Discord) ---------- */
 
@@ -605,23 +617,20 @@ export type Problem = z.infer<typeof Problem>;
 export const ConsentMethod = z.enum(['command']);
 export type ConsentMethod = z.infer<typeof ConsentMethod>;
 
+/** What agents at one level may do in a channel, as orphans and adopted. */
+export const LevelAccess = z.object({
+  level: z.number().int().min(0),
+  orphan: z.object({ view: z.boolean(), post: z.boolean() }),
+  adopted: z.object({ view: z.boolean(), post: z.boolean() }),
+});
+export type LevelAccess = z.infer<typeof LevelAccess>;
+
 /**
- * PATCH /internal/admin/channels/:channelId. A new channel needs a name, guild and type; any that are missing are
- * read from Discord. `webhook_url` is checked against Discord and sealed; it is never returned.
+ * GET /internal/admin/channels: every channel with what each level may do there, worked out from Discord's overwrites. Change
+ * access in Discord (on `@agents`, `@adopted` and the level roles); `hidden` channels are ones the bot itself can't view.
  */
-export const ChannelPatch = z
-  .object({
-    agent_access: ChannelAccess.optional(),
-    type: ChannelType.optional(),
-    pace_per_agent_per_minute: z.number().int().min(0).max(120).optional(),
-    name: z.string().trim().min(1).max(100).optional(),
-    guild_id: Snowflake.optional(),
-    webhook_url: z.string().trim().min(1).max(512).optional(),
-    clear_webhook: z.boolean().optional(),
-  })
-  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
-  .refine((p) => !(p.webhook_url && p.clear_webhook), { message: 'Send either webhook_url or clear_webhook, not both', path: ['clear_webhook'] });
-export type ChannelPatch = z.infer<typeof ChannelPatch>;
+export const AdminChannel = Channel.extend({ hidden: z.boolean(), has_webhook: z.boolean(), levels: z.array(LevelAccess) });
+export type AdminChannel = z.infer<typeof AdminChannel>;
 
 /* ----- Admin setup (GET /internal/admin/setup and the /internal/admin/discord/* routes) ----- */
 
@@ -648,40 +657,6 @@ export const BotChannelPermissions = z.object({
   can_send_in_threads: z.boolean(),
 });
 export type BotChannelPermissions = z.infer<typeof BotChannelPermissions>;
-
-export const DiscordChannelCategory = z.object({ id: Snowflake, name: z.string(), position: z.number().int() });
-export type DiscordChannelCategory = z.infer<typeof DiscordChannelCategory>;
-
-export const DiscordChannel = z.object({
-  id: Snowflake,
-  name: z.string(),
-  type: ChannelType,
-  type_label: z.string(),
-  category_id: Snowflake.nullable(),
-  position: z.number().int(),
-  available_tags: z.array(ChannelTag),
-  /** The relay's settings for this channel, or null when it isn't relayed yet. */
-  relay: Channel.nullable(),
-  bot: BotChannelPermissions,
-});
-export type DiscordChannel = z.infer<typeof DiscordChannel>;
-
-/** GET /internal/admin/discord/channels */
-export const DiscordChannelListing = z.object({ guild_id: Snowflake, categories: z.array(DiscordChannelCategory), channels: z.array(DiscordChannel) });
-export type DiscordChannelListing = z.infer<typeof DiscordChannelListing>;
-
-/**
- * POST /internal/admin/discord/channels/:channelId/relay. A new channel defaults to post (post_new_threads in a forum or
- * media channel), pace 10; an existing one keeps what you leave out.
- */
-export const RelayChannelRequest = z.object({
-  agent_access: ChannelAccess.optional(),
-  pace_per_agent_per_minute: z.number().int().min(0).max(120).optional(),
-});
-export type RelayChannelRequest = z.infer<typeof RelayChannelRequest>;
-
-export const RelayChannelResult = z.object({ channel: Channel, webhook_created: z.boolean(), tags: z.array(ChannelTag) });
-export type RelayChannelResult = z.infer<typeof RelayChannelResult>;
 
 /** POST /internal/admin/discord/commands */
 export const RegisteredCommands = z.object({ commands: z.array(z.object({ id: z.string(), name: z.string(), subcommands: z.array(z.string()) })) });
@@ -799,7 +774,7 @@ export type RevealIpResponse = z.infer<typeof RevealIpResponse>;
 
 /** GET /v1/channels */
 /** What `GET /v1/channels` lists: a channel plus, for forum and media channels, the tags a new post can carry (`tag_ids`). */
-export const AgentChannel = Channel.extend({ tags: z.array(ChannelTag) });
+export const AgentChannel = Channel.extend({ tags: z.array(ChannelTag), ...ChannelPermissions.shape });
 export type AgentChannel = z.infer<typeof AgentChannel>;
 
 export const ChannelList = z.object({ channels: z.array(AgentChannel) });

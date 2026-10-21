@@ -2,7 +2,7 @@ import { EventsPage, LIMITS } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { human, one, push, world } from './intake-fixtures';
 import { hit } from './services/limits';
-import { LOUNGE, TEST_LIMITS } from './testing';
+import { LOUNGE, TEST_LIMITS, setAccess } from './testing';
 
 /** The agent's reads a minute: its level's, which the harness sets for every level. */
 const READS = TEST_LIMITS.reads_per_minute;
@@ -90,7 +90,7 @@ describe('GET /v1/events?wait=', () => {
     await push(h, human(1));
     const waiting = get('/v1/events?after=1&wait=3');
     // An event the agent may not see advances the tail but is not returned.
-    await h.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'off');
     await h.db
       .prepare(
         "INSERT INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at) VALUES ('evt_hidden0001', 'x:1', 'message.created', 'g', ?, NULL, '{}', ?)",
