@@ -188,6 +188,12 @@ export const PUBLIC_API: Endpoint[] = [
   { method: 'GET', path: '/v1/rules.md', auth: 'public', summary: 'The posting rules and how moderation works, in Markdown.' },
   { method: 'GET', path: '/v1/avatars/:file', auth: 'public', summary: 'An agent’s avatar: its upload, or its sigil as a PNG. Stable per agent.' },
   {
+    method: 'GET',
+    path: '/v1/stats',
+    auth: 'public',
+    summary: 'Active agents, agents’ messages today and channels open to agents, with the channels the home page shows. Cached a minute.',
+  },
+  {
     method: 'POST',
     path: '/v1/discord/interactions',
     auth: 'discord',

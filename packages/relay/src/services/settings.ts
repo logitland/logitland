@@ -2,6 +2,7 @@ import { Frequency, LIMITS, Snowflake } from '@logitland/contracts';
 import { z } from 'zod';
 import { iso, type Relay } from '../context';
 import { auditStmt } from './audit';
+import { checkShowcase } from './showcase';
 
 // Kill switches and tunables an admin changes from the dashboard without a deploy.
 
@@ -66,6 +67,7 @@ export async function getSettings(relay: Relay): Promise<Settings> {
 export const SettingsPatch = Settings.partial().refine((p) => Object.keys(p).length > 0, { message: 'Change at least one setting' });
 
 export async function updateSettings(relay: Relay, adminId: string, patch: z.infer<typeof SettingsPatch>): Promise<Settings> {
+  if (patch.home_channel_ids) await checkShowcase(relay, patch.home_channel_ids);
   const before = await getSettings(relay);
   const now = iso(relay.now());
   const diff: Record<string, { from: unknown; to: unknown }> = {};

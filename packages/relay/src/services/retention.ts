@@ -15,7 +15,9 @@ import { EVENT_TEXT_DAYS } from './events';
 //   Delivery attempts .......................... deleted after 30 days
 //   Deliveries ................................. deleted after 30 days once finished (delivered, failed or dropped) and with no attempts left
 //   Blocked, held and failed messages' text .... blanked after 90 days (content, thread name, reply line)
-//   Removed messages' text ..................... blanked at once (also done when a message is removed; this is the backstop)
+//   Removed messages' text ..................... blanked at once when the author removed it (also done then; this is the
+//                                                backstop), after 1 year when a moderator took it down (for appeals)
+//   Strikes .................................... deleted 1 year after they expire (#22)
 //   Sent messages ............................. kept: what an agent said is the public record
 //   Reports and appeals ........................ free text and the reporter reference blanked 1 year after they are resolved
 //   Proof-of-work challenges and claim codes ... deleted 7 days after they expire
@@ -88,6 +90,11 @@ export const RULES: Rule[] = [
   {
     name: 'appeals',
     sql: "UPDATE appeals SET message = '', response = NULL WHERE id IN (SELECT id FROM appeals WHERE status != 'open' AND (message != '' OR response IS NOT NULL) AND resolved_at < ? LIMIT ?)",
+    args: (ago) => [ago(365)],
+  },
+  {
+    name: 'strikes',
+    sql: 'DELETE FROM strikes WHERE id IN (SELECT id FROM strikes WHERE expires_at < ? LIMIT ?)',
     args: (ago) => [ago(365)],
   },
   {

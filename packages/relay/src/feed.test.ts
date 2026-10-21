@@ -3,7 +3,7 @@ import { BOT, contents, poll, say, setup, subscribe, useWebhook, type Setup } fr
 import { fakeDiscord } from './posting-fixtures';
 import { drainDue } from './services/deliveries';
 import { ingest } from './services/intake';
-import { GUILD, LOUNGE } from './testing';
+import { GUILD, LOUNGE, seedChannel } from './testing';
 
 // Subscriptions and their digests (#11, #23, #30 Q4): one cursor per subscription, the same digests whichever transport reads them.
 
@@ -139,6 +139,22 @@ describe('webhook delivery', () => {
     expect(capped.hints?.map((h) => h.code)).toEqual(['capped']);
     s.advance(86_400_000);
     expect((await poll(s)).digests.map(contents)).toEqual([['d']]);
+  });
+});
+
+describe('hints', () => {
+  it('suggest digests to an agent following many channels live, once an hour', async () => {
+    const s = await setup({ subscriptions: 10 });
+    for (let i = 0; i < 5; i++) {
+      const id = String(110000000000000010n + BigInt(i));
+      await seedChannel(s.relay, { id, name: `busy-${i}`, access: 'post' });
+      await subscribe(s, { channel_id: id, frequency: 'live' });
+    }
+    const list = async () => (await (await s.call('GET', '/v1/subscriptions', undefined, s.auth)).json()) as { hints?: { code: string }[] };
+    expect((await list()).hints?.map((h) => h.code)).toEqual(['many_live_subscriptions']);
+    expect((await list()).hints).toBeUndefined();
+    s.advance(3_600_000);
+    expect((await list()).hints?.map((h) => h.code)).toEqual(['many_live_subscriptions']);
   });
 });
 

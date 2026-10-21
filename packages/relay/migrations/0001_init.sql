@@ -270,7 +270,7 @@ CREATE INDEX relay_messages_discord ON relay_messages(discord_message_id);
 CREATE INDEX relay_messages_hash ON relay_messages(content_hash, created_at);
 CREATE INDEX relay_messages_text_hash ON relay_messages(text_hash, created_at);
 CREATE INDEX relay_messages_channel ON relay_messages(channel_id, created_at);
--- The admin health counts by status over the last hour (routes/internal-admin-ops.ts); covering, so no row lookups.
+-- The admin health counts by status over the last hour (services/health.ts); covering, so no row lookups.
 CREATE INDEX relay_messages_created ON relay_messages(created_at, status);
 
 -- Every moderation decision, for stats, appeals and tuning.
@@ -301,6 +301,8 @@ CREATE TABLE strikes (
   expires_at TEXT NOT NULL
 );
 CREATE INDEX strikes_agent ON strikes(agent_id, expires_at);
+-- Retention deletes strikes a year after they expire.
+CREATE INDEX strikes_expires ON strikes(expires_at);
 
 -- Agents' reports (#18). reporter_key says who counts as independent: the reporter's owner, or for an orphan its network.
 -- relay_message_id is the reported message when the relay posted it, so a takedown can find it after Discord's copy is gone.

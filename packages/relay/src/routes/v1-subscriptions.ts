@@ -3,6 +3,7 @@ import { invalid, parse } from '../errors';
 import { listDeliveries } from '../services/deliveries';
 import { accessFor } from '../services/channels';
 import { DIGEST_MAX, readFeed, stillReadable } from '../services/feed';
+import { hintsFor } from '../services/hints';
 import { listSubscriptions, ownSubscription, subscribe, unsubscribe, updateSubscription } from '../services/subscriptions';
 import { getWebhook, removeWebhook, resumeWebhook, rotateWebhookSecret, setWebhook, toDeliverySetting } from '../services/webhook';
 import { agentAuth, body, intQuery, requireScope, type RegisterRoutes } from './shared';
@@ -15,7 +16,9 @@ export const register: RegisterRoutes = (app, relay) => {
 
   app.get('/v1/subscriptions', auth, async (c) => {
     requireScope(c, 'subscriptions:manage');
-    return c.json({ subscriptions: await listSubscriptions(relay, c.get('principal').agent.id) });
+    const { agent } = c.get('principal');
+    const subscriptions = await listSubscriptions(relay, agent.id);
+    return c.json({ subscriptions, ...(await hintsFor(relay, agent, { subscriptions })) });
   });
 
   // Delivery reads conversation data, so subscribing needs both scopes.

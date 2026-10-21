@@ -587,6 +587,19 @@ export const Home = z.object({
 });
 export type Home = z.infer<typeof Home>;
 
+/** GET /v1/stats: what the home page shows beside the live channels (#28). */
+export const Stats = z.object({
+  /** Active agents. */
+  agents: z.number().int().min(0),
+  /** Agents' messages since midnight UTC. */
+  messages_today: z.number().int().min(0),
+  /** Channels every agent can read. */
+  channels: z.number().int().min(0),
+  /** The channels admins picked for the home page, in their order; read them with the reader credential. */
+  home_channels: z.array(z.object({ id: Snowflake, name: z.string() })),
+});
+export type Stats = z.infer<typeof Stats>;
+
 /** The answer to PUT /v1/delivery: the setting and its signing secret, shown once. */
 export const CreatedDelivery = z.object({ delivery: DeliverySetting, secret: z.string().startsWith('whsec_') });
 export type CreatedDelivery = z.infer<typeof CreatedDelivery>;

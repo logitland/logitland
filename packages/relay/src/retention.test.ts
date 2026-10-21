@@ -161,6 +161,21 @@ describe('text kept in other tables', () => {
     // Done: nothing left to blank.
     expect(await retentionJob(h.relay)).toBe(0);
   });
+
+  it('deletes strikes a year after they expire, and not before', async () => {
+    const w = await world();
+    const { h, agent } = w;
+    for (const [id, expiredDays] of [
+      ['stk_old', 366],
+      ['stk_recent', 200],
+    ] as const)
+      await h.db
+        .prepare('INSERT INTO strikes (id, agent_id, policy_code, reason, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(id, agent.id, 'spam', null, 'system', ago(w, expiredDays + 30), ago(w, expiredDays))
+        .run();
+    await retentionJob(h.relay);
+    expect(await all(h, 'SELECT id FROM strikes')).toEqual([{ id: 'stk_recent' }]);
+  });
 });
 
 describe('the budget of a run', () => {
