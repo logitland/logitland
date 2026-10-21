@@ -1,0 +1,153 @@
+/* Logitland design tokens — "Flock & Cord".
+   Dark is the default palette (bare :root); light applies under [data-theme="light"].
+   Meaning: --act purple = pressable or selected; --wait amber = waiting on someone; --fail red = broken or refused; plain ink = healthy. */
+
+:root {
+  --font-display: 'Bricolage Grotesque', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-text: 'Instrument Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-mono: 'Martian Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --r-pill: 999px;
+  --r-card: 20px;
+  --r-modal: 24px;
+  --r-panel: 12px;
+  --r-tag: 6px;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 150ms;
+  --dur: 240ms;
+  --dur-slow: 480ms;
+
+  --gutter: 32px;
+
+  /* Dark is the default palette. */
+  --ground: oklch(0.155 0.022 293);
+  --surface: oklch(0.198 0.026 293);
+  --sunken: oklch(0.172 0.022 293);
+  --raised: oklch(0.238 0.03 293);
+  --line: oklch(0.275 0.025 293);
+  --line-strong: oklch(0.34 0.03 293);
+  --field: oklch(0.6 0.03 293);
+  --ink: oklch(0.97 0.008 293);
+  --ink-2: oklch(0.86 0.016 293);
+  --ink-3: oklch(0.78 0.02 293);
+  --act: oklch(0.555 0.24 293);
+  --act-hover: oklch(0.5 0.22 293);
+  --act-text: oklch(0.81 0.1 293);
+  --act-soft: oklch(0.3 0.09 293);
+  --act-soft-ink: oklch(0.9 0.05 293);
+  --on-act: oklch(1 0 0);
+  --wait: oklch(0.83 0.13 78);
+  --wait-soft: oklch(0.27 0.05 70);
+  --wait-mark: oklch(0.82 0.14 78);
+  --wait-line: oklch(0.45 0.07 75);
+  --fail: oklch(0.8 0.11 22);
+  --fail-soft: oklch(0.27 0.06 20);
+  --fail-mark: oklch(0.68 0.19 25);
+  --fail-line: oklch(0.45 0.09 22);
+  --on-fail: oklch(0.155 0.022 293);
+  --quiet-mark: oklch(0.52 0.03 293);
+  --inverse: oklch(0.13 0.02 293);
+  --inverse-2: oklch(0.24 0.03 293);
+  --on-inverse: oklch(0.95 0.008 293);
+  --on-inverse-2: oklch(0.85 0.016 293);
+  --on-inverse-3: oklch(0.77 0.02 293);
+  --act-on-inverse: oklch(0.81 0.1 293);
+  --fail-on-inverse: oklch(0.78 0.12 22);
+  --wait-on-inverse: oklch(0.84 0.13 78);
+  --link-hover: oklch(0.97 0.008 293);
+  --hover-b: 1.15;
+  --ring: 0 0 0 1px oklch(1 0 0 / 0.07);
+  --ring-control: 0 0 0 1px oklch(1 0 0 / 0.14);
+  --ring-raised: 0 0 0 1px oklch(1 0 0 / 0.1), 0 24px 64px -16px oklch(0 0 0 / 0.6);
+  --scrim: oklch(0.1 0.02 293 / 0.72);
+  --focus: oklch(0.81 0.1 293);
+  --image-outline: oklch(1 0 0 / 0.1);
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --ground: oklch(0.985 0.004 293);
+  --surface: oklch(1 0 0);
+  --sunken: oklch(0.966 0.008 293);
+  --raised: oklch(0.955 0.012 293);
+  --line: oklch(0.918 0.008 293);
+  --line-strong: oklch(0.86 0.012 293);
+  --field: oklch(0.66 0.016 293);
+  --ink: oklch(0.21 0.03 293);
+  --ink-2: oklch(0.42 0.025 293);
+  --ink-3: oklch(0.515 0.02 293);
+  --act: oklch(0.52 0.25 293);
+  --act-hover: oklch(0.46 0.23 293);
+  --act-text: oklch(0.48 0.23 293);
+  --act-soft: oklch(0.955 0.022 293);
+  --act-soft-ink: oklch(0.38 0.18 293);
+  --on-act: oklch(1 0 0);
+  --wait: oklch(0.52 0.115 65);
+  --wait-soft: oklch(0.962 0.036 82);
+  --wait-mark: oklch(0.8 0.15 78);
+  --wait-line: oklch(0.84 0.08 80);
+  --fail: oklch(0.52 0.19 25);
+  --fail-soft: oklch(0.958 0.02 20);
+  --fail-mark: oklch(0.6 0.2 25);
+  --fail-line: oklch(0.82 0.07 22);
+  --on-fail: oklch(1 0 0);
+  --quiet-mark: oklch(0.8 0.02 293);
+  --inverse: oklch(0.2 0.035 293);
+  --inverse-2: oklch(0.27 0.04 293);
+  --on-inverse: oklch(0.97 0.008 293);
+  --on-inverse-2: oklch(0.86 0.02 293);
+  --on-inverse-3: oklch(0.77 0.02 293);
+  --act-on-inverse: oklch(0.82 0.095 293);
+  --fail-on-inverse: oklch(0.8 0.11 22);
+  --wait-on-inverse: oklch(0.85 0.12 80);
+  --link-hover: oklch(0.46 0.23 293);
+  --hover-b: 0.95;
+  --ring: 0 0 0 1px oklch(0.21 0.03 293 / 0.07), 0 1px 2px oklch(0.21 0.03 293 / 0.04), 0 8px 24px -12px oklch(0.21 0.03 293 / 0.12);
+  --ring-control: 0 0 0 1px oklch(0.21 0.03 293 / 0.15), 0 1px 2px oklch(0.21 0.03 293 / 0.06);
+  --ring-raised: 0 0 0 1px oklch(0.21 0.03 293 / 0.06), 0 24px 56px -16px oklch(0.21 0.03 293 / 0.3);
+  --scrim: oklch(0.2 0.035 293 / 0.5);
+  --focus: oklch(0.52 0.25 293);
+  --image-outline: oklch(0 0 0 / 0.1);
+  color-scheme: light;
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --ink-2: oklch(0.95 0.008 293);
+    --ink-3: oklch(0.9 0.01 293);
+    --act-text: oklch(0.92 0.05 293);
+    --field: oklch(0.78 0.02 293);
+    --line: oklch(0.45 0.02 293);
+    --line-strong: oklch(0.55 0.02 293);
+    --ring: 0 0 0 1px oklch(1 0 0 / 0.4);
+    --ring-control: 0 0 0 1px oklch(1 0 0 / 0.55);
+  }
+  :root[data-theme='light'] {
+    --ink-2: oklch(0.3 0.03 293);
+    --ink-3: oklch(0.36 0.025 293);
+    --act: oklch(0.42 0.23 293);
+    --act-text: oklch(0.38 0.21 293);
+    --field: oklch(0.45 0.02 293);
+    --line: oklch(0.75 0.012 293);
+    --line-strong: oklch(0.62 0.014 293);
+    --ring: 0 0 0 1px oklch(0.21 0.03 293 / 0.5);
+    --ring-control: 0 0 0 1px oklch(0.21 0.03 293 / 0.7);
+  }
+}
+
+@media (max-width: 48rem) {
+  :root {
+    --gutter: 16px;
+  }
+}

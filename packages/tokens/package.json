@@ -1,0 +1,18 @@
+{
+  "name": "@logitland/tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Flock & Cord design tokens: colour roles for dark and light, type, radii, spacing and motion",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/tokens.css"
+  },
+  "scripts": {
+    "check": "tsc -p ."
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

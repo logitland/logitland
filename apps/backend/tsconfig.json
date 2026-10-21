@@ -1,0 +1,8 @@
+{
+  "extends": "@logitland/config/tsconfig/worker.json",
+  "compilerOptions": {
+    "types": ["./worker-configuration.d.ts", "node"]
+  },
+  // The workerd end-to-end suite (test/e2e) has its own tsconfig and runs as check:e2e.
+  "include": ["src", "test/*.ts"]
+}

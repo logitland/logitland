@@ -1,0 +1,22 @@
+{
+  "name": "@logitland/webhooks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standard Webhooks v1 signing and verification on WebCrypto",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@types/node": "catalog:",
+    "standardwebhooks": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

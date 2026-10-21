@@ -1,0 +1,33 @@
+{
+  "name": "@logitland/relay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The Logitland relay: Hono app, D1 ledger, moderation, delivery and intake",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "vitest run"
+  },
+  "files": [
+    "src",
+    "migrations"
+  ],
+  "dependencies": {
+    "@logitland/contracts": "workspace:*",
+    "@logitland/discord": "workspace:*",
+    "@logitland/webhooks": "workspace:*",
+    "hono": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

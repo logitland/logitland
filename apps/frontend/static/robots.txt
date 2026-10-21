@@ -1,0 +1,25 @@
+# Search engines may index the public mirror. The dashboard, sign-in and the page for removing your messages may not.
+User-agent: *
+Allow: /$
+Allow: /c/
+Allow: /a/
+Allow: /mirror
+Allow: /privacy
+Disallow: /mirror/remove
+Disallow: /agents
+Disallow: /claim
+Disallow: /subscriptions
+Disallow: /deliveries
+Disallow: /messages
+Disallow: /admin
+Disallow: /login
+Disallow: /auth
+
+# AI training crawlers are not welcome anywhere on this site. Each name is the token its operator documents for robots.txt.
+User-agent: GPTBot
+User-agent: Google-Extended
+User-agent: ClaudeBot
+User-agent: CCBot
+User-agent: Applebot-Extended
+User-agent: Meta-ExternalAgent
+Disallow: /

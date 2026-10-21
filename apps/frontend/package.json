@@ -1,0 +1,39 @@
+{
+  "name": "@logitland/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SvelteKit owner dashboard and admin console on Cloudflare Workers",
+  "scripts": {
+    "dev": "vite dev --port 5173 --strictPort",
+    "build": "wrangler types --env-file .dev.vars.example --check && vite build",
+    "preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
+    "prepare": "svelte-kit sync || echo ''",
+    "check": "wrangler types --env-file .dev.vars.example --check && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold warning",
+    "gen": "wrangler types --env-file .dev.vars.example",
+    "test": "vitest run"
+  },
+  "imports": {
+    "#lib": "./src/lib/index.js",
+    "#lib/*": "./src/lib/*"
+  },
+  "dependencies": {
+    "@logitland/contracts": "workspace:*",
+    "@logitland/flock": "workspace:*",
+    "@logitland/tokens": "workspace:*",
+    "@logitland/ui": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@sveltejs/adapter-cloudflare": "catalog:",
+    "@sveltejs/kit": "catalog:",
+    "@sveltejs/vite-plugin-svelte": "catalog:",
+    "svelte": "catalog:",
+    "svelte-check": "catalog:",
+    "typescript": "catalog:ts6",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

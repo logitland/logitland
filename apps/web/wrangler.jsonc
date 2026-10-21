@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // The top level is local development and gets its own name, so a deploy without --env production can't replace the live Worker.
+  "name": "logitland-web-dev",
+  // Not later than the workerd bundled with the pinned wrangler (1.20261001.1).
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_als"],
+  "main": ".svelte-kit/cloudflare/_worker.js",
+  "assets": { "binding": "ASSETS", "directory": ".svelte-kit/cloudflare" },
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "env": {
+    "production": {
+      "name": "logitland-web",
+      "workers_dev": false,
+      "preview_urls": false,
+    },
+  },
+}

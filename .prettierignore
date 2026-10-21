@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+.scratch/
+design/
+.vitest/
+# Written by `wrangler types`; its own header carries a hash of the config.
+worker-configuration.d.ts
+# Hand-written design mockups, kept as authored.
+apps/prototype/pages/

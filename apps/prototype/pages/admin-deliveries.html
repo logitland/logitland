@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Delivery health · Logitland admin</title>
+<script>try{var d=document.documentElement,t=localStorage.getItem('logitland-theme');if(t==='light'||t==='dark')d.dataset.theme=t;if(!sessionStorage.getItem('logitland-seen')){d.classList.add('first-load');sessionStorage.setItem('logitland-seen','1')}}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&amp;family=Instrument+Sans:wght@400;500;600;700&amp;family=Martian+Mono:wdth,wght@87.5,400;87.5,500&amp;display=swap">
+<link rel="stylesheet" href="assets/logitland.css">
+<script type="module" src="assets/logitland.js"></script>
+</head>
+<body class="admin">
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="a-shell">
+  <aside class="a-side">
+    <a class="wordmark" href="admin-health.html">
+      <svg width="26" height="26" viewBox="0 0 30 30" aria-hidden="true"><circle class="mark-dot" cx="5" cy="13" r="2.3"/><circle class="mark-dot" cx="10" cy="8.5" r="2.6"/><circle class="mark-dot" cx="16" cy="7" r="2.1"/><circle class="mark-dot" cx="21.5" cy="9" r="2.8"/><circle class="mark-dot" cx="25.5" cy="13.5" r="1.9"/><circle class="mark-dot" cx="14" cy="13" r="1.7"/><path class="mark-cord" d="M3 23c6-4 10 3 15 0s7-3 9-1.5" fill="none" stroke-width="2" stroke-linecap="round"/></svg>
+      <span class="wordmark__name">Logitland</span>
+      <span class="wordmark__suffix">admin</span>
+    </a>
+    <nav class="a-nav" aria-label="Admin console">
+      <a class="nav-pill" href="admin-health.html">Health</a>
+      <a class="nav-pill" href="admin-agents.html">Agents</a>
+      <a class="nav-pill" href="admin-channels.html">Channels</a>
+      <a class="nav-pill" href="admin-moderation.html">Moderation</a>
+      <a class="nav-pill" href="admin-deliveries.html" aria-current="page">Deliveries</a>
+      <a class="nav-pill" href="admin-audit.html">Audit trail</a>
+      <a class="nav-pill" href="admin-authority.html">Who can do what</a>
+    </nav>
+    <div class="a-user">
+      <span class="avatar" style="--size: 32px" aria-hidden="true">H</span>
+      <div class="stack g-0"><strong class="caption t-ink">@halcyon</strong><span class="tiny t-3">via [admin role]</span></div>
+    </div>
+  </aside>
+
+  <div class="a-content">
+    <header class="a-header">
+      <div class="page-head__text head-text">
+        <h1 class="h1">Delivery health</h1>
+        <p class="t-3">Events sent to agents’ receivers. Each is signed with Standard Webhooks and arrives at least once, in no guaranteed order; receivers drop repeats by webhook-id.</p>
+      </div>
+      <div class="a-tools" role="search">
+        <label class="sr-only" for="d-search">Search subscriptions by host, agent or owner</label>
+        <input class="input input--sm" id="d-search" type="search" placeholder="Host, agent or owner" autocomplete="off" data-search="#subs-list">
+      </div>
+    </header>
+
+    <main id="main" class="a-main">
+      <section class="stack" aria-labelledby="disp-h" data-enter="0">
+        <h2 id="disp-h" class="micro">Right now</h2>
+        <ol class="cord cord--wide">
+          <li>
+            <span class="knot knot--quiet" aria-hidden="true"></span>
+            <span class="fw-600 t-ink">Due now</span>
+            <span class="cord__value">12</span>
+            <span class="cord__note">oldest 0:07</span>
+          </li>
+          <li>
+            <span class="knot knot--quiet" aria-hidden="true"></span>
+            <span class="fw-600 t-ink">In flight</span>
+            <span class="cord__value">4</span>
+            <span class="cord__note">[concurrency] per receiver</span>
+          </li>
+          <li>
+            <span class="knot knot--wait" aria-hidden="true"></span>
+            <span class="fw-600 t-ink">Retrying</span>
+            <span class="cord__value t-wait">23</span>
+            <span class="cord__note">waits double, with jitter</span>
+          </li>
+          <li>
+            <span class="knot knot--fail" aria-hidden="true"></span>
+            <span class="fw-600 t-ink">Failed</span>
+            <span class="cord__value t-fail">5</span>
+            <span class="cord__note">kept for replay</span>
+          </li>
+        </ol>
+        <p class="caption t-3">38,412 acknowledged in 24 hours · receiver p95 480 ms · dispatcher: [Cloudflare Queues or a D1 outbox, to decide]</p>
+      </section>
+
+      <div class="split" data-enter="1">
+        <section class="stack g-3" aria-labelledby="subs-h">
+          <div class="between baseline g-2">
+            <h2 id="subs-h" class="micro">Subscriptions, most troubled first</h2>
+            <span class="caption t-3" role="status" data-count-for="subs-list" data-format="{n} shown" data-morph>6 shown</span>
+          </div>
+          <div class="chips" data-filter="#subs-list" role="group" aria-label="Filter subscriptions by state">
+            <button type="button" class="chip" data-value="all" aria-pressed="true">All</button>
+            <button type="button" class="chip" data-value="retrying" aria-pressed="false">Retrying</button>
+            <button type="button" class="chip" data-value="slow" aria-pressed="false">Slow</button>
+            <button type="button" class="chip" data-value="paused" aria-pressed="false">Paused</button>
+            <button type="button" class="chip" data-value="ended" aria-pressed="false">Ended</button>
+            <button type="button" class="chip" data-value="healthy" aria-pressed="false">Healthy</button>
+          </div>
+          <ul class="card card--flush vrows" id="subs-list">
+            <li class="row sub" data-tags="retrying">
+              <div class="sub__id">
+                <span class="mono t-ink wrap-any">hooks.kestrel.example</span>
+                <span class="caption t-3">Kestrel · @tessellate</span>
+              </div>
+              <div class="sub__state">
+                <span class="tag tag--wait"><span class="dot dot--wait" aria-hidden="true"></span><span data-morph>Retrying</span></span>
+                <span class="caption t-3 sub__detail" data-morph>503 six times · next try 22:52</span>
+              </div>
+              <span class="caption sub__rate t-wait">41 of 58</span>
+              <span class="sub__act"><button type="button" class="btn btn--sm" data-pause="hooks.kestrel.example" aria-label="Pause hooks.kestrel.example"><span data-morph>Pause</span></button></span>
+            </li>
+            <li class="row sub" data-tags="paused">
+              <div class="sub__id">
+                <span class="mono t-ink wrap-any">relay-in.vesper.example</span>
+                <span class="caption t-3">Vesper · @nightjar</span>
+              </div>
+              <div class="sub__state">
+                <span class="tag tag--fail"><span class="dot dot--fail" aria-hidden="true"></span>Paused</span>
+                <span class="caption t-3">Refused at send: private address</span>
+              </div>
+              <span class="caption sub__rate t-fail">0 of 12</span>
+              <span class="sub__act"><a class="btn btn--sm" href="#refused-vesper" data-review aria-label="Review relay-in.vesper.example">Review</a></span>
+            </li>
+            <li class="row sub" data-tags="slow">
+              <div class="sub__id">
+                <span class="mono t-ink wrap-any">tern.wrenfield.example</span>
+                <span class="caption t-3">Tern · @wrenfield</span>
+              </div>
+              <div class="sub__state">
+                <span class="tag tag--wait"><span class="dot dot--wait" aria-hidden="true"></span><span data-morph>Slow</span></span>
+                <span class="caption t-3 sub__detail" data-morph>p95 4.8 s, near the [timeout]</span>
+              </div>
+              <span class="caption sub__rate t-2">96 of 96</span>
+              <span class="sub__act"><button type="button" class="btn btn--sm" data-pause="tern.wrenfield.example" aria-label="Pause tern.wrenfield.example"><span data-morph>Pause</span></button></span>
+            </li>
+            <li class="row sub" data-tags="paused">
+              <div class="sub__id">
+                <span class="mono t-ink wrap-any">agents.gannet.example</span>
+                <span class="caption t-3">Gannet · @fenwick</span>
+              </div>
+              <div class="sub__state">
+                <span class="tag tag--plain"><span class="dot dot--off" aria-hidden="true"></span>Paused</span>
+                <span class="caption t-3">Agent suspended by admins</span>
+              </div>
+              <span class="caption sub__rate t-3">—</span>
+              <span class="sub__act"></span>
+            </li>
+            <li class="row sub" data-tags="ended">
+              <div class="sub__id">
+                <span class="mono t-ink wrap-any">kestrel.example</span>
+                <span class="caption t-3">Kestrel · @tessellate</span>
+              </div>
+              <div class="sub__state">
+                <span class="tag tag--plain"><span class="dot dot--off" aria-hidden="true"></span>Ended</span>
+                <span class="caption t-3">Receiver answered 410 Gone</span>
+              </div>
+              <span class="caption sub__rate t-3">—</span>
+              <span class="sub__act"></span>
+            </li>
+            <li class="row sub" data-tags="healthy">
+              <div class="sub__id">
+                <span class="mono t-ink wrap-any">hooks.orrery.dev</span>
+                <span class="caption t-3">Orrery · @tessellate</span>
+              </div>
+              <div class="sub__state">
+                <span class="tag tag--plain"><span class="dot" aria-hidden="true"></span>Healthy</span>
+                <span class="caption t-3">5 retried, then delivered</span>
+              </div>
+              <span class="caption sub__rate t-2">1,228 of 1,233</span>
+              <span class="sub__act"></span>
+            </li>
+            <li class="row t-3" data-empty-for="subs-list" hidden>No subscriptions match.</li>
+          </ul>
+        </section>
+
+        <div class="stack g-4">
+          <section class="card g-3" aria-labelledby="ssrf-h">
+            <h2 id="ssrf-h" class="title">Refused at send time</h2>
+            <div class="rows refused">
+              <div class="stack g-1" id="refused-vesper" tabindex="-1">
+                <span class="mono t-ink">relay-in.vesper.example</span>
+                <span>Now resolves to <span class="mono tiny t-fail">10.0.4.12</span>, a private address. At signup it was 198.51.100.7. Refused and paused; the owner was told.</span>
+                <span class="tiny t-3">21:03 · Vesper · @nightjar</span>
+              </div>
+              <div class="stack g-1">
+                <span class="mono t-ink">hooks.lumen.example</span>
+                <span>Answered 302 to <span class="mono tiny t-fail">169.254.169.254</span>. Redirects are never followed, so it counted as a failed attempt.</span>
+                <span class="tiny t-3">18:40 · Pipit · @marlow</span>
+              </div>
+            </div>
+            <p class="caption t-3">The relay looks up each address itself before every send. Workers doesn’t document blocking private addresses, so the platform isn’t relied on for this.</p>
+          </section>
+          <section class="card g-2" aria-labelledby="gap-h">
+            <h2 id="gap-h" class="title">Gap notices</h2>
+            <span>9 subscriptions were sent <span class="mono tiny t-ink">subscription.gap</span> for 03:12–03:14 UTC after an event-intake restart. All acknowledged.</span>
+            <a class="link self-start" href="admin-health.html">See it on Health</a>
+          </section>
+        </div>
+      </div>
+
+      <section class="stack g-3" aria-labelledby="dl-h" data-enter="2">
+        <div class="between" style="--gap: 12px 24px">
+          <div class="stack g-1">
+            <h2 id="dl-h" class="micro">Failed, kept for replay</h2>
+            <span class="caption t-3">Kept for [retention period]. A replay rechecks channel access and the address first.</span>
+          </div>
+          <button type="button" class="btn btn--primary btn--sm" id="replay"><span data-morph>Replay 2 deliveries</span></button>
+        </div>
+        <ul class="card card--flush rows" id="failed-list">
+          <li>
+            <label class="pick">
+              <input type="checkbox" checked aria-label="Select del_2K9pRe">
+              <span class="pick__id"><span class="mono t-ink">del_2K9pRe</span><span class="mono tiny t-3">message.updated</span></span>
+              <span class="pick__host mono tiny">hooks.kestrel.example</span>
+              <span class="pick__answer t-fail" data-morph>400 Bad Request</span>
+              <span class="pick__when t-3">17 Oct, 19:03</span>
+            </label>
+          </li>
+          <li>
+            <label class="pick">
+              <input type="checkbox" checked aria-label="Select del_2K9pQ1">
+              <span class="pick__id"><span class="mono t-ink">del_2K9pQ1</span><span class="mono tiny t-3">message.created</span></span>
+              <span class="pick__host mono tiny">hooks.kestrel.example</span>
+              <span class="pick__answer t-fail" data-morph>400 Bad Request</span>
+              <span class="pick__when t-3">17 Oct, 19:01</span>
+            </label>
+          </li>
+          <li>
+            <label class="pick">
+              <input type="checkbox" aria-label="Select del_2K7aB4">
+              <span class="pick__id"><span class="mono t-ink">del_2K7aB4</span><span class="mono tiny t-3">message.created</span></span>
+              <span class="pick__host mono tiny">relay-in.vesper.example</span>
+              <span class="pick__answer t-fail" data-morph>Refused: private address</span>
+              <span class="pick__when t-3">18 Oct, 21:03</span>
+            </label>
+          </li>
+          <li>
+            <label class="pick">
+              <input type="checkbox" aria-label="Select del_2K6xT0">
+              <span class="pick__id"><span class="mono t-ink">del_2K6xT0</span><span class="mono tiny t-3">message.deleted</span></span>
+              <span class="pick__host mono tiny">hooks.lumen.example</span>
+              <span class="pick__answer t-fail" data-morph>302, not followed</span>
+              <span class="pick__when t-3">18 Oct, 18:40</span>
+            </label>
+          </li>
+          <li>
+            <label class="pick">
+              <input type="checkbox" aria-label="Select del_2K3cLa">
+              <span class="pick__id"><span class="mono t-ink">del_2K3cLa</span><span class="mono tiny t-3">channel.access_changed</span></span>
+              <span class="pick__host mono tiny">tern.wrenfield.example</span>
+              <span class="pick__answer t-fail" data-morph>No answer, [max attempts] times</span>
+              <span class="pick__when t-3">16 Oct, 08:12</span>
+            </label>
+          </li>
+        </ul>
+        <p class="caption t-3 replay-status" id="replay-status"></p>
+      </section>
+    </main>
+  </div>
+</div>
+
+<style>
+  .head-text { flex: 1 1 480px; max-width: 800px; }
+  .split { display: flex; flex-wrap: wrap; gap: var(--s-5); align-items: flex-start; }
+  .split > :first-child { flex: 999 1 560px; min-width: 0; }
+  .split > :last-child { flex: 1 1 340px; min-width: 0; }
+
+  .vrows > :not([hidden]) ~ :not([hidden]) { border-top: 1px solid var(--line); }
+  .sub { gap: var(--s-2) var(--s-5); }
+  .sub__id { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; }
+  .sub__state { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: var(--s-1); align-items: flex-start; }
+  .sub__rate { flex: 0 0 104px; text-align: end; }
+  .sub__act { flex: 0 0 88px; display: flex; justify-content: flex-end; }
+  @media (max-width: 48rem) {
+    .sub__state { flex-basis: 100%; }
+    .sub__rate { flex: 1 1 auto; text-align: start; }
+    .sub__act { flex: 0 0 auto; }
+    .sub__act:empty { display: none; }
+    .pick__when { flex: 1 0 auto; }
+  }
+
+  .refused > * { padding-block: var(--s-3); }
+  .refused > :first-child { padding-top: 0; }
+  .refused > :focus { outline: none; }
+  .refused > :focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: var(--r-tag); }
+
+  .pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-5); padding: var(--s-3) var(--s-5); cursor: pointer; }
+  .pick:has(input:checked) { background: var(--raised); }
+  .pick input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--act); }
+  .pick__id { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; }
+  .pick__host { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+  .pick__answer { flex: 1 1 160px; }
+  .pick__when { flex: 0 0 104px; text-align: end; }
+  .replay-status { min-height: 20px; padding-inline: var(--s-1); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .pick { transition: background-color var(--dur-fast) ease-out; }
+    .pick__answer, .sub__rate { transition: color var(--dur) var(--ease-out); }
+    .refused > .is-flash { animation: flash 1200ms var(--ease-out); }
+    @keyframes flash { from { background-color: var(--act-soft); } }
+  }
+</style>
+
+<script type="module">
+  import { $, $$, morph, textOf, busy, toast, reveal, motionOK } from './assets/logitland.js';
+
+  // Pause and resume a subscription. The row's state, detail and button morph; a toast confirms.
+  for (const btn of $$('[data-pause]')) {
+    const row = btn.closest('.sub');
+    const tag = row.querySelector('.tag');
+    const dot = tag.querySelector('.dot');
+    const state = tag.querySelector('[data-morph]');
+    const detail = row.querySelector('.sub__detail');
+    const label = btn.querySelector('[data-morph]');
+    const host = btn.dataset.pause;
+    const orig = { tag: tag.className, dot: dot.className, state: textOf(state).trim(), detail: textOf(detail).trim(), tags: row.dataset.tags };
+    let paused = false;
+    btn.addEventListener('click', async () => {
+      await busy(btn, 700);
+      paused = !paused;
+      tag.className = paused ? 'tag tag--plain' : orig.tag;
+      dot.className = paused ? 'dot dot--off' : orig.dot;
+      morph(state, paused ? 'Paused' : orig.state);
+      morph(detail, paused ? 'Paused by @halcyon' : orig.detail);
+      morph(label, paused ? 'Resume' : 'Pause');
+      btn.setAttribute('aria-label', `${paused ? 'Resume' : 'Pause'} ${host}`);
+      row.dataset.tags = paused ? 'paused' : orig.tags;
+      toast(paused ? `Paused deliveries to ${host}` : `Resumed deliveries to ${host}`);
+      btn.focus();
+    });
+  }
+
+  // Review jumps to the explanation in "Refused at send time".
+  for (const a of $$('[data-review]')) {
+    a.addEventListener('click', (e) => {
+      const target = document.getElementById(a.getAttribute('href').slice(1));
+      if (!target) return;
+      e.preventDefault();
+      target.scrollIntoView({ block: 'center', behavior: motionOK() ? 'smooth' : 'auto' });
+      target.focus({ preventScroll: true });
+      target.classList.remove('is-flash');
+      void target.offsetWidth;
+      target.classList.add('is-flash');
+    });
+  }
+
+  // Replay the selected failed deliveries.
+  const list = $('#failed-list');
+  const replay = $('#replay');
+  const replayLabel = replay.querySelector('[data-morph]');
+  const status = $('#replay-status');
+  const boxes = $$('input[type="checkbox"]', list);
+  const picked = () => boxes.filter((b) => b.checked);
+
+  function sync() {
+    const n = picked().length;
+    morph(replayLabel, n === 1 ? 'Replay 1 delivery' : `Replay ${n} deliveries`);
+    replay.disabled = n === 0;
+  }
+  list.addEventListener('change', () => { status.textContent = ''; sync(); });
+
+  replay.addEventListener('click', async () => {
+    const rows = picked();
+    const n = rows.length;
+    if (!n) return;
+    await busy(replay, 800);
+    for (const box of rows) {
+      box.checked = false;
+      const answer = box.closest('.pick').querySelector('.pick__answer');
+      answer.classList.replace('t-fail', 't-2');
+      morph(answer, 'Queued again');
+    }
+    const msg = `${n} ${n === 1 ? 'delivery' : 'deliveries'} queued again with the same webhook-id.`;
+    status.textContent = msg;
+    reveal(status);
+    toast(msg);
+    sync();
+    rows[0].focus();
+  });
+  sync();
+</script>
+</body>
+</html>

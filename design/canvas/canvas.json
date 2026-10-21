@@ -1,0 +1,360 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-19T01:37:30Z"
+  },
+  "title": "Logitland dashboards",
+  "launch": {
+    "view": "canvas",
+    "page": "owner"
+  },
+  "pages": [
+    {
+      "id": "owner",
+      "name": "Owner dashboard"
+    },
+    {
+      "id": "admin",
+      "name": "Admin console"
+    }
+  ],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1360,
+      "title": "Owner · Home",
+      "page": "owner",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "owner-claim.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 1480,
+      "title": "Owner · Approve a claim",
+      "page": "owner",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "owner-claim-phone.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Owner · Claim on a phone",
+      "page": "owner",
+      "is_interactive": true
+    },
+    "owner-agent.dc.html": {
+      "x": 3510,
+      "y": 0,
+      "w": 1440,
+      "h": 1870,
+      "title": "Owner · Agent detail",
+      "page": "owner",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "owner-new-agent.dc.html": {
+      "x": 0,
+      "y": 2280,
+      "w": 1440,
+      "h": 1450,
+      "title": "Owner · Register an agent + key reveal",
+      "page": "owner",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "owner-subscriptions.dc.html": {
+      "x": 1520,
+      "y": 2280,
+      "w": 1440,
+      "h": 1610,
+      "title": "Owner · Subscriptions",
+      "page": "owner",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "owner-delivery.dc.html": {
+      "x": 3040,
+      "y": 2280,
+      "w": 1440,
+      "h": 1540,
+      "title": "Owner · Delivery inspector",
+      "page": "owner",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "owner-messages.dc.html": {
+      "x": 4560,
+      "y": 2280,
+      "w": 1440,
+      "h": 1430,
+      "title": "Owner · Messages and moderation",
+      "page": "owner",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "admin-health.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1300,
+      "title": "Admin · Relay health",
+      "page": "admin",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "admin-agents.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 1090,
+      "title": "Admin · Agent registry",
+      "page": "admin",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "admin-channels.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 1260,
+      "title": "Admin · Relayed channels",
+      "page": "admin",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "admin-moderation.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 1270,
+      "title": "Admin · Jev/Laya moderation",
+      "page": "admin",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "admin-deliveries.dc.html": {
+      "x": 0,
+      "y": 1800,
+      "w": 1440,
+      "h": 1490,
+      "title": "Admin · Delivery health",
+      "page": "admin",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "admin-audit.dc.html": {
+      "x": 1520,
+      "y": 1800,
+      "w": 1440,
+      "h": 1670,
+      "title": "Admin · Audit trail",
+      "page": "admin",
+      "expand": "fill",
+      "is_interactive": true
+    },
+    "admin-authority.dc.html": {
+      "x": 3040,
+      "y": 1800,
+      "w": 1440,
+      "h": 2060,
+      "title": "Admin · Authority map",
+      "page": "admin",
+      "expand": "fill",
+      "is_interactive": true
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "owner-claim.dc.html",
+    "owner-claim-phone.dc.html",
+    "owner-agent.dc.html",
+    "owner-new-agent.dc.html",
+    "owner-subscriptions.dc.html",
+    "owner-delivery.dc.html",
+    "owner-messages.dc.html",
+    "admin-health.dc.html",
+    "admin-agents.dc.html",
+    "admin-channels.dc.html",
+    "admin-moderation.dc.html",
+    "admin-deliveries.dc.html",
+    "admin-audit.dc.html",
+    "admin-authority.dc.html"
+  ],
+  "notes": {
+    "t_owner1": {
+      "x": 0,
+      "y": -300,
+      "text": "Owners: agents, joining, keys",
+      "kind": "title1",
+      "maxW": 4950,
+      "page": "owner"
+    },
+    "t_owner2": {
+      "x": 0,
+      "y": 1980,
+      "text": "Owners: subscriptions, deliveries, messages",
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "owner"
+    },
+    "n_owner_q": {
+      "x": 5070,
+      "y": 0,
+      "w": 380,
+      "maxH": 420,
+      "fill": "orange",
+      "page": "owner",
+      "text": "Open decision · Who qualifies as an owner?\nAny Discord account, or only members of the server or holders of a role? (auth.md, question 2)\n\nThe claim screens show 'any Discord account'. Code lifetime (10 min) and attempt cap are the auth.md reference defaults, not agreed values."
+    },
+    "n_owner_keys": {
+      "x": 5070,
+      "y": 500,
+      "w": 380,
+      "maxH": 460,
+      "fill": "orange",
+      "page": "owner",
+      "text": "Open decision · Key lifecycle\nExpiry, replacement overlap, lost-key recovery, and whether revoking one key also cancels the subscriptions created with it (auth.md, question 3).\n\nOwnership transfer is drawn as unavailable in v1 (auth.md, question 4)."
+    },
+    "n_owner_scopes": {
+      "x": 5070,
+      "y": 1040,
+      "w": 380,
+      "maxH": 360,
+      "fill": "blue",
+      "page": "owner",
+      "text": "Proposed, not agreed\nScopes messages:read, messages:write, subscriptions:manage and the claim-first flow come from the auth research's 'small independent v1' proposal."
+    },
+    "f_owner_1": {
+      "x": 5530,
+      "y": 0,
+      "w": 440,
+      "maxH": 760,
+      "fill": "green",
+      "page": "owner",
+      "text": "Buildable as drawn · row 1\n• 'You can view #channel': the relay's bot calls Get Guild Member (no privileged intent needed) and works out channel access from roles and overwrites. Owners who aren't in the server see no channels.\n• Role changes: without the privileged GUILD_MEMBERS intent there's no live role-change event, so access is rechecked on a timer and on every read or send.\n• Claim flow: pending record, 10-minute code, one-time key pickup with an enrollment secret. All plain D1 rows with atomic updates.\n• Keys: random opaque keys, only a hash stored, checked on every call, so revoking takes effect on the next request.\n• Discord shows only a name and avatar on webhook posts. Which badge Discord adds isn't documented, so no badge is drawn."
+    },
+    "n_owner_events": {
+      "x": 6120,
+      "y": 2280,
+      "w": 380,
+      "maxH": 460,
+      "fill": "blue",
+      "page": "owner",
+      "text": "Proposed, not agreed\nEvent names, Standard Webhooks HMAC signing, retry horizon, replay window and the challenge check come from discord.md and hosting.md proposals. Numbers on these screens are placeholders."
+    },
+    "n_owner_uncertain": {
+      "x": 6120,
+      "y": 2820,
+      "w": 380,
+      "maxH": 460,
+      "fill": "orange",
+      "page": "owner",
+      "text": "Open decision · Uncertain sends\nDiscord's Execute Webhook has no idempotency key. When a send times out after Discord may have saved it: wait for reconciliation, allow an explicit resend, or accept duplicates? The Messages screen offers all three so the group can pick."
+    },
+    "f_owner_2": {
+      "x": 6560,
+      "y": 2280,
+      "w": 440,
+      "maxH": 900,
+      "fill": "green",
+      "page": "owner",
+      "text": "Buildable as drawn · row 2\n• Posting: Execute Webhook with username, avatar_url, wait=true and allowed_mentions {parse: []}. Forum posts use thread_name, replies use thread_id.\n• Edits: Edit Webhook Message. allowed_mentions must be sent again, because Discord doesn't keep the original setting.\n• 'Check the channel first' for uncertain sends: read recent channel history and match the webhook's message.\n• Deliveries: Standard Webhooks HMAC. Queues and a D1 outbox both give at-least-once delivery with no ordering, so receivers dedupe on webhook-id and no per-receiver ordering is promised.\n• The verify library needs a plain headers object on Workers: Object.fromEntries(request.headers).\n• Address checks: the relay resolves the address itself before each send, because Workers fetch doesn't document blocking private addresses.\n• Reading other people's messages needs the Message Content intent (Developer Portal toggle while the app has under 10,000 users)."
+    },
+    "t_admin1": {
+      "x": 0,
+      "y": -300,
+      "text": "Admins: health, agents, channels, moderation",
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "admin"
+    },
+    "t_admin2": {
+      "x": 0,
+      "y": 1500,
+      "text": "Admins: deliveries, audit, authority",
+      "kind": "title1",
+      "maxW": 4480,
+      "page": "admin"
+    },
+    "n_admin_access": {
+      "x": 6120,
+      "y": 0,
+      "w": 380,
+      "maxH": 400,
+      "fill": "orange",
+      "page": "admin",
+      "text": "Open decision · Who gets this console?\nDashboard login must not make someone a human admin. The group must name the Discord identity or role that grants access (recommendation.md). Drawn here as [admin role]."
+    },
+    "n_admin_jl": {
+      "x": 6120,
+      "y": 480,
+      "w": 380,
+      "maxH": 460,
+      "fill": "orange",
+      "page": "admin",
+      "text": "Open decision · Jev/Laya contract\nVerdict set, timeout and outage behaviour, retries, and how edits are handled are not researched yet. 'Passed / Held / Blocked / Waiting' are placeholder labels."
+    },
+    "n_admin_ingest": {
+      "x": 6120,
+      "y": 1020,
+      "w": 380,
+      "maxH": 420,
+      "fill": "orange",
+      "page": "admin",
+      "text": "Open decision · Event intake\nNarrow bridge from the Discord MCP event log, or a dedicated Gateway ingestor? The health screen draws the MCP bridge option, including its known gap behaviour."
+    },
+    "f_admin_1": {
+      "x": 6560,
+      "y": 0,
+      "w": 440,
+      "maxH": 900,
+      "fill": "green",
+      "page": "admin",
+      "text": "Buildable as drawn · row 1\n• Discord sending table: X-RateLimit-* headers when Discord sends them (they're optional) plus Retry-After on 429s. Agents sharing a webhook share its bucket.\n• Gaps: after a failed Gateway resume, missed events aren't replayed. The relay knows the time window but not how many events were in it, and backfills surviving messages over REST.\n• Signup slowdown: the Workers rate-limit binding (per location, approximate) keyed by network. Exact per-agent pace needs a Durable Object or D1 counter.\n• 'Created by the MCP bot': read from Discord's audit log (needs View Audit Log). Which MCP caller asked shows only if the MCP writes it into the audit-log reason.\n• Reader checks per channel: computed from the bot's roles and channel overwrites."
+    },
+    "n_admin_authority": {
+      "x": 4600,
+      "y": 1800,
+      "w": 380,
+      "maxH": 460,
+      "fill": "orange",
+      "page": "admin",
+      "text": "Open decision · Permission fidelity\nThe MCP executes with one shared bot token, so Discord sees the bot's roles, not each admin's. Is that the intended boundary, or do admins need per-person role checks in the MCP? (discord.md)"
+    },
+    "f_admin_2": {
+      "x": 5040,
+      "y": 1800,
+      "w": 420,
+      "maxH": 600,
+      "fill": "green",
+      "page": "admin",
+      "text": "Buildable as drawn · row 2\n• Replay: re-enqueue the stored delivery with a new attempt timestamp and the same webhook-id, after rechecking channel access and the address.\n• Refused at send time: the relay's own DNS lookup before each send. Redirects are never followed (redirect: manual).\n• Audit trail: relay rows in D1, plus Discord audit-log entries the relay reads.\n• Authority map: MCP behaviour is taken from source at f76dc82. The live MCP install and the bot's roles weren't inspected."
+    },
+    "legend_owner": {
+      "x": -500,
+      "y": 0,
+      "w": 420,
+      "maxH": 560,
+      "fill": "purple",
+      "page": "owner",
+      "text": "How to read these screens\n• Purple: you can press it, or it is selected\n• Amber: waiting on someone, or a decision is needed\n• Red: broken or refused\n• Grey: healthy, nothing to do\n• Pills press, cards hold, small tags report status\n• Agents are a flock of seven dots drawn from their ID; people are an initial\n• Cords with knots are paths and sequences\n• Dark is the default; switch to Light with the Theme tweak"
+    },
+    "legend_admin": {
+      "x": -500,
+      "y": 0,
+      "w": 420,
+      "maxH": 560,
+      "fill": "purple",
+      "page": "admin",
+      "text": "How to read these screens\n• Purple: you can press it, or it is selected\n• Amber: waiting on someone, or a decision is needed\n• Red: broken or refused\n• Grey: healthy, nothing to do\n• Pills press, cards hold, small tags report status\n• Agents are a flock of seven dots drawn from their ID; people are an initial\n• Cords with knots are paths and sequences\n• Dark is the default; switch to Light with the Theme tweak"
+    }
+  },
+  "designSystems": []
+}

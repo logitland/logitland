@@ -1,0 +1,11 @@
+{
+  "extends": "$app/tsconfig",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    // worker-configuration.d.ts imports the built _worker.js (wrangler's mainModule type); don't type-check that bundle.
+    "checkJs": false,
+    "types": ["$app/types", "./worker-configuration.d.ts"]
+  },
+  "include": ["src", "vite.config.ts"]
+}

@@ -1,0 +1,95 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The top level is local development and gets its own name, so a deploy without --env production can't replace the live Worker.
+  "name": "logitland-backend-dev",
+  "main": "src/index.ts",
+  // Not later than the workerd bundled with the pinned wrangler (1.20261001.1).
+  "compatibility_date": "2026-10-01",
+
+  // The top level is local development (`wrangler dev`, with .dev.vars). Deploy with `--env production`.
+  // Never on workers.dev: the dashboard's API is a named entrypoint, and nothing else should be public by accident.
+  "workers_dev": false,
+  "preview_urls": false,
+  // Invocation logs record "<Method> <URL>", and URLs carry claim codes, so they stay off. relay.log lines (console) are kept.
+  "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
+  // Workers Cache serves repeat GETs of /public without running the Worker (Cache-Control decides). It also covers
+  // service-binding calls, and a hit skips the Worker's auth, so the dashboard's entrypoint is switched off.
+  "cache": { "enabled": true },
+  "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "logitland",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/relay/migrations",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "GATEWAY", "class_name": "DiscordGateway" },
+      { "name": "CHANNEL_SENDER", "class_name": "ChannelSender" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] }],
+  "queues": {
+    "producers": [{ "binding": "DELIVERIES", "queue": "logitland-deliveries" }],
+    "consumers": [
+      { "queue": "logitland-deliveries", "max_batch_size": 10, "max_concurrency": 10, "max_retries": 24, "dead_letter_queue": "logitland-deliveries-dlq" },
+    ],
+  },
+  // Every minute: Gateway watchdog, held-message re-checks, stuck sends, re-fan-out of unfanned events, due deliveries.
+  // Every 15 minutes: retention, raw-IP purge, rate-counter sweep, re-sealing after a key rotation.
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "PUBLIC_URL": "http://localhost:8787",
+    "DASHBOARD_URL": "http://localhost:5173",
+    "MODERATION_OUTAGE": "hold",
+  },
+
+  "env": {
+    "production": {
+      "name": "logitland-backend",
+      "workers_dev": false,
+      "preview_urls": false,
+      // Repeated on purpose: don't rely on what an environment inherits.
+      "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
+      "cache": { "enabled": true },
+      "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },
+      // Replace the placeholders before the first deploy; the relay refuses to start while they remain.
+      "routes": [{ "pattern": "relay.REPLACE.invalid", "custom_domain": true }],
+      "vars": {
+        "PUBLIC_URL": "https://relay.REPLACE.invalid",
+        "DASHBOARD_URL": "https://REPLACE.invalid",
+        "MODERATION_OUTAGE": "hold",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "logitland",
+          "database_id": "REPLACE-with-wrangler-d1-create-output",
+          "migrations_dir": "../../packages/relay/migrations",
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "GATEWAY", "class_name": "DiscordGateway" },
+          { "name": "CHANNEL_SENDER", "class_name": "ChannelSender" },
+        ],
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] }],
+      "queues": {
+        "producers": [{ "binding": "DELIVERIES", "queue": "logitland-deliveries" }],
+        "consumers": [
+          { "queue": "logitland-deliveries", "max_batch_size": 10, "max_concurrency": 10, "max_retries": 24, "dead_letter_queue": "logitland-deliveries-dlq" },
+        ],
+      },
+      // The fallback classifier. Only in production: Workers AI always runs remotely.
+      "ai": { "binding": "AI" },
+      "triggers": { "crons": ["* * * * *"] },
+    },
+  },
+  // Secrets (wrangler secret put --env production): RELAY_SECRET_KEY, IP_HASH_KEY, INTERNAL_TOKEN,
+  // DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID, DISCORD_CONSENT_ROLE_ID,
+  // JEV_LAYA_URL, JEV_LAYA_TOKEN, ADMIN_DISCORD_IDS, optionally BLOCKED_HOSTS. See DEPLOY.md.
+}

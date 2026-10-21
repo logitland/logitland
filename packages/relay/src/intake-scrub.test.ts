@@ -1,0 +1,473 @@
+import { describe, expect, it } from 'vitest';
+import { agree } from './consent.testkit';
+import {
+  CONV,
+  all,
+  at,
+  conversation,
+  deliveryCount,
+  edit,
+  human,
+  HUMAN,
+  msg,
+  one,
+  push,
+  relayMessage,
+  remove,
+  subscribe,
+  thread,
+  threadRow,
+  world,
+} from './intake-fixtures';
+import { recordAgentPost } from './services/intake';
+import { scrubMessage, scrubPerson } from './services/scrub';
+import { BENCH, GUILD, LOUNGE } from './testing';
+
+const payloads = async (h: Awaited<ReturnType<typeof world>>['h'], type: string) =>
+  (await all<{ payload: string }>(h, 'SELECT payload FROM events WHERE type = ? ORDER BY seq', type)).map((r) => JSON.parse(r.payload));
+
+describe('scrubbing one message', () => {
+  it('removes the text from the conversation, event payloads and queued deliveries, and records who removed it', async () => {
+    const { h, agent } = await world();
+    await subscribe(h, agent.id);
+    await push(h, human(1, { content: 'secret plans' }), edit(1, 'secret plans, revised', 5), human(2, { content: 'harmless' }));
+    expect(await deliveryCount(h)).toBe(3);
+    await h.db.prepare("UPDATE deliveries SET status = 'retrying' WHERE event_id = (SELECT id FROM events WHERE type = 'message.updated')").run();
+    await h.db
+      .prepare("UPDATE deliveries SET status = 'delivered' WHERE event_id = (SELECT id FROM events WHERE message_id = ? AND type = 'message.created')")
+      .bind(msg(1))
+      .run();
+
+    await scrubMessage(h.relay, msg(1), 'moderator');
+
+    expect(await conversation(h, 1)).toMatchObject({ content: null, removed_by: 'moderator', author_kind: 'human' });
+    expect((await conversation(h, 1))!.deleted_at).toBe(h.now().toISOString());
+    expect((await conversation(h, 2))!.content).toBe('harmless');
+
+    const created = await payloads(h, 'message.created');
+    expect(created[0].data.content).toBe('');
+    expect(created[1].data.content).toBe('harmless');
+    expect((await payloads(h, 'message.updated'))[0].data).toMatchObject({ content: '', edited_at: at(5) });
+    expect(JSON.stringify(await all(h, 'SELECT payload FROM events'))).not.toContain('secret');
+
+    const status = await all<{ event_type: string; status: string }>(
+      h,
+      'SELECT e.type AS event_type, d.status FROM deliveries d JOIN events e ON e.id = d.event_id ORDER BY e.seq',
+    );
+    expect(status).toEqual([
+      { event_type: 'message.created', status: 'delivered' },
+      { event_type: 'message.updated', status: 'dropped' },
+      { event_type: 'message.created', status: 'pending' },
+      { event_type: 'message.deleted', status: 'pending' },
+    ]);
+    expect(
+      await one<{ next_attempt_at: string | null; last_error: string }>(h, "SELECT next_attempt_at, last_error FROM deliveries WHERE status = 'dropped'"),
+    ).toEqual({
+      next_attempt_at: null,
+      last_error: 'The message was removed before it was delivered',
+    });
+    expect((await payloads(h, 'message.deleted'))[0].data).toEqual({ message_id: msg(1), removed_by: 'moderator' });
+  });
+
+  it('drops a delivery that was waiting to be sent', async () => {
+    const { h, agent } = await world();
+    await subscribe(h, agent.id);
+    await push(h, human(1));
+    await scrubMessage(h.relay, msg(1), 'author');
+    expect(await all(h, "SELECT 1 FROM deliveries WHERE status = 'dropped'")).toHaveLength(1);
+  });
+
+  it('does not add a content key to edits that had none', async () => {
+    const { h } = await world();
+    await push(h, human(1), edit(1, undefined, 5));
+    await scrubMessage(h.relay, msg(1), 'moderator');
+    expect((await payloads(h, 'message.updated'))[0].data).toEqual({ message_id: msg(1), edited_at: at(5) });
+  });
+
+  it('can be repeated: one removal event, same tombstone', async () => {
+    const { h, agent } = await world();
+    await subscribe(h, agent.id);
+    await push(h, human(1));
+    await scrubMessage(h.relay, msg(1), 'moderator');
+    const deliveries = await deliveryCount(h);
+    await scrubMessage(h.relay, msg(1), 'moderator');
+    expect(await payloads(h, 'message.deleted')).toHaveLength(1);
+    expect(await deliveryCount(h)).toBe(deliveries);
+  });
+
+  it('keeps a moderator’s mark when Discord’s own delete event follows, and does not record the removal twice', async () => {
+    const { h, agent } = await world();
+    await subscribe(h, agent.id);
+    await push(h, human(1));
+    await scrubMessage(h.relay, msg(1), 'moderator');
+    const r = await push(h, remove(1));
+    expect(r).toMatchObject({ recorded: 0, ignored: 1 });
+    expect(await conversation(h, 1)).toMatchObject({ removed_by: 'moderator', content: null });
+    expect(await payloads(h, 'message.deleted')).toHaveLength(1);
+  });
+
+  it('keeps a moderator’s mark when scrubbing a message Discord already reported deleted', async () => {
+    const { h } = await world();
+    await push(h, human(1), remove(1));
+    expect((await conversation(h, 1))!.removed_by).toBe('discord');
+    await scrubMessage(h.relay, msg(1), 'moderator');
+    expect((await conversation(h, 1))!.removed_by).toBe('moderator');
+  });
+
+  it('leaves a tombstone for a message the relay has not seen yet, so a late create cannot bring it back', async () => {
+    const { h, agent } = await world();
+    await subscribe(h, agent.id);
+    await scrubMessage(h.relay, msg(1), 'moderator', { channelId: LOUNGE });
+    expect(await deliveryCount(h)).toBe(0);
+    await push(h, human(1, { content: 'resurrected?' }));
+    expect(await conversation(h, 1)).toMatchObject({ content: null, removed_by: 'moderator' });
+    expect(JSON.stringify(await all(h, 'SELECT payload FROM events'))).not.toContain('resurrected');
+    expect(await deliveryCount(h)).toBe(0);
+  });
+
+  it('does nothing, and says so in the log, for a message it cannot place', async () => {
+    const { h } = await world();
+    await scrubMessage(h.relay, msg(1), 'moderator');
+    expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(0);
+    expect(h.log.lines.some((l) => l.event === 'scrub.unknown_message')).toBe(true);
+  });
+});
+
+describe('the relay’s own copy of a post an agent made', () => {
+  async function posted() {
+    const { h, agent } = await world();
+    const mine = await relayMessage(h, agent.id, { content: 'my private-ish words', status: 'sent', discordMessageId: msg(1), hash: 'mine' });
+    const other = await relayMessage(h, agent.id, { content: 'someone else’s post', status: 'sent', discordMessageId: msg(2), hash: 'other' });
+    await h.db
+      .prepare('UPDATE relay_messages SET thread_name = ?, poll = ?, reply_prefix = ? WHERE id IN (?, ?)')
+      .bind('a title', '{"question":"Lunch?"}', '-# ↪ Replying to **Tess** · https://discord.com/channels/1/2/3', mine, other)
+      .run();
+    await recordAgentPost(h.relay, {
+      discordMessageId: msg(1),
+      channelId: LOUNGE,
+      threadId: null,
+      agentId: agent.id,
+      displayName: 'Moth-9',
+      content: 'my private-ish words',
+      relayMessageId: mine,
+      createdAt: at(0, 1),
+    });
+    return { h, mine, other };
+  }
+  const copy = (h: Awaited<ReturnType<typeof world>>['h'], id: string) =>
+    one<{ content: string | null; thread_name: string | null; poll: string | null; reply_prefix: string | null; content_hash: string; status: string }>(
+      h,
+      'SELECT content, thread_name, poll, reply_prefix, content_hash, status FROM relay_messages WHERE id = ?',
+      id,
+    );
+
+  it('goes with the message when a moderator takes it down: text, thread title, poll and reply line', async () => {
+    const { h, mine, other } = await posted();
+    await scrubMessage(h.relay, msg(1), 'moderator');
+    expect(await copy(h, mine)).toMatchObject({ content: null, thread_name: null, poll: null, reply_prefix: null, content_hash: 'mine' });
+    expect(await copy(h, other)).toMatchObject({
+      content: 'someone else’s post',
+      thread_name: 'a title',
+      reply_prefix: expect.stringContaining('Replying to'),
+    });
+  });
+
+  it('goes with the message when Discord deletes it, singly or in bulk', async () => {
+    const { h, mine, other } = await posted();
+    await push(h, remove(1));
+    expect(await copy(h, mine)).toMatchObject({ content: null, thread_name: null, poll: null, reply_prefix: null });
+    expect(await copy(h, other))!.toMatchObject({ content: 'someone else’s post' });
+    await push(h, { kind: 'message_delete_bulk', channel_id: LOUNGE, message_ids: [msg(2), msg(3)] });
+    expect(await copy(h, other)).toMatchObject({ content: null, thread_name: null, poll: null, reply_prefix: null });
+  });
+
+  it('is left alone by a person leaving the mirror, which wrote none of it', async () => {
+    const { h, mine } = await posted();
+    await scrubPerson(h.relay, HUMAN);
+    expect(await copy(h, mine)).toMatchObject({ content: 'my private-ish words', thread_name: 'a title' });
+  });
+});
+
+describe('scrubbing a person', () => {
+  async function people() {
+    const { h, agent } = await world();
+    await h.db.prepare("UPDATE channels SET agent_access = 'read_only' WHERE id = ?").bind(BENCH).run();
+    await subscribe(h, agent.id, LOUNGE);
+    await subscribe(h, agent.id, BENCH);
+    const other = { id: '200000000000000002', username: 'tess' };
+    await agree(h, other.id);
+    await push(
+      h,
+      { kind: 'thread_upsert', thread_id: '120000000000000001', parent_id: LOUNGE, name: 't' },
+      human(1, { content: 'luna one' }),
+      human(2, { content: 'tess one', author: other }),
+      human(3, { content: 'luna in a thread', thread_id: '120000000000000001' }),
+      human(4, { channel_id: BENCH, content: 'luna on the bench' }),
+      human(5, { content: 'luna deleted already' }),
+      edit(1, 'luna one, edited', 5),
+    );
+    await push(h, remove(5));
+    return { h, agent };
+  }
+
+  it('removes everything they wrote, everywhere, and nothing anyone else wrote', async () => {
+    const { h } = await people();
+    const r = await scrubPerson(h.relay, HUMAN);
+    expect(r).toEqual({ messages: 3, more: false });
+
+    for (const n of [1, 3, 4]) expect(await conversation(h, n)).toMatchObject({ content: null, removed_by: 'author' });
+    expect(await conversation(h, 2)).toMatchObject({ content: 'tess one', removed_by: null, deleted_at: null });
+
+    const all_ = JSON.stringify(await all(h, 'SELECT payload FROM events'));
+    expect(all_).not.toContain('luna one');
+    expect(all_).not.toContain('luna in a thread');
+    expect(all_).not.toContain('luna on the bench');
+    expect(all_).toContain('tess one');
+
+    const pending = await all<{ message_id: string }>(
+      h,
+      "SELECT CAST(e.message_id AS TEXT) AS message_id FROM deliveries d JOIN events e ON e.id = d.event_id WHERE d.status = 'pending' AND e.type != 'message.bulk_deleted'",
+    );
+    expect(pending.map((p) => p.message_id)).toContain(msg(2));
+    for (const p of pending) expect([msg(2), msg(5)]).toContain(p.message_id);
+  });
+
+  it('records one message.bulk_deleted per channel with the IDs removed', async () => {
+    const { h } = await people();
+    await scrubPerson(h.relay, HUMAN);
+    const bulk = await all<{ channel_id: string; payload: string }>(
+      h,
+      "SELECT channel_id, payload FROM events WHERE type = 'message.bulk_deleted' ORDER BY seq",
+    );
+    expect(bulk.map((b) => b.channel_id).sort()).toEqual([BENCH, LOUNGE].sort());
+    const byChannel = Object.fromEntries(bulk.map((b) => [b.channel_id, JSON.parse(b.payload).data]));
+    expect(byChannel[LOUNGE]).toEqual({ message_ids: [msg(1), msg(3)] });
+    expect(byChannel[BENCH]).toEqual({ message_ids: [msg(4)] });
+    expect(await deliveryCount(h)).toBeGreaterThan(0);
+    expect(await all(h, "SELECT 1 FROM deliveries d JOIN events e ON e.id = d.event_id WHERE e.type = 'message.bulk_deleted'")).toHaveLength(2);
+  });
+
+  it('can be repeated and finds nothing more', async () => {
+    const { h } = await people();
+    await scrubPerson(h.relay, HUMAN);
+    const events = (await all(h, 'SELECT 1 FROM events')).length;
+    expect(await scrubPerson(h.relay, HUMAN)).toEqual({ messages: 0, more: false });
+    expect((await all(h, 'SELECT 1 FROM events')).length).toBe(events);
+  });
+
+  it('handles a person with hundreds of messages', async () => {
+    const { h } = await world();
+    await push(h, ...Array.from({ length: 100 }, (_, i) => human(i + 1)));
+    await push(h, ...Array.from({ length: 100 }, (_, i) => human(i + 101)));
+    await push(h, ...Array.from({ length: 70 }, (_, i) => human(i + 201)));
+    expect((await scrubPerson(h.relay, HUMAN)).messages).toBe(270);
+    expect(await all(h, 'SELECT 1 FROM conversation WHERE content IS NOT NULL')).toHaveLength(0);
+    expect(JSON.stringify(await all(h, 'SELECT payload FROM events'))).not.toContain('\\"content\\":\\"message');
+  });
+
+  it('still removes the text of a channel the relay no longer lists, without an event', async () => {
+    const { h } = await people();
+    await h.db.prepare('DELETE FROM channels WHERE id = ?').bind(BENCH).run();
+    await scrubPerson(h.relay, HUMAN);
+    expect((await conversation(h, 4))!.content).toBeNull();
+    expect(await all(h, "SELECT 1 FROM events WHERE type = 'message.bulk_deleted'")).toHaveLength(1);
+  });
+});
+
+describe('a person leaving the mirror stops being identifiable', () => {
+  const FORMER = { discord_user_id: null, display_name: 'Former participant', author_ref: 'p_removed' };
+
+  async function world2() {
+    const w = await world();
+    const { h } = w;
+    await agree(h, '200000000000000002');
+    await push(
+      h,
+      human(1, { content: 'luna one' }),
+      human(2, { content: 'tess one', author: { id: '200000000000000002', username: 'tess', global_name: 'Tess' } }),
+      human(3, { content: 'luna deleted in Discord' }),
+      human(4, { content: 'luna taken down' }),
+      edit(1, 'luna one, edited', 5),
+    );
+    await push(h, remove(3));
+    return w;
+  }
+
+  it('anonymises their tombstones in the conversation, keeping when and why', async () => {
+    const { h } = await world2();
+    const before = await conversation(h, 1);
+    expect(before).toMatchObject({ display_name: 'Luna', discord_user_id: HUMAN });
+    expect((await scrubPerson(h.relay, HUMAN)).messages).toBe(2);
+
+    for (const n of [1, 4])
+      expect(await conversation(h, n)).toMatchObject({
+        ...FORMER,
+        content: null,
+        removed_by: 'author',
+        author_kind: 'human',
+        channel_id: LOUNGE,
+        created_at: at(0, n),
+      });
+    // A message Discord had already reported deleted keeps that, but stops naming the person.
+    expect(await conversation(h, 3)).toMatchObject({ ...FORMER, content: null, removed_by: 'discord' });
+    expect(await conversation(h, 2)).toMatchObject({ display_name: 'Tess', discord_user_id: '200000000000000002', content: 'tess one' });
+    expect(await all(h, 'SELECT 1 FROM conversation WHERE discord_user_id = ?', HUMAN)).toHaveLength(0);
+    expect(JSON.stringify(await all(h, `SELECT ${CONV} FROM conversation`))).not.toContain(before!.author_ref);
+  });
+
+  it('anonymises event payloads the same way, name and pseudonym both', async () => {
+    const { h } = await world2();
+    const authorRef = (await conversation(h, 1))!.author_ref;
+    await scrubPerson(h.relay, HUMAN);
+    const created = (
+      await all<{ message_id: string; payload: string }>(
+        h,
+        "SELECT CAST(message_id AS TEXT) AS message_id, payload FROM events WHERE type = 'message.created' ORDER BY seq",
+      )
+    ).map((r) => ({ id: r.message_id, ...JSON.parse(r.payload).data }));
+    for (const m of created.filter((c) => c.id !== msg(2)))
+      expect(m.author).toEqual({ kind: 'human', agent_id: null, author_id: 'p_removed', display_name: 'Former participant' });
+    expect(created.find((c) => c.id === msg(2))!.author.display_name).toBe('Tess');
+    const everything = JSON.stringify(await all(h, 'SELECT payload FROM events'));
+    expect(everything).not.toContain(authorRef);
+    expect(everything).not.toContain('Luna');
+  });
+
+  it('shows readers “A person in Discord”, the same for everyone, in place of the former participant', async () => {
+    const { h, agent } = await world2();
+    await scrubPerson(h.relay, HUMAN);
+    const page = await (await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agent.key))).json();
+    const mine = (page as { messages: { message_id: string; author: object; deleted: boolean; content: string | null }[] }).messages.find(
+      (m) => m.message_id === msg(1),
+    )!;
+    expect(mine).toMatchObject({ deleted: true, content: null, author: { kind: 'human', author_id: 'p_withheld', display_name: 'A person in Discord' } });
+    const events = await (await h.call('GET', '/v1/events?after=0', undefined, h.as(agent.key))).json();
+    expect(JSON.stringify(events)).not.toContain('Luna');
+  });
+
+  it('finds nothing more the second time', async () => {
+    const { h } = await world2();
+    await scrubPerson(h.relay, HUMAN);
+    const events = (await all(h, 'SELECT 1 FROM events')).length;
+    expect(await scrubPerson(h.relay, HUMAN)).toEqual({ messages: 0, more: false });
+    expect((await all(h, 'SELECT 1 FROM events')).length).toBe(events);
+  });
+
+  it('is only for people who leave: a moderator’s takedown keeps who wrote the message', async () => {
+    const { h } = await world2();
+    await scrubMessage(h.relay, msg(4), 'moderator');
+    expect(await conversation(h, 4)).toMatchObject({ content: null, removed_by: 'moderator', display_name: 'Luna', discord_user_id: HUMAN });
+    expect(
+      JSON.parse((await one<{ payload: string }>(h, "SELECT payload FROM events WHERE type = 'message.created' AND message_id = ?", msg(4)))!.payload).data
+        .author.display_name,
+    ).toBe('Luna');
+  });
+
+  it('handles a person with a hundred messages', async () => {
+    const { h } = await world();
+    await push(h, ...Array.from({ length: 100 }, (_, i) => human(i + 1)));
+    const first = await scrubPerson(h.relay, HUMAN);
+    expect(first).toEqual({ messages: 100, more: false });
+    expect(await all(h, 'SELECT 1 FROM conversation WHERE discord_user_id IS NOT NULL')).toHaveLength(0);
+    expect(await all(h, "SELECT 1 FROM conversation WHERE display_name != 'Former participant'")).toHaveLength(0);
+  });
+});
+
+describe('a person leaving the mirror stops being named in what agents wrote to them', () => {
+  const TESS = { id: '200000000000000002', username: 'tess', global_name: 'Tess' };
+  const line = (name: string, target: number) => `-# ↪ Replying to **${name}** · https://discord.com/channels/${GUILD}/${LOUNGE}/${msg(target)}`;
+
+  async function replies() {
+    const w = await world();
+    const { h, agent } = w;
+    await agree(h, TESS.id);
+    await push(
+      h,
+      human(1, { content: 'luna one' }),
+      thread(msg(1), LOUNGE, { name: 'Luna’s topic' }),
+      human(2, { content: 'tess one', author: TESS }),
+      thread(msg(2), LOUNGE, { name: 'Tess’s topic' }),
+    );
+    const post = (n: number, replyTo: number, text: string, name = 'Luna') =>
+      recordAgentPost(h.relay, {
+        discordMessageId: msg(n),
+        channelId: LOUNGE,
+        threadId: null,
+        agentId: agent.id,
+        displayName: 'Moth-9',
+        content: text.startsWith('Look') ? text : `${line(name, replyTo)}\n${text}`,
+        relayMessageId: 'msg_01JB7Q2M8R',
+        createdAt: at(0, n),
+        replyTo: msg(replyTo),
+      });
+    await post(3, 1, 'good point');
+    await post(4, 2, 'good point too', 'Tess');
+    await post(5, 1, `Look: ${line('Luna', 1)}`);
+    await push(h, edit(3, `${line('Luna', 1)}\ngood point, revised`, 5));
+    // The posting records: one sent, one still on its way (no conversation row yet).
+    const sent = await relayMessage(h, agent.id, { content: 'good point', status: 'sent', discordMessageId: msg(3), hash: 'sent' });
+    const flying = await relayMessage(h, agent.id, { content: 'on its way', status: 'queued', hash: 'flying' });
+    const other = await relayMessage(h, agent.id, { content: 'to Tess', status: 'sent', discordMessageId: msg(4), hash: 'other' });
+    for (const [id, to, name] of [
+      [sent, 1, 'Luna'],
+      [flying, 1, 'Luna'],
+      [other, 2, 'Tess'],
+    ] as const)
+      await h.db.prepare('UPDATE relay_messages SET reply_to = ?, reply_prefix = ? WHERE id = ?').bind(msg(to), line(name, to), id).run();
+    await h.db.prepare('UPDATE conversation SET relay_message_id = ? WHERE message_id = ?').bind(sent, msg(3)).run();
+    return { ...w, sent, flying, other };
+  }
+  const prefix = (h: Awaited<ReturnType<typeof world>>['h'], id: string) =>
+    one<{ reply_prefix: string }>(h, 'SELECT reply_prefix FROM relay_messages WHERE id = ?', id).then((r) => r!.reply_prefix);
+
+  it('rewrites the reply lines in the conversation, the posting records and the event log, for that person only', async () => {
+    const { h, sent, flying, other } = await replies();
+    await scrubPerson(h.relay, HUMAN);
+
+    expect((await conversation(h, 3))!.content).toBe(`${line('a person', 1)}\ngood point, revised`);
+    // Not a reply line to this person, not at the start of the message, and not about anyone else.
+    expect((await conversation(h, 4))!.content).toBe(`${line('Tess', 2)}\ngood point too`);
+    expect((await conversation(h, 5))!.content).toBe(`Look: ${line('Luna', 1)}`);
+    expect(await prefix(h, sent)).toBe(line('a person', 1));
+    expect(await prefix(h, flying)).toBe(line('a person', 1));
+    expect(await prefix(h, other)).toBe(line('Tess', 2));
+
+    const events = await all<{ type: string; message_id: string; payload: string }>(
+      h,
+      "SELECT type, CAST(message_id AS TEXT) AS message_id, payload FROM events WHERE type IN ('message.created', 'message.updated') AND message_id IN (?, ?, ?) ORDER BY seq",
+      msg(3),
+      msg(4),
+      msg(5),
+    );
+    const text = (type: string, n: number) => JSON.parse(events.find((e) => e.type === type && e.message_id === msg(n))!.payload).data.content;
+    expect(text('message.created', 3)).toBe(`${line('a person', 1)}\ngood point`);
+    expect(text('message.updated', 3)).toBe(`${line('a person', 1)}\ngood point, revised`);
+    expect(text('message.created', 4)).toBe(`${line('Tess', 2)}\ngood point too`);
+    expect(text('message.created', 5)).toBe(`Look: ${line('Luna', 1)}`);
+  });
+
+  it('drops the names of the threads they started, and only those', async () => {
+    const { h } = await replies();
+    await scrubPerson(h.relay, HUMAN);
+    expect((await threadRow(h, msg(1)))!.name).toBeNull();
+    expect((await threadRow(h, msg(2)))!.name).toBe('Tess’s topic');
+  });
+
+  it('shows agents and the public the same “a person” whether or not the clean-up ran', async () => {
+    const { h, agent } = await replies();
+    await h.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ?').bind(at(30), HUMAN).run();
+    const page = await (await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agent.key))).json();
+    const text = (page as { messages: { message_id: string; content: string }[] }).messages.find((m) => m.message_id === msg(3))!.content;
+    expect(text.split('\n')[0]).toBe(line('a person', 1));
+    await scrubPerson(h.relay, HUMAN);
+    expect((await conversation(h, 3))!.content!.split('\n')[0]).toBe(line('a person', 1));
+  });
+
+  it('can be repeated, and finds nothing more to change', async () => {
+    const { h, sent } = await replies();
+    await scrubPerson(h.relay, HUMAN);
+    const before = JSON.stringify([await all(h, `SELECT ${CONV} FROM conversation`), await all(h, 'SELECT payload FROM events'), await prefix(h, sent)]);
+    await scrubPerson(h.relay, HUMAN);
+    expect(JSON.stringify([await all(h, `SELECT ${CONV} FROM conversation`), await all(h, 'SELECT payload FROM events'), await prefix(h, sent)])).toBe(before);
+  });
+});
