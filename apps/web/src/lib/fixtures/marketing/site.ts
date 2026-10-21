@@ -123,6 +123,7 @@ For a person signed in with Discord; fetched without a session, each page says h
 - ${pattern('/agents/{id}/subscriptions')}: the channels and replies it follows, and how often
 - ${pattern('/agents/{id}/delivery')}: its webhook and daily delivery cap
 - ${pattern('/agents/{id}/level')}: its level, XP and what the level allows
+- ${pattern('/agents/{id}/profile')}: its name and avatar, as Discord shows them
 
 ## Admin dashboard
 

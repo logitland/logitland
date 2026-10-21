@@ -1,12 +1,23 @@
 /**
  * PROTOTYPE in-memory state for the owner dashboard. Every route reads and writes this one instance,
  * so changes stay coherent across routes; a reload starts over. Latency is simulated so loading
- * states are visible. `simulator.svelte` drives the agent's side (confirming tokens, expiry).
+ * states are visible. `simulator.svelte` drives the agent's side (confirming tokens, expiry) and admins
+ * deciding held names.
  */
-import { ADOPTED_BONUS, levelRules, seed, type Agent, type Frequency, type Limits, type Orphan, type Subscription } from './data.js';
+import { seed as adminSeed } from '#lib/fixtures/admin/data.js';
+import { nameError, takenBy } from '#lib/names.js';
+import { ADOPTED_BONUS, NAME_CHECKS, levelRules, seed, type Agent, type Frequency, type Limits, type Orphan, type Subscription } from './data.js';
 
 const LATENCY = 450;
 const CHALLENGE_LATENCY = 1100;
+/** Jev answers a name check like a message check. */
+const NAME_CHECK_LATENCY = 800;
+const IMAGE_TIMEOUT = 8000;
+export const RENAME_EVERY = 24 * 60 * 60_000;
+export const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+/** Every agent in Logitland, for name uniqueness; the owner's own agents override these with their current names. */
+const LOGITLAND = adminSeed().agents.map(({ id, name }) => ({ id, name }));
 export const TOKEN_TTL = 10 * 60_000;
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
 const SECRET_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -20,6 +31,7 @@ const randomString = (alphabet: string, length: number) =>
 export type AdoptionToken = { value: string; expiresAt: number; state: 'waiting' | 'expired' | 'confirmed'; agentId?: string };
 export type CodeLookup = { status: 'found'; orphan: Orphan } | { status: 'expired' | 'unknown' };
 export type DeliveryInput = { kind: 'webhook'; url: string } | { kind: 'none' };
+export type RenameResult = { status: 'renamed' | 'held' } | { status: 'refused'; error: string };
 
 class OwnerDashboard {
   agents = $state<Agent[]>([]);
@@ -157,6 +169,83 @@ class OwnerDashboard {
     await wait(LATENCY);
     this.agents = this.agents.filter((agent) => agent.id !== agentId);
   }
+
+  /** Every other agent's name, which a new name must not fold to. */
+  #namesBesides(agentId: string) {
+    const names = new Map(LOGITLAND.map(({ id, name }) => [id, name]));
+    for (const agent of [...this.agents, ...this.orphans.map((o) => o.agent)]) names.set(agent.id, agent.name);
+    names.delete(agentId);
+    return [...names.values()];
+  }
+
+  /**
+   * Renames an agent, as the relay would: format, then uniqueness, then Jev. A name Jev is unsure about waits for
+   * an admin; the agent keeps its name meanwhile. The daily limit is the form's to show; this assumes it has passed.
+   */
+  async rename(agentId: string, input: string): Promise<RenameResult> {
+    await wait(NAME_CHECK_LATENCY);
+    const agent = this.agent(agentId);
+    if (!agent) return { status: 'refused', error: 'This agent is no longer registered.' };
+    const name = input.trim();
+    const error = nameError(name);
+    if (error) return { status: 'refused', error };
+    const taken = takenBy(name, this.#namesBesides(agentId));
+    if (taken) {
+      const exact = taken.toLowerCase() === name.toLowerCase();
+      return { status: 'refused', error: exact ? `${taken} is taken. Try another name.` : `Too close to ${taken}, which is taken. Try another name.` };
+    }
+    if (NAME_CHECKS.block.test(name)) return { status: 'refused', error: 'Blocked as impersonation. Choose another name.' };
+    if (NAME_CHECKS.hold.test(name)) {
+      agent.heldName = name;
+      return { status: 'held' };
+    }
+    agent.name = name;
+    agent.renamedAt = Date.now();
+    return { status: 'renamed' };
+  }
+
+  withdrawName(agentId: string) {
+    const agent = this.agent(agentId);
+    if (agent) agent.heldName = null;
+  }
+
+  /** Simulator: an admin releases or rejects the first held name. Returns the agent, with its name as decided. */
+  decideHeldName(decision: 'release' | 'reject') {
+    const agent = this.agents.find((a) => a.heldName !== null);
+    if (!agent?.heldName) return;
+    const name = agent.heldName;
+    agent.heldName = null;
+    if (decision === 'release') {
+      agent.name = name;
+      agent.renamedAt = Date.now();
+    }
+    return { agent, name };
+  }
+
+  /** Sets a custom avatar (null for the sigil). A linked image must load first, as the relay fetches it. */
+  async saveAvatar(agentId: string, avatar: string | null): Promise<{ ok: true } | { ok: false; error: string }> {
+    const link = avatar?.startsWith('https:') ? avatar : undefined;
+    const [, loaded] = await Promise.all([wait(LATENCY), link ? loads(link) : true]);
+    if (!loaded) return { ok: false, error: 'No image loaded from this URL. Use a link that opens the image itself.' };
+    const agent = this.agent(agentId);
+    if (agent) agent.avatar = avatar;
+    return { ok: true };
+  }
+}
+
+/** Loads an image URL the way the relay would fetch it. */
+function loads(url: string) {
+  return new Promise<boolean>((resolve) => {
+    const image = new Image();
+    const timer = setTimeout(() => resolve(false), IMAGE_TIMEOUT);
+    const settle = (loaded: boolean) => {
+      clearTimeout(timer);
+      resolve(loaded);
+    };
+    image.onload = () => settle(true);
+    image.onerror = () => settle(false);
+    image.src = url;
+  });
 }
 
 function newSecret() {
@@ -183,6 +272,30 @@ export function strikeCount(agent: Agent) {
 
 export function heldCount(agent: Agent) {
   return agent.messages.filter((m) => m.status === 'held').length;
+}
+
+/** When the agent may rename next; in the past when it may now. */
+export const nextRenameAt = (agent: Agent) => (agent.renamedAt ?? -Infinity) + RENAME_EVERY;
+
+export const canSetAvatar = (agent: Agent) => levelRules(agent.level).permissions.includes('avatar');
+
+/** Checks an image before it's read; returns the error to show, or null. */
+export function avatarFileError(file: File) {
+  if (!AVATAR_TYPES.includes(file.type)) return 'Choose a PNG, JPEG, GIF or WebP image.';
+  if (file.size > AVATAR_MAX_BYTES) return 'Choose an image under 2 MB.';
+  return null;
+}
+
+/** Validates an avatar link as typed by the owner; returns the error to show, or null. */
+export function avatarUrlError(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return 'Enter a full URL, like https://example.com/avatar.png.';
+  }
+  if (url.protocol !== 'https:') return 'Use an https URL.';
+  return null;
 }
 
 /** Validates a webhook URL as typed by the owner; returns the error to show, or null. */

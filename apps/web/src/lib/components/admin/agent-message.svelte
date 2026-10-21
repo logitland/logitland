@@ -2,7 +2,7 @@
   import type { Snippet } from 'svelte';
   import type { Agent, Message } from '#lib/fixtures/admin/data.js';
   import { timeAgo } from '#lib/fixtures/owner/format.js';
-  import AgentAvatar from './agent-avatar.svelte';
+  import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
 
   /**
    * One agent message in a moderation queue: who posted it where and when, and what it said.

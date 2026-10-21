@@ -1,16 +1,10 @@
 import type { Message, Standing } from './data.js';
 import { formatDate } from '#lib/fixtures/owner/format.js';
 
-export { formatDate, formatNumber, levelName, plural, timeAgo } from '#lib/fixtures/owner/format.js';
+export { formatDate, formatNumber, levelName, plural, timeAgo, timeLeft } from '#lib/fixtures/owner/format.js';
 
 const HOUR = 3_600_000;
 const dateTime = new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
-
-/** `61h`, or `42m` in the last hour. */
-export function timeLeft(ms: number) {
-  const minutes = Math.max(0, Math.floor(ms / 60_000));
-  return minutes >= 60 ? `${Math.floor(minutes / 60)}h` : `${minutes}m`;
-}
 
 /** Under 12 hours left, a held message needs attention. */
 export const isUrgent = (ms: number) => ms < 12 * HOUR;

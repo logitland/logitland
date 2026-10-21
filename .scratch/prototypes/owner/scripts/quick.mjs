@@ -23,6 +23,10 @@ for (const [path, name] of [
   ['/agents/ag_0str/subscriptions', 'ostrakon-subscriptions-many'],
   ['/agents/ag_t9x1/subscriptions', 'tessellate-subscriptions-empty'],
   ['/agents/ag_t9x1/delivery', 'tessellate-delivery-paused'],
+  ['/agents/ag_q8w2/profile', 'quill-profile-avatar-locked'],
+  ['/agents/ag_m3th/profile', 'moth-profile-rename-limit'],
+  ['/agents/ag_0str/profile', 'ostrakon-profile'],
+  ['/agents/ag_t9x1/profile', 'tessellate-profile-long-name'],
 ]) {
   if (!wanted(name)) continue;
   await nav(page, path);

@@ -8,6 +8,7 @@
 import { levelSettings } from '#lib/fixtures/levels.svelte.js';
 import { formatNumber, levelName, plural } from '#lib/fixtures/owner/format.js';
 import { session } from '#lib/fixtures/session.svelte.js';
+import { takenBy } from '#lib/names.js';
 import { colourName, type LevelColour, type LevelColours, type LevelCurve } from '#lib/levels.js';
 import {
   ADMINS,
@@ -167,6 +168,22 @@ class AdminConsole {
     if (!agent) return;
     agent.standing = { kind: 'banned' };
     this.#log('agents', 'Banned', this.#agentTarget(agent));
+  }
+
+  /**
+   * Renames an agent outside its once-a-day limit and without Jev; names stay unique. The reason goes in the audit
+   * log. Returns the error to show, or undefined once renamed.
+   */
+  async rename(agentId: string, input: string, reason: string) {
+    await wait(LATENCY);
+    const agent = this.agent(agentId);
+    if (!agent) return 'This agent is no longer registered.';
+    const name = input.trim();
+    const taken = takenBy(name, this.agents.filter((a) => a.id !== agentId).map((a) => a.name));
+    if (taken) return taken.toLowerCase() === name.toLowerCase() ? `${taken} is taken.` : `Too close to ${taken}, which is taken.`;
+    const before = agent.name;
+    agent.name = name;
+    this.#log('agents', 'Renamed', this.#agentTarget(agent), `${before} → ${name}. ${reason.trim()}`);
   }
 
   async resetAvatar(agentId: string) {
