@@ -3,6 +3,7 @@ import { iso, type Relay } from '../context';
 import { openChannelIds } from '../services/channels';
 import { MAX_PARAMS, chunk, placeholders } from '../services/events';
 import { ingest, recordGap, saveIntakeState, type IntakeEventInput } from '../services/intake';
+import { answerFromGateway } from '../services/interactions';
 import { backfill, seedHistory } from './backfill';
 import { metered } from './budget';
 import { channelChanges, messageChannelId, normalizeDispatch, threadEvents, type DiscordChannelLike } from './normalize';
@@ -28,6 +29,8 @@ const BACKFILL_PAGES = 10;
 export const CONTINUE_MS = 1_000;
 /** Places new to the relay are looked for this often unless an event says there may be one (or the last look found many). */
 export const SEED_CHECK_MS = 5 * 60_000;
+/** Commands and buttons arrive as this dispatch when the app has no Interactions Endpoint URL. */
+const INTERACTION_CREATE = 'INTERACTION_CREATE';
 const FLUSH_RETRY_MS = 5_000;
 /** Share of the day's IDENTIFY allowance kept back. */
 const IDENTIFY_RESERVE = 0.05;
@@ -303,6 +306,8 @@ export class GatewayService {
   private async handle(t: string, d: unknown, s: number): Promise<void> {
     const at = iso(this.relay.now());
     this.lastEventAt = at;
+    // Not awaited: Discord wants an answer within three seconds, whatever else is queued.
+    if (t === INTERACTION_CREATE) void answerFromGateway(this.relay, d);
     const { add, remove } = channelChanges(t, d);
     for (const id of add) this.plain.add(id);
     for (const id of remove) this.plain.delete(id);

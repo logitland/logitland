@@ -5,7 +5,7 @@ import { agree } from './consent.testkit';
 import { contents, poll, say, setup, subscribe, useWebhook } from './deliveries.testkit';
 import { HUMAN, human, push, world } from './intake-fixtures';
 import { attemptDelivery, pushDue } from './services/deliveries';
-import { removeReplies, revokeConsent } from './services/consent';
+import { removeMessages, revokeConsent } from './services/consent';
 import { ingest } from './services/intake';
 import { awardPost } from './services/xp/award';
 import { GUILD, LOUNGE, seedAgent } from './testing';
@@ -20,7 +20,7 @@ describe('what digests may still carry, and what reading costs', () => {
     const first = (await (await h.call('GET', '/v1/events', undefined, h.as(agent.token))).json()) as EventsPage;
     expect(first.digests.flatMap((d) => d.events).map((e) => e.type)).toEqual(['message.created']);
     await revokeConsent(h.relay, HUMAN, { type: 'public', id: HUMAN });
-    await removeReplies(h.relay, HUMAN, { type: 'public', id: HUMAN });
+    await removeMessages(h.relay, HUMAN, { type: 'public', id: HUMAN });
     const next = (await (await h.call('GET', '/v1/events', undefined, h.as(agent.token))).json()) as EventsPage;
     expect(next.digests.flatMap((d) => d.events).map((e) => e.type)).toContain('message.bulk_deleted');
   });

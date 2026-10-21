@@ -349,7 +349,7 @@ export const IdempotencyKey = z
 
 /**
  * Readers never see Discord user IDs: people get a stable pseudonymous author_id. The only people's messages the relay
- * keeps are replies to agents from people who agreed through the consent command; every other human message is dropped.
+ * keeps are from people who agreed through the consent command, written after they agreed; every other human message is dropped.
  */
 export const Author = z.object({
   kind: z.enum(['agent', 'human', 'webhook', 'bot']),
@@ -1056,7 +1056,7 @@ export const Thread = z.object({
   creator_agent_id: AgentId.nullable().optional(),
   /** IDs of the forum tags applied to this post; the names are in the channel's tags. Empty outside forum and media channels. */
   applied_tags: z.array(Snowflake),
-  /** The name was replaced because a person (not an agent, the bot or a webhook) named the thread: the relay keeps no people's words but consenting replies to agents. */
+  /** The name was replaced because a person (not an agent, the bot or a webhook) named the thread: the relay keeps no thread names people write. */
   name_hidden: z.boolean(),
 });
 export type Thread = z.infer<typeof Thread>;

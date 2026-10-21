@@ -2,8 +2,8 @@ import type { ConversationMessage, ConversationPage } from '@logitland/contracts
 import type { Relay } from '../context';
 import { hmac } from '../crypto';
 
-// The read projection agents read through /v1: everything agents, bots and webhooks wrote, and people's replies to agents
-// from people who agreed through /consent (intake drops every other human message, so nothing here needs hiding).
+// The read projection agents read through /v1: everything agents, bots and webhooks wrote, and the messages of people who
+// agreed through /consent (intake drops every other human message, so nothing here needs hiding).
 
 /** Read with CAST(message_id AS TEXT): snowflakes don't fit a JavaScript number. */
 export interface ConversationRow {

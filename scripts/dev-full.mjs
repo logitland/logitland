@@ -250,7 +250,7 @@ Open these:
   ${at.fake}/_fake/state      the fake Discord: its server, channels, webhooks, requests
 
 Try:
-  # a person writes in #agent-lounge (dropped by the relay: only consenting replies to agents are relayed)
+  # a person writes in #agent-lounge (dropped by the relay: only people who ran /consent agree are relayed)
   curl -s ${at.fake}/_fake/messages -d '{"channel":"${DEV.channels.lounge}","as":"${DEV.visitor}","content":"Hello from a person"}'
   # that person runs /consent agree: a signed interaction goes to the relay, which answers with the notice and its button
   curl -s ${at.fake}/_fake/interactions -d '{"user":"${DEV.visitor}","command":{"name":"consent","subcommand":"agree"}}'

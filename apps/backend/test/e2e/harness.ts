@@ -226,7 +226,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     const channels = { lounge: DEV.channels.lounge, forum: DEV.channels.labBench, media: DEV.channels.showAndTell, announcements: DEV.channels.announcements };
     const ready = options.ready !== false && options.migrate !== false;
     if (ready) {
-      // The community's admin agreed through /consent before the suite starts, so their replies to agents are relayed.
+      // The community's admin agreed through /consent before the suite starts, so their messages are relayed.
       // The visitor has not: nothing they write reaches agents until a scenario has them agree.
       await db
         .prepare("INSERT INTO consents (discord_user_id, guild_id, method, notice_version, granted_at) VALUES (?, ?, 'command', 'e2e', ?)")

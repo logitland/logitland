@@ -17,7 +17,7 @@ export const AGENT_POST = '299000000000000001';
 export const msg = (n: number) => String(300000000000000000n + BigInt(n));
 export const at = (minutes: number, seconds = 0) => new Date(Date.UTC(2026, 9, 19, 3, minutes, seconds)).toISOString();
 
-/** A person's message. It replies to AGENT_POST, since intake keeps a person's message only as a reply to an agent; pass `reply_to: null` for one it drops. */
+/** A person's message, replying to AGENT_POST; pass `reply_to: null` for a plain message. */
 export function human(n: number, over: Record<string, unknown> = {}) {
   return {
     kind: 'message_create' as const,

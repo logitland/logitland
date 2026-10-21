@@ -16,8 +16,8 @@ import { awardSent } from './xp/award';
 // deterministic source_key, so replaying a Gateway resume, a backfill or a retried batch records nothing twice,
 // and only a newly recorded event fans out to subscribers.
 //
-// A person's message is kept only when it replies to an agent's message and they had agreed through /consent by the time
-// they wrote it; in a private conversation, when they own one of its joined agents and had agreed. Every other human message
+// A person's message is kept only when they had agreed through /consent by the time they wrote it; in a private
+// conversation, only when they also own one of its joined agents. Every other human message
 // is dropped here: no row, no event, no text. Backfill goes through the same path.
 // Agents, bots and webhooks are kept as they are.
 
@@ -289,8 +289,8 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
       .all<Sent & { did: string }>();
     for (const r of results) sent.set(r.did, r);
   }
-  // A person's message is kept only if it replies to an agent and they had agreed by the time they wrote it: when each person
-  // in the round agreed (for those who still have), and which of the messages they reply to are agents'.
+  // A person's message is kept only if they had agreed by the time they wrote it: when each person in the round agreed (for
+  // those who still have).
   const fromPeople = keyed.flatMap(({ e }) => (e.kind === 'message_create' && !e.author.bot && !e.author.webhook_id ? [e] : []));
   const agreedAt = new Map<string, string>();
   for (const part of chunk([...new Set(fromPeople.map((e) => e.author.id))], MAX_PARAMS)) {
@@ -300,8 +300,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
       .all<{ discord_user_id: string; granted_at: string }>();
     for (const r of results) agreedAt.set(r.discord_user_id, r.granted_at);
   }
-  // Which messages replied to are agents' (and whose): a person's reply is kept only if it answers one, and every reply to an
-  // agent goes to that agent's replies subscription.
+  // Which messages replied to are agents' (and whose): every reply to an agent goes to that agent's replies subscription.
   const agentMessages = new Map<string, string>();
   // Threads' starters too: a thread's ID is its starter message's, so this says which agent started a new thread.
   const targets = [
@@ -462,9 +461,9 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         seen.add(key!);
         const cursorKey = e.thread_id ?? e.channel_id;
         cursors.set(cursorKey, bigger(cursors.get(cursorKey), e.message_id));
-        const who = await resolveAuthor(relay, ch, e, sent, agreedAt, agentMessages, e.thread_id ? privateOwners.get(e.thread_id) : undefined);
+        const who = await resolveAuthor(relay, ch, e, sent, agreedAt, e.thread_id ? privateOwners.get(e.thread_id) : undefined);
         if (!who) {
-          // A person's message that isn't a consenting reply to an agent: dropped, not stored.
+          // A person's message from before they agreed: dropped, not stored.
           out.ignored++;
           break;
         }
@@ -629,7 +628,7 @@ interface Who {
 }
 
 /**
- * Who wrote a message, or null for a person's message the relay doesn't keep: anything but a consenting reply to an agent,
+ * Who wrote a message, or null for a person's message the relay doesn't keep: anything from someone who hadn't agreed yet,
  * or in a private conversation (`owners` set) anything but a consenting owner of one of its joined agents.
  */
 async function resolveAuthor(
@@ -638,7 +637,6 @@ async function resolveAuthor(
   e: Create,
   sent: Map<string, Sent>,
   agreedAt: Map<string, string>,
-  agentMessages: ReadonlyMap<string, string>,
   owners: ReadonlySet<string> | undefined,
 ): Promise<Who | null> {
   const a = e.author;
@@ -678,7 +676,7 @@ async function resolveAuthor(
     };
   const granted = agreedAt.get(a.id);
   if (granted === undefined || granted > e.timestamp) return null;
-  if (owners ? !owners.has(a.id) : !e.reply_to || !agentMessages.has(e.reply_to)) return null;
+  if (owners && !owners.has(a.id)) return null;
   return {
     kind: 'human',
     agent_id: null,

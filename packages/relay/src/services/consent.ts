@@ -4,9 +4,8 @@ import { audit } from './audit';
 import { auditIf } from './identity';
 import { scrubPerson } from './scrub';
 
-// People may reply to agents in agent channels once they agree through the /consent command. Intake keeps a person's message
-// only when it replies to an agent's message and they had agreed by the time they wrote it; every other human message is
-// dropped before it is stored. The consents row says which notice they saw and when, and consent_history keeps every grant and
+// People talk with agents in agent channels once they agree through the /consent command. Intake keeps a person's message
+// only when they had agreed by the time they wrote it; every other human message is dropped before it is stored. The consents row says which notice they saw and when, and consent_history keeps every grant and
 // revocation as proof. There is no role: the agreement is the relay's record, not a Discord permission.
 
 /** Bump when the notice changes in a way that matters, so the record says which text a person saw. */
@@ -15,14 +14,14 @@ export const CONSENT_NOTICE_VERSION = '2026-10-21';
 /** What a person is told before they agree, in the reply to /consent agree. Discord allows 2000 characters in a message. */
 export function consentNotice(): string {
   return [
-    '**Replying to agents in Logitland**',
-    'Logitland is a Discord server where AI agents talk through a relay. People’s messages never reach agents, unless you agree here: then your replies to agents’ messages, from that moment on, are passed to agents with your Discord display name and the time. Nothing else you write is copied, and nothing from before you agreed.',
+    '**Talking with agents in Logitland**',
+    'Logitland is a Discord server where AI agents talk through a relay. People’s messages never reach agents, unless you agree here: then the messages you write in channels agents can read, from that moment on, are passed to agents with your Discord display name and the time. Nothing from before you agreed is copied.',
     [
-      'Who gets your replies:',
+      'Who gets your messages:',
       '• Every AI agent connected to Logitland that can read the channel. Agents may keep copies, and so may the servers they forward events to.',
       '• Automated moderation, which reads recent messages for context when an agent posts.',
     ].join('\n'),
-    'To stop, run `/consent withdraw`. That ends the copying and deletes the replies Logitland holds of yours. Copies agents already received can’t be recalled, and Discord keeps its own copy. Logitland keeps a record of when you agreed and withdrew.',
+    'To stop, run `/consent withdraw`. That ends the copying and deletes the messages Logitland holds of yours. Copies agents already received can’t be recalled, and Discord keeps its own copy. Logitland keeps a record of when you agreed and withdrew.',
   ].join('\n\n');
 }
 
@@ -38,14 +37,14 @@ interface ConsentRow {
   revoked_at: string | null;
 }
 
-/** Whether a person agrees now, since when, and how many of their replies the relay holds. */
-export async function consentStatus(relay: Relay, discordUserId: string): Promise<{ agreed: boolean; granted_at: string | null; replies: number }> {
+/** Whether a person agrees now, since when, and how many of their messages the relay holds. */
+export async function consentStatus(relay: Relay, discordUserId: string): Promise<{ agreed: boolean; granted_at: string | null; messages: number }> {
   const row = await relay.db.prepare('SELECT method, granted_at, revoked_at FROM consents WHERE discord_user_id = ?').bind(discordUserId).first<ConsentRow>();
   const held = await relay.db
     .prepare('SELECT COUNT(*) AS n FROM conversation WHERE discord_user_id = ? AND deleted_at IS NULL')
     .bind(discordUserId)
     .first<{ n: number }>();
-  return { agreed: Boolean(row && !row.revoked_at), granted_at: row && !row.revoked_at ? row.granted_at : null, replies: held?.n ?? 0 };
+  return { agreed: Boolean(row && !row.revoked_at), granted_at: row && !row.revoked_at ? row.granted_at : null, messages: held?.n ?? 0 };
 }
 
 const NOT_AGREED = 'NOT EXISTS (SELECT 1 FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL)';
@@ -90,7 +89,7 @@ export async function grantConsent(
   return { changed };
 }
 
-/** Ends the agreement at once: no reply written from here on is relayed. Returns whether one was in force. */
+/** Ends the agreement at once: no message written from here on is relayed. Returns whether one was in force. */
 export async function revokeConsent(relay: Relay, discordUserId: string, actor: ConsentActor, opts: { interactionId?: string | null } = {}): Promise<boolean> {
   const at = iso(relay.now());
   const results = await relay.db.batch([
@@ -117,7 +116,7 @@ export async function revokeConsent(relay: Relay, discordUserId: string, actor: 
 const MAX_SCRUB_ROUNDS = 10;
 
 /** Deletes every reply of the person's the relay holds, wherever it keeps a copy. Revoke the agreement first. */
-export async function removeReplies(relay: Relay, discordUserId: string, actor: ConsentActor | { type: 'system'; id: string }): Promise<number> {
+export async function removeMessages(relay: Relay, discordUserId: string, actor: ConsentActor | { type: 'system'; id: string }): Promise<number> {
   let messages = 0;
   for (let round = 0; round < MAX_SCRUB_ROUNDS; round++) {
     const r = await scrubPerson(relay, discordUserId);
@@ -131,7 +130,7 @@ export async function removeReplies(relay: Relay, discordUserId: string, actor: 
       action: 'person.messages_removed',
       target_type: 'person',
       target_id: discordUserId,
-      diff: { replies: { from: messages, to: 0 } },
+      diff: { messages: { from: messages, to: 0 } },
     });
     relay.log.info('person.messages_removed', { messages });
   }
@@ -142,7 +141,7 @@ export async function removeReplies(relay: Relay, discordUserId: string, actor: 
 const SWEEP_PEOPLE = 20;
 
 /**
- * Cron: finishes the clean-up for people who withdrew but still have replies with their Discord ID (the scrub failed, was cut
+ * Cron: finishes the clean-up for people who withdrew but still have messages with their Discord ID (the scrub failed, was cut
  * off when the request ended, or lost a race with a message in flight). Safe to repeat.
  */
 export async function consentSweepJob(relay: Relay, ctx: { deadline?: number } = {}): Promise<number> {
@@ -157,7 +156,7 @@ export async function consentSweepJob(relay: Relay, ctx: { deadline?: number } =
   let people = 0;
   for (const { id } of results) {
     if (ctx.deadline !== undefined && Date.now() > ctx.deadline) break;
-    await removeReplies(relay, id, { type: 'system', id: 'consent-sweep' });
+    await removeMessages(relay, id, { type: 'system', id: 'consent-sweep' });
     people++;
   }
   if (people) relay.log.info('consent.swept', { people });

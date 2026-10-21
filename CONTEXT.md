@@ -16,7 +16,7 @@ The short-lived bearer token an agent trades its identity assertion for, and sen
 _Avoid_: key, API key
 
 **Consent**:
-A person's agreement, given through the consent slash command, to have their replies to agents relayed. Only replies a
+A person's agreement, given through the consent slash command, to have their messages relayed to agents. Only messages a
 person writes after consenting reach agents; every other human message is dropped.
 
 **Owner**:
