@@ -1,4 +1,4 @@
-import { AdminPermission, type AdminRole, type AdminRoleUpdate, type AdminStanding } from '@logitland/contracts';
+import { AdminPermission, type AdminRole, type AdminRoleUpdate, type AdminStanding, type TeamMember } from '@logitland/contracts';
 import { DiscordError, TEAM_MEMBER_ACCEPTED } from '@logitland/discord';
 import { iso, type Relay } from '../context';
 import { RelayError, invalid, notFound, unavailable } from '../errors';
@@ -18,16 +18,16 @@ const MEMBER_KEEP_MS = 86_400_000;
 const NO_STANDING: AdminStanding = { full: false, permissions: [] };
 
 /** Discord's answer under `key`, asked again once it is older than `ttlMs`. */
-async function lookup(relay: Relay, key: string, ttlMs: number, ask: () => Promise<string[]>): Promise<string[]> {
+async function lookup<T>(relay: Relay, key: string, ttlMs: number, ask: () => Promise<T>): Promise<T> {
   const row = await relay.db.prepare('SELECT value, fetched_at FROM discord_lookups WHERE key = ?').bind(key).first<{ value: string; fetched_at: string }>();
   const now = relay.now();
-  if (row && now.getTime() - Date.parse(row.fetched_at) < ttlMs) return JSON.parse(row.value) as string[];
-  let value: string[];
+  if (row && now.getTime() - Date.parse(row.fetched_at) < ttlMs) return JSON.parse(row.value) as T;
+  let value: T;
   try {
     value = await ask();
   } catch (error) {
     relay.log.warn('admins.discord_unreachable', { key, stale: Boolean(row), error });
-    if (row) return JSON.parse(row.value) as string[];
+    if (row) return JSON.parse(row.value) as T;
     // A wrong token is what a new deployment most likely gets wrong, and with it nobody can open the setup checklist.
     if (error instanceof DiscordError && error.status === 401)
       throw new RelayError(503, 'misconfigured', 'Discord rejected the bot token, so admin standing can’t be checked. Check DISCORD_BOT_TOKEN.');
@@ -53,6 +53,31 @@ export const fullAdmins = (relay: Relay): Promise<string[]> =>
     if (app.owner) return [app.owner.id];
     throw new Error('Discord named no owner for the application');
   });
+
+type TeamUser = { id: string; username: string; global_name?: string | null };
+
+/**
+ * The full admins with their names, for the admin pages: the accepted members of the Developer team (or the application's
+ * one owner), and their owner IDs once they have signed in. Cached apart from `fullAdmins`, which only needs IDs.
+ */
+export async function developerTeam(relay: Relay): Promise<TeamMember[]> {
+  const users = await lookup<TeamUser[]>(relay, 'team-members', TEAM_TTL_MS, async () => {
+    const app = await relay.discord.getCurrentApplication();
+    const people = app.team ? app.team.members.filter((m) => m.membership_state === TEAM_MEMBER_ACCEPTED).map((m) => m.user) : app.owner ? [app.owner] : [];
+    return people.map(({ id, username, global_name }) => ({ id, username, global_name }));
+  });
+  if (!users.length) return [];
+  const { results: owners } = await relay.db
+    .prepare(`SELECT id, discord_user_id FROM owners WHERE discord_user_id IN (${users.map(() => '?').join(', ')})`)
+    .bind(...users.map((u) => u.id))
+    .all<{ id: string; discord_user_id: string }>();
+  return users.map((u) => ({
+    discord_user_id: u.id,
+    username: u.username,
+    name: u.global_name || u.username,
+    owner_id: owners.find((o) => o.discord_user_id === u.id)?.id ?? null,
+  }));
+}
 
 /** A person's roles in the server. Someone who isn't in it holds none. */
 const memberRoles = (relay: Relay, guildId: string, discordUserId: string): Promise<string[]> =>

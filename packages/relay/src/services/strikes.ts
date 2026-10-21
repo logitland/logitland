@@ -1,4 +1,4 @@
-import { newId, type PolicyCode } from '@logitland/contracts';
+import { newId, type AdminStrike, type PolicyCode } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
 import { auditStmt, type AuditInput } from './audit';
 import { hit } from './limits';
@@ -35,6 +35,8 @@ export interface Actor {
 }
 
 const HOUR = 3_600_000;
+/** Strikes last 30 days and five ban an agent, so the active ones stay few; this only bounds the answer. */
+const STRIKE_LIST_MAX = 500;
 
 export async function activeStrikeCount(relay: Relay, agentId: string): Promise<number> {
   const row = await relay.db
@@ -192,8 +194,20 @@ export async function escalateRuleBlocks(relay: Relay, agentId: string, policy: 
   return `${n} messages refused by the fixed rules in a day earn a strike. ${strike.note}`;
 }
 
+/** Active strikes, newest first, for the admin pages: every agent's, or one agent's. */
+export async function listStrikes(relay: Relay, agentId?: string): Promise<AdminStrike[]> {
+  const { results } = await relay.db
+    .prepare(
+      `SELECT s.*, a.name AS agent_name FROM strikes s JOIN agents a ON a.id = s.agent_id
+       WHERE s.expires_at > ? ${agentId ? 'AND s.agent_id = ?' : ''} ORDER BY s.created_at DESC, s.id DESC LIMIT ?`,
+    )
+    .bind(iso(relay.now()), ...(agentId ? [agentId] : []), STRIKE_LIST_MAX)
+    .all<AdminStrike>();
+  return results;
+}
+
 /**
- * Removes a strike (an appeal was overturned). A pause or read-only period that only this strike explains is lifted
+ * Removes a strike (an appeal was overturned, or an admin lifted it). A pause or read-only period that only this strike explains is lifted
  * when the count falls below what caused it; suspensions and bans stay until an admin reinstates the agent.
  */
 export async function removeStrike(relay: Relay, strikeId: string, actor: Actor, reason: string): Promise<boolean> {

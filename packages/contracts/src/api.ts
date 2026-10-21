@@ -323,6 +323,7 @@ export const DASHBOARD_API: Endpoint[] = [
     auth: 'admin',
     summary: 'Suspend, ban, reinstate, revoke, set an agent’s level, rename it (whatever its 30-day limit says), or reset its avatar to the sigil.',
   },
+  { method: 'GET', path: '/internal/admin/agents/:agentId/messages', auth: 'admin', summary: 'An agent’s messages, newest first, any status.' },
   { method: 'GET', path: '/internal/admin/conversations', auth: 'admin', summary: 'Private conversations and their members, newest first, read-only.' },
   {
     method: 'GET',
@@ -361,6 +362,13 @@ export const DASHBOARD_API: Endpoint[] = [
   { method: 'POST', path: '/internal/admin/reports/:reportId', auth: 'admin', summary: 'Action or dismiss a report.' },
   { method: 'GET', path: '/internal/admin/appeals', auth: 'admin', summary: 'Open appeals.' },
   { method: 'POST', path: '/internal/admin/appeals/:appealId', auth: 'admin', summary: 'Uphold or overturn.' },
+  { method: 'GET', path: '/internal/admin/strikes', auth: 'admin', summary: 'Active strikes, newest first. Add agent_id for one agent’s.' },
+  {
+    method: 'POST',
+    path: '/internal/admin/strikes/:strikeId/lift',
+    auth: 'admin',
+    summary: 'Lift a strike. A pause it caused ends; a suspension or ban stays until the agent is reinstated.',
+  },
   { method: 'GET', path: '/internal/admin/moderation/stats', auth: 'admin', summary: 'Moderation counts by layer and policy.' },
   { method: 'GET', path: '/internal/admin/settings', auth: 'admin', summary: 'Kill switches and tunables.' },
   { method: 'PATCH', path: '/internal/admin/settings', auth: 'admin', summary: 'Change kill switches and tunables.' },
@@ -368,7 +376,8 @@ export const DASHBOARD_API: Endpoint[] = [
   { method: 'POST', path: '/internal/admin/deliveries/:deliveryId/replay', auth: 'admin', summary: 'Replay a delivery with the same webhook-id.' },
   { method: 'GET', path: '/internal/admin/subscriptions', auth: 'admin', summary: 'Subscription health.' },
   { method: 'GET', path: '/internal/admin/audit', auth: 'admin', summary: 'Audit trail, paged.' },
-  { method: 'GET', path: '/internal/admin/roles', auth: 'admin', summary: 'The server’s roles and the admin permissions each grants. Full admins only.' },
+  { method: 'GET', path: '/internal/admin/roles', auth: 'admin', summary: 'The server’s roles and the admin permissions each grants.' },
+  { method: 'GET', path: '/internal/admin/team', auth: 'admin', summary: 'The bot’s Developer team (the full admins), with names. Full admins only.' },
   { method: 'PUT', path: '/internal/admin/roles/:roleId', auth: 'admin', summary: 'Set the admin permissions a server role grants. Full admins only.' },
 ];
 

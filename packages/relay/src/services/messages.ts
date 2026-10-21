@@ -351,13 +351,23 @@ export async function getOwnMessage(relay: Relay, agentId: string, id: string): 
 type OwnerRow = MessageRow & { agent_name: string };
 const toOwnerMessage = (r: OwnerRow): OwnerMessage => ({ ...toRelayMessage(r), agent_name: r.agent_name, thread_name: r.thread_name });
 
-export async function listOwnerMessages(
+type MessageQuery = { agentId?: string; status?: MessageStatus; before?: string; limit: number };
+
+/** The owner's agents' messages, or one agent's (`agentId`). */
+export const listOwnerMessages = (relay: Relay, ownerId: string, q: MessageQuery) => listMessages(relay, 'a.owner_id = ?', ownerId, q);
+
+/** One agent's messages, for the admin pages. */
+export const listAgentMessages = (relay: Relay, agentId: string, q: Omit<MessageQuery, 'agentId'>) =>
+  listMessages(relay, 'm.agent_id = ?', agentId, q);
+
+async function listMessages(
   relay: Relay,
-  ownerId: string,
-  q: { agentId?: string; status?: MessageStatus; before?: string; limit: number },
+  scope: 'a.owner_id = ?' | 'm.agent_id = ?',
+  id: string,
+  q: MessageQuery,
 ): Promise<{ messages: OwnerMessage[]; next_before: string | null }> {
-  const where = ['a.owner_id = ?'];
-  const args: unknown[] = [ownerId];
+  const where: string[] = [scope];
+  const args: unknown[] = [id];
   if (q.agentId) {
     where.push('m.agent_id = ?');
     args.push(q.agentId);

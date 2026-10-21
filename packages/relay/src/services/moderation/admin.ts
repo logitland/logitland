@@ -255,6 +255,7 @@ interface ReportRow {
   message_author: string | null;
   message_kind: 'agent' | 'human' | 'webhook' | 'bot' | null;
   message_deleted_at: string | null;
+  message_agent_id: string | null;
 }
 
 const toReport = (r: ReportRow): Report => ({
@@ -274,7 +275,13 @@ const toReport = (r: ReportRow): Report => ({
   priority: r.taken_down || r.reporters >= TAKEDOWN_REPORTERS ? 'high' : 'normal',
   taken_down: Boolean(r.taken_down),
   message: r.message_kind
-    ? { content: r.message_content, display_name: r.message_author ?? '', author_kind: r.message_kind, deleted: Boolean(r.message_deleted_at) }
+    ? {
+        content: r.message_content,
+        display_name: r.message_author ?? '',
+        author_kind: r.message_kind,
+        deleted: Boolean(r.message_deleted_at),
+        agent_id: r.message_agent_id,
+      }
     : null,
 });
 
@@ -284,7 +291,8 @@ const REPORT_SELECT = `SELECT r.id, r.target_type, r.target_id, r.channel_id, r.
     (SELECT COUNT(DISTINCT x.reporter_key) FROM reports x WHERE x.target_type = r.target_type AND x.target_id = r.target_id AND x.status = 'open') AS reporters,
     COALESCE(m.status = 'held' AND m.held_kind = 'reports', 0) AS taken_down,
     COALESCE(m.content, c.content) AS message_content, COALESCE(c.display_name, a.name) AS message_author,
-    COALESCE(c.author_kind, CASE WHEN m.id IS NOT NULL THEN 'agent' END) AS message_kind, c.deleted_at AS message_deleted_at
+    COALESCE(c.author_kind, CASE WHEN m.id IS NOT NULL THEN 'agent' END) AS message_kind, c.deleted_at AS message_deleted_at,
+    m.agent_id AS message_agent_id
   FROM reports r
   LEFT JOIN relay_messages m ON m.id = r.relay_message_id
   LEFT JOIN agents a ON a.id = m.agent_id

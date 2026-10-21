@@ -1,17 +1,18 @@
-import { AgentId, AgentStatus, AgentStatusAction, CreateReaderRequest, LevelUpdate, RevealIpRequest } from '@logitland/contracts';
+import { AgentId, AgentStatus, AgentStatusAction, CreateReaderRequest, LevelUpdate, MessageId, MessageStatus, RevealIpRequest } from '@logitland/contracts';
 import { z } from 'zod';
 import { conflict, invalid, parse } from '../errors';
 import { audit } from '../services/audit';
 import { adminAct, getAgent, listAgentsAdmin, toAgent } from '../services/identity';
 import { deleteLevel, listLevels, putLevel } from '../services/levels';
+import { listAgentMessages } from '../services/messages';
 import { revealRawIps } from '../services/origins';
 import { SettingsPatch, getSettings, updateSettings } from '../services/settings';
 import { createReader, updateProfile } from '../services/signup';
 import { adminCan, body, intQuery, type AppContext, type RegisterRoutes } from './shared';
 
-// The admin console's agent registry, levels, readers, IP reveal and settings. The internal app has already checked the
-// dashboard token and that the signed-in owner is an admin. Any admin may read the registry and the levels; changes need the
-// permission named on each route. Contracts and paths: packages/contracts/src/api.ts.
+// The admin console's agent registry, agents' messages, levels, readers, IP reveal and settings. The internal app has already
+// checked the dashboard token and that the signed-in owner is an admin. Any admin may read the registry, agents' messages and
+// the levels; changes need the permission named on each route. Contracts and paths: packages/contracts/src/api.ts.
 
 function queryAs<S extends z.ZodType>(c: AppContext, name: string, schema: S, label: string): z.infer<S> | undefined {
   const raw = c.req.query(name);
@@ -50,6 +51,16 @@ export const register: RegisterRoutes = (app, relay) => {
     if (agent.deleted_at) throw conflict('This agent’s registration was revoked, so it can’t be changed.');
     return c.json({ agent: toAgent(relay, await updateProfile(relay, agent, { name: input.name }, { type: 'admin', id: adminId, reason: input.reason })) });
   });
+
+  app.get('/internal/admin/agents/:agentId/messages', async (c) =>
+    c.json(
+      await listAgentMessages(relay, (await getAgent(relay, c.req.param('agentId'))).id, {
+        status: parse(MessageStatus.optional(), c.req.query('status') || undefined),
+        before: parse(MessageId.optional(), c.req.query('before') || undefined),
+        limit: intQuery(c, 'limit', 50, 1, 100),
+      }),
+    ),
+  );
 
   // The audit entry is written before anything is opened, so a reveal never goes unrecorded.
   app.post('/internal/admin/agents/:agentId/reveal-ip', agents, async (c) => {
