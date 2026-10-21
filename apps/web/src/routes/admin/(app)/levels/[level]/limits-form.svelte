@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Adoption, LevelLimits, type Level, type LevelPermission } from '@logitland/contracts';
-  import { untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import SaveCard from '#lib/components/admin/save-card.svelte';
   import { Checkbox } from '#lib/components/ui/checkbox/index.js';
@@ -23,8 +22,10 @@
     adopted: Object.fromEntries(LIMIT_KEYS.map((k) => [k, String(l.limits.adopted[k])])) as Record<Limit, string>,
   });
 
-  let draft = $state(untrack(() => toDraft(level)));
-  let permissions = $state(untrack(() => ({ orphan: [...level.permissions.orphan], adopted: [...level.permissions.adopted] })));
+  // A draft only once the admin changes something; until then the form follows the relay's level as it refreshes.
+  let edited = $state<{ draft: Draft; permissions: Level['permissions'] }>();
+  const draft = $derived(edited?.draft ?? toDraft(level));
+  const permissions = $derived(edited?.permissions ?? level.permissions);
   let errors = $state<Partial<Record<Limit, string>>>({});
 
   const dirty = $derived(
@@ -36,14 +37,17 @@
   );
 
   function discard() {
-    draft = toDraft(level);
-    permissions = { orphan: [...level.permissions.orphan], adopted: [...level.permissions.adopted] };
+    edited = undefined;
     errors = {};
+  }
+
+  function setLimit(adoption: Adoption, key: Limit, value: string) {
+    edited = { draft: { ...draft, [adoption]: { ...draft[adoption], [key]: value } }, permissions };
   }
 
   function toggle(adoption: Adoption, permission: LevelPermission, on: boolean) {
     const rest = permissions[adoption].filter((p) => p !== permission);
-    permissions[adoption] = on ? [...rest, permission] : rest;
+    edited = { draft, permissions: { ...permissions, [adoption]: on ? [...rest, permission] : rest } };
   }
 
   function validate() {
@@ -65,6 +69,7 @@
     const { level: n, ...update } = level;
     try {
       await saveLevel({ level: n, update: { ...update, limits, permissions } });
+      edited = undefined;
       toast.success(`Saved ${levelName(n)}`);
     } catch (e) {
       toast.error(refusal(e));
@@ -74,7 +79,10 @@
 
 <SaveCard title="Limits and permissions" {dirty} onDiscard={discard} onSave={save}>
   <div role="table" aria-label="Limits and permissions for {levelName(level.level)}" class="flex flex-col">
-    <div role="row" class="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-end gap-3 pb-2 text-xs font-medium text-muted-foreground sm:grid-cols-[minmax(0,1fr)_8rem_8rem]">
+    <div
+      role="row"
+      class="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-end gap-3 pb-2 text-xs font-medium text-muted-foreground sm:grid-cols-[minmax(0,1fr)_8rem_8rem]"
+    >
       <span role="columnheader"><span class="sr-only">Setting</span></span>
       {#each ADOPTIONS as adoption (adoption)}
         <span role="columnheader">{ADOPTION_LABELS[adoption]}</span>
@@ -93,7 +101,7 @@
                   min="0"
                   max={LevelLimits.shape[key].maxValue}
                   step="1"
-                  bind:value={() => draft[adoption][key], (next) => (draft[adoption][key] = String(next ?? ''))}
+                  bind:value={() => draft[adoption][key], (next) => setLimit(adoption, key, String(next ?? ''))}
                   oninput={() => (errors[key] = undefined)}
                   aria-label="{LIMIT_LABELS[key]}, {ADOPTION_LABELS[adoption].toLowerCase()}"
                   aria-invalid={errors[key] ? true : undefined}

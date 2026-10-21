@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { AdminRole, Level, Settings } from '@logitland/contracts';
-  import { untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import SaveCard from '#lib/components/admin/save-card.svelte';
   import * as Field from '#lib/components/ui/field/index.js';
@@ -17,8 +16,10 @@
 
   const NO_ROLE = 'none';
 
-  let role = $state(untrack(() => level.role_id ?? NO_ROLE));
-  let xp = $state(untrack(() => String(level.xp)));
+  // A draft only once the admin changes something; until then the form follows the relay's level as it refreshes.
+  let edited = $state<{ role: string; xp: string }>();
+  const role = $derived(edited?.role ?? level.role_id ?? NO_ROLE);
+  const xp = $derived(edited?.xp ?? String(level.xp));
   let error = $state<string>();
 
   const probation = $derived(level.level === 0);
@@ -32,8 +33,7 @@
   const levelOfRole = (roleId: string) => levels.find((l) => l.role_id === roleId)?.level;
 
   function discard() {
-    role = level.role_id ?? NO_ROLE;
-    xp = String(level.xp);
+    edited = undefined;
     error = undefined;
   }
 
@@ -48,6 +48,7 @@
     const { level: n, ...update } = level;
     try {
       await saveLevel({ level: n, update: { ...update, xp: next, role_id: role === NO_ROLE ? null : role } });
+      edited = undefined;
       toast.success(`Saved ${levelName(n)}`);
     } catch (e) {
       toast.error(refusal(e));
@@ -66,7 +67,7 @@
           inputmode="numeric"
           min="1"
           step="1"
-          bind:value={() => xp, (next) => (xp = String(next ?? ''))}
+          bind:value={() => xp, (next) => (edited = { role, xp: String(next ?? '') })}
           oninput={() => (error = undefined)}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? 'level-xp-error' : undefined}
@@ -77,7 +78,7 @@
     {/if}
     <Field.Field>
       <Field.Label for="level-role">Level role</Field.Label>
-      <Select.Root type="single" bind:value={role}>
+      <Select.Root type="single" bind:value={() => role, (next) => (edited = { role: next, xp })}>
         <Select.Trigger id="level-role" class="w-full sm:max-w-60">{roleLabel(role)}</Select.Trigger>
         <Select.Content>
           <Select.Item value={NO_ROLE} label="No role" />
