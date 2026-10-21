@@ -189,7 +189,8 @@ finish() {
 # Worker needs into one private file. It deploys nothing: pushing these to Cloudflare is a later step.
 # The relay bot is separate from Textile (the Discord MCP bot), so relay and admin credentials never mix.
 
-ENV_FILE="${ENV_FILE:-$HOME/.config/logitland/relay.env}"
+# Never inside a repo: the library defaults ENV_FILE to ./.env, so set it outright.
+ENV_FILE="${RELAY_ENV_FILE:-$HOME/.config/logitland/relay.env}"
 mkdir -p "$(dirname "$ENV_FILE")"
 touch "$ENV_FILE" && chmod 600 "$ENV_FILE"
 
