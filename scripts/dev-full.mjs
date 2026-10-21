@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// The whole Logitland stack in one process, on ports of your choosing, kept apart from `pnpm dev`'s (its own settings and
-// wrangler dev registry), so a second checkout or a test run can have one alongside:
+// The whole Logitland stack against the fake Discord, in one process, on ports of your choosing: for tests and agents, which
+// need made-up people and a server they can drive. `pnpm dev` is the real one. Kept apart from it (own settings, wrangler dev
+// registry and database), so both can run at once:
 //
 //   fake Discord  127.0.0.1:8790   packages/discord-fake, seeded with a small server (text, announcement, forum, media, a consent role, an agents role, an admin)
 //   relay         localhost:8787   apps/backend under `wrangler dev`, pointed at the fake (RELAY_MODE=development + DISCORD_API_BASE)
-//   web           localhost:5174   apps/web under `vite dev`, bound to the relay, signing in through the fake's OAuth2
+//   web           127.0.0.1:5174   apps/web under `vite dev`, bound to the relay, signing in through the fake's OAuth2
 //
 //   pnpm dev:full [--reset] [--fake-port 8790] [--relay-port 8787] [--web-port 5174]
 //
@@ -17,7 +18,7 @@ import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEV } from '../packages/discord-fake/src/seed.ts';
-import { APPLICATION_ID, DEFAULT_PORTS, prepare, wrangler } from './dev-stack.mjs';
+import { APPLICATION_ID, DEFAULT_PORTS, prepareFake, wrangler } from './dev-stack.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const state = join(root, 'apps/backend/.wrangler/dev-full');
@@ -164,7 +165,7 @@ for (const [what, port] of [
 }
 // The web app answers on 127.0.0.1, so its sign-in cookies stay apart from pnpm dev's on localhost.
 const WEB_HOST = '127.0.0.1';
-const { at, files } = await prepare({ state, ports, webHost: WEB_HOST, reset: flag('reset'), registry, persist });
+const { at, files } = await prepareFake({ state, ports, webHost: WEB_HOST, reset: flag('reset'), registry, persist });
 
 /* ---------- 2. The fake Discord ---------- */
 
@@ -225,7 +226,7 @@ await runCron();
 /* ---------- 4. The web app ---------- */
 
 console.log('Starting the web app…');
-// It finds the relay through the same dev registry, and reads the settings prepare wrote in place of apps/web/.dev.vars.
+// It finds the relay through the same dev registry, and reads the settings prepareFake wrote in place of apps/web/.dev.vars.
 const web = join(root, 'apps/web');
 start('web', 'node', [join(web, 'node_modules/vite/bin/vite.js'), 'dev', '--host', WEB_HOST, '--port', String(ports.web), '--strictPort'], {
   cwd: web,
