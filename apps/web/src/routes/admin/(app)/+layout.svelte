@@ -6,7 +6,6 @@
   import InboxIcon from '@lucide/svelte/icons/inbox';
   import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
   import ShieldIcon from '@lucide/svelte/icons/shield';
-  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import AccountMenu from '#lib/components/shell/account-menu.svelte';
   import AppShell from '#lib/components/shell/app-shell.svelte';
@@ -16,15 +15,9 @@
   import type { Power } from '#lib/fixtures/admin/data.js';
   import Simulator from '#lib/fixtures/admin/simulator.svelte';
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
-  import { session } from '#lib/fixtures/session.svelte.js';
+  import { session } from '#lib/session.js';
 
   let { children } = $props();
-
-  // Admin pages exist only for people with admin standing; everyone else is an owner, so their agents are home.
-  $effect(() => {
-    if (!session.person) goto(`/sign-in?next=${encodeURIComponent(page.url.pathname)}`, { replace: true });
-    else if (!admin.admin) goto('/agents', { replace: true });
-  });
 
   const path = $derived(page.url.pathname);
 
@@ -72,12 +65,7 @@
       </Sidebar.Group>
     {/snippet}
     {#snippet footer()}
-      <AccountMenu
-        name={person.name}
-        handle={person.handle}
-        switchTo={{ href: '/agents', label: 'Owner dashboard' }}
-        onSignOut={() => session.signOut()}
-      />
+      <AccountMenu name={person.name} handle={person.handle} switchTo={{ href: '/agents', label: 'Owner dashboard' }} onSignOut={() => session.signOut()} />
     {/snippet}
     {#if locked}
       <Empty.Root class="border">

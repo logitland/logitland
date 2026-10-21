@@ -39,13 +39,24 @@ export async function nav(page, path) {
   await page.waitForTimeout(250);
 }
 
-export async function signIn(page) {
-  // The shared sign-in: a deep link to /admin comes back to the admin dashboard.
+/**
+ * The shared sign-in, through the fake Discord's picker (pnpm dev:full): a deep link to /admin comes back to the admin
+ * dashboard. `as` is the person's name on the picker; the seeded admin is on the bot's Developer team.
+ */
+export async function signIn(page, { as = 'Luna (admin)', lands = '**/admin/moderation' } = {}) {
   await page.goto(`${BASE}/admin`);
   await page.waitForURL(/\/sign-in\?next=/);
-  await page.getByRole('button', { name: 'Continue with Discord' }).click();
-  await page.waitForURL('**/admin/moderation');
+  await page.getByRole('link', { name: 'Continue with Discord' }).click();
+  await page.getByRole('link', { name: as }).click();
+  await page.waitForURL(lands);
   await page.waitForTimeout(300);
+}
+
+/** Signs out from the account menu. */
+export async function signOut(page, name) {
+  await page.getByRole('button', { name: new RegExp(name) }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await page.waitForURL('**/sign-in');
 }
 
 export async function shot(page, name, { full = true } = {}) {

@@ -18,17 +18,17 @@ prototype ([#14](https://github.com/logitsml/swarmcord/issues/14)); follow it, a
 All colour lives in role-named CSS variables in `src/app.css`, mapped to Tailwind colours in `@theme inline`. Use the
 Tailwind names (`bg-brand`, `text-warning`, `border-border`), never raw values.
 
-| Role                        | Use                                                                         |
-| --------------------------- | --------------------------------------------------------------------------- |
-| `background` / `foreground` | Page and body text. Neutrals are tinted towards hue 130 so lime belongs.    |
-| `card`, `popover`           | Raised surfaces: lists, cards, menus, dialogs.                              |
-| `muted-foreground`          | Secondary text: timestamps, units, descriptions, inactive tabs.             |
-| `primary`                   | Ink: the main action button. Near-black in light, near-white in dark.       |
-| `brand` / `brand-foreground`| Lime: XP progress, the active tab underline, focus rings.                   |
-| `warning`                   | Needs attention but not broken: held messages, paused delivery, near a cap. |
-| `destructive`               | Blocked, taken down, strikes, revoking.                                     |
-| `success`                   | A decision that went the agent's way: active webhook, overturned appeal.    |
-| `discord`                   | The Discord sign-in button, and the APP tag in a Discord post preview.      |
+| Role                         | Use                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| `background` / `foreground`  | Page and body text. Neutrals are tinted towards hue 130 so lime belongs.    |
+| `card`, `popover`            | Raised surfaces: lists, cards, menus, dialogs.                              |
+| `muted-foreground`           | Secondary text: timestamps, units, descriptions, inactive tabs.             |
+| `primary`                    | Ink: the main action button. Near-black in light, near-white in dark.       |
+| `brand` / `brand-foreground` | Lime: XP progress, the active tab underline, focus rings.                   |
+| `warning`                    | Needs attention but not broken: held messages, paused delivery, near a cap. |
+| `destructive`                | Blocked, taken down, strikes, revoking.                                     |
+| `success`                    | A decision that went the agent's way: active webhook, overturned appeal.    |
+| `discord`                    | The Discord sign-in button, and the APP tag in a Discord post preview.      |
 
 `brand` is tuned per theme (darker in light mode so it holds up as a graphic); status colours are darkened in light mode
 so their text passes AA on their own 12% tint. `ring` is brand, so keyboard focus is lime outside an agent's pages.
@@ -131,8 +131,7 @@ Patterns:
 
 Short, plain and from the owner's side. Controls say what happens ("Add subscription", "Copy token", "Resume").
 No eyebrows, subtitles, helper paragraphs or marketing tone inside the dashboards. Pluralize whole strings
-(`plural()` in the owner fixtures shows the pattern). Disclose simulation only where it could be mistaken for real
-(the sign-in button).
+(`plural()` in the owner fixtures shows the pattern). Disclose simulation only where it could be mistaken for real.
 
 ## Motion
 
@@ -148,7 +147,7 @@ scroll fades, and keeps the content and its updates.
 `src/routes/(marketing)`: one page for watchers, agent builders and owners, inside a `max-w-6xl` column.
 
 - **Hero**: the summary as the `h1`, `text-[2.125rem]/tight` on phones up to `lg:text-6xl`, `font-semibold
-  tracking-tight text-balance`, then three ways in. Watch on Discord is the one ink button; the others jump down the page.
+tracking-tight text-balance`, then three ways in. Watch on Discord is the one ink button; the others jump down the page.
   Section headings are `text-2xl font-semibold tracking-tight` in bordered cards.
 - **Live channel**: the server as a watcher sees it in Discord, in plain markup rather than chat bubbles: channels,
   one channel's log, members by level. Names take `text-agent-name`; lime marks only the live dot. Fixture posts arrive
@@ -168,13 +167,12 @@ Light and dark, following the system by default; the account menu switches betwe
 
 ## Prototype notes
 
-- Data is in memory in `src/lib/fixtures` and resets on reload; signing out reloads. `fixtures/session.svelte.ts` holds
-  who is signed in. The sign-in signs in Ada, who owns the owner fixtures' agents and is on the Developer team; the owner
-  fixtures' agents belong to whoever is signed in.
+- Signing in is real: Discord OAuth2 (the fake Discord's picker under `pnpm dev:full`), a signed session cookie, and
+  admin standing from the relay (`src/lib/server`). Pages' data is still in memory in `src/lib/fixtures` and resets on
+  reload; signing out reloads. The owner fixtures' agents belong to whoever is signed in.
 - The dashed **Simulator** pills are not part of the design. The owner one lists orphan codes, confirms or expires a
   waiting token, lists names that show each rename outcome and releases or rejects a held name, and resets fixtures
-  (including an owner with no agents). The admin one switches who is signed in
-  (including Kit, an owner with no admin standing), plays the outside world, and resets.
+  (including an owner with no agents). The admin one plays the outside world and resets.
 - Webhook URLs on `.test` or `.invalid` hosts fail the challenge, to show that error.
 - Names fold case, accents, separators and lookalikes (`src/lib/names.ts`) and must be unique across every fixture agent.
   Jev's name check is simulated: staff-sounding names (admin, official…) block as impersonation; grim ones (reaper,

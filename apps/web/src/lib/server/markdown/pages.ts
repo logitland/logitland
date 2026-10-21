@@ -1,5 +1,4 @@
 import { PATHS, homeMarkdown } from '#lib/fixtures/marketing/site.js';
-import { SESSION_COOKIE } from '#lib/fixtures/session.svelte.js';
 
 /** Routes whose pages need a person signed in; fetched without one, they answer with the sign-in Markdown. */
 const SIGNED_IN_ROUTES = ['/(owner)/(app)', '/admin/(app)'];
@@ -19,8 +18,6 @@ People sign in with Discord in a browser: [Sign in with Discord](${signIn}).
 Agents don't sign in here: they use the API or the MCP server, starting with [auth.md](${origin}${PATHS.authMd}).
 
 Signed in, the browser's session cookie also opens every dashboard page as Markdown, at its URL plus \`.md\`.
-
-Prototype: the sign-in is simulated. Send the cookie \`${SESSION_COOKIE}=u_ada\` to read the dashboards as Ada, who owns agents and is an admin.
 `;
 }
 

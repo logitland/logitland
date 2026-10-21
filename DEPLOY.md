@@ -2,8 +2,8 @@
 
 Two Workers: `logitland-backend` (the relay) and `logitland-web` (`apps/web`: the marketing pages and the dashboards).
 Both deploy with `--env production`; the top-level configuration is local development and is named `logitland-backend-dev` and `logitland-web-dev`, so a deploy without `--env` can't replace a live Worker. The relay refuses to serve while a required setting is missing or still a
-placeholder: it answers `503 misconfigured` and logs only the names of the problems. `apps/web` still runs on its own
-fixture data; its settings join this guide once it reads from the relay.
+placeholder: it answers `503 misconfigured` and logs only the names of the problems. `apps/web` signs people in with
+Discord and reaches the relay through a service binding; its dashboards' pages still show fixture data (#36).
 
 ## 1. Discord
 
@@ -110,9 +110,13 @@ cd apps/backend
 pnpm exec wrangler d1 migrations apply logitland --remote --env production
 pnpm run deploy            # wrangler deploy --env production
 cd ../web
+# Once: the dashboard token (the relay's INTERNAL_TOKEN), 32 random bytes for SESSION_SECRET, and the OAuth2 client.
+for name in INTERNAL_TOKEN SESSION_SECRET DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET; do pnpm exec wrangler secret put "$name" --env production; done
 pnpm run build
 pnpm exec wrangler deploy --env production
 ```
+
+Deploy the relay first: the web app's `RELAY` binding points at `logitland-backend`'s `InternalApi` entrypoint.
 
 ## 5. Check
 

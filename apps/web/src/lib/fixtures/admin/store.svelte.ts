@@ -7,7 +7,7 @@
  */
 import { levelSettings } from '#lib/fixtures/levels.svelte.js';
 import { formatNumber, levelName, plural } from '#lib/fixtures/owner/format.js';
-import { session } from '#lib/fixtures/session.svelte.js';
+import { session } from '#lib/session.js';
 import { takenBy } from '#lib/names.js';
 import { colourName, type LevelColour, type LevelColours, type LevelCurve } from '#lib/levels.js';
 import {
@@ -86,16 +86,9 @@ class AdminConsole {
 
   // ---------- Identity
 
-  /** The signed-in person's powers. */
+  /** The signed-in person's powers, as the relay reads them from Discord. */
   get powers(): Power[] {
-    return this.powersOf(session.person);
-  }
-
-  /** The Developer team holds every power; everyone else, the union of their roles' grants. */
-  powersOf(person: Person | undefined): Power[] {
-    if (!person) return [];
-    if (person.team) return POWER_KEYS;
-    return POWER_KEYS.filter((power) => this.grants.some((g) => person.roles.includes(g.roleId) && g.powers.includes(power)));
+    return session.standing?.permissions ?? [];
   }
 
   /** The signed-in person, if they have admin standing (any power). Admin pages exist only for them. */
@@ -103,19 +96,21 @@ class AdminConsole {
     return this.powers.length > 0 ? session.person : undefined;
   }
 
+  /** `admins` is the Developer team's alone. */
   can(power: Power | 'admins') {
-    if (power === 'admins') return this.admin?.team ?? false;
+    if (power === 'admins') return session.standing?.full ?? false;
     return this.powers.includes(power);
   }
 
   adminName(actor: string) {
-    return actor === RELAY_ACTOR ? 'Relay' : (ADMINS.find((a) => a.id === actor)?.name ?? 'Unknown admin');
+    if (actor === RELAY_ACTOR) return 'Relay';
+    return [session.person, ...ADMINS].find((a) => a?.id === actor)?.name ?? 'Unknown admin';
   }
 
   // ---------- Audit
 
   #log(area: Area, action: string, target?: AuditEntry['target'], detail?: string): Undo {
-    const entry: AuditEntry = { id: id(), at: Date.now(), actor: session.personId ?? RELAY_ACTOR, area, action, target, detail };
+    const entry: AuditEntry = { id: id(), at: Date.now(), actor: session.person?.id ?? RELAY_ACTOR, area, action, target, detail };
     this.audit.unshift(entry);
     return () => {
       this.audit = this.audit.filter((e) => e.id !== entry.id);
@@ -150,7 +145,8 @@ class AdminConsole {
     const agent = this.agent(agentId);
     if (!agent) return;
     agent.standing = { kind: 'suspended', until: hours === null ? null : Date.now() + hours * 3_600_000 };
-    const length = hours !== null && hours % 24 === 0 ? plural(hours / 24, { one: '# day', other: '# days' }) : plural(hours ?? 0, { one: '# hour', other: '# hours' });
+    const length =
+      hours !== null && hours % 24 === 0 ? plural(hours / 24, { one: '# day', other: '# days' }) : plural(hours ?? 0, { one: '# hour', other: '# hours' });
     this.#log('agents', hours === null ? 'Suspended until lifted' : `Suspended for ${length}`, this.#agentTarget(agent));
   }
 
@@ -179,7 +175,10 @@ class AdminConsole {
     const agent = this.agent(agentId);
     if (!agent) return 'This agent is no longer registered.';
     const name = input.trim();
-    const taken = takenBy(name, this.agents.filter((a) => a.id !== agentId).map((a) => a.name));
+    const taken = takenBy(
+      name,
+      this.agents.filter((a) => a.id !== agentId).map((a) => a.name),
+    );
     if (taken) return taken.toLowerCase() === name.toLowerCase() ? `${taken} is taken.` : `Too close to ${taken}, which is taken.`;
     const before = agent.name;
     agent.name = name;
@@ -222,7 +221,12 @@ class AdminConsole {
     const message = this.#message(agentId, messageId);
     if (!agent || !message || message.status !== 'held') return () => {};
     message.status = decision === 'release' ? 'sent' : 'blocked';
-    const unlog = this.#log('moderation', decision === 'release' ? 'Released a held message' : 'Rejected a held message', this.#agentTarget(agent), `#${message.channel}`);
+    const unlog = this.#log(
+      'moderation',
+      decision === 'release' ? 'Released a held message' : 'Rejected a held message',
+      this.#agentTarget(agent),
+      `#${message.channel}`,
+    );
     return () => {
       const again = this.#message(agentId, messageId);
       if (again) again.status = 'held';
@@ -235,7 +239,14 @@ class AdminConsole {
     for (const { agent, message, expiresAt } of this.held) {
       if (expiresAt > this.now) continue;
       message.status = 'blocked';
-      this.audit.unshift({ id: id(), at: this.now, actor: RELAY_ACTOR, area: 'moderation', action: 'Blocked a message unreviewed for 72 hours', target: this.#agentTarget(agent) });
+      this.audit.unshift({
+        id: id(),
+        at: this.now,
+        actor: RELAY_ACTOR,
+        area: 'moderation',
+        action: 'Blocked a message unreviewed for 72 hours',
+        target: this.#agentTarget(agent),
+      });
     }
   }
 
@@ -254,7 +265,9 @@ class AdminConsole {
     return this.reports
       .map((r) => this.reportCase(r.id))
       .filter((c) => c !== undefined)
-      .sort((a, b) => Number(b.message.status === 'taken_down') - Number(a.message.status === 'taken_down') || b.report.reports.length - a.report.reports.length);
+      .sort(
+        (a, b) => Number(b.message.status === 'taken_down') - Number(a.message.status === 'taken_down') || b.report.reports.length - a.report.reports.length,
+      );
   }
 
   #closeReport(caseId: string) {
@@ -330,7 +343,11 @@ class AdminConsole {
     if (message) message.appeal = decision;
     if (decision === 'overturned' && strike) agent.strikes.splice(strikeIndex, 1);
     const what = appeal.kind === 'strike' ? 'strike' : 'block';
-    const unlog = this.#log('moderation', decision === 'overturned' ? `Overturned a ${what} on appeal` : `Upheld a ${what} on appeal`, this.#agentTarget(agent));
+    const unlog = this.#log(
+      'moderation',
+      decision === 'overturned' ? `Overturned a ${what} on appeal` : `Upheld a ${what} on appeal`,
+      this.#agentTarget(agent),
+    );
     return () => {
       this.appeals.splice(index, 0, appeal);
       const again = this.agent(agent.id);
@@ -374,7 +391,7 @@ class AdminConsole {
           (key) => `${PERMISSION_LABELS[key]} (${adoption}) ${next.permissions![adoption].includes(key) ? 'on' : 'off'}`,
         ),
       );
-      this.#log('levels', 'Changed limits', target,[...diffs, ...permissionDiffs].join(', '));
+      this.#log('levels', 'Changed limits', target, [...diffs, ...permissionDiffs].join(', '));
     }
 
     if (next.checks) {
@@ -441,7 +458,10 @@ class AdminConsole {
 
   async saveGrants(next: RoleGrant[]) {
     await wait(LATENCY);
-    const powers = (ps: Power[]) => POWER_KEYS.filter((p) => ps.includes(p)).map((p) => POWER_LABELS[p]).join(', ');
+    const powers = (ps: Power[]) =>
+      POWER_KEYS.filter((p) => ps.includes(p))
+        .map((p) => POWER_LABELS[p])
+        .join(', ');
     const name = (roleId: string) => `@${this.role(roleId)?.name}`;
     for (const grant of next) {
       const before = this.grants.find((g) => g.roleId === grant.roleId);
@@ -485,7 +505,12 @@ class AdminConsole {
   async setCommands(registered: boolean) {
     await wait(LATENCY * 2);
     this.health.commands.registered = registered;
-    this.#log('health', registered ? 'Registered slash commands' : 'Deregistered slash commands', undefined, plural(this.health.commands.count, { one: '# command', other: '# commands' }));
+    this.#log(
+      'health',
+      registered ? 'Registered slash commands' : 'Deregistered slash commands',
+      undefined,
+      plural(this.health.commands.count, { one: '# command', other: '# commands' }),
+    );
   }
 
   async reconnectGateway() {
@@ -505,7 +530,14 @@ class AdminConsole {
     if (open.report.reports.length >= 3) {
       open.message.status = 'taken_down';
       open.message.reason = `Reported as ${this.#topReason(open.report)}`;
-      this.audit.unshift({ id: id(), at: Date.now(), actor: RELAY_ACTOR, area: 'moderation', action: 'Took down a message after 3 reports', target: this.#agentTarget(open.agent) });
+      this.audit.unshift({
+        id: id(),
+        at: Date.now(),
+        actor: RELAY_ACTOR,
+        area: 'moderation',
+        action: 'Took down a message after 3 reports',
+        target: this.#agentTarget(open.agent),
+      });
     }
     return open.agent;
   }

@@ -1,10 +1,10 @@
 import { redirect } from '@sveltejs/kit';
-import { admin } from '#lib/fixtures/admin/store.svelte.js';
+import { signedIn } from '#lib/server/dashboard.js';
 
-// The admin dashboard runs on in-memory fixtures (see #lib/fixtures/admin). Browsers render it themselves: the server
-// knows no person for them, so their HTML is an empty shell. Markdown requests carry one, so the server renders the pages,
-// and sends people without admin standing to their agents, as the browser does.
-export const load = ({ locals }) => {
-  if (locals.person && admin.powersOf(locals.person).length === 0) redirect(307, '/agents');
-  return { personId: locals.person?.id ?? null };
+// Admin pages exist only for people with admin standing; everyone else is an owner, so their agents are home. The pages
+// still run on in-memory fixtures (see #lib/fixtures/admin); the signed-in person and their standing are real.
+export const load = async (event) => {
+  const data = await signedIn(event);
+  if (data.standing.permissions.length === 0) redirect(307, '/agents');
+  return data;
 };

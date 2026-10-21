@@ -17,6 +17,7 @@
     "#lib/*": "./src/lib/*"
   },
   "devDependencies": {
+    "@logitland/contracts": "workspace:*",
     "@fontsource-variable/funnel-sans": "catalog:",
     "@internationalized/date": "catalog:",
     "@lucide/svelte": "catalog:",
