@@ -55,8 +55,9 @@ export const DEFAULT_COLOURS: LevelColours = {
 };
 
 /**
- * A level's colour: its own, or a tween in OKLCH between the nearest assigned levels on either side, with hue along
- * the shorter arc. Levels past the last assigned one keep its colour, and so do levels before the first.
+ * A level's colour: its own, or a straight line in OKLab between the nearest assigned levels on either side, so a
+ * gap between distant hues passes through softer, greyer tones instead of sweeping round the colour wheel. Levels
+ * past the last assigned one keep its colour, and so do levels before the first.
  */
 export function levelColour(level: number, colours: LevelColours): LevelColour {
   const assigned = Object.keys(colours)
@@ -70,11 +71,17 @@ export function levelColour(level: number, colours: LevelColours): LevelColour {
   return mix(colours[below], colours[above], (level - below) / (above - below));
 }
 
+const RADIANS = Math.PI / 180;
+
+/** Hue and chroma as OKLab's a and b (lightness is the theme's, so it never changes along a tween). */
+const toLab = ({ hue, chroma }: LevelColour) => ({ a: chroma * Math.cos(hue * RADIANS), b: chroma * Math.sin(hue * RADIANS) });
+
 function mix(from: LevelColour, to: LevelColour, t: number): LevelColour {
-  const chroma = from.chroma + (to.chroma - from.chroma) * t;
-  // A colourless end has no hue of its own, so the tween takes the other end's.
-  if (from.chroma === 0) return { hue: to.hue, chroma };
-  if (to.chroma === 0) return { hue: from.hue, chroma };
-  const turn = ((to.hue - from.hue + 540) % 360) - 180;
-  return { hue: (from.hue + turn * t + 360) % 360, chroma };
+  const [p, q] = [toLab(from), toLab(to)];
+  const a = p.a + (q.a - p.a) * t;
+  const b = p.b + (q.b - p.b) * t;
+  const chroma = Math.hypot(a, b);
+  // At chroma 0 the hue is meaningless; keep the nearer end's so the value stays stable.
+  if (chroma < 1e-6) return { hue: (t < 0.5 ? from : to).hue, chroma: 0 };
+  return { hue: (Math.atan2(b, a) / RADIANS + 360) % 360, chroma };
 }

@@ -24,11 +24,14 @@ describe('level colours', () => {
   const YELLOW = { hue: 85, chroma: 0.12 };
   const colours: LevelColours = { 2: GREEN, 6: PURPLE, 8: YELLOW };
 
-  // Proves assigned levels keep their colour, gaps tween, and the ends hold the nearest assigned colour.
+  const lab = ({ hue, chroma }: { hue: number; chroma: number }) => [
+    chroma * Math.cos((hue * Math.PI) / 180),
+    chroma * Math.sin((hue * Math.PI) / 180),
+  ];
+
+  // Proves assigned levels keep their colour and the ends hold the nearest assigned colour.
   it.each([
     ['an assigned level keeps its colour', 6, PURPLE],
-    ['a gap tweens hue and chroma halfway', 4, { hue: 225, chroma: 0.16 }],
-    ['hue takes the shorter arc, through 0°', 7, { hue: 15, chroma: 0.14 }],
     ['levels past the last keep its colour', 30, YELLOW],
     ['levels before the first keep its colour', 0, GREEN],
   ])('%s', (_, level, expected) => {
@@ -37,7 +40,21 @@ describe('level colours', () => {
     expect(colour.chroma).toBeCloseTo(expected.chroma);
   });
 
+  // Proves a gap is the straight OKLab line between its neighbours, as Mia asked: halfway is the midpoint of a and b,
+  // so purple to yellow passes through a soft rose-grey rather than sweeping through red.
+  it.each([
+    ['green to purple', 4, GREEN, PURPLE],
+    ['purple to yellow', 7, PURPLE, YELLOW],
+  ])('halfway from %s is the OKLab midpoint', (_, level, from, to) => {
+    const [a, b] = lab(levelColour(level, colours));
+    const [[a1, b1], [a2, b2]] = [lab(from), lab(to)];
+    expect(a).toBeCloseTo((a1 + a2) / 2);
+    expect(b).toBeCloseTo((b1 + b2) / 2);
+  });
+
   it('tweens out of white along the next colour’s hue', () => {
-    expect(levelColour(1, DEFAULT_COLOURS)).toEqual({ hue: DEFAULT_COLOURS[2].hue, chroma: DEFAULT_COLOURS[2].chroma / 2 });
+    const colour = levelColour(1, DEFAULT_COLOURS);
+    expect(colour.hue).toBeCloseTo(DEFAULT_COLOURS[2].hue);
+    expect(colour.chroma).toBeCloseTo(DEFAULT_COLOURS[2].chroma / 2);
   });
 });
