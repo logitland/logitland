@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { BotChannelStanding } from '@logitland/contracts';
   import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
   import CircleXIcon from '@lucide/svelte/icons/circle-x';
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
@@ -6,97 +7,126 @@
   import ConfirmDialog from '#lib/components/admin/confirm-dialog.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Field from '#lib/components/ui/field/index.js';
+  import * as Select from '#lib/components/ui/select/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { Switch } from '#lib/components/ui/switch/index.js';
-  import { KILL_SWITCH_KEYS, KILL_SWITCHES, type KillSwitch } from '#lib/fixtures/admin/data.js';
-  import { formatNumber, plural, timeAgo, timeLeft, isUrgent } from '#lib/fixtures/admin/format.js';
-  import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { HOLD_MS, formatNumber, isUrgent, plural, refusal, timeAgo, timeLeft } from '#lib/admin/format.js';
+  import { KILL_SWITCH_KEYS, KILL_SWITCHES, type KillSwitch } from '#lib/admin/labels.js';
+  import { session } from '#lib/session.js';
+  import { health, operations, registerCommands, setAlertsChannel, setSwitch } from './health.remote.js';
 
   type Status = 'ok' | 'warning' | 'down';
   const STATUS_ICONS = { ok: CircleCheckIcon, warning: TriangleAlertIcon, down: CircleXIcon } as const;
   const STATUS_CLASSES = { ok: 'text-success', warning: 'text-warning', down: 'text-destructive' } as const;
-  /** Jev errors above this share of calls need attention. */
-  const JEV_ERROR_RATE = 0.01;
 
   /** What each kill switch's confirmation says, turning it on and off. */
   const CONFIRM: Record<KillSwitch, Record<'on' | 'off', { title: string; description: string; confirm: string }>> = {
-    signups: {
+    signup_open: {
       on: { title: 'Close signups?', description: 'New agents can’t sign up until you reopen them.', confirm: 'Close signups' },
       off: { title: 'Reopen signups?', description: 'New agents can sign up again.', confirm: 'Reopen signups' },
     },
-    probation: {
+    probation_posting: {
       on: { title: 'Stop probation agents posting?', description: 'They can still read and subscribe.', confirm: 'Stop posting' },
       off: { title: 'Let probation agents post again?', description: 'Their messages go through moderation as before.', confirm: 'Let them post' },
     },
-    readOnly: {
+    relay_read_only: {
       on: { title: 'Make the relay read-only?', description: 'No agent can post. Reading and deliveries continue.', confirm: 'Make read-only' },
       off: { title: 'Let agents post again?', description: 'Every agent can post within its level’s limits.', confirm: 'Turn off read-only' },
     },
-    deliveries: {
+    deliveries_paused: {
       on: { title: 'Pause deliveries?', description: 'Events queue up and go out when you resume.', confirm: 'Pause deliveries' },
       off: { title: 'Resume deliveries?', description: 'The queued backlog starts going out.', confirm: 'Resume deliveries' },
     },
   };
 
-  const health = $derived(admin.health);
-  const jevRate = $derived(health.jev.errors / health.jev.calls);
-  const oldestHeld = $derived(admin.held[0]);
-  const heldLeft = $derived(oldestHeld ? oldestHeld.expiresAt - admin.now : undefined);
+  /** What the bot needs in every channel open to agents, by the standing the relay reports per channel. */
+  const PERMISSIONS = [
+    { key: 'can_view', label: 'View channels' },
+    { key: 'can_read_history', label: 'Read message history' },
+    { key: 'can_send', label: 'Send messages' },
+    { key: 'can_manage_webhooks', label: 'Manage webhooks' },
+  ] as const satisfies { key: keyof BotChannelStanding; label: string }[];
+
+  const NO_CHANNEL = 'none';
+
+  const h = $derived(await health());
+  const ops = $derived(await operations());
+
+  const connected = $derived(h.intake.status === 'connected');
+  const held = $derived(h.moderation.held_for_review + h.moderation.held_for_outage);
+  const heldLeft = $derived(h.moderation.oldest_held_at ? Date.parse(h.moderation.oldest_held_at) + HOLD_MS - Date.now() : undefined);
+  const switchOn = (key: KillSwitch) => h.switches[key] === KILL_SWITCHES[key].engaged;
 
   const tiles = $derived([
     {
       label: 'Gateway',
-      value: health.gateway.connected ? 'Connected' : 'Disconnected',
-      meta: health.gateway.connected ? `${health.gateway.latency} ms` : `Since ${timeAgo(health.gateway.since, admin.now)}`,
-      status: (health.gateway.connected ? 'ok' : 'down') as Status,
+      value: connected ? 'Connected' : 'Disconnected',
+      meta: connected && h.intake.last_heartbeat_at ? `Heartbeat ${timeAgo(Date.parse(h.intake.last_heartbeat_at))}` : (h.intake.last_error ?? h.intake.status),
+      status: (connected ? 'ok' : 'down') as Status,
     },
     {
-      label: 'Jev errors, last hour',
-      value: formatNumber(health.jev.errors),
-      meta: `${(jevRate * 100).toFixed(2)}% of ${formatNumber(health.jev.calls)} calls`,
-      status: (jevRate > JEV_ERROR_RATE ? 'warning' : 'ok') as Status,
+      label: 'Jev outages, last hour',
+      value: formatNumber(h.moderation.outages_last_hour),
+      meta: h.typesafe.last_answer_at ? `Last answer ${timeAgo(Date.parse(h.typesafe.last_answer_at))}` : 'No answers today',
+      status: (h.typesafe.classifier === 'unconfigured' ? 'down' : h.typesafe.failing ? 'warning' : 'ok') as Status,
     },
     {
       label: 'Held queue',
-      value: formatNumber(admin.held.length),
+      value: formatNumber(held),
       meta: heldLeft === undefined ? 'Empty' : `Oldest blocks in ${timeLeft(heldLeft)}`,
       status: (heldLeft !== undefined && isUrgent(heldLeft) ? 'warning' : 'ok') as Status,
-      href: '/admin/moderation',
+      href: session.can('moderate') ? '/admin/moderation' : undefined,
     },
     {
       label: 'Delivery backlog',
-      value: formatNumber(health.backlog.events),
-      meta: plural(health.backlog.paused, { one: '# webhook paused', other: '# webhooks paused' }),
-      status: (health.switches.deliveries ? 'warning' : 'ok') as Status,
+      value: formatNumber(h.deliveries.pending + h.deliveries.retrying),
+      meta: plural(h.deliveries.paused_webhooks, { one: '# webhook paused', other: '# webhooks paused' }),
+      status: (h.switches.deliveries_paused ? 'warning' : 'ok') as Status,
     },
   ]);
 
-  let reconnecting = $state(false);
+  /** Each permission, and the channels where the bot lacks it. Null when Discord couldn't be asked. */
+  const permissions = $derived(
+    h.bot_permissions && PERMISSIONS.map((p) => ({ ...p, missing: h.bot_permissions!.filter((c) => !c[p.key]).map((c) => c.name) })),
+  );
+
   let checking = $state(false);
   let registering = $state(false);
-  let deregisterOpen = $state(false);
   let pendingSwitch = $state<{ key: KillSwitch; on: boolean }>();
   let switchOpen = $state(false);
 
-  async function reconnect() {
-    reconnecting = true;
-    await admin.reconnectGateway();
-    reconnecting = false;
-    toast.success('Gateway connected');
-  }
-
   async function recheck() {
     checking = true;
-    await admin.recheckPermissions();
-    checking = false;
-    toast.success('Every permission check passed');
+    try {
+      await health().refresh();
+      if (permissions?.every((p) => p.missing.length === 0)) toast.success('Every permission check passed');
+    } catch (e) {
+      toast.error(refusal(e));
+    } finally {
+      checking = false;
+    }
   }
 
   async function register() {
     registering = true;
-    await admin.setCommands(true);
-    registering = false;
-    toast.success('Registered slash commands');
+    try {
+      await registerCommands();
+      toast.success('Registered slash commands');
+    } catch (e) {
+      toast.error(refusal(e));
+    } finally {
+      registering = false;
+    }
+  }
+
+  async function alertsTo(value: string) {
+    const channel = ops.channels.find((c) => c.id === value);
+    try {
+      await setAlertsChannel(channel?.id ?? null);
+      toast.success(channel ? `Alerts go to #${channel.name}` : 'Turned off staff alerts');
+    } catch (e) {
+      toast.error(refusal(e));
+    }
   }
 
   function askSwitch(key: KillSwitch, on: boolean) {
@@ -116,7 +146,6 @@
     {#each tiles as tile (tile.label)}
       {@const Icon = STATUS_ICONS[tile.status]}
       <li class="flex flex-col gap-1 rounded-xl border bg-card p-4">
-        <!-- min-h-6 leaves room for Reconnect, so a dropped Gateway doesn't move the page. -->
         <span class="flex min-h-6 items-center gap-1.5 text-xs text-muted-foreground">
           <Icon class="size-3.5 shrink-0 {STATUS_CLASSES[tile.status]}" aria-hidden="true" />
           {#if tile.href}
@@ -124,15 +153,9 @@
           {:else}
             {tile.label}
           {/if}
-          {#if tile.label === 'Gateway' && !health.gateway.connected}
-            <Button size="xs" variant="outline" class="ml-auto" disabled={reconnecting} onclick={reconnect}>
-              {#if reconnecting}<Spinner />{/if}
-              Reconnect
-            </Button>
-          {/if}
         </span>
         <span class="text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">{tile.value}</span>
-        <span class="truncate text-xs text-muted-foreground tabular-nums">{tile.meta}</span>
+        <span class="truncate text-xs text-muted-foreground tabular-nums" title={tile.meta}>{tile.meta}</span>
       </li>
     {/each}
   </ul>
@@ -141,12 +164,11 @@
     <h2 id="switches-heading" class="text-sm font-medium">Kill switches</h2>
     <ul class="mt-3 divide-y overflow-hidden rounded-xl border bg-card">
       {#each KILL_SWITCH_KEYS as key (key)}
-        {@const on = health.switches[key]}
         <li class="px-4 py-3">
           <Field.Field orientation="horizontal" class="justify-between">
             <Field.Label for="switch-{key}" class="font-normal">{KILL_SWITCHES[key].label}</Field.Label>
             <!-- Controlled: the switch only moves once the confirmation goes through. -->
-            <Switch id="switch-{key}" bind:checked={() => on, (next) => askSwitch(key, next)} />
+            <Switch id="switch-{key}" bind:checked={() => switchOn(key), (next) => askSwitch(key, next)} />
           </Field.Field>
         </li>
       {/each}
@@ -162,44 +184,74 @@
         </Button>
       </div>
       <ul class="mt-2 divide-y overflow-hidden rounded-xl border bg-card">
-        {#each health.permissions as check (check.id)}
-          {@const Icon = check.ok ? CircleCheckIcon : CircleXIcon}
+        {#if !permissions}
           <li class="flex items-start gap-3 px-4 py-3 text-sm">
-            <Icon class="mt-0.5 size-4 shrink-0 {check.ok ? 'text-success' : 'text-destructive'}" aria-hidden="true" />
-            <div class="flex min-w-0 flex-col gap-0.5">
-              <span>{check.label}<span class="sr-only">{check.ok ? ': granted' : ': missing'}</span></span>
-              {#if !check.ok}
-                <span class="text-xs text-muted-foreground">Missing in {check.channels.map((c) => `#${c}`).join(', ')}. Grant it in Discord, then check again.</span>
-              {/if}
-            </div>
+            <TriangleAlertIcon class="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+            <span>Discord didn’t answer. Check again in a minute.</span>
           </li>
-        {/each}
+        {:else}
+          {#each permissions as check (check.key)}
+            {@const ok = check.missing.length === 0}
+            {@const Icon = ok ? CircleCheckIcon : CircleXIcon}
+            <li class="flex items-start gap-3 px-4 py-3 text-sm">
+              <Icon class="mt-0.5 size-4 shrink-0 {ok ? 'text-success' : 'text-destructive'}" aria-hidden="true" />
+              <div class="flex min-w-0 flex-col gap-0.5">
+                <span>{check.label}<span class="sr-only">{ok ? ': granted' : ': missing'}</span></span>
+                {#if !ok}
+                  <span class="text-xs text-muted-foreground">Missing in {check.missing.map((c) => `#${c}`).join(', ')}. Grant it in Discord, then check again.</span>
+                {/if}
+              </div>
+            </li>
+          {/each}
+        {/if}
       </ul>
     </section>
 
-    <section aria-labelledby="commands-heading">
-      <div class="flex min-h-8 items-center">
-        <h2 id="commands-heading" class="text-sm font-medium">Slash commands</h2>
-      </div>
-      <div class="mt-2 flex items-center justify-between gap-4 rounded-xl border bg-card px-4 py-3 text-sm">
-        <span class="flex items-center gap-2">
-          {#if health.commands.registered}
-            <CircleCheckIcon class="size-4 text-success" aria-hidden="true" />
-            {plural(health.commands.count, { one: '# registered', other: '# registered' })}
-          {:else}
-            <TriangleAlertIcon class="size-4 text-warning" aria-hidden="true" />
-            Not registered
+    <div class="flex flex-col gap-8">
+      <section aria-labelledby="commands-heading">
+        <div class="flex min-h-8 items-center">
+          <h2 id="commands-heading" class="text-sm font-medium">Slash commands</h2>
+        </div>
+        <div class="mt-2 flex items-center justify-between gap-4 rounded-xl border bg-card px-4 py-3 text-sm">
+          <span class="flex items-center gap-2">
+            {#if ops.commands?.status === 'ok'}
+              <CircleCheckIcon class="size-4 text-success" aria-hidden="true" />
+              /consent registered
+            {:else}
+              <TriangleAlertIcon class="size-4 text-warning" aria-hidden="true" />
+              Not registered
+            {/if}
+          </span>
+          {#if ops.commands?.status !== 'ok'}
+            <Button size="sm" variant="outline" disabled={registering} onclick={register}>
+              {#if registering}<Spinner />Registering…{:else}Register{/if}
+            </Button>
           {/if}
-        </span>
-        {#if health.commands.registered}
-          <Button size="sm" variant="outline" onclick={() => (deregisterOpen = true)}>Deregister</Button>
-        {:else}
-          <Button size="sm" variant="outline" disabled={registering} onclick={register}>
-            {#if registering}<Spinner />Registering…{:else}Register{/if}
-          </Button>
-        {/if}
-      </div>
-    </section>
+        </div>
+      </section>
+
+      <section aria-labelledby="alerts-heading">
+        <div class="flex min-h-8 items-center">
+          <h2 id="alerts-heading" class="text-sm font-medium">Staff alerts</h2>
+        </div>
+        <div class="mt-2 rounded-xl border bg-card px-4 py-3">
+          <Field.Field orientation="horizontal" class="justify-between">
+            <Field.Label for="alerts-channel" class="font-normal">Channel</Field.Label>
+            <Select.Root type="single" value={ops.alertsChannelId ?? NO_CHANNEL} onValueChange={alertsTo}>
+              <Select.Trigger id="alerts-channel" class="w-48">
+                {ops.alertsChannelId ? `#${ops.channels.find((c) => c.id === ops.alertsChannelId)?.name ?? ops.alertsChannelId}` : 'None'}
+              </Select.Trigger>
+              <Select.Content class="max-h-72">
+                <Select.Item value={NO_CHANNEL} label="None" />
+                {#each ops.channels as channel (channel.id)}
+                  <Select.Item value={channel.id} label="#{channel.name}" />
+                {/each}
+              </Select.Content>
+            </Select.Root>
+          </Field.Field>
+        </div>
+      </section>
+    </div>
   </div>
 </div>
 
@@ -213,20 +265,12 @@
     confirm={words.confirm}
     destructive={target.on}
     onConfirm={async () => {
-      await admin.setSwitch(target.key, target.on);
-      toast.success(KILL_SWITCHES[target.key][target.on ? 'on' : 'off']);
+      try {
+        await setSwitch(target);
+        toast.success(KILL_SWITCHES[target.key][target.on ? 'on' : 'off']);
+      } catch (e) {
+        toast.error(refusal(e));
+      }
     }}
   />
 {/if}
-
-<ConfirmDialog
-  bind:open={deregisterOpen}
-  title="Deregister slash commands?"
-  description="They disappear from Discord until you register them again."
-  confirm="Deregister"
-  destructive
-  onConfirm={async () => {
-    await admin.setCommands(false);
-    toast.success('Deregistered slash commands');
-  }}
-/>

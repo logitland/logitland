@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import type { Level, ModerationCheck } from '@logitland/contracts';
   import { toast } from 'svelte-sonner';
   import SaveCard from '#lib/components/admin/save-card.svelte';
   import * as Field from '#lib/components/ui/field/index.js';
   import { Switch } from '#lib/components/ui/switch/index.js';
-  import { CHECK_KEYS, CHECKS, type Check, type LevelRule } from '#lib/fixtures/admin/data.js';
-  import { levelName } from '#lib/fixtures/admin/format.js';
-  import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { levelName, refusal } from '#lib/admin/format.js';
+  import { CHECK_KEYS, CHECKS } from '#lib/admin/labels.js';
+  import { saveLevel } from '../levels.remote.js';
 
   /** Which deterministic checks run on this level's messages before Jev sees them. */
-  let { level, rule }: { level: number; rule: LevelRule } = $props();
+  let { level }: { level: Level } = $props();
 
   const GROUPS = [
     { outcome: 'block', label: 'Blocks' },
@@ -17,21 +17,29 @@
     { outcome: 'limit', label: 'Flood control' },
   ] as const;
 
-  let checks = $state(untrack(() => [...rule.checks]));
-  const dirty = $derived(CHECK_KEYS.some((c) => checks.includes(c) !== rule.checks.includes(c)));
+  // A draft only once the admin changes something; until then the form follows the relay's level as it refreshes.
+  let edited = $state<ModerationCheck[]>();
+  const checks = $derived(edited ?? level.checks);
+  const dirty = $derived(CHECK_KEYS.some((c) => checks.includes(c) !== level.checks.includes(c)));
 
-  function toggle(check: Check, on: boolean) {
+  function toggle(check: ModerationCheck, on: boolean) {
     const rest = checks.filter((c) => c !== check);
-    checks = on ? [...rest, check] : rest;
+    edited = on ? [...rest, check] : rest;
   }
 
   async function save() {
-    await admin.saveLevel(level, { checks: CHECK_KEYS.filter((c) => checks.includes(c)) });
-    toast.success(`Saved ${levelName(level)}`);
+    const { level: n, ...update } = level;
+    try {
+      await saveLevel({ level: n, update: { ...update, checks: CHECK_KEYS.filter((c) => checks.includes(c)) } });
+      edited = undefined;
+      toast.success(`Saved ${levelName(n)}`);
+    } catch (e) {
+      toast.error(refusal(e));
+    }
   }
 </script>
 
-<SaveCard title="Moderation checks" {dirty} onDiscard={() => (checks = [...rule.checks])} onSave={save}>
+<SaveCard title="Moderation checks" {dirty} onDiscard={() => (edited = undefined)} onSave={save}>
   <div class="grid gap-6 md:grid-cols-3">
     {#each GROUPS as group (group.outcome)}
       <Field.Set>

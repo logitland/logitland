@@ -1,6 +1,6 @@
 import type { AdminStanding } from '@logitland/contracts';
 import { redirect, type ServerLoadEvent } from '@sveltejs/kit';
-import type { Person } from '#lib/fixtures/admin/data.js';
+import type { Person } from '#lib/session.js';
 import { relay } from './relay.js';
 
 /**
@@ -13,5 +13,5 @@ export async function signedIn(event: ServerLoadEvent): Promise<{ person: Person
   const owner = event.locals.owner;
   if (!owner) redirect(303, `/sign-in?next=${encodeURIComponent(path)}`);
   const standing = await relay<AdminStanding>(event, `/internal/owners/${owner.id}/admin`);
-  return { person: { id: owner.id, name: owner.username, handle: owner.username, team: standing.full, roles: [] }, standing };
+  return { person: { id: owner.id, name: owner.username, handle: owner.username }, standing };
 }

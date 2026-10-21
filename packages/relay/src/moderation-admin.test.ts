@@ -365,6 +365,33 @@ describe('the strike ladder', () => {
     expect(await audits(h, 'strike.removed')).toHaveLength(1);
   });
 
+  it('lists active strikes for admins, newest first, and lets them lift one', async () => {
+    const { h, a, admin, api } = await setup();
+    const b = await seedAgent(h.relay, { name: 'Brisk' });
+    await strike(h, a.id);
+    h.advance(60_000);
+    const second = await strike(h, a.id);
+    h.advance(60_000);
+    await strike(h, b.id);
+    const list = async (query = '') => (await json(await api('GET', `/internal/admin/strikes${query}`))).strikes as Record<string, any>[];
+    expect((await list()).map((s) => s.agent_name)).toEqual(['Brisk', a.name, a.name]);
+    expect((await list(`?agent_id=${a.id}`)).map((s) => s.id)).toEqual([second.id, expect.any(String)]);
+
+    expect((await api('POST', `/internal/admin/strikes/${second.id}/lift`)).status).toBe(204);
+    expect(await list(`?agent_id=${a.id}`)).toHaveLength(1);
+    // Down to one strike, the pause the second one caused ends.
+    expect((await agentRow(h, a.id))!.posting_paused_until).toBeNull();
+    expect((await audits(h, 'strike.removed'))[0]).toMatchObject({ actor_type: 'admin', actor_id: admin.id, target_id: a.id });
+    expect((await api('POST', `/internal/admin/strikes/${second.id}/lift`)).status).toBe(404);
+  });
+
+  it('leaves expired strikes off the list', async () => {
+    const { h, a, api } = await setup();
+    await strike(h, a.id);
+    h.advance(31 * 86_400_000);
+    expect((await json(await api('GET', '/internal/admin/strikes'))).strikes).toEqual([]);
+  });
+
   describe('from moderation', () => {
     it('adds one for a severe block, and the agent is told', async () => {
       const { h, a } = await setup({ moderator: decide(() => ({ verdict: 'block', policy_code: 'violence' })) });
@@ -511,7 +538,7 @@ describe('reports', () => {
       reporters: 3,
       taken_down: false,
       status: 'open',
-      message: { content: 'a rude thing', display_name: 'Someone', author_kind: 'human', deleted: false },
+      message: { content: 'a rude thing', display_name: 'Someone', author_kind: 'human', deleted: false, agent_id: null },
     });
     expect(list.reports.at(-1)).toMatchObject({ priority: 'normal', reporters: 1 });
     expect(h.discordCalls.filter((c) => c.method === 'DELETE')).toHaveLength(0);
@@ -550,6 +577,8 @@ describe('reports', () => {
     const culprit = await seedAgent(h.relay);
     const sent = await json(await post(h, culprit, 'to be taken down'));
     const id = (await json(await report(h, await reporter(h), sent.discord_message_id))).id;
+    // The relay posted it, so the report names its agent.
+    expect((await json(await api('GET', '/internal/admin/reports'))).reports[0].message).toMatchObject({ agent_id: culprit.id });
     const res = await api('POST', `/internal/admin/reports/${id}`, { action: 'takedown', policy_code: 'hate', note: 'Hateful.', strike: true });
     expect(res.status).toBe(200);
     expect((await row(h, sent.id))!.status).toBe('removed');
@@ -837,5 +866,28 @@ describe('a suspended agent can appeal', () => {
     const { h, a } = await setup();
     await h.db.prepare("UPDATE agents SET status = 'off' WHERE id = ?").bind(a.id).run();
     expect((await appeal(h, a, { target_type: 'status', target_id: a.id, message: 'I am off but want to appeal.' })).status).toBe(403);
+  });
+});
+
+describe('the admin pages’ reads', () => {
+  it('lists one agent’s messages, newest first, filtered by status', async () => {
+    const { h, a, api } = await setup();
+    const b = await seedAgent(h.relay, { name: 'Brisk' });
+    const sent = await json(await post(h, a, 'hello there'));
+    const kept = await held(h, a);
+    await post(h, b, 'not this one');
+    const page = await json(await api('GET', `/internal/admin/agents/${a.id}/messages`));
+    expect(page.messages.map((m: any) => m.id)).toEqual([kept.id, sent.id]);
+    expect(page.messages[0]).toMatchObject({ agent_name: a.name, status: 'held' });
+    expect((await json(await api('GET', `/internal/admin/agents/${a.id}/messages?status=sent`))).messages.map((m: any) => m.id)).toEqual([sent.id]);
+    expect((await api('GET', '/internal/admin/agents/agt_0000000000NOPE/messages')).status).toBe(404);
+  });
+
+  it('names who acted and the agent each audit entry concerns', async () => {
+    const { h, a, admin, api } = await setup();
+    const kept = await held(h, a);
+    await api('POST', `/internal/admin/messages/${kept.id}/release`);
+    const { entries } = await json(await api('GET', '/internal/admin/audit'));
+    expect(entries.find((e: any) => e.action === 'message.released')).toMatchObject({ actor_id: admin.id, actor_name: 'admin', agent: { id: a.id, name: a.name } });
   });
 });

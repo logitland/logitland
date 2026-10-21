@@ -1,33 +1,56 @@
-// Performs every admin journey end to end and asserts what each one changes.
-// Usage: node journeys.mjs <width> <light|dark>. Screenshots of interesting states go to OUT.
+// Performs every admin journey end to end against the relay (pnpm dev:full) and asserts what each one changes. Agents sign
+// up and act through the relay's public API (relay.mjs), so the queues hold real messages, reports and appeals.
+// Usage: BASE=http://localhost:5174 RELAY=http://localhost:8787 node journeys.mjs <width> <light|dark>. Screenshots go to OUT.
 import assert from 'node:assert/strict';
-import { open, nav, revokeTeam, signIn, signOut, shot } from './lib.mjs';
+import { LUNA, open, nav, setTeam, signIn, signOut, shot } from './lib.mjs';
+import { appeal, post, report, signUp } from './relay.mjs';
 
 const width = Number(process.argv[2] ?? 1440);
 const theme = process.argv[3] ?? 'light';
 const tag = `${width}-${theme}`;
-const { browser, page, errors } = await open({ width, theme });
-const main = page.locator('#content');
-const dialog = page.getByRole('alertdialog');
 const step = (name) => console.log(`✓ ${name}`);
 
+// ---------- Agents, each signing up from its own network (signups are limited per network)
+const run = Date.now().toString(36).slice(-4);
+const ip = () => `198.51.${Math.floor(Math.random() * 250)}.${2 + Math.floor(Math.random() * 250)}`;
+const quill = await signUp(`Quill-${run}`, ip());
+const moth = await signUp(`Moth-${run}`, ip());
+const wren = await signUp(`Wren-${run}`, ip());
+const sent = await post(quill, `Morning. Picking up the tokenizer thread from last night (${run}).`);
+const quillHeld = await post(quill, `Here is the contact sheet: quill-${run}@example.com`);
+const mothHeld = await post(moth, `My owner said I could share her email: moth-${run}@example.com`);
+assert.equal(sent.status, 'sent');
+assert.equal(quillHeld.status, 'held');
+assert.equal(mothHeld.status, 'held');
+step('agents signed up and posted: one sent, two held');
+
+const { browser, page, errors } = await open({ width, theme });
+// DEBUG=1 logs every remote function call the dashboard makes.
+if (process.env.DEBUG) page.on('response', (r) => r.url().includes('/_app/remote/') && console.log(`  ${r.status()} ${r.url().split('/_app/remote/')[1]}`));
+const main = page.locator('#content');
+const dialog = page.getByRole('alertdialog');
+const formDialog = page.getByRole('dialog');
+
 async function toast(text) {
-  await page.locator('[data-sonner-toast]', { hasText: text }).first().waitFor();
+  try {
+    await page.locator('[data-sonner-toast]', { hasText: text }).first().waitFor({ timeout: 10_000 });
+  } catch (error) {
+    // What the page showed instead (often the relay's refusal, as an error toast).
+    await shot(page, `${tag}-journey-failed`, { full: false });
+    console.error(await page.locator('[data-sonner-toast]').allInnerTexts());
+    throw error;
+  }
 }
+/** Waits for toasts to time out: removing them by hand leaves sonner counting them, and it hides new ones past three. */
 async function dismissToasts() {
-  await page.waitForTimeout(100);
-  await page.evaluate(() => document.querySelectorAll('[data-sonner-toast]').forEach((t) => t.remove()));
+  for (let i = 0; i < 60 && (await page.locator('[data-sonner-toast]').count()); i++) await page.waitForTimeout(250);
 }
 async function confirmDialog(button) {
   await dialog.getByRole('button', { name: button }).click();
   await dialog.waitFor({ state: 'hidden' });
 }
-async function simulator(button) {
-  await page.getByRole('button', { name: 'Simulator' }).click();
-  await page.getByRole('button', { name: button }).click();
-  await page.keyboard.press('Escape');
-}
-const tabCount = async (label) => (await main.getByRole('link', { name: new RegExp(`^${label} \\d+$`) }).innerText()).split(/\s+/).pop();
+const tabCount = async (label) => Number((await main.getByRole('link', { name: new RegExp(`^${label} \\d+$`) }).innerText()).split(/\s+/).pop());
+const row = (text) => main.locator('li', { hasText: text }).first();
 
 await signIn(page);
 step('signed in, landed on held queue');
@@ -42,279 +65,254 @@ if (width < 768) await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 step('account menu offers the owner dashboard');
 
-// ---------- Held: release with undo, reject
-assert.equal(await tabCount('Held'), '5');
-const wren = main.locator('li', { hasText: 'Wren' }).first();
-await wren.getByRole('button', { name: 'Release' }).click();
-await toast('Released Wren’s message');
-assert.equal(await tabCount('Held'), '4');
-await page.locator('[data-sonner-toast]').getByRole('button', { name: 'Undo' }).click();
-assert.equal(await tabCount('Held'), '5');
+// ---------- Held: release one, reject one
+const held = await tabCount('Held');
+await row(`quill-${run}@example.com`).getByRole('button', { name: 'Release' }).click();
+await toast(`Released Quill-${run}’s message`);
 await dismissToasts();
-await main.locator('li', { hasText: 'Murmur' }).first().getByRole('button', { name: 'Reject' }).click();
-await toast('Rejected Murmur’s message');
-assert.equal(await tabCount('Held'), '4');
+await row(`moth-${run}@example.com`).getByRole('button', { name: 'Reject' }).click();
+await toast(`Rejected Moth-${run}’s message`);
 await dismissToasts();
-step('held: release, undo, reject');
+assert.equal(await tabCount('Held'), held - 2);
+assert.equal(await main.getByText(`quill-${run}@example.com`).count(), 0);
+step('held: release, reject');
 
-// ---------- Reports: cancel, restore (reporters lose XP), take down (strike)
+// ---------- Agent: give the reporter a level that may report (Level 3 lets orphans report)
+await nav(page, `/admin/agents/${wren.id}`);
+await main.getByRole('button', { name: 'Change level' }).click();
+await formDialog.getByLabel('Level').click();
+await page.getByRole('option', { name: /Level 3/ }).click();
+await formDialog.getByRole('button', { name: 'Change level' }).click();
+await formDialog.getByText('Add a reason for the audit log.').waitFor();
+await formDialog.getByLabel('Reason').fill('Trusted reporter for the journey');
+await shot(page, `${tag}-journey-change-level`, { full: false });
+await formDialog.getByRole('button', { name: 'Change level' }).click();
+await toast(`Wren-${run} is now level 3`);
+await dismissToasts();
+assert.ok(await main.getByText('Level 3', { exact: true }).isVisible());
+step('agent: change level needs a reason');
+
+// ---------- Reports: an agent reports a message; take it down (a strike follows)
+await report(wren, sent, 'disruptive', 'Third repost of this today.');
 await nav(page, '/admin/moderation/reports');
-const cartographerCase = main.locator('li', { hasText: 'Reposting the channel map' }).first();
-await cartographerCase.getByRole('button', { name: 'Dismiss' }).click();
+const reported = row('Picking up the tokenizer thread');
+await reported.getByText('Third repost of this today.').waitFor();
+await reported.getByRole('button', { name: 'Dismiss' }).click();
 await dialog.waitFor();
 await dialog.getByRole('button', { name: 'Cancel' }).click();
 await dialog.waitFor({ state: 'hidden' });
-assert.equal(await tabCount('Reports'), '3');
-await main.locator('li', { hasText: 'free security audit' }).first().getByRole('button', { name: 'Restore' }).click();
-await dialog.waitFor();
-await shot(page, `${tag}-journey-restore-dialog`, { full: false });
-await confirmDialog('Restore message');
-await toast('Restored Glimmer’s message');
-await dismissToasts();
-await main.locator('li', { hasText: 'reading list is pinned' }).first().getByRole('button', { name: 'Take down' }).click();
+await reported.getByRole('button', { name: 'Take down' }).click();
+await shot(page, `${tag}-journey-takedown-dialog`, { full: false });
 await confirmDialog('Take down message');
-await toast('Took down Lumen’s message');
+await toast(`Took down Quill-${run}’s message`);
 await dismissToasts();
-assert.equal(await tabCount('Reports'), '1');
-await simulator('Agent reports');
-await page.waitForTimeout(200);
-assert.equal(await main.getByText('2 reports').count(), 1);
-step('reports: cancel, restore, take down, simulated report');
+assert.equal(await main.getByText(`thread from last night (${run})`).count(), 0);
+step('reports: cancel, take down');
 
-await nav(page, '/admin/agents/ag_q8w2');
-assert.ok(await main.getByText('3,160 / 4,000 XP').isVisible(), 'Quill lost 20 XP for a rejected report');
-await nav(page, '/admin/agents/ag_l7mn');
-assert.ok(await main.getByText('Takedown confirmed: spam').isVisible());
-step('reports changed reporters’ XP and added a strike');
-
-// ---------- Appeals
-await nav(page, '/admin/moderation/appeals');
-await main.locator('li', { hasText: 'Halcyon' }).first().getByRole('button', { name: 'Overturn' }).click();
-await toast('Overturned on Halcyon’s appeal');
-await dismissToasts();
-await main.locator('li', { hasText: 'Moth' }).first().getByRole('button', { name: 'Uphold' }).click();
-await toast('Upheld on Moth’s appeal');
-await dismissToasts();
-assert.ok(await main.getByText('No appeals').isVisible());
-await nav(page, '/admin/agents/ag_h4lc');
-assert.ok(await main.getByText('Overturned on appeal').isVisible());
-assert.ok(await main.getByText('None').isVisible(), 'Halcyon’s strike is gone');
-step('appeals: overturn removes the strike, uphold');
-
-// ---------- Strikes
+// ---------- Strikes: the takedown's strike, lifted
 await nav(page, '/admin/moderation/strikes');
-const strikes = Number(await tabCount('Strikes'));
-await main.getByRole('button', { name: /Lift Parallax’s strike/ }).first().click();
-await toast('Lifted a strike from Parallax');
-assert.equal(Number(await tabCount('Strikes')), strikes - 1);
-await page.locator('[data-sonner-toast]').getByRole('button', { name: 'Undo' }).click();
-assert.equal(Number(await tabCount('Strikes')), strikes);
+const strikes = await tabCount('Strikes');
+await main.getByRole('button', { name: new RegExp(`Lift Quill-${run}’s strike`) }).click();
+await toast(`Lifted a strike from Quill-${run}`);
 await dismissToasts();
-step('strikes: lift and undo');
+assert.equal(await tabCount('Strikes'), strikes - 1);
+step('strikes: lift');
+
+// ---------- Appeals: the rejected agent appeals; overturning needs a reply
+await appeal(moth, 'message', mothHeld.id, 'My owner asked me to share her address for collaboration requests.');
+await nav(page, '/admin/moderation/appeals');
+await row('collaboration requests').getByRole('button', { name: 'Overturn' }).click();
+await dialog.getByRole('button', { name: 'Overturn' }).click();
+await dialog.getByText(`Tell Moth-${run} why.`).waitFor();
+await dialog.getByLabel(`Reply to Moth-${run}`).fill('Fair: an owner may share their own address.');
+await shot(page, `${tag}-journey-appeal`, { full: false });
+await confirmDialog('Overturn');
+await toast(`Overturned on Moth-${run}’s appeal`);
+await dismissToasts();
+assert.equal(await main.getByText('collaboration requests').count(), 0);
+step('appeals: overturn needs a reply');
 
 // ---------- Agents: find, filter, empty state
 await nav(page, '/admin/agents');
-await main.getByRole('searchbox', { name: 'Find an agent' }).fill('glim');
+const search = main.getByRole('searchbox', { name: 'Find an agent' });
+await search.fill(`moth-${run}`);
 assert.equal(await main.locator('ul > li').count(), 1);
-await main.getByRole('searchbox', { name: 'Find an agent' }).fill('ag_0str');
-assert.ok(await main.getByText('Ostrakon').isVisible());
-await main.getByRole('searchbox', { name: 'Find an agent' }).fill('nobody');
+await search.fill(quill.id);
+assert.ok(await main.getByText(`Quill-${run}`).isVisible());
+await search.fill('nobody like this');
 await shot(page, `${tag}-journey-agents-empty`, { full: false });
 await main.getByRole('button', { name: 'Clear filters' }).click();
-await main.getByRole('radio', { name: /Banned/ }).click();
-assert.equal(await main.locator('ul > li').count(), 1);
+await main.getByRole('radio', { name: /Orphans/ }).click();
+assert.ok((await main.locator('ul > li').count()) >= 3);
 step('agents: search by name and ID, empty, filter');
 
-// ---------- Agent actions
-await nav(page, '/admin/agents/ag_m3th');
-await main.getByRole('button', { name: 'Change level' }).click();
-await page.getByRole('dialog').getByLabel('Level').click();
-await page.getByRole('option', { name: /Level 2/ }).click();
-await shot(page, `${tag}-journey-change-level`, { full: false });
-await page.getByRole('dialog').getByRole('button', { name: 'Change level' }).click();
-await toast('Moth is now level 2');
-await dismissToasts();
-assert.ok(await main.getByText('Level 2', { exact: true }).isVisible());
-await main.getByRole('button', { name: 'More for Moth' }).click();
+// ---------- Agent actions: suspend and lift, cancel a ban, rename, reveal IPs
+await nav(page, `/admin/agents/${moth.id}`);
+const more = () => main.getByRole('button', { name: new RegExp(`^More for Moth`) }).click();
+await more();
 await page.getByRole('menuitem', { name: 'Suspend' }).click();
-await dialog.getByLabel('For').click();
-await page.getByRole('option', { name: '7 days' }).click();
+await dialog.getByLabel('Reason').fill('Cooling off after the held message');
 await shot(page, `${tag}-journey-suspend`, { full: false });
 await confirmDialog('Suspend agent');
-await toast('Suspended Moth');
+await toast(`Suspended Moth-${run}`);
 await dismissToasts();
-assert.ok(await main.getByText(/Suspended until/).isVisible());
-await main.getByRole('button', { name: 'More for Moth' }).click();
+assert.ok(await main.locator('header').getByText('Suspended', { exact: true }).isVisible());
+await more();
 await page.getByRole('menuitem', { name: 'Lift suspension' }).click();
-await toast('Lifted Moth’s suspension');
+await dialog.getByLabel('Reason').fill('Talked it through');
+await confirmDialog('Lift suspension');
+await toast(`Lifted Moth-${run}’s suspension`);
 await dismissToasts();
-await main.getByRole('button', { name: 'More for Moth' }).click();
+await more();
 await page.getByRole('menuitem', { name: 'Ban' }).click();
 await dialog.getByRole('button', { name: 'Cancel' }).click();
-assert.equal(await main.getByText('Banned').count(), 0);
-// Rename past the 30-day limit: the reason is required and names stay unique
-const renameDialog = page.getByRole('dialog');
-await main.getByRole('button', { name: 'More for Moth' }).click();
-await page.getByRole('menuitem', { name: 'Rename' }).click();
-await renameDialog.getByLabel('Name').fill('Qu1ll');
-await renameDialog.getByRole('button', { name: 'Rename agent' }).click();
-await renameDialog.getByText('Add a reason for the audit log.').waitFor();
-await renameDialog.getByLabel('Reason').fill('Owner asked by email; the agent is rate limited');
-await renameDialog.getByRole('button', { name: 'Rename agent' }).click();
-await renameDialog.getByText('Too close to Quill, which is taken.').waitFor();
-await shot(page, `${tag}-journey-rename-error`, { full: false });
-await renameDialog.getByRole('button', { name: 'Cancel' }).click();
-await renameDialog.waitFor({ state: 'hidden' });
-assert.equal((await main.locator('h1').innerText()).trim(), 'Moth', 'cancel keeps the name');
-await main.getByRole('button', { name: 'More for Moth' }).click();
-await page.getByRole('menuitem', { name: 'Rename' }).click();
-assert.equal(await renameDialog.getByLabel('Reason').inputValue(), '', 'reopening starts clean');
-await renameDialog.getByLabel('Name').fill('Mothlight');
-await renameDialog.getByLabel('Reason').fill('Owner asked by email; the agent is rate limited');
-await shot(page, `${tag}-journey-rename`, { full: false });
-await renameDialog.getByRole('button', { name: 'Rename agent' }).click();
-await toast('Renamed Moth to Mothlight');
-await dismissToasts();
-assert.equal((await main.locator('h1').innerText()).trim(), 'Mothlight');
-// Reset a custom avatar to the sigil: cancel keeps it, confirm removes it
-await nav(page, '/admin/agents/ag_g1mr');
-await main.getByRole('button', { name: 'More for Glimmer' }).click();
-await page.getByRole('menuitem', { name: 'Reset avatar' }).click();
-await shot(page, `${tag}-journey-reset-avatar`, { full: false });
-await dialog.getByRole('button', { name: 'Cancel' }).click();
 await dialog.waitFor({ state: 'hidden' });
-assert.equal(await main.locator('header img').count(), 1, 'cancel keeps the avatar');
-await main.getByRole('button', { name: 'More for Glimmer' }).click();
-await page.getByRole('menuitem', { name: 'Reset avatar' }).click();
-await confirmDialog('Reset avatar');
-await toast('Avatar reset');
+assert.equal(await main.locator('header').getByText('Banned').count(), 0);
+// Rename past the 30-day limit: the reason is required and the relay keeps names unique
+await more();
+await page.getByRole('menuitem', { name: 'Rename' }).click();
+await formDialog.getByLabel('Name').fill(`Quill-${run}`);
+await formDialog.getByRole('button', { name: 'Rename agent' }).click();
+await formDialog.getByText('Add a reason for the audit log.').waitFor();
+await formDialog.getByLabel('Reason').fill('Owner asked by email');
+await formDialog.getByRole('button', { name: 'Rename agent' }).click();
+await formDialog.locator('[data-slot="field-error"]').first().waitFor();
+await shot(page, `${tag}-journey-rename-error`, { full: false });
+await formDialog.getByLabel('Name').fill(`Mothlight-${run}`);
+await formDialog.getByRole('button', { name: 'Rename agent' }).click();
+await toast(`Renamed Moth-${run} to Mothlight-${run}`);
 await dismissToasts();
-assert.equal(await main.locator('header img').count(), 0);
-await nav(page, '/admin/agents');
-assert.ok((await main.getByText('Mothlight', { exact: true }).count()) > 0, 'agents list shows the new name');
-step('agent: change level, suspend, lift, cancel ban, rename, reset avatar');
+assert.equal((await main.locator('h1').innerText()).trim(), `Mothlight-${run}`);
+await main.getByRole('button', { name: /^More for Mothlight/ }).click();
+await page.getByRole('menuitem', { name: 'Reveal IP addresses' }).click();
+await formDialog.getByLabel('Reason').fill('Checking for a sockpuppet network');
+await formDialog.getByRole('button', { name: 'Reveal IP addresses' }).click();
+await formDialog.getByRole('button', { name: 'Done' }).waitFor();
+await shot(page, `${tag}-journey-reveal-ip`, { full: false });
+await formDialog.getByRole('button', { name: 'Done' }).click();
+step('agent: suspend, lift, cancel ban, rename (taken, then new), reveal IPs');
 
-// ---------- Levels
+// ---------- Levels: threshold and limits validation, save, checks, defaults
 await nav(page, '/admin/levels/3');
-assert.ok(await main.getByText('2,250 XP', { exact: true }).isVisible(), 'Level 3 shows its threshold from the curve');
-await main.getByRole('link', { name: 'Change curve' }).click();
-await page.waitForURL('**/admin/levels/defaults');
-const base = main.getByLabel('Level 1 XP');
-await base.fill('0');
-await main.getByLabel('Growth').fill('9');
+const xp = main.getByLabel('XP to reach Level 3');
+const threshold = await xp.inputValue();
+await xp.fill('1');
 await main.getByRole('button', { name: 'Save' }).first().click();
-assert.ok(await main.getByText('Enter a whole number from 1 to 100,000.').isVisible());
-assert.ok(await main.getByText('Enter a number from 1 to 3.').isVisible());
+assert.ok(await main.getByText(/^Enter a whole number from/).isVisible());
 await shot(page, `${tag}-journey-level-errors`, { full: false });
-await main.getByLabel('Growth').fill('2');
-await base.fill('300');
-assert.ok(await main.getByText('Level 5 at 7,500 XP · Level 10 at 30,000 XP').isVisible(), 'the curve previews its result');
-await main.getByRole('button', { name: 'Save' }).first().click();
-await toast('Saved level curve');
-await dismissToasts();
-await main.getByRole('button', { name: /^Level 3 colour/ }).click();
-await page.getByRole('button', { name: 'Orange', exact: true }).click();
-await page.keyboard.press('Escape');
-await page.waitForTimeout(300);
-await main.getByRole('button', { name: /^Level 2 colour/ }).click();
-await page.waitForTimeout(200);
-await page.getByRole('button', { name: 'Tween instead' }).click();
-await page.keyboard.press('Escape');
-await main.getByRole('button', { name: 'Save' }).nth(1).click();
-await toast('Saved level colours');
-await dismissToasts();
-await nav(page, '/admin/levels/3');
-assert.ok(await main.getByText('2,700 XP', { exact: true }).isVisible(), 'Level 3 follows the new curve');
-await main.getByLabel('Posts per day, adopted').fill('10');
+await main.getByRole('button', { name: 'Discard' }).click();
+assert.equal(await xp.inputValue(), threshold);
+const perDay = main.getByLabel('Posts per day, adopted');
+const before = Number(await perDay.inputValue());
+await perDay.fill('0');
 await main.getByRole('button', { name: 'Save' }).nth(1).click();
 assert.ok(await main.getByText('Adopted can’t be lower than orphan.').isVisible());
-await main.getByRole('button', { name: 'Discard' }).click();
-assert.equal(await main.getByLabel('Posts per day, adopted').inputValue(), '1250');
-await main.getByLabel('Posts per day, adopted').fill('1300');
-await main.getByLabel('Custom avatar, adopted').click();
+await perDay.fill(String(before + 1));
 await main.getByRole('button', { name: 'Save' }).nth(1).click();
 await toast('Saved Level 3');
 await dismissToasts();
+await nav(page, '/admin/levels/2');
+await nav(page, '/admin/levels/3');
+assert.equal(Number(await main.getByLabel('Posts per day, adopted').inputValue()), before + 1, 'the saved limit came back from the relay');
 await main.getByLabel('Spam').click();
 await main.getByRole('button', { name: 'Save' }).nth(2).click();
 await toast('Saved Level 3');
 await dismissToasts();
 await nav(page, '/admin/levels/defaults');
-await main.getByLabel('Channel subscriptions').click();
-await page.getByRole('option', { name: '5m', exact: true }).click();
-await main.getByRole('button', { name: 'Save' }).nth(2).click();
+const channelDefault = main.getByLabel('Channel subscriptions');
+const next = (await channelDefault.innerText()).trim() === '5m' ? '10m' : '5m';
+await channelDefault.click();
+await page.getByRole('option', { name: next, exact: true }).click();
+await main.getByRole('button', { name: 'Save' }).click();
 await toast('Saved subscription defaults');
 await dismissToasts();
-step('levels: curve validation and save, colours, limits validation, discard, save limits, checks, defaults');
+step('levels: threshold validation, limits validation and save, checks, defaults');
 
-// ---------- The owner dashboard reads the same curve and colours (same browser session)
-await nav(page, '/admin/agents/ag_q8w2');
-assert.ok(await main.getByText('3,160 / 4,800 XP').isVisible(), 'admin meter follows the new curve');
-if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
-await page.getByRole('button', { name: /luna-admin/ }).click();
-await page.getByRole('menuitemradio', { name: 'Level' }).click();
-await page.keyboard.press('Escape');
-if (width < 768) await page.keyboard.press('Escape');
-await nav(page, '/agents');
-const quill = main.locator('li', { hasText: 'Quill' }).first();
-assert.ok(await quill.getByText('3,180 / 4,800 XP').isVisible(), 'owner meter follows the admin’s curve');
-const bar = await quill.locator('[data-slot="progress-indicator"]').evaluate((el) => getComputedStyle(el).backgroundColor);
-assert.match(bar, /oklch\([\d.]+ [\d.]+ 55\)/, `Quill's level 3 bar is orange, got ${bar}`);
-await shot(page, `${tag}-journey-owner-by-level`, { full: false });
-await nav(page, '/admin/moderation');
-step('owner dashboard: same curve, level colour from the admin’s choice');
+// ---------- Channels: what each level may do, from Discord's overwrites
+await nav(page, '/admin/channels');
+assert.ok(await main.getByRole('rowheader', { name: /agent-lounge/ }).isVisible());
+step('channels: the matrix lists the fake server’s channels');
 
-// ---------- Admins
+// ---------- Admins: map a role, validation, remove it again
 await nav(page, '/admin/admins');
-await main.getByLabel('Edit levels').first().click();
+assert.ok(await main.getByText('Luna (admin)').isVisible());
 await main.getByRole('button', { name: 'Add role' }).click();
-await page.getByRole('menuitem', { name: '@helpers' }).click();
+const added = (await page.getByRole('menuitem').first().innerText()).trim();
+await page.getByRole('menuitem').first().click();
 await main.getByLabel('Moderate').last().click();
 await main.getByRole('button', { name: 'Save' }).click();
-assert.ok(await main.getByText('Give @helpers at least one power, or remove it.').isVisible());
+assert.ok(await main.getByText(`Give ${added} at least one power, or remove it.`).isVisible());
 await shot(page, `${tag}-journey-admins-error`, { full: false });
-await main.getByRole('button', { name: 'Remove @helpers' }).click();
+await main.getByLabel('Moderate').last().click();
 await main.getByRole('button', { name: 'Save' }).click();
 await toast('Saved admin roles');
 await dismissToasts();
-step('admins: grant a power, add role, validation, remove, save');
+await main.getByRole('button', { name: `Remove ${added}` }).click();
+await main.getByRole('button', { name: 'Save' }).click();
+await toast('Saved admin roles');
+await dismissToasts();
+assert.ok(await main.getByText('No server roles have admin powers').isVisible());
+step('admins: grant a role powers, validation, take them away');
 
-// ---------- Health
+// ---------- Health: a kill switch both ways, re-check, slash commands, the alerts channel
 await nav(page, '/admin/health');
-await main.getByRole('switch', { name: 'Close signups' }).click();
+const signups = main.getByRole('switch', { name: 'Close signups' });
+await signups.click();
 await dialog.getByRole('button', { name: 'Cancel' }).click();
-assert.equal(await main.getByRole('switch', { name: 'Close signups' }).getAttribute('aria-checked'), 'false');
-await main.getByRole('switch', { name: 'Close signups' }).click();
+assert.equal(await signups.getAttribute('aria-checked'), 'false');
+await signups.click();
 await shot(page, `${tag}-journey-kill-switch`, { full: false });
 await confirmDialog('Close signups');
 await toast('Closed signups');
 await dismissToasts();
-assert.equal(await main.getByRole('switch', { name: 'Close signups' }).getAttribute('aria-checked'), 'true');
+assert.equal(await signups.getAttribute('aria-checked'), 'true');
+await signups.click();
+await confirmDialog('Reopen signups');
+await toast('Reopened signups');
+await dismissToasts();
+assert.equal(await signups.getAttribute('aria-checked'), 'false');
 await main.getByRole('button', { name: 'Check again' }).click();
 await toast('Every permission check passed');
 await dismissToasts();
-await main.getByRole('button', { name: 'Deregister' }).click();
-await confirmDialog('Deregister');
-await toast('Deregistered slash commands');
+if (await main.getByRole('button', { name: 'Register' }).count()) {
+  await main.getByRole('button', { name: 'Register' }).click();
+  await toast('Registered slash commands');
+  await dismissToasts();
+}
+assert.ok(await main.getByText('/consent registered').isVisible());
+await main.getByLabel('Channel').click();
+await page.getByRole('option', { name: '#agent-lounge' }).click();
+await toast('Alerts go to #agent-lounge');
 await dismissToasts();
-await simulator('Gateway drops');
-await shot(page, `${tag}-journey-health-trouble`);
-await main.getByRole('button', { name: 'Reconnect' }).click();
-await toast('Gateway connected');
-await main.getByRole('button', { name: 'Register' }).click();
-await toast('Registered slash commands');
+await main.getByLabel('Channel').click();
+await page.getByRole('option', { name: 'None' }).click();
+await toast('Turned off staff alerts');
 await dismissToasts();
-step('health: kill switch cancel and confirm, re-check, slash commands, Gateway reconnect');
+await shot(page, `${tag}-journey-health`);
+step('health: kill switch cancel, close and reopen, re-check, /consent, alerts channel');
 
 // ---------- Audit sees all of it
 await nav(page, '/admin/audit');
-// The journey logs more than one page of changes.
+await main.getByRole('searchbox', { name: 'Search changes' }).fill(run);
 while (await main.getByRole('button', { name: 'Show more' }).count()) await main.getByRole('button', { name: 'Show more' }).click();
-for (const text of ['Released a held message', 'Restored a taken-down message', 'Overturned a strike on appeal', 'Changed level', 'Changed level curve', 'Changed level colours', 'Changed limits', 'Changed admin powers for @moderators', 'Closed signups', 'Changed subscription defaults', 'Moth → Mothlight. Owner asked by email; the agent is rate limited']) {
+for (const text of [
+  `Released a held message · Quill-${run}`,
+  `Rejected a held message · Moth`,
+  `Took down a message · Quill-${run}`,
+  `Lifted a strike · Quill-${run}`,
+  'Overturned an appeal · Mothlight',
+  `Changed level · Wren-${run}`,
+  'Suspended · Mothlight',
+  'Reinstated · Mothlight',
+  `name Moth-${run} → Mothlight-${run}`,
+  'Revealed IP addresses · Mothlight',
+]) {
   assert.ok((await main.getByText(text).count()) > 0, `audit has “${text}”`);
 }
-// Rowan's fixture release is the only one: the undone release left no entry.
-assert.equal(await main.getByText('Released a held message', { exact: false }).count(), 1);
+await main.getByRole('searchbox', { name: 'Search changes' }).fill('');
+for (const text of ['Changed a level · Level 3', 'Changed a role’s admin powers', 'signup open false → true']) {
+  assert.ok((await main.getByText(text).count()) > 0, `audit has “${text}”`);
+}
 await main.getByRole('button', { name: 'Area' }).click();
 await page.getByRole('option', { name: 'Levels', exact: true }).click();
 await shot(page, `${tag}-journey-audit-levels`);
@@ -323,14 +321,13 @@ await main.getByRole('button', { name: 'Clear filters' }).click();
 step('audit: every change logged, filter, empty, clear');
 
 // ---------- Standing taken away mid-session applies on the next page
-await revokeTeam();
+await setTeam([]);
 if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
 await page.getByRole('link', { name: 'Health', exact: true }).click();
 await page.waitForURL('**/agents');
 step('removed from the Developer team: the next admin page sends them to their agents');
 
 // ---------- Someone without admin standing has no admin pages
-// (A narrower admin, with a server role's powers, needs the role mapped on the relay; it returns with the real Admins page.)
 if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
 await signOut(page, 'luna-admin');
 await page.getByRole('link', { name: 'Continue with Discord' }).click();
@@ -349,5 +346,9 @@ await page.getByRole('button', { name: /visitor/ }).click();
 assert.equal(await page.getByRole('menuitem', { name: 'Admin dashboard' }).count(), 0);
 step('owner without admin standing: admin pages send them to their agents, no dashboard switch');
 
+// Luna back on the team, so the next run signs in as a full admin again.
+await setTeam([LUNA]);
+
 console.log(errors.length ? errors.join('\n') : 'no errors');
 await browser.close();
+if (errors.length) process.exit(1);

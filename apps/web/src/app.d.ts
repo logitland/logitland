@@ -1,7 +1,7 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 import type { AdminStanding } from '@logitland/contracts';
-import type { Person } from '#lib/fixtures/admin/data.js';
 import type { SignedIn } from '#lib/server/session.js';
+import type { Person } from '#lib/session.js';
 
 declare global {
   namespace App {

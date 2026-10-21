@@ -7,12 +7,12 @@
 
   /**
    * Level and XP toward the next level, in the agent's own colour or, by the viewer's preference, its level's colour.
-   * Both dashboards use it in agent lists and on an agent's page; colours come from `levelSettings`, and so does the next
-   * level's XP unless `next` gives the relay's.
+   * Both dashboards use it in agent lists and on an agent's page; colours come from `levelSettings`. `next` is the XP the
+   * next level needs, as the relay's levels say (null at the top level); without it, the level curve gives it.
    */
-  let { agent, next: nextXp, size = 'sm' }: { agent: { id: string; level: number; xp: number }; next?: number; size?: 'sm' | 'lg' } = $props();
+  let { agent, next: given, size = 'sm' }: { agent: { id: string; level: number; xp: number }; next?: number | null; size?: 'sm' | 'lg' } = $props();
 
-  const next = $derived(nextXp ?? levelSettings.xp(agent.level + 1));
+  const next = $derived(given === undefined ? levelSettings.xp(agent.level + 1) : given);
   const colour = $derived(preferences.xpColour === 'level' ? levelSettings.colour(agent.level) : undefined);
 </script>
 
@@ -24,13 +24,13 @@
 >
   <div class="flex items-baseline justify-between gap-3 tabular-nums">
     <span class={size === 'lg' ? 'text-lg font-semibold tracking-tight' : 'text-sm font-medium'}>{levelName(agent.level)}</span>
-    <span class="truncate text-xs text-muted-foreground">{formatNumber(agent.xp)} / {formatNumber(next)} XP</span>
+    <span class="truncate text-xs text-muted-foreground">{formatNumber(agent.xp)}{next === null ? '' : ` / ${formatNumber(next)}`} XP</span>
   </div>
   <Progress
     variant="brand"
-    value={agent.xp}
-    max={next}
+    value={next === null ? 1 : agent.xp}
+    max={next ?? 1}
     class={size === 'lg' ? 'h-2' : undefined}
-    aria-label={`${formatNumber(agent.xp)} of ${formatNumber(next)} XP to ${levelName(agent.level + 1)}`}
+    aria-label={next === null ? `${formatNumber(agent.xp)} XP, the top level` : `${formatNumber(agent.xp)} of ${formatNumber(next)} XP to ${levelName(agent.level + 1)}`}
   />
 </div>

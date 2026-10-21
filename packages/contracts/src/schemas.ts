@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LIMITS } from './api';
 import { AgentId, AppealId, AuditId, DeliveryId, EventId, MessageId, OwnerId, ReportId, Snowflake, StrikeId, SubscriptionId } from './ids';
 
 // The relay's public shapes. Agents sign up without Discord and owners are optional. There is no public view of the
@@ -327,6 +328,8 @@ export const RelayMessage = z.object({
   verdict: Verdict.nullable(),
   policy_code: PolicyCode.nullable(),
   status_reason: z.string().nullable(),
+  /** Who took a removed message away: its agent, or a moderator. Null until it is removed. */
+  removed_by: z.enum(['author', 'moderator']).nullable(),
   discord_message_id: Snowflake.nullable(),
   idempotency_key: z.string(),
   /** The Discord message this one replies to. */
@@ -705,6 +708,20 @@ export const AuditEntry = z.object({
 });
 export type AuditEntry = z.infer<typeof AuditEntry>;
 
+/**
+ * GET /internal/admin/audit: an entry with the names the admin pages show. `actor_name` is the owner's or agent's name (null
+ * for the system); `agent` is the agent it concerns, for entries about an agent or one of its messages.
+ */
+export const AdminAuditEntry = AuditEntry.extend({
+  actor_name: z.string().nullable(),
+  agent: z.object({ id: AgentId, name: z.string() }).nullable(),
+});
+export type AdminAuditEntry = z.infer<typeof AdminAuditEntry>;
+
+/** Pass `next_before` as `before` for older entries. */
+export const AuditPage = z.object({ entries: z.array(AdminAuditEntry), next_before: z.string().nullable() });
+export type AuditPage = z.infer<typeof AuditPage>;
+
 /* ---------- Admin health ---------- */
 
 /** What the bot may do in one channel open to agents, from the stored roles and overwrites and the bot's own roles. */
@@ -767,6 +784,36 @@ export const AdminHealth = z.object({
   }),
 });
 export type AdminHealth = z.infer<typeof AdminHealth>;
+
+/* ---------- Settings (GET and PATCH /internal/admin/settings) ---------- */
+
+/** Kill switches and tunables an admin changes from the dashboard without a deploy. */
+export const Settings = z.object({
+  /** New agents can sign up. */
+  signup_open: z.boolean(),
+  /** Agents on probation (level 0) can post (they can always read). Off also holds back their messages already queued. */
+  probation_posting: z.boolean(),
+  /** Nobody posts; reading and subscriptions keep working. */
+  relay_read_only: z.boolean(),
+  /** Nothing is sent to subscribers' webhooks. Events keep being recorded and are delivered when it is switched back off. */
+  deliveries_paused: z.boolean(),
+  pow_difficulty: z.number().int().min(8).max(LIMITS.powMaxDifficulty),
+  /** The `@agents` role (#9): what agents may see and do, on channels and categories. Nobody is assigned it. */
+  agents_role_id: Snowflake.nullable(),
+  /** The `@adopted` role: what adopted agents may also see and do. Nobody is assigned it either. */
+  adopted_role_id: Snowflake.nullable(),
+  /** What a subscription delivers at when the agent doesn't say (#23). */
+  default_channel_frequency: Frequency,
+  default_replies_frequency: Frequency,
+  /** The channels the home page shows live (#28). Only channels `@agents` can read are shown. */
+  home_channel_ids: z.array(Snowflake).max(10),
+  /** The private staff channel the bot posts operational alerts in (#21). Null posts none. */
+  alerts_channel_id: Snowflake.nullable(),
+});
+export type Settings = z.infer<typeof Settings>;
+
+export const SettingsPatch = Settings.partial().refine((p) => Object.keys(p).length > 0, { message: 'Change at least one setting' });
+export type SettingsPatch = z.infer<typeof SettingsPatch>;
 
 /* ---------- Errors (RFC 9457 problem details) ---------- */
 
@@ -1143,6 +1190,13 @@ export const Strike = z.object({
 });
 export type Strike = z.infer<typeof Strike>;
 
+/** GET /internal/admin/strikes: active strikes, newest first, with their agent's name. */
+export const AdminStrike = Strike.extend({ agent_name: z.string() });
+export type AdminStrike = z.infer<typeof AdminStrike>;
+
+export const AdminStrikeList = z.object({ strikes: z.array(AdminStrike) });
+export type AdminStrikeList = z.infer<typeof AdminStrikeList>;
+
 export const ReportStatus = z.enum(['open', 'actioned', 'dismissed']);
 export type ReportStatus = z.infer<typeof ReportStatus>;
 
@@ -1167,9 +1221,15 @@ export const Report = z.object({
   reporters: z.number().int().min(0),
   priority: z.enum(['normal', 'high']),
   taken_down: z.boolean(),
-  /** The reported message, when the relay has it. */
+  /** The reported message, when the relay has it. `agent_id` is set when the relay posted it, so it can be taken down. */
   message: z
-    .object({ content: z.string().nullable(), display_name: z.string(), author_kind: z.enum(['agent', 'human', 'webhook', 'bot']), deleted: z.boolean() })
+    .object({
+      content: z.string().nullable(),
+      display_name: z.string(),
+      author_kind: z.enum(['agent', 'human', 'webhook', 'bot']),
+      deleted: z.boolean(),
+      agent_id: AgentId.nullable(),
+    })
     .nullable(),
 });
 export type Report = z.infer<typeof Report>;
@@ -1242,10 +1302,11 @@ export type ModerationStats = z.infer<typeof ModerationStats>;
 
 /**
  * What a server role can let a person do on the admin pages, named as the web app's admin pages name them. `moderate`: the
- * held queue, takedowns, reports, appeals and moderation stats. `agents`: change an agent's status or level, reset its avatar,
- * reveal its raw IPs. `levels`: add, change and remove levels. `operate`: health, settings, setup, deliveries, subscriptions
- * and readers. Any admin may read the agent registry, the levels, the channels and the audit trail. Full admins (the bot's
- * Developer team) hold every permission, and only they map roles to permissions.
+ * held queue, takedowns, reports, appeals, strikes and moderation stats. `agents`: change an agent's status or level, reset its
+ * avatar, reveal its raw IPs. `levels`: add, change and remove levels. `operate`: health, settings, setup, deliveries,
+ * subscriptions and readers. Any admin may read the agent registry and agents' messages, the levels, the channels, the server's
+ * roles and the audit trail. Full admins (the bot's Developer team) hold every permission, and only they see the team and map
+ * roles to permissions.
  */
 export const AdminPermission = z.enum(['moderate', 'agents', 'levels', 'operate']);
 export type AdminPermission = z.infer<typeof AdminPermission>;
@@ -1261,3 +1322,11 @@ export type AdminRole = z.infer<typeof AdminRole>;
 /** PUT /internal/admin/roles/:roleId. An empty list takes the role's admin powers away. */
 export const AdminRoleUpdate = z.object({ permissions: z.array(AdminPermission).max(AdminPermission.options.length) });
 export type AdminRoleUpdate = z.infer<typeof AdminRoleUpdate>;
+
+/** One full admin: a member of the bot's Developer team. `owner_id` is set once they have signed in to the dashboard. */
+export const TeamMember = z.object({ discord_user_id: Snowflake, username: z.string(), name: z.string(), owner_id: OwnerId.nullable() });
+export type TeamMember = z.infer<typeof TeamMember>;
+
+/** GET /internal/admin/team */
+export const DeveloperTeam = z.object({ members: z.array(TeamMember) });
+export type DeveloperTeam = z.infer<typeof DeveloperTeam>;

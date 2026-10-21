@@ -6,7 +6,8 @@
 
   /**
    * DESIGN.md's confirmation pattern: the title is the question, the confirm button repeats the verb,
-   * one line of consequence. `onConfirm` may be async; the dialog waits for it with a spinner, then closes.
+   * one line of consequence. `onConfirm` may be async; the dialog waits for it with a spinner, then closes,
+   * unless it returns false (a field in `children` needs fixing first).
    */
   let {
     open = $bindable(false),
@@ -23,7 +24,7 @@
     confirm: string;
     destructive?: boolean;
     onConfirm: () => Promise<unknown> | unknown;
-    /** Extra fields between the description and the buttons, such as a duration. */
+    /** Extra fields between the description and the buttons, such as a reason. */
     children?: Snippet;
   } = $props();
 
@@ -31,9 +32,9 @@
 
   async function run() {
     pending = true;
-    await onConfirm();
+    const done = await onConfirm();
     pending = false;
-    open = false;
+    if (done !== false) open = false;
   }
 </script>
 

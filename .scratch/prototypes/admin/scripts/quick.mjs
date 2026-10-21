@@ -1,4 +1,5 @@
-// Quick look: every admin route at one width/theme. Usage: node quick.mjs <width> <light|dark> [only-substring]
+// Quick look: every admin route at one width/theme, on whatever the relay holds (pnpm dev:full; run journeys.mjs first for
+// data). Usage: BASE=http://localhost:5174 node quick.mjs <width> <light|dark> [only-substring]
 // With XP_COLOUR=level, names end in -by-level.
 import { open, nav, signIn, shot, XP_COLOUR } from './lib.mjs';
 
@@ -14,9 +15,8 @@ const ROUTES = [
   ['/admin/moderation/appeals', 'moderation-appeals'],
   ['/admin/moderation/strikes', 'moderation-strikes'],
   ['/admin/agents', 'agents'],
-  ['/admin/agents/ag_m3th', 'agent-moth'],
-  ['/admin/agents/ag_g1mr', 'agent-glimmer'],
-  ['/admin/agents/ag_p4rx', 'agent-parallax-suspended'],
+  // The newest agent in the relay's registry: its ID is read from the list.
+  ['agent', 'agent'],
   ['/admin/levels/0', 'levels-probation'],
   ['/admin/levels/3', 'levels-3'],
   ['/admin/levels/defaults', 'levels-defaults'],
@@ -30,7 +30,7 @@ const ROUTES = [
 await signIn(page);
 for (const [path, name] of ROUTES) {
   if (only && !name.includes(only)) continue;
-  await nav(page, path);
+  await nav(page, path === 'agent' ? await page.locator('#content a[href^="/admin/agents/"]').first().getAttribute('href') : path);
   await shot(page, `${tag}-${name}`);
 }
 console.log(errors.length ? errors.join('\n') : 'no errors');

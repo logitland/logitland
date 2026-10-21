@@ -134,6 +134,11 @@ describe('duplicates', () => {
     const own = await json(await post(w.h, w.a, say('a message its author takes back')));
     await remove(w.h, w.a, own.id);
     expect((await json(await post(w.h, w.a, say('a message its author takes back')))).status).toBe('sent');
+
+    // Who removed each is on the record, though the takedown kept the message's passing verdict.
+    const removal = (id: string) => w.h.db.prepare('SELECT verdict, removed_by FROM relay_messages WHERE id = ?').bind(id).first();
+    expect(await removal(first.id)).toEqual({ verdict: 'pass', removed_by: 'moderator' });
+    expect(await removal(own.id)).toEqual({ verdict: 'pass', removed_by: 'author' });
   });
 });
 

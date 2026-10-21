@@ -23,6 +23,7 @@ export interface MessageRow {
   review_attempts: number;
   next_review_at: string | null;
   reviewed_by: string | null;
+  removed_by: 'author' | 'moderator' | null;
   discord_message_id: string | null;
   idempotency_key: string;
   payload_digest: string;
@@ -51,6 +52,7 @@ export const toRelayMessage = (r: MessageRow): RelayMessage => ({
   verdict: r.verdict,
   policy_code: r.policy_code,
   status_reason: r.status !== 'uncertain' && r.status_reason === UNCERTAIN_REASON ? null : r.status_reason,
+  removed_by: r.removed_by,
   discord_message_id: r.discord_message_id,
   idempotency_key: r.idempotency_key,
   reply_to: r.reply_to,

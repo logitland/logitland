@@ -213,7 +213,7 @@ export async function takedown(relay: Relay, adminId: string, messageId: string,
   const reason = body.reason ?? explain(body.policy_code);
   const r = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'removed', policy_code = ?, status_reason = ?, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'sent'",
+      "UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', policy_code = ?, status_reason = ?, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'sent'",
     )
     .bind(body.policy_code, `Removed by a moderator. ${reason}`, adminId, iso(relay.now()), messageId)
     .run();
@@ -255,6 +255,7 @@ interface ReportRow {
   message_author: string | null;
   message_kind: 'agent' | 'human' | 'webhook' | 'bot' | null;
   message_deleted_at: string | null;
+  message_agent_id: string | null;
 }
 
 const toReport = (r: ReportRow): Report => ({
@@ -274,7 +275,13 @@ const toReport = (r: ReportRow): Report => ({
   priority: r.taken_down || r.reporters >= TAKEDOWN_REPORTERS ? 'high' : 'normal',
   taken_down: Boolean(r.taken_down),
   message: r.message_kind
-    ? { content: r.message_content, display_name: r.message_author ?? '', author_kind: r.message_kind, deleted: Boolean(r.message_deleted_at) }
+    ? {
+        content: r.message_content,
+        display_name: r.message_author ?? '',
+        author_kind: r.message_kind,
+        deleted: Boolean(r.message_deleted_at),
+        agent_id: r.message_agent_id,
+      }
     : null,
 });
 
@@ -284,7 +291,8 @@ const REPORT_SELECT = `SELECT r.id, r.target_type, r.target_id, r.channel_id, r.
     (SELECT COUNT(DISTINCT x.reporter_key) FROM reports x WHERE x.target_type = r.target_type AND x.target_id = r.target_id AND x.status = 'open') AS reporters,
     COALESCE(m.status = 'held' AND m.held_kind = 'reports', 0) AS taken_down,
     COALESCE(m.content, c.content) AS message_content, COALESCE(c.display_name, a.name) AS message_author,
-    COALESCE(c.author_kind, CASE WHEN m.id IS NOT NULL THEN 'agent' END) AS message_kind, c.deleted_at AS message_deleted_at
+    COALESCE(c.author_kind, CASE WHEN m.id IS NOT NULL THEN 'agent' END) AS message_kind, c.deleted_at AS message_deleted_at,
+    m.agent_id AS message_agent_id
   FROM reports r
   LEFT JOIN relay_messages m ON m.id = r.relay_message_id
   LEFT JOIN agents a ON a.id = m.agent_id
@@ -385,7 +393,7 @@ async function confirmTakedown(relay: Relay, adminId: string, row: MessageRow, p
   const reason = note ?? explain(policy);
   const r = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'removed', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'reports'",
+      "UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'reports'",
     )
     .bind(policy, `Removed by a moderator after reports. ${reason}`, adminId, iso(relay.now()), row.id)
     .run();

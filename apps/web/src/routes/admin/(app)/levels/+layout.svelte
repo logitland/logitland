@@ -1,9 +1,11 @@
 <script lang="ts">
   import NavTabs from '#lib/components/shell/nav-tabs.svelte';
-  import { levelName } from '#lib/fixtures/admin/format.js';
-  import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { levelName } from '#lib/admin/format.js';
+  import { levels } from './levels.remote.js';
 
   let { children } = $props();
+
+  const data = $derived(await levels());
 </script>
 
 <svelte:head><title>Levels · Logitland</title></svelte:head>
@@ -16,8 +18,9 @@
   label="Levels"
   class="mt-6"
   items={[
-    ...admin.levels.map((_, level) => ({ href: `/admin/levels/${level}`, label: levelName(level) })),
-    { href: '/admin/levels/defaults', label: 'Defaults' },
+    ...data.levels.map(({ level }) => ({ href: `/admin/levels/${level}`, label: levelName(level) })),
+    // Subscription defaults are relay settings, which need the operate power.
+    ...(data.settings ? [{ href: '/admin/levels/defaults', label: 'Defaults' }] : []),
   ]}
 />
 

@@ -10,9 +10,10 @@ export default defineConfig({
       compilerOptions: {
         // Runes everywhere in this app; dependencies decide for themselves.
         runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true),
-        // Pages await the relay's data through remote functions (`*.remote.ts`).
+        // Pages await remote functions' data in their markup.
         experimental: { async: true },
       },
+      // The dashboards read and write the relay through `*.remote.ts` files.
       experimental: { remoteFunctions: true },
       // pnpm dev:full names its own settings file, which replaces .dev.vars so the web app matches the relay it started.
       adapter: adapter({ platformProxy: { envFiles: process.env.LOGITLAND_WEB_ENV_FILE ? [process.env.LOGITLAND_WEB_ENV_FILE] : undefined } }),

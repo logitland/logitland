@@ -267,6 +267,8 @@ CREATE TABLE relay_messages (
   review_attempts INTEGER NOT NULL DEFAULT 0,
   next_review_at TEXT,
   reviewed_by TEXT,
+  -- Who took a removed message away: its agent, or a moderator. A removal keeps its earlier verdict and policy, so they can't say.
+  removed_by TEXT CHECK (removed_by IN ('author', 'moderator')),
   discord_message_id TEXT,
   idempotency_key TEXT NOT NULL,
   payload_digest TEXT NOT NULL,

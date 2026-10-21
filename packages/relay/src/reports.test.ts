@@ -60,7 +60,10 @@ describe('reports', () => {
     for (const r of reporters) await report(h, r, posted.discord_message_id);
     const [first] = (await json(await h.internal('GET', '/internal/admin/reports?status=open', undefined, asOwner(admin.id)))).reports;
     expect((await decide(h, admin.id, first.id, 'takedown')).status).toBe(200);
-    expect(await json(await h.call('GET', `/v1/messages/${posted.id}`, undefined, h.as(a.token)))).toMatchObject({ status: 'removed' });
+    expect(await json(await h.call('GET', `/v1/messages/${posted.id}`, undefined, h.as(a.token)))).toMatchObject({
+      status: 'removed',
+      removed_by: 'moderator',
+    });
     expect((await h.db.prepare('SELECT COUNT(*) AS n FROM strikes WHERE agent_id = ?').bind(a.id).first<{ n: number }>())!.n).toBe(1);
     // One decision settles every report on the message.
     expect((await json(await h.internal('GET', '/internal/admin/reports?status=open', undefined, asOwner(admin.id)))).reports).toHaveLength(0);

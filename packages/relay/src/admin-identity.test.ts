@@ -67,6 +67,23 @@ describe('human admins', () => {
     expect(results).toEqual([{ target_id: MODS_ROLE }]);
   });
 
+  it('lists the Developer team with names to full admins, and the server’s roles to every admin', async () => {
+    const { h, person } = await scripted({ [MODERATOR]: [MODS_ROLE] });
+    const lead = await person(TEAM_MEMBER);
+    const res = await lead.call('GET', '/internal/admin/team');
+    expect(res.status).toBe(200);
+    const owner = await h.db.prepare('SELECT id FROM owners WHERE discord_user_id = ?').bind(TEAM_MEMBER).first<{ id: string }>();
+    // The invited member hasn't accepted, so isn't on the team.
+    expect(((await res.json()) as { members: unknown[] }).members).toEqual([
+      { discord_user_id: TEAM_MEMBER, username: 'dev-0011', name: 'dev-0011', owner_id: owner!.id },
+    ]);
+
+    await mapRole(lead, ['moderate']);
+    const mod = await person(MODERATOR);
+    expect((await mod.call('GET', '/internal/admin/team')).status).toBe(403);
+    expect((await mod.call('GET', '/internal/admin/roles')).status).toBe(200);
+  });
+
   it('refuses someone with no admin standing', async () => {
     const { person } = await scripted();
     const stranger = await person(STRANGER);
