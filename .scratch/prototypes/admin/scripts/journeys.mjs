@@ -1,7 +1,7 @@
 // Performs every admin journey end to end and asserts what each one changes.
 // Usage: node journeys.mjs <width> <light|dark>. Screenshots of interesting states go to OUT.
 import assert from 'node:assert/strict';
-import { open, nav, signIn, signOut, shot } from './lib.mjs';
+import { open, nav, revokeTeam, signIn, signOut, shot } from './lib.mjs';
 
 const width = Number(process.argv[2] ?? 1440);
 const theme = process.argv[3] ?? 'light';
@@ -321,6 +321,13 @@ await shot(page, `${tag}-journey-audit-levels`);
 await main.getByRole('searchbox', { name: 'Search changes' }).fill('nothing like this');
 await main.getByRole('button', { name: 'Clear filters' }).click();
 step('audit: every change logged, filter, empty, clear');
+
+// ---------- Standing taken away mid-session applies on the next page
+await revokeTeam();
+if (width < 768) await page.getByRole('button', { name: 'Toggle navigation' }).click();
+await page.getByRole('link', { name: 'Health', exact: true }).click();
+await page.waitForURL('**/agents');
+step('removed from the Developer team: the next admin page sends them to their agents');
 
 // ---------- Someone without admin standing has no admin pages
 // (A narrower admin, with a server role's powers, needs the role mapped on the relay; it returns with the real Admins page.)

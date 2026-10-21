@@ -8,8 +8,10 @@ import { relay } from './relay.js';
  * Without a session, the page sends the person to sign in and back.
  */
 export async function signedIn(event: ServerLoadEvent): Promise<{ person: Person; standing: AdminStanding }> {
+  // Reading the path makes every navigation re-run the dashboards' layouts, so standing taken away applies on the next page.
+  const path = event.url.pathname;
   const owner = event.locals.owner;
-  if (!owner) redirect(303, `/sign-in?next=${encodeURIComponent(event.url.pathname)}`);
+  if (!owner) redirect(303, `/sign-in?next=${encodeURIComponent(path)}`);
   const standing = await relay<AdminStanding>(event, `/internal/owners/${owner.id}/admin`);
   return { person: { id: owner.id, name: owner.username, handle: owner.username, team: standing.full, roles: [] }, standing };
 }

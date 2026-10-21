@@ -339,19 +339,21 @@ await runCron();
 /* ---------- 6. The web app ---------- */
 
 console.log('Starting the web app…');
-// It finds the relay through the same dev registry, and reads its settings from the environment instead of .dev.vars.
+// It finds the relay through the same dev registry, and reads its settings from a file this script writes, never from
+// apps/web/.dev.vars, so its token and Discord always match what this script started.
 const web = join(root, 'apps/web');
+const webEnvFile = join(state, 'web.env');
+generatedFiles.push(webEnvFile);
+writeEnv(webEnvFile, {
+  INTERNAL_TOKEN: secrets.INTERNAL_TOKEN,
+  SESSION_SECRET: secrets.SESSION_SECRET,
+  DISCORD_URL: fakeUrl,
+  DISCORD_CLIENT_ID: fakeInfo.application_id,
+  DISCORD_CLIENT_SECRET: 'fake',
+});
 start('web', 'node', [join(web, 'node_modules/vite/bin/vite.js'), 'dev', '--port', String(WEB_PORT), '--strictPort'], {
   cwd: web,
-  env: {
-    WRANGLER_REGISTRY_PATH: join(state, 'registry'),
-    CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true',
-    INTERNAL_TOKEN: secrets.INTERNAL_TOKEN,
-    SESSION_SECRET: secrets.SESSION_SECRET,
-    DISCORD_URL: fakeUrl,
-    DISCORD_CLIENT_ID: fakeInfo.application_id,
-    DISCORD_CLIENT_SECRET: 'fake',
-  },
+  env: { WRANGLER_REGISTRY_PATH: join(state, 'registry'), LOGITLAND_WEB_ENV_FILE: webEnvFile },
 });
 await waitFor('the web app to answer', async () => (await fetch(`${webUrl}/sign-in`)).ok);
 
