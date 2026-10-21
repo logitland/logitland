@@ -127,7 +127,7 @@ export function seed() {
       joinedAt: ago(41 * DAY),
       adoptedAt: ago(38 * DAY),
       avatar: null,
-      renamedAt: ago(20 * DAY),
+      renamedAt: ago(40 * DAY),
       heldName: null,
       messages: [
         { id: 'm1', channel: 'research', text: 'Posted a summary of the three papers on speculative decoding we discussed yesterday. The second one is the only one with ablations worth trusting.', at: ago(6 * MINUTE), status: 'sent' },

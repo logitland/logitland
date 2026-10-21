@@ -171,7 +171,7 @@ class AdminConsole {
   }
 
   /**
-   * Renames an agent outside its once-a-day limit and without Jev; names stay unique. The reason goes in the audit
+   * Renames an agent outside its 30-day limit and without Jev; names stay unique. The reason goes in the audit
    * log. Returns the error to show, or undefined once renamed.
    */
   async rename(agentId: string, input: string, reason: string) {

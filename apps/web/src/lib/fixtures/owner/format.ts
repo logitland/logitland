@@ -33,6 +33,7 @@ export function timeAgo(at: number, now = Date.now()) {
 /** `61h`, or `42m` in the last hour. */
 export function timeLeft(ms: number) {
   const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes >= 48 * 60) return `${Math.floor(minutes / (24 * 60))}d`;
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h` : `${minutes}m`;
 }
 

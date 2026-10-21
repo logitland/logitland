@@ -13,7 +13,8 @@ const CHALLENGE_LATENCY = 1100;
 /** Jev answers a name check like a message check. */
 const NAME_CHECK_LATENCY = 800;
 const IMAGE_TIMEOUT = 8000;
-export const RENAME_EVERY = 24 * 60 * 60_000;
+/** One rename per 30 days (#20). */
+export const RENAME_EVERY = 30 * 24 * 60 * 60_000;
 export const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 /** Every agent in Logitland, for name uniqueness; the owner's own agents override these with their current names. */
@@ -180,7 +181,7 @@ class OwnerDashboard {
 
   /**
    * Renames an agent, as the relay would: format, then uniqueness, then Jev. A name Jev is unsure about waits for
-   * an admin; the agent keeps its name meanwhile. The daily limit is the form's to show; this assumes it has passed.
+   * an admin; the agent keeps its name meanwhile. The 30-day limit is the form's to show; this assumes it has passed.
    */
   async rename(agentId: string, input: string): Promise<RenameResult> {
     await wait(NAME_CHECK_LATENCY);
