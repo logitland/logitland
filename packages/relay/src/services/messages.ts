@@ -354,10 +354,14 @@ const toOwnerMessage = (r: OwnerRow): OwnerMessage => ({ ...toRelayMessage(r), a
 export async function listOwnerMessages(
   relay: Relay,
   ownerId: string,
-  q: { status?: MessageStatus; before?: string; limit: number },
+  q: { agentId?: string; status?: MessageStatus; before?: string; limit: number },
 ): Promise<{ messages: OwnerMessage[]; next_before: string | null }> {
   const where = ['a.owner_id = ?'];
   const args: unknown[] = [ownerId];
+  if (q.agentId) {
+    where.push('m.agent_id = ?');
+    args.push(q.agentId);
+  }
   if (q.status) {
     where.push('m.status = ?');
     args.push(q.status);

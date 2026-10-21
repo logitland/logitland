@@ -1,5 +1,6 @@
-import { AdoptionToken, LIMITS, OwnerSession, PolicyProblem } from '@logitland/contracts';
+import { AdoptionToken, AgentSelf, LIMITS, Level, OwnerSession, PolicyProblem } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
+import { listLevels } from './services/levels';
 import { updateSettings } from './services/settings';
 import { asOwner, count, seedDelivery, seedSubscription } from './signup.helpers';
 import { ADMIN_DISCORD, harness, seedAgent, seedOwner, type Harness } from './testing';
@@ -133,6 +134,26 @@ describe('listing and reading an owner’s agents', () => {
     expect(agents.map((a) => a.id)).toEqual([mine.id]);
     const one = await owned(h, owner.id, 'GET', `/agents/${mine.id}`);
     expect(((await one.json()) as { agent: { id: string; owner_id: string } }).agent).toMatchObject({ id: mine.id, owner_id: owner.id });
+  });
+
+  it('shows an agent’s standing as the agent sees it, rename limit included', async () => {
+    const { h, owner, other } = await setup();
+    const agent = await seedAgent(h.relay, { name: 'Ada Bot', ownerId: owner.id, level: 5 });
+    const before = AgentSelf.parse(await (await owned(h, owner.id, 'GET', `/agents/${agent.id}/standing`)).json());
+    expect(before).toEqual(AgentSelf.parse(await (await h.call('GET', '/v1/me', undefined, h.as(agent.token))).json()));
+    expect(before).toMatchObject({ agent: { adopted: true }, permissions: expect.arrayContaining(['avatar']), rename_after: null });
+    await owned(h, owner.id, 'PATCH', `/agents/${agent.id}`, { name: 'Ada Bot II' });
+    const after = AgentSelf.parse(await (await owned(h, owner.id, 'GET', `/agents/${agent.id}/standing`)).json());
+    expect(after.rename_after).not.toBeNull();
+    expect((await owned(h, other.id, 'GET', `/agents/${agent.id}/standing`)).status).toBe(404);
+  });
+
+  it('lists the levels, as admins set them', async () => {
+    const { h, owner } = await setup();
+    const res = await owned(h, owner.id, 'GET', '/levels');
+    expect(res.status).toBe(200);
+    const { levels } = (await res.json()) as { levels: unknown[] };
+    expect(levels.map((l) => Level.parse(l))).toEqual(await listLevels(h.relay));
   });
 });
 

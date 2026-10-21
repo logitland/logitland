@@ -4,7 +4,8 @@ import { adminStanding } from '../services/admins';
 import { cancelAdoptionToken, createAdoptionToken, getAdoptionToken } from '../services/adoption';
 import { decideClaim, lookupClaim } from '../services/claims';
 import { deleteOwner, getOwner, listOwnerAgents, ownedAgent, revokeRegistration, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
-import { updateProfile } from '../services/signup';
+import { listLevels } from '../services/levels';
+import { agentSelf, updateProfile } from '../services/signup';
 import { body, type RegisterRoutes } from './shared';
 
 // What a signed-in owner does with their agents. The internal app has already checked the dashboard token and that
@@ -37,6 +38,14 @@ export const register: RegisterRoutes = (app, relay) => {
   app.get('/internal/owners/:ownerId/agents/:agentId', async (c) =>
     c.json({ agent: toAgent(relay, await ownedAgent(relay, c.req.param('ownerId'), c.req.param('agentId'))) }),
   );
+
+  app.get('/internal/owners/:ownerId/agents/:agentId/standing', async (c) => {
+    const agent = await ownedAgent(relay, c.req.param('ownerId'), c.req.param('agentId'));
+    return c.json(await agentSelf(relay, { agent, scopes: agent.scopes }));
+  });
+
+  // What each level permits, so owner screens can say which level unlocks what.
+  app.get('/internal/owners/:ownerId/levels', async (c) => c.json({ levels: await listLevels(relay) }));
 
   app.get('/internal/owners/:ownerId/claims/:code', async (c) => c.json(await lookupClaim(relay, c.req.param('ownerId'), c.req.param('code'))));
 
