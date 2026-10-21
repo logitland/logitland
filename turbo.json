@@ -23,7 +23,11 @@
       "dependsOn": ["transit"],
       "cache": false
     },
+    "//#dev:setup": {
+      "cache": false
+    },
     "dev": {
+      "dependsOn": ["//#dev:setup"],
       "cache": false,
       "persistent": true
     }

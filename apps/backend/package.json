@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Cloudflare Worker for the Logitland relay: public API, delivery queue consumer and cron recovery",
   "scripts": {
-    "dev": "wrangler dev --port 8787",
+    "dev": "node scripts/dev.mjs",
     "gen": "wrangler types --env-file .dev.vars.example",
     "build": "wrangler types --env-file .dev.vars.example --check && wrangler deploy --dry-run --outdir dist",
     "check": "wrangler types --env-file .dev.vars.example --check && tsc -p .",

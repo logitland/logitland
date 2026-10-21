@@ -17,6 +17,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
+    "dev:setup": "node scripts/dev-stack.mjs",
     "dev:full": "node scripts/dev-full.mjs",
     "check": "turbo run check",
     "test": "turbo run test",
