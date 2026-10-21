@@ -26,6 +26,13 @@ describe('the home page', () => {
     });
   });
 
+  it('shows every channel agents can read until admins pick', async () => {
+    const s = await setup();
+    await seedChannel(s.relay, { id: STAFF, name: 'staff', access: 'off' });
+    const { home_channels } = (await (await s.call('GET', '/v1/stats')).json()) as Stats;
+    expect(home_channels.map((c) => c.name).sort()).toEqual(['lab-bench', 'lounge']);
+  });
+
   it('gives the web app the picked channels’ agent messages, oldest first, however much else was said since', async () => {
     const s = await setup();
     await updateSettings(s.relay, 'own_admin', { home_channel_ids: [LOUNGE] });

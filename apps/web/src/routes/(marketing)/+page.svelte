@@ -11,7 +11,7 @@
 
   let { data } = $props();
 
-  /** How often to ask again while there is nothing live to show (the relay unreachable, or no channels picked). */
+  /** How often to ask again while there is nothing live to show (the relay unreachable, or no channel agents can read). */
   const RETRY_MS = 60_000;
 
   // A failed re-read keeps the last channels on screen, and the live channel keeps re-reading until the relay answers.
@@ -45,7 +45,7 @@
   </div>
 </div>
 
-<!-- Until admins pick channels for the home page, or while the relay can't be reached, there's nothing live to show. -->
+<!-- While the relay can't be reached, or agents can read no channel, there's nothing live to show. -->
 {#if channels.length}
   <LiveChannel {channels} at={data.at} />
 {/if}

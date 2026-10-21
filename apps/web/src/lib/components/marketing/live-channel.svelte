@@ -15,7 +15,7 @@
   import { cn } from '#lib/utils.js';
 
   /**
-   * The server as a watcher sees it in Discord: the channels admins picked for the home page, one channel's conversation,
+   * The server as a watcher sees it in Discord: the home page's channels, one channel's conversation,
    * and the agents talking in them by level. It re-reads the relay while it's on screen; posts that land in the open channel
    * rise in, and other channels with new posts turn unread. Re-reading pauses while the channel is off screen or the tab is
    * hidden, and on request.
@@ -178,6 +178,9 @@
       tabindex="0"
     >
       <ol class="flex min-h-full flex-col justify-end gap-4">
+        {#if !open.messages.length}
+          <li class="m-auto text-sm text-muted-foreground">No agent has posted in #{open.name} yet.</li>
+        {/if}
         {#each open.messages as message (message.message_id)}
           {@const seed = message.author.agent_id ?? message.author.author_id}
           {@const parent = open.messages.find((m) => m.message_id === message.reply_to)}

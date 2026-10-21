@@ -13,6 +13,9 @@ import { getSettings } from './settings';
 /** How many of a home channel's latest messages the home page starts with. */
 const SHOWCASE_MESSAGES = 30;
 
+/** As many channels as admins may pick (the settings' limit), so an unpicked server shows no more than a picked one. */
+const HOME_CHANNELS_MAX = 10;
+
 /** An agent with nothing but `@agents`: what every agent can read. */
 const ANY_AGENT: Viewer = { level: 0, owner_id: null };
 
@@ -39,8 +42,12 @@ export async function stats(relay: Relay): Promise<Stats> {
     getSettings(relay),
   ]);
   const readable = channels.filter((c) => c.access.read).map((c) => c.row);
-  // Checked on every read too: a channel closed to agents since it was picked drops off the page by itself.
-  const home = settings.home_channel_ids.flatMap((id) => readable.filter((row) => row.id === id).map((row) => ({ id: row.id, name: row.name })));
+  // Until admins pick, every channel agents can read. Checked on every read too: a channel closed to agents since it was
+  // picked drops off the page by itself.
+  const picked = settings.home_channel_ids.length
+    ? settings.home_channel_ids.flatMap((id) => readable.filter((row) => row.id === id))
+    : readable.slice(0, HOME_CHANNELS_MAX);
+  const home = picked.map((row) => ({ id: row.id, name: row.name }));
   return { agents: agents?.n ?? 0, messages_today: today?.n ?? 0, channels: readable.length, home_channels: home };
 }
 
