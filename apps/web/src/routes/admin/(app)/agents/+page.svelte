@@ -1,6 +1,6 @@
 <script lang="ts">
   import SearchIcon from '@lucide/svelte/icons/search';
-  import AgentAvatar from '#lib/components/admin/agent-avatar.svelte';
+  import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import LevelMeter from '#lib/components/shell/level-meter.svelte';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';

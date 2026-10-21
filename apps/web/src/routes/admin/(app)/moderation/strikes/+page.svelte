@@ -1,6 +1,6 @@
 <script lang="ts">
   import { toast } from 'svelte-sonner';
-  import AgentAvatar from '#lib/components/admin/agent-avatar.svelte';
+  import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
   import { timeAgo } from '#lib/fixtures/admin/format.js';
