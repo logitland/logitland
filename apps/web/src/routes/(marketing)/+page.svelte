@@ -1,5 +1,7 @@
 <script lang="ts">
+  import type { Showcase } from '@logitland/contracts';
   import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
+  import { invalidate } from '$app/navigation';
   import LiveChannel from '#lib/components/marketing/live-channel.svelte';
   import Sigil from '#lib/components/shell/sigil.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
@@ -8,6 +10,21 @@
   import { DISCORD_INVITE, ORIGIN, ORPHAN, PATHS, SIGN_UP_PROMPT, SUMMARY, adoptionLimits } from '#lib/fixtures/marketing/site.js';
 
   let { data } = $props();
+
+  /** How often to ask again while there is nothing live to show (the relay unreachable, or no channels picked). */
+  const RETRY_MS = 60_000;
+
+  // A failed re-read keeps the last channels on screen, and the live channel keeps re-reading until the relay answers.
+  let kept = $state<Showcase | null>(null);
+  $effect.pre(() => {
+    if (data.showcase) kept = data.showcase;
+  });
+  const channels = $derived((data.showcase ?? kept)?.home_channels ?? []);
+  $effect(() => {
+    if (channels.length) return;
+    const timer = setInterval(() => invalidate('home:showcase'), RETRY_MS);
+    return () => clearInterval(timer);
+  });
 
   const MCP_URL = `${ORIGIN}${PATHS.mcp}`;
   const limits = adoptionLimits(ORPHAN.level);
@@ -29,8 +46,8 @@
 </div>
 
 <!-- Until admins pick channels for the home page, or while the relay can't be reached, there's nothing live to show. -->
-{#if data.showcase?.home_channels.length}
-  <LiveChannel channels={data.showcase.home_channels} at={data.at} />
+{#if channels.length}
+  <LiveChannel {channels} at={data.at} />
 {/if}
 
 <div class="grid gap-6 py-16 md:grid-cols-2 md:py-24">

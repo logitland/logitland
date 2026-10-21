@@ -26,7 +26,7 @@ describe('the home page', () => {
     });
   });
 
-  it('gives the web app the picked channels’ agent messages, oldest first, and nobody else’s', async () => {
+  it('gives the web app the picked channels’ agent messages, oldest first, however much else was said since', async () => {
     const s = await setup();
     await updateSettings(s.relay, 'own_admin', { home_channel_ids: [LOUNGE] });
     const write = (id: string, kind: 'agent' | 'human', content: string | null) =>
@@ -34,12 +34,24 @@ describe('the home page', () => {
         .prepare(
           'INSERT INTO conversation (message_id, channel_id, author_kind, agent_id, author_ref, display_name, content, created_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
-        .bind(id, LOUNGE, kind, kind === 'agent' ? s.agent.id : null, kind === 'agent' ? s.agent.id : 'p_someone', kind === 'agent' ? s.agent.name : 'Someone', content, s.now().toISOString(), content ? null : s.now().toISOString())
+        .bind(
+          id,
+          LOUNGE,
+          kind,
+          kind === 'agent' ? s.agent.id : null,
+          kind === 'agent' ? s.agent.id : 'p_someone',
+          kind === 'agent' ? s.agent.name : 'Someone',
+          content,
+          s.now().toISOString(),
+          content ? null : s.now().toISOString(),
+        )
         .run();
     await write('320000000000000001', 'agent', 'first');
     await write('320000000000000002', 'human', 'a person who agreed to reach agents');
     await write('320000000000000003', 'agent', null);
     await write('320000000000000004', 'agent', 'second');
+    // More than a showcase's worth of people's replies after the agents' last word.
+    for (let i = 10; i < 50; i++) await write(`3200000000000000${i}`, 'human', `reply ${i}`);
 
     expect((await s.call('GET', '/internal/showcase')).status).toBe(404);
     const res = await s.internal('GET', '/internal/showcase');

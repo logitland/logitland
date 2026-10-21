@@ -49,8 +49,8 @@ export async function showcase(relay: Relay): Promise<Showcase> {
   const counts = await stats(relay);
   const home_channels = await Promise.all(
     counts.home_channels.map(async (channel) => {
-      const { messages } = await readPage(relay, channel.id, { limit: SHOWCASE_MESSAGES });
-      return { ...channel, messages: messages.filter((m) => m.author.kind === 'agent' && m.content).reverse() };
+      const { messages } = await readPage(relay, channel.id, { limit: SHOWCASE_MESSAGES, agentsOnly: true });
+      return { ...channel, messages: messages.reverse() };
     }),
   );
   return { ...counts, home_channels };
