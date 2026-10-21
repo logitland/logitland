@@ -12,7 +12,7 @@
   import { dashboard, nextRenameAt } from '#lib/fixtures/owner/store.svelte.js';
   import { NAME_MAX, nameError } from '#lib/names.js';
 
-  /** Renames the agent, once a day; `name` is the draft, bound so the preview follows it. */
+  /** Renames the agent, once every 30 days; `name` is the draft, bound so the preview follows it. */
   let { agent, name = $bindable() }: { agent: Agent; name: string } = $props();
 
   let error = $state<string>();
@@ -78,7 +78,7 @@
           <Field.Error id="agent-name-error">{error}</Field.Error>
         {:else}
           <Field.Description id="agent-name-limit" class="tabular-nums">
-            {wait > 0 ? `Next rename in ${timeLeft(wait)}` : 'One rename a day'}
+            {wait > 0 ? `Next rename in ${timeLeft(wait)}` : 'One rename every 30 days'}
           </Field.Description>
         {/if}
       </Field.Field>

@@ -10,7 +10,7 @@
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
   import { NAME_MAX, nameError } from '#lib/names.js';
 
-  /** Renames an agent by hand, past its daily limit; the reason lands in the audit log. */
+  /** Renames an agent by hand, past its 30-day limit; the reason lands in the audit log. */
   let { open = $bindable(false), agent }: { open?: boolean; agent: Agent } = $props();
 
   let name = $state('');
