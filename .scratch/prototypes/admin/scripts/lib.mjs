@@ -1,4 +1,4 @@
-// Shared Playwright helpers for driving the admin dashboard prototype.
+// Shared Playwright helpers for driving the admin dashboard against the relay (pnpm dev:full).
 // Needs playwright-core installed under PW_DIR (default /tmp/owner-proto/pw) and Chromium at /usr/bin/chromium.
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -24,11 +24,12 @@ export async function open({ width, theme }) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  // The fake Discord's sign-in picker has no favicon; that 404 isn't the dashboard's.
+  page.on('console', (m) => m.type() === 'error' && !m.location().url.endsWith('/favicon.ico') && errors.push(m.text()));
   return { browser, page, errors };
 }
 
-/** Client-side navigation, so the in-memory store survives. */
+/** Client-side navigation, as an admin clicking through the sidebar would. */
 export async function nav(page, path) {
   await page.evaluate((p) => {
     const a = document.createElement('a');
@@ -55,11 +56,13 @@ export async function signIn(page, { as = 'Luna (admin)', lands = '**/admin/mode
 }
 
 /**
- * Empties the fake application's Developer team and clears the relay's cached Discord answers, so whoever was a full admin
- * no longer is. FAKE is the fake Discord's address; the relay's local database is this checkout's.
+ * Sets the fake application's Developer team (Discord user IDs) and clears the relay's cached Discord answers, so the
+ * change applies at once: `setTeam([])` makes whoever was a full admin no longer one, `setTeam([LUNA])` restores the seed.
+ * FAKE is the fake Discord's address; the relay's local database is this checkout's.
  */
-export async function revokeTeam() {
-  await fetch(`${process.env.FAKE ?? 'http://127.0.0.1:8790'}/_fake/application`, { method: 'PATCH', body: JSON.stringify({ team: [] }) });
+export const LUNA = '200000000000000099';
+export async function setTeam(team) {
+  await fetch(`${process.env.FAKE ?? 'http://127.0.0.1:8790'}/_fake/application`, { method: 'PATCH', body: JSON.stringify({ team }) });
   const backend = fileURLToPath(new URL('../../../../apps/backend/', import.meta.url));
   execFileSync('node', ['node_modules/wrangler/bin/wrangler.js', 'd1', 'execute', 'logitland', '--local', '--command', 'DELETE FROM discord_lookups'], {
     cwd: backend,
