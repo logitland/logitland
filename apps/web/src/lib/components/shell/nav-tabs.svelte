@@ -4,6 +4,9 @@
 
   /** Route-backed tabs: each tab is a link, the current route is marked with aria-current. `count` shows a queue size. */
   let { items, label, class: className }: { items: { href: string; label: string; count?: number }[]; label: string; class?: string } = $props();
+
+  /** On phones the tabs scroll sideways; keep the current one in view. */
+  const reveal = (link: HTMLElement) => link.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
 </script>
 
 <nav aria-label={label} class={cn('-mx-4 overflow-x-auto border-b px-4 sm:mx-0 sm:px-0', className)}>
@@ -14,6 +17,7 @@
         <a
           href={item.href}
           aria-current={current ? 'page' : undefined}
+          {@attach current && reveal}
           class={cn(
             'relative flex h-10 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50',
             'after:absolute after:inset-x-2.5 after:-bottom-px after:h-0.5 after:rounded-full after:bg-brand after:opacity-0',
