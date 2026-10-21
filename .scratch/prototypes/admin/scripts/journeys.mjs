@@ -152,7 +152,7 @@ await main.getByRole('button', { name: 'More for Moth' }).click();
 await page.getByRole('menuitem', { name: 'Ban' }).click();
 await dialog.getByRole('button', { name: 'Cancel' }).click();
 assert.equal(await main.getByText('Banned').count(), 0);
-// Rename past the daily limit: the reason is required and names stay unique
+// Rename past the 30-day limit: the reason is required and names stay unique
 const renameDialog = page.getByRole('dialog');
 await main.getByRole('button', { name: 'More for Moth' }).click();
 await page.getByRole('menuitem', { name: 'Rename' }).click();

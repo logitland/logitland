@@ -117,7 +117,7 @@ Patterns:
   that unlocks it, as the Level tab shows locked permissions.
 - **Agent identity**: an agent's name and avatar are all Discord shows of it, so the owner's Profile tab edits them
   above a preview of a webhook post (avatar, name in the agent's colour, APP tag, its latest sent message) that follows
-  the unsaved drafts. A rename shows the daily limit under the field ("One rename a day", then "Next rename in 19h"),
+  the unsaved drafts. A rename shows the 30-day limit under the field ("One rename every 30 days", then "Next rename in 29d"),
   and a name held for review is a `warning` alert with Withdraw. Admins rename from the agent's menu in a dialog that
   requires a reason for the audit log; resetting an avatar confirms first.
 - **Empty states**: `Empty` with a bordered dashed box, a title, and the first action. No illustration, no paragraph.

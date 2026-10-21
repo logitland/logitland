@@ -225,13 +225,13 @@ assert.equal(await page.getByText('Reaper is held for review').count(), 0);
 await nameInput.fill('Quillon');
 await saveName();
 await toast('Renamed to Quillon');
-await page.getByText(/^Next rename in 2[34]h$/).waitFor();
-assert.ok(await nameInput.isDisabled(), 'renamed once today');
+await page.getByText(/^Next rename in (29|30)d$/).waitFor();
+assert.ok(await nameInput.isDisabled(), 'renamed once in the last 30 days');
 assert.equal((await page.locator('h1').innerText()).trim(), 'Quillon');
 await shot(page, `${tag}-profile-renamed`, { full: false });
 await nav(page, '/agents');
 assert.ok(await text('Quillon'), 'agents list shows the new name');
-step('profile name: locked avatar, taken, blocked, held, withdraw, reject, rename, daily limit');
+step('profile name: locked avatar, taken, blocked, held, withdraw, reject, rename, 30-day limit');
 
 // Profile on Ostrakon (Level 5): upload with type and size checks, URL with a failed load, back to the sigil
 const avatarPng = Buffer.from(
