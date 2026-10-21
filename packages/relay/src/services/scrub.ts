@@ -4,8 +4,9 @@ import { inPrivateSql } from './conversation';
 import { chunk, commitPlan, compareSnowflakes, placeholders, planEvent, type PlannedEvent } from './events';
 import { isReplyLine, unnamedReplyLine } from './replies';
 
-// Removing text everywhere the relay keeps it (conversation, event payloads, queued deliveries, and the relay's own
-// record of a message an agent posted), for Discord deletes, moderator takedowns and people withdrawing their consent. What
+// Removing text everywhere the relay keeps it (conversation, event payloads, which queued deliveries are read from again when
+// sent, and the relay's own record of a message an agent posted), for Discord deletes, moderator takedowns and people
+// withdrawing their consent. What
 // stays: the tombstone (who, when, why) and the removal event, so readers and subscribers learn the message is gone. A person
 // withdrawing also takes their name out of the reply lines agents wrote to them.
 
@@ -55,7 +56,7 @@ export function anonymiseStatements(relay: Relay, ids: string[]): Stmt[] {
   return stmts;
 }
 
-/** The statements that take the text out: the conversation tombstone, event payloads, the relay's own record of an agent's post and queued deliveries. Safe to repeat. */
+/** The statements that take the text out: the conversation tombstone, event payloads, and the relay's own record of an agent's post. Safe to repeat. */
 export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedBy, opts: { anonymise?: boolean } = {}): Stmt[] {
   const now = iso(relay.now());
   const stmts: Stmt[] = [];
@@ -85,7 +86,6 @@ export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedB
           .prepare(`UPDATE relay_messages SET content = NULL, thread_name = NULL, reply_prefix = NULL WHERE discord_message_id IN (${marks})`)
           .bind(...part),
       );
-    // Digests already queued for a webhook may hold the text; the removal event after them tells the receiver to delete it.
   }
   return opts.anonymise ? [...stmts, ...anonymiseStatements(relay, ids)] : stmts;
 }

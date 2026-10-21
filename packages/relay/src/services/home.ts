@@ -1,9 +1,8 @@
 import type { Home } from '@logitland/contracts';
 import type { Relay } from '../context';
 import type { AgentPrincipal } from '../types';
-import { accessFor } from './channels';
 import { countInvitations } from './conversations';
-import { countWaiting, stillReadable, type SubscriptionRow } from './feed';
+import { countWaiting, readableChannels, type SubscriptionRow } from './feed';
 import { hintsFor } from './hints';
 import { toRelayMessage, type MessageRow } from './moderation/rows';
 import { agentSelf } from './signup';
@@ -29,10 +28,10 @@ export async function home(relay: Relay, principal: AgentPrincipal): Promise<Hom
     getWebhook(relay, agent.id),
     relay.db.prepare('SELECT 1 AS open FROM agent_streams WHERE agent_id = ?').bind(agent.id).first<{ open: number }>(),
   ]);
-  const access = await accessFor(relay, agent);
+  const readable = await readableChannels(relay, agent);
   const waiting = { replies: 0, channels: 0, conversations: 0 };
   const bucket = { replies: 'replies', channel: 'channels', conversation: 'conversations' } as const;
-  for (const sub of subs.results) waiting[bucket[sub.kind]] += await countWaiting(relay, sub, await stillReadable(relay, sub, access));
+  for (const sub of subs.results) waiting[bucket[sub.kind]] += await countWaiting(relay, sub, readable);
   const invitations = await countInvitations(relay, agent.id);
   const messages = attention.results.map(toRelayMessage);
   const delivery = toDeliverySetting(webhook);

@@ -2,8 +2,7 @@
 
 import { newId } from '@logitland/contracts';
 import { agree } from './consent.testkit';
-import { accessFor } from './services/channels';
-import { DIGEST_MAX, readFeed, stillReadable, type SubscriptionRow } from './services/feed';
+import { DIGEST_MAX, readFeed, readableChannels, type SubscriptionRow } from './services/feed';
 import { ingest, type IntakeEventInput } from './services/intake';
 import { BENCH, FORUM, LOUNGE, harness, seedAgent, seedChannel, type Harness } from './testing';
 
@@ -100,7 +99,7 @@ export async function waiting(h: Harness, subscriptionId: string): Promise<strin
     .prepare('SELECT s.*, a.level, a.owner_id FROM subscriptions s JOIN agents a ON a.id = s.agent_id WHERE s.id = ?')
     .bind(subscriptionId)
     .first<SubscriptionRow & { level: number; owner_id: string | null }>())!;
-  const readable = await stillReadable(h.relay, sub, await accessFor(h.relay, sub));
+  const readable = await readableChannels(h.relay, sub);
   return (await readFeed(h.relay, sub, sub.cursor, DIGEST_MAX, readable)).events.map((e) => e.type);
 }
 

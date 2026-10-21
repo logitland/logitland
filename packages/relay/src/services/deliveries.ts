@@ -3,7 +3,7 @@ import { signHeaders } from '@logitland/webhooks';
 import { iso, type DeliveryMessage, type Relay, type Stmt } from '../context';
 import { audit } from './audit';
 import { DestinationRefused, preflightDestination } from './destinations';
-import { takeDigests } from './feed';
+import { refreshDigest, takeDigests } from './feed';
 import { getSettings } from './settings';
 import { wakeStreams } from './streams';
 import { previousSecretAad, secretAad, urlAad, type WebhookRow } from './webhook';
@@ -112,19 +112,21 @@ export async function pushDue(relay: Relay, agentId: string): Promise<number> {
     .bind(agentId)
     .first<PushAgent>();
   if (!agent || agent.status !== 'active' || !(JSON.parse(agent.scopes) as string[]).includes('messages:read')) return 0;
-  const { digests } = await takeDigests(relay, agent, 'due');
-  if (!digests.length) return 0;
+  // Each delivery row commits with its digest's cursor move, so a digest is never taken without one.
   const at = iso(relay.now());
-  const rows = digests.map((d) => ({ id: newId('delivery'), digest: d }));
-  await relay.db.batch(
-    rows.map(({ id, digest }) =>
-      relay.db
-        .prepare(
-          "INSERT INTO deliveries (id, agent_id, subscription_id, event_count, body, status, next_attempt_at, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
-        )
-        .bind(id, agent.id, digest.subscription_id, digest.events.length, JSON.stringify(digest), at, at),
-    ),
-  );
+  const made = new Map<string, string>();
+  const { digests } = await takeDigests(relay, agent, 'due', (digest, from) => {
+    const id = newId('delivery');
+    made.set(digest.subscription_id, id);
+    return relay.db
+      .prepare(
+        `INSERT INTO deliveries (id, agent_id, subscription_id, event_count, body, status, next_attempt_at, created_at)
+         SELECT ?, ?, ?, ?, ?, 'pending', ?, ? WHERE EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND cursor = ?)`,
+      )
+      .bind(id, agent.id, digest.subscription_id, digest.events.length, JSON.stringify(digest), at, at, digest.subscription_id, from);
+  });
+  if (!digests.length) return 0;
+  const rows = digests.map((d) => ({ id: made.get(d.subscription_id)! }));
   if (relay.queue) {
     if (
       await send(
@@ -228,10 +230,13 @@ export async function attemptDelivery(relay: Relay, deliveryId: string, opts: { 
   }
 }
 
-async function deliver(relay: Relay, a: Attempt, body: string): Promise<AttemptResult> {
+async function deliver(relay: Relay, a: Attempt, stored: string): Promise<AttemptResult> {
   const hook = await relay.db.prepare('SELECT * FROM agent_webhooks WHERE agent_id = ?').bind(a.agentId).first<WebhookRow>();
   if (!hook || hook.status === 'disabled') return settle(relay, a, { status: 'dropped', error: 'The webhook was removed or disabled' });
   a.failingSince = hook.failing_since;
+  // Read again at every attempt: a removal or a withdrawal since the digest was taken must not leave with it.
+  const body = await refreshDigest(relay, a.agentId, stored);
+  if (!body) return settle(relay, a, { status: 'dropped', error: 'Nothing in the digest may be sent any more' });
 
   const target = await relay.secrets.open(hook.url_ciphertext, urlAad(hook));
   let url: URL;

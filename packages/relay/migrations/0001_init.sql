@@ -392,6 +392,8 @@ CREATE INDEX events_observed ON events(observed_at);
 CREATE INDEX events_for_agent ON events(agent_id, seq) WHERE agent_id IS NOT NULL;
 CREATE INDEX events_replies ON events(reply_agent_id, seq) WHERE reply_agent_id IS NOT NULL;
 CREATE INDEX events_private ON events(private_thread_id, seq) WHERE private_thread_id IS NOT NULL;
+-- Bulk removals, which reach replies subscriptions through the messages they name (feed.ts).
+CREATE INDEX events_bulk ON events(type, seq) WHERE type = 'message.bulk_deleted';
 -- Events that still hold message text, so the retention job finds the old ones without scanning the blanked ones.
 CREATE INDEX events_with_text ON events(observed_at) WHERE json_extract(payload, '$.data.content') != '';
 -- What retention may delete once it is old. Removal events ('delete:<id>' tombstones) are kept for good: intake finds them
@@ -604,6 +606,10 @@ BEGIN
   WHERE next_due_ms IS NULL AND ended_at IS NULL AND (
     (kind = 'channel' AND channel_id = NEW.channel_id AND NEW.agent_id IS NULL AND NEW.private_thread_id IS NULL AND (include_own = 1 OR NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))
     OR (kind = 'replies' AND (agent_id = NEW.agent_id OR (agent_id = NEW.reply_agent_id AND NEW.private_thread_id IS NULL AND (NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))))
+    -- A bulk removal holding a reply to the agent (feed.ts BULK_REPLY).
+    OR (kind = 'replies' AND NEW.type = 'message.bulk_deleted' AND NEW.private_thread_id IS NULL
+      AND EXISTS (SELECT 1 FROM json_each(NEW.payload, '$.data.message_ids') j JOIN conversation c ON c.message_id = CAST(j.value AS INTEGER)
+        JOIN conversation p ON p.message_id = c.reply_to WHERE p.agent_id = subscriptions.agent_id))
     OR (kind = 'conversation' AND NEW.private_thread_id IS NOT NULL AND NEW.agent_id IS NULL AND (include_own = 1 OR NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id)
       AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.thread_id = NEW.private_thread_id AND m.agent_id = subscriptions.agent_id AND m.joined_at IS NOT NULL
         AND (m.left_at IS NULL OR NEW.type IN ('message.deleted', 'message.bulk_deleted'))))

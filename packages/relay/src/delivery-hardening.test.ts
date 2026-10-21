@@ -143,13 +143,13 @@ describe('query plans', () => {
     const sql: string[] = [];
     const real = s.relay.db;
     s.relay.db = { batch: (x) => real.batch(x), prepare: (text) => (sql.push(text), real.prepare(text)) };
-    for (const row of await all<SubscriptionRow>(s, 'SELECT * FROM subscriptions WHERE agent_id = ?', s.agent.id)) await readFeed(s.relay, row, 0, 100);
+    for (const row of await all<SubscriptionRow>(s, 'SELECT * FROM subscriptions WHERE agent_id = ?', s.agent.id)) await readFeed(s.relay, row, 0, 100, '[]');
     s.relay.db = real;
     const reads = sql.filter((q) => q.startsWith('SELECT e.seq, e.payload FROM events e'));
     expect(reads).toHaveLength(2);
     const plans = reads.map((q) => plan(s, q, ...Array(q.split('?').length - 1).fill(sub.id)));
     for (const p of plans) expect(p).not.toMatch(/SCAN e\b/);
     // A channel's events by channel; the replies by the agent they are addressed to, or whose message they answer.
-    for (const index of ['events_channel', 'events_for_agent', 'events_replies']) expect(plans.join(' | ')).toContain(index);
+    for (const index of ['events_channel', 'events_for_agent', 'events_replies', 'events_bulk']) expect(plans.join(' | ')).toContain(index);
   });
 });
