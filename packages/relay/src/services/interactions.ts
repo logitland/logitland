@@ -10,7 +10,7 @@ import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, rem
 // https://docs.discord.com/developers/interactions/overview (verifying requests)
 
 const InteractionType = { PING: 1, APPLICATION_COMMAND: 2, MESSAGE_COMPONENT: 3 } as const;
-const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5 } as const;
+const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5, UPDATE_MESSAGE: 7 } as const;
 const EPHEMERAL = 64;
 
 /**
@@ -22,6 +22,10 @@ export const AGREE_BUTTON = `consent_agree:${CONSENT_NOTICE_VERSION}`;
 
 /** An action row (type 1) holding a primary (style 1) button (type 2) whose custom_id the handler below answers. */
 export const agreeButton = (customId: string) => [{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: relay my messages', custom_id: customId }] }];
+
+/** Shows the consent notice, as /consent agree does, from a button on an ordinary message (turn-away.ts). */
+export const NOTICE_BUTTON = 'consent_notice';
+export const noticeButton = () => [{ type: 1, components: [{ type: 2, style: 1, label: 'Read and agree', custom_id: NOTICE_BUTTON }] }];
 
 /** The one definition of the /consent command, registered by POST /internal/admin/discord/commands. */
 export const CONSENT_COMMAND = {
@@ -51,7 +55,7 @@ type Interaction = z.infer<typeof Interaction>;
 
 export interface InteractionResponse {
   type: number;
-  data?: { content?: string; flags: number; allowed_mentions?: { parse: never[] }; components?: ReturnType<typeof agreeButton> };
+  data?: { content?: string; flags?: number; allowed_mentions?: { parse: never[] }; components?: ReturnType<typeof agreeButton> | [] };
 }
 
 /* ---------- Signature ---------- */
@@ -99,6 +103,12 @@ const say = (content: string): InteractionResponse => ({
   data: { content, flags: EPHEMERAL, allowed_mentions: { parse: [] } },
 });
 
+/** Replaces the message the pressed button is on (the ephemeral notice), button and all. */
+const edit = (content: string): InteractionResponse => ({
+  type: Callback.UPDATE_MESSAGE,
+  data: { content, allowed_mentions: { parse: [] }, components: [] },
+});
+
 /** Agreeing and withdrawing write history that is kept for good, so one person can only do so much of it. */
 const TOGGLES_PER_10_MIN = 6;
 const tooOften = (seconds: number) =>
@@ -133,8 +143,8 @@ function actionOf(i: Interaction): Action | null {
   if (i.type === InteractionType.MESSAGE_COMPONENT) {
     const id = i.data?.custom_id;
     if (id === AGREE_BUTTON) return 'agree';
-    // A button shown under an older notice.
-    return id?.startsWith('consent_agree:') ? 'notice' : null;
+    // A button shown under an older notice, or the one on a turned-away message.
+    return id === NOTICE_BUTTON || id?.startsWith('consent_agree:') ? 'notice' : null;
   }
   if (i.type !== InteractionType.APPLICATION_COMMAND || i.data?.name !== CONSENT_COMMAND.name) return null;
   const sub = i.data.options?.[0]?.name;
@@ -173,10 +183,11 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
   }
 
   const turn = await hit(relay, { key: `consent:${userId}:10m`, limit: TOGGLES_PER_10_MIN, windowSeconds: 600 }, 1, true);
+  // Only the button under the notice agrees, so the answer takes the notice's place.
   if (action === 'agree') {
-    if (!turn.ok) return say(tooOften(turn.retryAfterSeconds));
+    if (!turn.ok) return edit(tooOften(turn.retryAfterSeconds));
     const { changed } = await grantConsent(relay, { discordUserId: userId, guildId, actor, interactionId: i.id });
-    return say(agreed(changed));
+    return edit(agreed(changed));
   }
 
   // The agreement ends before we answer, even when the clean-up is rate limited: nothing more is relayed either way.

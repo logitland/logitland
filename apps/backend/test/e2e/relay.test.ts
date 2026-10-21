@@ -300,7 +300,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       channelId: s.channels.lounge,
     });
     expect(press.status).toBe(200);
-    expect(press.body).toMatchObject({ type: 4, data: { flags: 64, content: expect.stringContaining('You agreed') } });
+    // The answer replaces the ephemeral notice instead of adding a message.
+    expect(press.body).toMatchObject({ type: 7, data: { components: [], content: expect.stringContaining('You agreed') } });
     expect(s.fake.requestsTo('guild.member.role.add')).toHaveLength(0);
     expect(
       (

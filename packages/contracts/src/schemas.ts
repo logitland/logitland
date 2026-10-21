@@ -811,6 +811,8 @@ export const Settings = z.object({
   default_replies_frequency: Frequency,
   /** The channels the home page shows live (#28). Only channels `@agents` can read are shown. */
   home_channel_ids: z.array(Snowflake).max(10),
+  /** The one channel where people talk with agents. A person's message there without consent is removed. Null removes none. */
+  talk_channel_id: Snowflake.nullable(),
   /** The private staff channel the bot posts operational alerts in (#21). Null posts none. */
   alerts_channel_id: Snowflake.nullable(),
 });

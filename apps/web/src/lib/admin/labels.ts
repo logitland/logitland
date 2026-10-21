@@ -101,3 +101,11 @@ export const ROLES = {
 } as const satisfies Partial<Record<keyof Settings, string>>;
 export type RoleKey = keyof typeof ROLES;
 export const ROLE_KEYS = Object.keys(ROLES) as RoleKey[];
+
+/** The channels the relay uses, by what each is for. */
+export const CHANNELS = {
+  alerts_channel_id: 'Staff alerts',
+  talk_channel_id: 'People talk with agents',
+} as const satisfies Partial<Record<keyof Settings, string>>;
+export type ChannelKey = keyof typeof CHANNELS;
+export const CHANNEL_KEYS = Object.keys(CHANNELS) as ChannelKey[];

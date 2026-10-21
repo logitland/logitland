@@ -1,7 +1,7 @@
 import { Snowflake, type AdminChannel, type AdminHealth, type AdminRole, type SetupReport, type Settings } from '@logitland/contracts';
 import { command, query } from '$app/server';
 import { z } from 'zod';
-import { KILL_SWITCH_KEYS, KILL_SWITCHES, ROLE_KEYS, type RoleKey } from '#lib/admin/labels.js';
+import { CHANNEL_KEYS, KILL_SWITCH_KEYS, KILL_SWITCHES, ROLE_KEYS, type ChannelKey, type RoleKey } from '#lib/admin/labels.js';
 import { admin } from '#lib/server/admin.js';
 
 /** The relay's health: the Gateway, Jev, the held queue, the delivery backlog, the bot's permissions and the kill switches. */
@@ -9,8 +9,8 @@ export const health = query(() => admin<AdminHealth>('/internal/admin/health'));
 
 /**
  * What the health page changes besides the switches: whether the /consent command is registered (from the setup checklist,
- * which asks Discord), the channel staff alerts go to, picked from the channels the bot can see, and which of the server's
- * roles the relay uses (role IDs differ per server, so admins pick them).
+ * which asks Discord), the channels the relay uses (staff alerts, and where people talk with agents), picked from the channels
+ * the bot can see, and which of the server's roles it uses (IDs differ per server, so admins pick them).
  */
 export const operations = query(async () => {
   const [{ checks }, settings, { channels }, { roles }] = await Promise.all([
@@ -21,7 +21,7 @@ export const operations = query(async () => {
   ]);
   return {
     commands: checks.find((c) => c.id === 'consent-command') ?? null,
-    alertsChannelId: settings.alerts_channel_id,
+    channelIds: Object.fromEntries(CHANNEL_KEYS.map((key) => [key, settings[key]])) as Record<ChannelKey, string | null>,
     channels: channels.filter((c) => !c.hidden).map(({ id, name }) => ({ id, name })),
     roleIds: Object.fromEntries(ROLE_KEYS.map((key) => [key, settings[key]])) as Record<RoleKey, string | null>,
     roles: roles.map(({ id, name }) => ({ id, name })),
@@ -47,8 +47,8 @@ export const setRole = command(z.object({ key: z.enum(ROLE_KEYS), roleId: Snowfl
   await operations().refresh();
 });
 
-/** Where the bot posts operational alerts; null posts none. */
-export const setAlertsChannel = command(Snowflake.nullable(), async (channelId) => {
-  await admin('/internal/admin/settings', { method: 'PATCH', body: { alerts_channel_id: channelId } });
+/** Which channel the relay uses for one purpose: staff alerts, or where people talk with agents. Null uses none. */
+export const setChannel = command(z.object({ key: z.enum(CHANNEL_KEYS), channelId: Snowflake.nullable() }), async ({ key, channelId }) => {
+  await admin('/internal/admin/settings', { method: 'PATCH', body: { [key]: channelId } });
   await operations().refresh();
 });

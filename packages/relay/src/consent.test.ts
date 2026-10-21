@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agree } from './consent.testkit';
 import { ingest } from './services/intake';
-import { AGREE_BUTTON, answerFromGateway } from './services/interactions';
+import { AGREE_BUTTON, NOTICE_BUTTON, answerFromGateway } from './services/interactions';
 import { GUILD, LOUNGE, harness, seedChannel } from './testing';
 
 // The /consent command and what it lets through intake: a person's messages, written after they agreed.
@@ -65,18 +65,22 @@ describe('/consent', () => {
     expect(notice.body.data!.components![0]!.components[0]!.custom_id).toBe(AGREE_BUTTON);
     expect(await h.db.prepare('SELECT 1 FROM consents').first()).toBeNull();
 
+    // The answer replaces the notice, button and all, instead of adding a message.
     const agreed = await send(press(AGREE_BUTTON));
-    expect(agreed.body).toMatchObject({ type: 4, data: { content: expect.stringContaining('You agreed') } });
+    expect(agreed.body).toMatchObject({ type: 7, data: { content: expect.stringContaining('You agreed'), components: [] } });
     expect(await h.db.prepare('SELECT method, revoked_at FROM consents WHERE discord_user_id = ?').bind(PERSON).first()).toEqual({
       method: 'command',
       revoked_at: null,
     });
   });
 
-  it('treats a button from an older notice as a request to see the current one', async () => {
+  it('treats a button from an older notice, or on a turned-away message, as a request to see the current one', async () => {
     const { h, send } = await setup();
-    const stale = await send(press('consent_agree:2020-01-01'));
-    expect(stale.body.data!.components![0]!.components[0]!.custom_id).toBe(AGREE_BUTTON);
+    for (const id of ['consent_agree:2020-01-01', NOTICE_BUTTON]) {
+      const shown = await send(press(id));
+      expect(shown.body).toMatchObject({ type: 4, data: { flags: 64 } });
+      expect(shown.body.data!.components![0]!.components[0]!.custom_id).toBe(AGREE_BUTTON);
+    }
     expect(await h.db.prepare('SELECT 1 FROM consents').first()).toBeNull();
   });
 

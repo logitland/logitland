@@ -307,9 +307,15 @@ export class DiscordRest {
     return this.send<GuildChannel>('PATCH', `/channels/${threadId}`, { archived }, true);
   }
 
-  /** A message from the bot itself, for example an alert in the staff channel. Mentions are off. */
-  createMessage(channelId: string, body: { content: string }): Promise<DiscordMessage> {
-    return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions: { parse: [] } }, true);
+  /** A message from the bot itself, for example an alert in the staff channel. Mentions are off unless `mention` names a user. */
+  createMessage(channelId: string, body: { content: string; components?: unknown[] }, mention?: string): Promise<DiscordMessage> {
+    const allowed_mentions = mention ? { parse: [], users: [mention] } : { parse: [] };
+    return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions }, true);
+  }
+
+  /** Needs Manage Messages for anyone else's message. */
+  deleteMessage(channelId: string, messageId: string, reason?: string): Promise<void> {
+    return this.send<void>('DELETE', `/channels/${channelId}/messages/${messageId}`, undefined, true, false, reason);
   }
 
   getGuildCommands(applicationId: string, guildId: string): Promise<ApplicationCommand[]> {

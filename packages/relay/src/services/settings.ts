@@ -21,6 +21,7 @@ export const DEFAULT_SETTINGS: Settings = {
   default_channel_frequency: '30s',
   default_replies_frequency: 'live',
   home_channel_ids: [],
+  talk_channel_id: null,
   alerts_channel_id: null,
 };
 

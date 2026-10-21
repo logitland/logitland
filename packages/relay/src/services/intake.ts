@@ -10,6 +10,8 @@ import { chunk, commitPlan, compareSnowflakes, MAX_PARAMS, placeholders, planEve
 import { contentHash } from './moderation/rows';
 import { parseReplyLine } from './replies';
 import { planRemoval, scrubStatements, type RemovedBy } from './scrub';
+import { getSettings } from './settings';
+import { turnAway, type TurnedAway } from './turn-away';
 import { awardSent } from './xp/award';
 
 // Normalised Discord events in, the event log and the conversation projection out. Every event has a
@@ -128,6 +130,9 @@ interface Relayed {
 interface Context {
   /** Channels some agent can see: their messages are kept and announced. */
   relayed: Map<string, Relayed & { id: string }>;
+  /** Where people talk with agents: a person's message there without consent is removed (turn-away.ts). */
+  talkChannelId: string | null;
+  turnedAway: TurnedAway[];
   /** Every channel the relay has a row for, closed ones too: deletes are applied there, quietly, so text removed in Discord never comes back. */
   known: Map<string, Relayed & { id: string }>;
   history: boolean;
@@ -210,6 +215,8 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
   const visible = await anyAgentAccess(relay);
   const ctx: Context = {
     relayed: new Map(results.filter((c) => visible(c).view).map((c) => [c.id, c])),
+    talkChannelId: (await getSettings(relay)).talk_channel_id,
+    turnedAway: [],
     known: new Map(results.map((c) => [c.id, c])),
     history: history ?? false,
   };
@@ -218,6 +225,7 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
     total.recorded += r.recorded;
     total.ignored += r.ignored;
   }
+  if (ctx.turnedAway.length) await turnAway(relay, ctx.turnedAway);
   if (total.invalid) relay.log.warn('intake.invalid_events', { source, count: total.invalid });
   if (total.recorded) relay.log.info('intake.batch', { source, ...total });
   return total;
@@ -463,7 +471,10 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         cursors.set(cursorKey, bigger(cursors.get(cursorKey), e.message_id));
         const who = await resolveAuthor(relay, ch, e, sent, agreedAt, e.thread_id ? privateOwners.get(e.thread_id) : undefined);
         if (!who) {
-          // A person's message from before they agreed: dropped, not stored.
+          // A person's message from before they agreed: dropped, not stored. One written live in the talk channel, by someone
+          // who hasn't agreed at all, is also removed from Discord.
+          if (!ctx.history && e.channel_id === ctx.talkChannelId && !agreedAt.has(e.author.id))
+            ctx.turnedAway.push({ channel_id: e.thread_id ?? e.channel_id, message_id: e.message_id, user_id: e.author.id });
           out.ignored++;
           break;
         }
