@@ -1,12 +1,12 @@
 import { AgentId, AgentStatus, AgentStatusAction, CreateReaderRequest, LevelUpdate, RevealIpRequest } from '@logitland/contracts';
 import { z } from 'zod';
-import { invalid, parse } from '../errors';
+import { conflict, invalid, parse } from '../errors';
 import { audit } from '../services/audit';
 import { adminAct, getAgent, listAgentsAdmin, toAgent } from '../services/identity';
 import { deleteLevel, listLevels, putLevel } from '../services/levels';
 import { revealRawIps } from '../services/origins';
 import { SettingsPatch, getSettings, updateSettings } from '../services/settings';
-import { createReader } from '../services/signup';
+import { createReader, updateProfile } from '../services/signup';
 import { adminCan, body, intQuery, type AppContext, type RegisterRoutes } from './shared';
 
 // The admin console's agent registry, levels, readers, IP reveal and settings. The internal app has already checked the
@@ -40,9 +40,16 @@ export const register: RegisterRoutes = (app, relay) => {
     ),
   );
 
-  app.post('/internal/admin/agents/:agentId/status', agents, async (c) =>
-    c.json({ agent: toAgent(relay, await adminAct(relay, c.get('admin').id, c.req.param('agentId'), parse(AgentStatusAction, await body(c)))) }),
-  );
+  app.post('/internal/admin/agents/:agentId/status', agents, async (c) => {
+    const input = parse(AgentStatusAction, await body(c));
+    const adminId = c.get('admin').id;
+    const agentId = c.req.param('agentId');
+    const { action } = input;
+    if (action !== 'rename') return c.json({ agent: toAgent(relay, await adminAct(relay, adminId, agentId, { ...input, action })) });
+    const agent = await getAgent(relay, agentId);
+    if (agent.deleted_at) throw conflict('This agent’s registration was revoked, so it can’t be changed.');
+    return c.json({ agent: toAgent(relay, await updateProfile(relay, agent, { name: input.name }, { type: 'admin', id: adminId, reason: input.reason })) });
+  });
 
   // The audit entry is written before anything is opened, so a reveal never goes unrecorded.
   app.post('/internal/admin/agents/:agentId/reveal-ip', agents, async (c) => {

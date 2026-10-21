@@ -33,7 +33,8 @@ import { repliesSubscriptionStmt } from './subscriptions';
 
 const SIGNUPS_PER_IP_PER_HOUR = 3;
 const PROFILE_CHANGES_PER_AGENT_PER_HOUR = 10;
-const RENAME_EVERY_MS = 86_400_000;
+const RENAME_EVERY_DAYS = 30;
+const RENAME_EVERY_MS = RENAME_EVERY_DAYS * 86_400_000;
 const OUTAGE_RETRY_SECONDS = 60;
 const GENERATED_NAME_TRIES = 5;
 
@@ -253,16 +254,19 @@ export async function agentSelf(relay: Relay, principal: AgentPrincipal): Promis
 }
 
 /**
- * A name or avatar change, by the agent itself or its owner. A name changes once a rolling day and goes through the same rules
- * and moderation as at registration. An avatar is an image the relay never looks at, so only levels with the `avatar`
- * permission may set one, and its address may not point at a site the message rules block.
+ * A name or avatar change, by the agent itself, its owner or an admin. An agent's name changes at most once every 30 days
+ * and goes through the same rules and moderation as at registration. An admin rename skips the limit and the classifier
+ * (the admin is the reviewer) and audits its reason; it still starts a new 30 days, so the agent can't undo it at once.
+ * An avatar is an image the relay never looks at, so only levels with the `avatar` permission may set one, and its address
+ * may not point at a site the message rules block.
  */
 export async function updateProfile(
   relay: Relay,
   agent: AgentRecord,
   patch: ProfileUpdate,
-  actor: { type: 'agent' | 'owner'; id: string },
+  actor: { type: 'agent' | 'owner'; id: string } | { type: 'admin'; id: string; reason: string },
 ): Promise<AgentRecord> {
+  const byAdmin = actor.type === 'admin';
   if (actor.type === 'owner' && (agent.status === 'suspended' || agent.status === 'banned')) {
     throw forbidden(`This agent is ${agent.status}. Only a relay admin can change that.`);
   }
@@ -275,8 +279,8 @@ export async function updateProfile(
   const renamed = name !== agent.name;
   const now = relay.now();
   if (renamed) {
-    const after = renameAfter(agent, now);
-    if (after) throw forbidden(`You can change your name once a day. Try again after ${after}.`);
+    const after = byAdmin ? null : renameAfter(agent, now);
+    if (after) throw forbidden(`You can change your name once every ${RENAME_EVERY_DAYS} days. Try again after ${after}.`);
     must(checkName(name));
     await assertNameFree(relay, name, agent.id);
   }
@@ -286,19 +290,29 @@ export async function updateProfile(
   if (avatar !== agent.avatar_url) diff.avatar_url = { from: agent.avatar_url, to: avatar };
   if (!Object.keys(diff).length) return agent;
 
-  await enforce(
-    relay,
-    [{ key: `profile:${agent.id}:h`, limit: PROFILE_CHANGES_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
-    `You can change your profile ${PROFILE_CHANGES_PER_AGENT_PER_HOUR} times an hour.`,
-  );
-  if (renamed) await reviewName(relay, agent.id, agent.level, name);
+  if (!byAdmin) {
+    await enforce(
+      relay,
+      [{ key: `profile:${agent.id}:h`, limit: PROFILE_CHANGES_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
+      `You can change your profile ${PROFILE_CHANGES_PER_AGENT_PER_HOUR} times an hour.`,
+    );
+    if (renamed) await reviewName(relay, agent.id, agent.level, name);
+  }
 
   try {
     await relay.db.batch([
       relay.db
         .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, avatar_url = ?, updated_at = ? WHERE id = ?')
         .bind(name, nameKey(name), renamed ? iso(now) : agent.name_changed_at, avatar, iso(now), agent.id),
-      auditStmt(relay, { actor_type: actor.type, actor_id: actor.id, action: 'agent.profile_updated', target_type: 'agent', target_id: agent.id, diff }),
+      auditStmt(relay, {
+        actor_type: actor.type,
+        actor_id: actor.id,
+        action: 'agent.profile_updated',
+        target_type: 'agent',
+        target_id: agent.id,
+        reason: byAdmin ? actor.reason : undefined,
+        diff,
+      }),
     ]);
   } catch (err) {
     await rethrowIfNameTaken(relay, err, name, agent.id);

@@ -364,7 +364,13 @@ export async function turnOn(relay: Relay, ownerId: string, agentId: string): Pr
   return transition(relay, agent, { from: ['off'], to: 'active', action: 'agent.turned_on', actor: { type: 'owner', id: ownerId }, statusReason: null });
 }
 
-export async function adminAct(relay: Relay, adminId: string, agentId: string, input: AgentStatusAction): Promise<AgentRecord> {
+/** Every admin action on an agent but `rename`, which goes through `updateProfile`. */
+export async function adminAct(
+  relay: Relay,
+  adminId: string,
+  agentId: string,
+  input: AgentStatusAction & { action: Exclude<AgentStatusAction['action'], 'rename'> },
+): Promise<AgentRecord> {
   const agent = await getAgent(relay, agentId);
   if (agent.deleted_at) throw conflict('This agent’s registration was revoked, so it can’t be changed.');
   const actor = { type: 'admin' as const, id: adminId };

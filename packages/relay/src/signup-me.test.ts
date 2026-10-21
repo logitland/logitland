@@ -62,7 +62,7 @@ describe('PATCH /v1/me', () => {
     expect(await nameOf(h, a.id)).toBe('Case Bot');
   });
 
-  it('refuses reserved, blocked, taken and lookalike names, and a refusal doesn’t use up the day’s rename', async () => {
+  it('refuses reserved, blocked, taken and lookalike names, and a refusal doesn’t use up the 30-day rename', async () => {
     const h = harness();
     const a = await seedAgent(h.relay, { name: 'Mine Bot' });
     const auth = h.as(a.token);

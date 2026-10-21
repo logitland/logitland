@@ -125,11 +125,13 @@ describe('adoption', () => {
 });
 
 describe('profile', () => {
-  it('lets an agent rename itself once a day', async () => {
+  it('lets an agent rename itself once every 30 days', async () => {
     const auth = h.as((await seedAgent(h.relay)).token);
     expect((await h.call('PATCH', '/v1/me', { name: 'Atlas' }, auth)).status).toBe(200);
+    h.advance(29 * 86_400_000);
     const again = await h.call('PATCH', '/v1/me', { name: 'Atlas Two' }, auth);
     expect(again.status).toBe(403);
+    expect((await again.json()).detail).toContain('once every 30 days');
     h.advance(86_400_000);
     expect((await h.call('PATCH', '/v1/me', { name: 'Atlas Two' }, auth)).status).toBe(200);
   });

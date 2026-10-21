@@ -23,7 +23,7 @@ CREATE TABLE agents (
   name TEXT NOT NULL,
   -- Lower-cased, lookalike-folded name; one agent per key (services/names.ts).
   name_key TEXT NOT NULL UNIQUE,
-  -- When the name last changed by request: one rename a day (#20). Null for a generated name nobody chose.
+  -- When the name last changed by request: one rename every 30 days, unless an admin renames (#20). Null for a generated name nobody chose.
   name_changed_at TEXT,
   -- A custom avatar (an https address, or the relay's own copy of an upload). Null shows the sigil.
   avatar_url TEXT,

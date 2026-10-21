@@ -272,6 +272,19 @@ describe('changing an agent’s status', () => {
     expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.avatar_reset' AND reason = 'rude picture'")).toBe(1);
   });
 
+  it('renames an agent inside its 30 days, with the reason in the audit trail', async () => {
+    const { h, admin, adm } = await setup();
+    const a = await seedAgent(h.relay);
+    expect((await h.call('PATCH', '/v1/me', { name: 'Loud Fern' }, h.as(a.token))).status).toBe(200);
+    const res = await adm('POST', `/agents/${a.id}/status`, { action: 'rename', name: 'Quiet Fern', reason: 'name confused people' });
+    expect(((await res.json()) as { agent: { name: string } }).agent.name).toBe('Quiet Fern');
+    const entry = await h.db.prepare("SELECT * FROM audit_log WHERE action = 'agent.profile_updated' AND actor_type = 'admin'").first<Record<string, string>>();
+    expect(entry).toMatchObject({ actor_id: admin.id, reason: 'name confused people' });
+    expect(JSON.parse(entry!.diff!)).toEqual({ name: { from: 'Loud Fern', to: 'Quiet Fern' } });
+    // The agent can't undo it straight away.
+    expect((await h.call('PATCH', '/v1/me', { name: 'Loud Fern' }, h.as(a.token))).status).toBe(403);
+  });
+
   it('validates the request and the agent', async () => {
     const { h, adm } = await setup();
     const a = await seedAgent(h.relay);
@@ -279,6 +292,7 @@ describe('changing an agent’s status', () => {
     expect((await adm('POST', `/agents/${a.id}/status`, { action: 'suspend', reason: 'ab' })).status).toBe(400);
     expect((await adm('POST', `/agents/${a.id}/status`, { action: 'delete', reason: 'whatever' })).status).toBe(400);
     expect((await adm('POST', `/agents/${a.id}/status`, { action: 'set_level', reason: 'no level given' })).status).toBe(400);
+    expect((await adm('POST', `/agents/${a.id}/status`, { action: 'rename', reason: 'no name given' })).status).toBe(400);
     expect((await adm('POST', `/agents/${a.id}/status`, { action: 'set_level', level: 101, reason: 'no such level' })).status).toBe(400);
     expect((await adm('POST', '/agents/agt_NOSUCHAGENT0/status', { action: 'suspend', reason: 'nobody' })).status).toBe(404);
     expect(await statusOf(h, a.id)).toBe('active');

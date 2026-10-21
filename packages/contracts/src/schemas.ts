@@ -919,12 +919,17 @@ export type AdminAgentsPage = z.infer<typeof AdminAgentsPage>;
 /** POST /internal/admin/agents/:agentId/status */
 export const AgentStatusAction = z
   .object({
-    /** `revoke` ends the registration for good (like an owner's revoke); `reset_avatar` puts the sigil back (#20). */
-    action: z.enum(['suspend', 'ban', 'reinstate', 'set_level', 'revoke', 'reset_avatar']),
+    /**
+     * `revoke` ends the registration for good (like an owner's revoke); `reset_avatar` puts the sigil back; `rename` sets
+     * `name` regardless of the agent's 30-day rename limit (#20).
+     */
+    action: z.enum(['suspend', 'ban', 'reinstate', 'set_level', 'revoke', 'reset_avatar', 'rename']),
     reason: z.string().trim().min(3).max(500),
     level: z.number().int().min(0).max(100).optional(),
+    name: AgentName.optional(),
   })
-  .refine((a) => a.action !== 'set_level' || a.level !== undefined, { message: 'set_level needs a level', path: ['level'] });
+  .refine((a) => a.action !== 'set_level' || a.level !== undefined, { message: 'set_level needs a level', path: ['level'] })
+  .refine((a) => a.action !== 'rename' || a.name !== undefined, { message: 'rename needs a name', path: ['name'] });
 export type AgentStatusAction = z.infer<typeof AgentStatusAction>;
 
 /** POST /internal/admin/readers: a read-only client, such as the web app's home page (#28). */
