@@ -161,6 +161,19 @@ describe('resuming', () => {
     expect(r.conn.current.seq).toBe(9);
   });
 
+  it('identifies afresh when the resume URL can’t be reached, rather than retrying it forever', async () => {
+    const r = rig({ random: 1 });
+    r.conn.restore(resumable);
+    r.state.connectError = new Error('resume host gone');
+    await r.conn.start();
+    expect(r.statuses[0]).toBe('resuming');
+    r.state.connectError = null;
+    await r.advance(1_000);
+    expect(r.last().url).toContain('gateway.discord.gg');
+    r.hello();
+    expect(r.last().socket.sent[0]!.op).toBe(2);
+  });
+
   it('identifies instead when a piece of the session is missing', async () => {
     const r = rig();
     r.conn.restore({ sessionId: 'sess-1', resumeUrl: 'wss://resume.discord.gg', seq: null });
