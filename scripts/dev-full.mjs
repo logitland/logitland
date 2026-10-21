@@ -162,7 +162,9 @@ for (const [what, port] of [
     process.exit(1);
   }
 }
-const { at, files } = await prepare({ state, ports, reset: flag('reset'), registry, persist });
+// The web app answers on 127.0.0.1, so its sign-in cookies stay apart from pnpm dev's on localhost.
+const WEB_HOST = '127.0.0.1';
+const { at, files } = await prepare({ state, ports, webHost: WEB_HOST, reset: flag('reset'), registry, persist });
 
 /* ---------- 2. The fake Discord ---------- */
 
@@ -225,7 +227,7 @@ await runCron();
 console.log('Starting the web app…');
 // It finds the relay through the same dev registry, and reads the settings prepare wrote in place of apps/web/.dev.vars.
 const web = join(root, 'apps/web');
-start('web', 'node', [join(web, 'node_modules/vite/bin/vite.js'), 'dev', '--port', String(ports.web), '--strictPort'], {
+start('web', 'node', [join(web, 'node_modules/vite/bin/vite.js'), 'dev', '--host', WEB_HOST, '--port', String(ports.web), '--strictPort'], {
   cwd: web,
   env: { WRANGLER_REGISTRY_PATH: registry, LOGITLAND_WEB_ENV_FILE: files.web },
 });

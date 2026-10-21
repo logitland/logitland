@@ -167,4 +167,5 @@ this fake.
 `pnpm dev` runs each as its own Turborepo task on `:8790`, `:8787` and `:5174`, after `dev:setup`; `dev:setup --reset` forgets
 the relay's local database. `pnpm dev:full` (`scripts/dev-full.mjs`) runs them in one process, stopped by process ID on
 Ctrl-C, with `--reset`, `--fake-port`, `--relay-port` and `--web-port`. Its settings, wrangler registry and relay database
-live under `apps/backend/.wrangler/dev-full`, so it runs beside `pnpm dev`. Nothing in the repository is edited.
+live under `apps/backend/.wrangler/dev-full`, and its web app answers on `127.0.0.1` (not `localhost`) so its sign-in cookies
+stay its own: it runs beside `pnpm dev`. Nothing in the repository is edited.

@@ -54,7 +54,7 @@ pnpm test         # unit and integration tests
 pnpm build        # web and backend bundles
 pnpm dev          # fake Discord + relay + web app, wired together, in Turborepo's terminal UI
 pnpm dev:setup --reset   # forget the relay's local database; the next pnpm dev starts fresh
-pnpm dev:full     # the same stack in one process, on other ports (--fake-port, --relay-port, --web-port) beside pnpm dev's
+pnpm dev:full     # the same stack in one process, beside pnpm dev's: other ports (--fake-port …), web on 127.0.0.1
 pnpm test:e2e     # the relay under workerd against the fake Discord (check:e2e typechecks it)
 pnpm format       # prettier over the repo (format:check to only check)
 ```

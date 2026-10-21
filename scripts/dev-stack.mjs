@@ -25,10 +25,14 @@ export const DEV_STATE = join(backend, '.wrangler/dev');
 /** The fake application's ID, which is also its bot user's. */
 export const APPLICATION_ID = '400000000000000001';
 
-export const urls = (ports) => ({
+/**
+ * Where each process answers. Browsers keep cookies by host, not port, so a stack beside `pnpm dev`'s serves its web app on
+ * another `webHost` (dev:full uses 127.0.0.1) and the two keep their own sign-ins.
+ */
+export const urls = (ports, webHost = 'localhost') => ({
   fake: `http://127.0.0.1:${ports.fake}`,
   relay: `http://localhost:${ports.relay}`,
-  web: `http://localhost:${ports.web}`,
+  web: `http://${webHost}:${ports.web}`,
 });
 
 /** Runs this checkout's wrangler in apps/backend. */
@@ -64,10 +68,11 @@ const random = (bytes) => Buffer.from(crypto.getRandomValues(new Uint8Array(byte
 /**
  * Writes `backend.env`, `web.env` and `fake.json` into `state`, applies the migrations and seeds the relay's settings. A
  * stack that runs beside `pnpm dev`'s (dev:full) passes its own `registry` (wrangler's dev registry, so its web app finds its
- * own relay) and `persist` (the relay's database and Durable Objects, so it doesn't resume the other's Gateway session).
+ * own relay), `persist` (the relay's database and Durable Objects, so it doesn't resume the other's Gateway session) and
+ * `webHost` (see `urls`).
  */
-export async function prepare({ state = DEV_STATE, ports = DEFAULT_PORTS, reset = false, registry, persist } = {}) {
-  const at = urls(ports);
+export async function prepare({ state = DEV_STATE, ports = DEFAULT_PORTS, webHost, reset = false, registry, persist } = {}) {
+  const at = urls(ports, webHost);
   mkdirSync(state, { recursive: true });
   if (!existsSync(join(backend, 'node_modules/wrangler/bin/wrangler.js'))) throw new Error('Run `pnpm install` first: wrangler is missing.');
   if (reset) {
