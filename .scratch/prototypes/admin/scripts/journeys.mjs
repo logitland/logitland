@@ -179,10 +179,14 @@ assert.ok(await main.getByText('Level 5 at 7,500 XP · Level 10 at 30,000 XP').i
 await main.getByRole('button', { name: 'Save' }).first().click();
 await toast('Saved level curve');
 await dismissToasts();
-await main.getByLabel('Level 3 colour').click();
-await page.getByRole('option', { name: 'Orange' }).click();
-await main.getByLabel('Level 2 colour').click();
-await page.getByRole('option', { name: 'Tween' }).click();
+await main.getByRole('button', { name: /^Level 3 colour/ }).click();
+await page.getByRole('button', { name: 'Orange', exact: true }).click();
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+await main.getByRole('button', { name: /^Level 2 colour/ }).click();
+await page.waitForTimeout(200);
+await page.getByRole('button', { name: 'Tween instead' }).click();
+await page.keyboard.press('Escape');
 await main.getByRole('button', { name: 'Save' }).nth(1).click();
 await toast('Saved level colours');
 await dismissToasts();
