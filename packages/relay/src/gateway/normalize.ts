@@ -18,6 +18,8 @@ const THREAD_TYPES: ReadonlySet<number> = new Set([10, 11]);
 const PRIVATE_THREAD = 12;
 /** The channel types the relay can use: text, announcement, forum, media. */
 export const CHANNEL_TYPES: Readonly<Record<number, 'text' | 'announcement' | 'forum' | 'media'>> = { 0: 'text', 5: 'announcement', 15: 'forum', 16: 'media' };
+/** Categories hold no messages; they are kept for the admin pages' layout. */
+const CATEGORY = 4;
 
 export interface DiscordMessageLike {
   id: string;
@@ -47,6 +49,8 @@ export interface DiscordChannelLike {
   permission_overwrites?: { id: string; type: 0 | 1; allow: string; deny: string }[];
   /** Slowmode, in seconds. */
   rate_limit_per_user?: number;
+  /** Its place among its siblings, as Discord sorts them. */
+  position?: number;
   flags?: number;
 }
 
@@ -124,6 +128,7 @@ export function threadEvents(channels: DiscordChannelLike[], ctx: NormalizeConte
 function channelUpdate(c: DiscordChannelLike, guildId: string | undefined): IntakeEventInput[] {
   const type = CHANNEL_TYPES[c.type];
   const guild = c.guild_id ?? guildId;
+  if (c.type === CATEGORY && c.name && guild) return [{ kind: 'category_update', category_id: c.id, guild_id: guild, name: c.name, position: c.position ?? 0 }];
   if (!type || !c.name || !guild) return [];
   if ((c.flags ?? 0) & CHANNEL_OBFUSCATED) return [{ kind: 'channel_hidden', channel_id: c.id, guild_id: guild, type }];
   return [
@@ -136,6 +141,7 @@ function channelUpdate(c: DiscordChannelLike, guildId: string | undefined): Inta
       type,
       overwrites: c.permission_overwrites ?? [],
       slowmode_seconds: c.rate_limit_per_user ?? 0,
+      position: c.position ?? 0,
       ...(c.available_tags ? { tags: c.available_tags.map((t) => ({ id: t.id, name: t.name, moderated: t.moderated ?? false })) } : {}),
     },
   ];
@@ -214,7 +220,9 @@ export function normalizeDispatch(t: string, d: unknown, ctx: NormalizeContext):
     }
     case 'CHANNEL_DELETE': {
       const c = d as DiscordChannelLike;
-      return inGuild(c.guild_id) && CHANNEL_TYPES[c.type] ? [{ kind: 'channel_delete', channel_id: c.id }] : [];
+      if (!inGuild(c.guild_id)) return [];
+      if (c.type === CATEGORY) return [{ kind: 'category_delete', category_id: c.id }];
+      return CHANNEL_TYPES[c.type] ? [{ kind: 'channel_delete', channel_id: c.id }] : [];
     }
     case 'MESSAGE_REACTION_ADD':
     case 'MESSAGE_REACTION_REMOVE': {

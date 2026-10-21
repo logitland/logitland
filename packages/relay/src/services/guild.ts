@@ -6,7 +6,11 @@ import type { IntakeEvent } from './intake';
 // what Discord's overwrites allow it (channels.ts). Applied before the messages of the same batch, so a message in a channel
 // that just opened to agents is already relayed.
 
-export type GuildEvent = Extract<IntakeEvent, { kind: 'channel_update' | 'channel_hidden' | 'channel_delete' | 'role_update' | 'role_delete' }>;
+export type GuildEvent = Extract<
+  IntakeEvent,
+  { kind: 'channel_update' | 'channel_hidden' | 'channel_delete' | 'category_update' | 'category_delete' | 'role_update' | 'role_delete' }
+>;
+const GUILD_KINDS = new Set<IntakeEvent['kind']>(['channel_update', 'channel_hidden', 'channel_delete', 'category_update', 'category_delete', 'role_update', 'role_delete']);
 
 /** A hidden channel's real name isn't known; this stands in until Discord sends it. */
 const HIDDEN_NAME = 'hidden channel';
@@ -27,12 +31,21 @@ function statement(relay: Relay, e: GuildEvent, now: string): Stmt {
       const tags = e.tags ? JSON.stringify(e.tags) : e.type === 'text' || e.type === 'announcement' ? '[]' : null;
       return relay.db
         .prepare(
-          `INSERT INTO channels (id, guild_id, parent_id, name, type, overwrites, slowmode_seconds, hidden, tags, deleted_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, COALESCE(?, '[]'), NULL, ?)
+          `INSERT INTO channels (id, guild_id, parent_id, name, type, overwrites, slowmode_seconds, position, hidden, tags, deleted_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, COALESCE(?, '[]'), NULL, ?)
            ON CONFLICT (id) DO UPDATE SET guild_id = excluded.guild_id, parent_id = excluded.parent_id, name = excluded.name, type = excluded.type,
-             overwrites = excluded.overwrites, slowmode_seconds = excluded.slowmode_seconds, hidden = 0, tags = COALESCE(?, channels.tags), deleted_at = NULL, updated_at = excluded.updated_at`,
+             overwrites = excluded.overwrites, slowmode_seconds = excluded.slowmode_seconds, position = excluded.position, hidden = 0, tags = COALESCE(?, channels.tags), deleted_at = NULL, updated_at = excluded.updated_at`,
         )
-        .bind(e.channel_id, e.guild_id, e.parent_id ?? null, e.name, e.type, JSON.stringify(e.overwrites), e.slowmode_seconds, tags, now, tags);
+        .bind(e.channel_id, e.guild_id, e.parent_id ?? null, e.name, e.type, JSON.stringify(e.overwrites), e.slowmode_seconds, e.position ?? 0, tags, now, tags);
     }
+    case 'category_update':
+      return relay.db
+        .prepare(
+          `INSERT INTO categories (id, guild_id, name, position, deleted_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?)
+           ON CONFLICT (id) DO UPDATE SET name = excluded.name, position = excluded.position, deleted_at = NULL, updated_at = excluded.updated_at`,
+        )
+        .bind(e.category_id, e.guild_id, e.name, e.position, now);
+    case 'category_delete':
+      return relay.db.prepare('UPDATE categories SET deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE id = ?').bind(now, now, e.category_id);
     case 'channel_hidden':
       return relay.db
         .prepare(
@@ -45,8 +58,7 @@ function statement(relay: Relay, e: GuildEvent, now: string): Stmt {
   }
 }
 
-export const isGuildEvent = (e: IntakeEvent): e is GuildEvent =>
-  e.kind === 'channel_update' || e.kind === 'channel_hidden' || e.kind === 'channel_delete' || e.kind === 'role_update' || e.kind === 'role_delete';
+export const isGuildEvent = (e: IntakeEvent): e is GuildEvent => GUILD_KINDS.has(e.kind);
 
 /**
  * Stores the channels and roles the events describe, in order, in one batch. A deleted channel's subscriptions end (#9): the

@@ -20,6 +20,8 @@ export interface ChannelRow {
   /** Discord's permission_overwrites, JSON. */
   overwrites: string;
   slowmode_seconds: number;
+  /** Its place in its category, as Discord sorts them. */
+  position: number;
   /** 1 when the bot can't view the channel. */
   hidden: number;
   webhook_ciphertext: string | null;

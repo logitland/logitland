@@ -1,6 +1,7 @@
 import type { AdminChannel } from '@logitland/contracts';
 import { Permission } from '@logitland/discord';
 import { describe, expect, it } from 'vitest';
+import { ingest } from './services/intake';
 import { updateSettings } from './services/settings';
 import { ADMIN_DISCORD, BENCH, GUILD, LOUNGE, harness, seedChannel, seedOwner } from './testing';
 
@@ -55,6 +56,7 @@ describe('GET /internal/admin/channels', () => {
         slowmode_seconds: 0,
         hidden: true,
         has_webhook: false,
+        position: 0,
         levels: [
           { level: 0, orphan: nothing, adopted: nothing },
           { level: 3, orphan: nothing, adopted: nothing },
@@ -69,11 +71,38 @@ describe('GET /internal/admin/channels', () => {
         slowmode_seconds: 0,
         hidden: false,
         has_webhook: true,
+        position: 0,
         levels: [
           { level: 0, orphan: { view: true, post: false }, adopted: { view: true, post: true } },
           { level: 3, orphan: { view: true, post: true }, adopted: { view: true, post: true } },
         ],
       },
+    ]);
+  });
+
+  it('lays channels out as Discord does: their categories, and their places in them', async () => {
+    const { h, as } = await setup();
+    const CATEGORY = '110000000000000030';
+    const update = (id: string, name: string, position: number) => ({
+      kind: 'channel_update',
+      channel_id: id,
+      guild_id: GUILD,
+      parent_id: CATEGORY,
+      name,
+      type: 'text',
+      overwrites: [],
+      slowmode_seconds: 0,
+      position,
+    });
+    await ingest(h.relay, {
+      source: 'test',
+      events: [{ kind: 'category_update', category_id: CATEGORY, guild_id: GUILD, name: 'logit.land', position: 3 }, update(LOUNGE, 'lounge', 2), update(BENCH, 'bench', 1)],
+    });
+    const body = (await (await h.internal('GET', '/internal/admin/channels', undefined, as)).json()) as { channels: AdminChannel[]; categories: unknown };
+    expect(body.categories).toEqual([{ id: CATEGORY, name: 'logit.land', position: 3 }]);
+    expect(body.channels.map((c) => [c.name, c.parent_id, c.position])).toEqual([
+      ['bench', CATEGORY, 1],
+      ['lounge', CATEGORY, 2],
     ]);
   });
 

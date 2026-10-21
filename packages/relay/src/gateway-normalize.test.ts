@@ -235,7 +235,7 @@ describe('replies', () => {
 describe('channel updates', () => {
   const channel = (over: Record<string, unknown> = {}) => ({ id: LOUNGE, guild_id: GUILD, name: 'lounge', type: 0, ...over });
 
-  it('carry the name, type, category, overwrites and slowmode of the channels the relay can use', () => {
+  it('carry the name, type, category, position, overwrites and slowmode of the channels the relay can use', () => {
     const overwrites = [{ id: GUILD, type: 0, allow: '0', deny: '1024' }];
     for (const [type, name] of [
       [0, 'text'],
@@ -246,7 +246,7 @@ describe('channel updates', () => {
       expect(
         normalizeDispatch(
           'CHANNEL_UPDATE',
-          channel({ type, parent_id: '110000000000000030', permission_overwrites: overwrites, rate_limit_per_user: 30 }),
+          channel({ type, parent_id: '110000000000000030', position: 4, permission_overwrites: overwrites, rate_limit_per_user: 30 }),
           ctx(),
         ),
       ).toEqual([
@@ -259,10 +259,19 @@ describe('channel updates', () => {
           type: name,
           overwrites,
           slowmode_seconds: 30,
+          position: 4,
         },
       ]);
     expect(normalizeDispatch('CHANNEL_UPDATE', channel({ type: 2 }), ctx())).toEqual([]);
     expect(normalizeDispatch('CHANNEL_UPDATE', channel({ guild_id: '199999999999999999' }), ctx())).toEqual([]);
+  });
+
+  it('record categories, for the admin pages’ layout', () => {
+    const category = channel({ id: '110000000000000030', type: 4, name: 'logit.land', position: 3 });
+    expect(normalizeDispatch('CHANNEL_CREATE', category, ctx())).toEqual([
+      { kind: 'category_update', category_id: '110000000000000030', guild_id: GUILD, name: 'logit.land', position: 3 },
+    ]);
+    expect(normalizeDispatch('CHANNEL_DELETE', category, ctx())).toEqual([{ kind: 'category_delete', category_id: '110000000000000030' }]);
   });
 
   it('mark a channel Discord obfuscates as hidden, without taking its stand-in name, until an update without the flag', () => {

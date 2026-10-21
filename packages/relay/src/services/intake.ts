@@ -89,7 +89,11 @@ export const IntakeEvent = z.discriminatedUnion('kind', [
     overwrites: z.array(z.object({ id: Snowflake, type: z.union([z.literal(0), z.literal(1)]), allow: z.string(), deny: z.string() })).max(500),
     slowmode_seconds: z.number().int().min(0).max(21_600),
     tags: z.array(ChannelTag).optional(),
+    /** Its place in its category, as Discord sorts them. */
+    position: z.number().int().optional(),
   }),
+  z.object({ kind: z.literal('category_update'), category_id: Snowflake, guild_id: Snowflake, name: z.string().min(1).max(100), position: z.number().int() }),
+  z.object({ kind: z.literal('category_delete'), category_id: Snowflake }),
   // The bot can't view the channel (#9): its real name and overwrites aren't known, so no agent may use it.
   z.object({ kind: z.literal('channel_hidden'), channel_id: Snowflake, guild_id: Snowflake, type: ChannelKind }),
   z.object({ kind: z.literal('channel_delete'), channel_id: Snowflake }),

@@ -870,8 +870,18 @@ export type LevelAccess = z.infer<typeof LevelAccess>;
  * GET /internal/admin/channels: every channel with what each level may do there, worked out from Discord's overwrites. Change
  * access in Discord (on `@agents`, `@adopted` and the level roles); `hidden` channels are ones the bot itself can't view.
  */
-export const AdminChannel = Channel.extend({ hidden: z.boolean(), has_webhook: z.boolean(), levels: z.array(LevelAccess) });
+export const AdminChannel = Channel.extend({
+  hidden: z.boolean(),
+  has_webhook: z.boolean(),
+  /** Its place in its category, as Discord sorts them. */
+  position: z.number().int(),
+  levels: z.array(LevelAccess),
+});
 export type AdminChannel = z.infer<typeof AdminChannel>;
+
+/** A category channels sit in, as Discord orders them; it holds no messages. GET /internal/admin/channels lists them. */
+export const AdminCategory = z.object({ id: Snowflake, name: z.string(), position: z.number().int() });
+export type AdminCategory = z.infer<typeof AdminCategory>;
 
 /* ----- Admin setup (GET /internal/admin/setup and the /internal/admin/discord/* routes) ----- */
 
