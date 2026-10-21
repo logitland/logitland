@@ -8,27 +8,33 @@
   import { Progress } from '#lib/components/ui/progress/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { Switch } from '#lib/components/ui/switch/index.js';
-  import type { Agent } from '#lib/fixtures/owner/data.js';
+  import type { OwnerDelivery } from '@logitland/contracts';
   import { formatNumber } from '#lib/fixtures/owner/format.js';
-  import { dashboard } from '#lib/fixtures/owner/store.svelte.js';
+  import { messageOf } from '#lib/owner/errors.js';
+  import { setCap } from '#lib/owner/owner.remote.js';
 
-  let { agent }: { agent: Agent } = $props();
+  let { agentId, delivery }: { agentId: string; delivery: OwnerDelivery } = $props();
 
+  /** The relay's bounds (`OwnerDeliveryPatch`), and the cap suggested when turning it on. */
   const MAX_CAP = 1_000_000;
+  const SUGGESTED_CAP = 5000;
   const NEAR_CAP = 0.9;
 
-  let enabled = $state(untrack(() => agent.cap !== null));
-  let value = $state(untrack(() => String(agent.cap ?? 5000)));
+  const cap = $derived(delivery.daily_event_cap);
+  const delivered = $derived(delivery.delivered_today);
+
+  let enabled = $state(untrack(() => cap !== null));
+  let value = $state(untrack(() => String(cap ?? SUGGESTED_CAP)));
   let error = $state<string>();
   let saving = $state(false);
 
   const parsed = $derived(Number(value));
-  const dirty = $derived(enabled !== (agent.cap !== null) || (enabled && parsed !== agent.cap));
-  const usage = $derived(agent.cap ? agent.deliveredToday / agent.cap : 0);
+  const dirty = $derived(enabled !== (cap !== null) || (enabled && parsed !== cap));
+  const usage = $derived(cap ? delivered / cap : 0);
 
   function discard() {
-    enabled = agent.cap !== null;
-    value = String(agent.cap ?? 5000);
+    enabled = cap !== null;
+    value = String(cap ?? SUGGESTED_CAP);
     error = undefined;
   }
 
@@ -39,9 +45,13 @@
       return;
     }
     saving = true;
-    await dashboard.saveCap(agent.id, enabled ? parsed : null);
+    try {
+      await setCap({ agentId, daily_event_cap: enabled ? parsed : null });
+      toast.success(enabled ? `Capped at ${formatNumber(parsed)} a day` : 'Cap removed');
+    } catch (failure) {
+      error = messageOf(failure);
+    }
     saving = false;
-    toast.success(enabled ? `Capped at ${formatNumber(parsed)} a day` : 'Cap removed');
   }
 </script>
 
@@ -55,18 +65,18 @@
         <div class="flex items-baseline justify-between gap-3 text-sm tabular-nums">
           <span class="text-muted-foreground">Delivered today</span>
           <span>
-            <span class="font-medium">{formatNumber(agent.deliveredToday)}</span>
-            {#if agent.cap !== null}
-              <span class="text-muted-foreground">/ {formatNumber(agent.cap)}</span>
+            <span class="font-medium">{formatNumber(delivered)}</span>
+            {#if cap !== null}
+              <span class="text-muted-foreground">/ {formatNumber(cap)}</span>
             {/if}
           </span>
         </div>
-        {#if agent.cap !== null}
+        {#if cap !== null}
           <Progress
-            value={agent.deliveredToday}
-            max={agent.cap}
+            value={delivered}
+            max={cap}
             variant={usage >= NEAR_CAP ? 'warning' : 'default'}
-            aria-label="{formatNumber(agent.deliveredToday)} of {formatNumber(agent.cap)} delivered today"
+            aria-label="{formatNumber(delivered)} of {formatNumber(cap)} delivered today"
           />
         {/if}
       </div>

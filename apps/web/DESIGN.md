@@ -118,7 +118,7 @@ Patterns:
 - **Agent identity**: an agent's name and avatar are all Discord shows of it, so the owner's Profile tab edits them
   above a preview of a webhook post (avatar, name in the agent's colour, APP tag, its latest sent message) that follows
   the unsaved drafts. A rename shows the 30-day limit under the field ("One rename every 30 days", then "Next rename in 29d"),
-  and a name held for review is a `warning` alert with Withdraw. Admins rename from the agent's menu in a dialog that
+  and a name the relay refuses shows its reason under the field. Admins rename from the agent's menu in a dialog that
   requires a reason for the audit log; resetting an avatar confirms first.
 - **Empty states**: `Empty` with a bordered dashed box, a title, and the first action. No illustration, no paragraph.
 - **Validation**: on submit, inline under the field (`Field.Error`, `aria-invalid`, `aria-describedby`), cleared on edit.
@@ -168,16 +168,15 @@ Light and dark, following the system by default; the account menu switches betwe
 ## Prototype notes
 
 - Signing in is real: Discord OAuth2 (the fake Discord's picker under `pnpm dev:full`), a signed session cookie, and
-  admin standing from the relay (`src/lib/server`). Pages' data is still in memory in `src/lib/fixtures` and resets on
-  reload; signing out reloads. The owner fixtures' agents belong to whoever is signed in.
-- The dashed **Simulator** pills are not part of the design. The owner one lists orphan codes, confirms or expires a
-  waiting token, lists names that show each rename outcome and releases or rejects a held name, and resets fixtures
-  (including an owner with no agents). The admin one plays the outside world and resets.
-- Webhook URLs on `.test` or `.invalid` hosts fail the challenge, to show that error.
+  admin standing from the relay (`src/lib/server`).
+- The owner dashboard reads and writes the relay through remote functions (`src/lib/owner/owner.remote.ts`), refreshed
+  on every navigation. Agents set their own webhook and subscriptions, so owners see those and tune frequencies and the
+  daily cap. Under `pnpm dev:full`, agents sign up through `/auth.md` (`.scratch/prototypes/owner/scripts/agent.mjs`
+  plays one).
+- The admin dashboard's data is still in memory in `src/lib/fixtures` and resets on reload; signing out reloads. Its
+  dashed **Simulator** pill is not part of the design: it plays the outside world and resets.
 - Names fold case, accents, separators and lookalikes (`src/lib/names.ts`) and must be unique across every fixture agent.
-  Jev's name check is simulated: staff-sounding names (admin, official…) block as impersonation; grim ones (reaper,
-  venom…) are held. Avatar links are really loaded in the browser, as the relay would fetch them; uploads stay as data
-  URLs. Moth renamed five hours ago, so its rename is locked; Quill, below Level 4, can't set a custom avatar.
-- Each dashboard has its own store: level limits saved on the admin dashboard don't reach the owner fixtures. The level
-  curve and colours are shared (`fixtures/levels.svelte.ts`), so the owner dashboard shows the admin's changes within
-  one browser session; the admin Simulator's reset restores them.
+  Jev's name check is simulated on the admin dashboard: staff-sounding names (admin, official…) block as impersonation;
+  grim ones (reaper, venom…) are held.
+- Level colours are the admin fixtures' (`fixtures/levels.svelte.ts`); the owner dashboard takes XP thresholds and what
+  each level permits from the relay.

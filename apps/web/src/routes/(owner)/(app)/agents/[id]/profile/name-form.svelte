@@ -1,25 +1,27 @@
 <script lang="ts">
-  import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+  import type { Agent } from '@logitland/contracts';
   import { toast } from 'svelte-sonner';
-  import * as Alert from '#lib/components/ui/alert/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Card from '#lib/components/ui/card/index.js';
   import * as Field from '#lib/components/ui/field/index.js';
   import { Input } from '#lib/components/ui/input/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
-  import type { Agent } from '#lib/fixtures/owner/data.js';
   import { timeLeft } from '#lib/fixtures/owner/format.js';
-  import { dashboard, nextRenameAt } from '#lib/fixtures/owner/store.svelte.js';
+  import { messageOf } from '#lib/owner/errors.js';
+  import { updateProfile } from '#lib/owner/owner.remote.js';
   import { NAME_MAX, nameError } from '#lib/names.js';
 
-  /** Renames the agent, once every 30 days; `name` is the draft, bound so the preview follows it. */
-  let { agent, name = $bindable() }: { agent: Agent; name: string } = $props();
+  /**
+   * Renames the agent, once every 30 days; `renameAfter` is when it may next (the relay's `rename_after`), and `name` is
+   * the draft, bound so the preview follows it.
+   */
+  let { agent, renameAfter, name = $bindable() }: { agent: Agent; renameAfter: string | null; name: string } = $props();
 
   let error = $state<string>();
   let saving = $state(false);
 
-  const wait = $derived(nextRenameAt(agent) - Date.now());
-  const locked = $derived(wait > 0 || agent.heldName !== null);
+  const wait = $derived(renameAfter ? Date.parse(renameAfter) - Date.now() : 0);
+  const locked = $derived(wait > 0);
   const dirty = $derived(name.trim() !== agent.name);
 
   function discard() {
@@ -32,14 +34,14 @@
     error = nameError(name) ?? undefined;
     if (error) return;
     saving = true;
-    const result = await dashboard.rename(agent.id, name);
-    saving = false;
-    if (result.status === 'refused') {
-      error = result.error;
-      return;
+    try {
+      const renamed = await updateProfile({ agentId: agent.id, patch: { name: name.trim() } });
+      name = renamed.name;
+      toast.success(`Renamed to ${renamed.name}`);
+    } catch (failure) {
+      error = messageOf(failure);
     }
-    name = agent.name;
-    if (result.status === 'renamed') toast.success(`Renamed to ${agent.name}`);
+    saving = false;
   }
 </script>
 
@@ -49,17 +51,6 @@
       <Card.Title>Name</Card.Title>
     </Card.Header>
     <Card.Content class="gap-6">
-      {#if agent.heldName}
-        <Alert.Root variant="warning" class="max-sm:pr-4">
-          <TriangleAlertIcon />
-          <Alert.Title class="line-clamp-none break-words">{agent.heldName} is held for review</Alert.Title>
-          <Alert.Description>{agent.name} keeps its name until an admin decides.</Alert.Description>
-          <Alert.Action class="static col-span-full mt-3 sm:absolute sm:top-1/2 sm:right-3 sm:mt-0 sm:-translate-y-1/2">
-            <Button size="sm" variant="outline" onclick={() => dashboard.withdrawName(agent.id)}>Withdraw</Button>
-          </Alert.Action>
-        </Alert.Root>
-      {/if}
-
       <Field.Field data-invalid={error ? true : undefined}>
         <Field.Label for="agent-name" class="sr-only">Name</Field.Label>
         <Input
@@ -78,7 +69,7 @@
           <Field.Error id="agent-name-error">{error}</Field.Error>
         {:else}
           <Field.Description id="agent-name-limit" class="tabular-nums">
-            {wait > 0 ? `Next rename in ${timeLeft(wait)}` : 'One rename every 30 days'}
+            {locked ? `Next rename in ${timeLeft(wait)}` : 'One rename every 30 days'}
           </Field.Description>
         {/if}
       </Field.Field>

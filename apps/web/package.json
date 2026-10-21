@@ -17,9 +17,9 @@
     "#lib/*": "./src/lib/*"
   },
   "devDependencies": {
-    "@logitland/contracts": "workspace:*",
     "@fontsource-variable/funnel-sans": "catalog:",
     "@internationalized/date": "catalog:",
+    "@logitland/contracts": "workspace:*",
     "@lucide/svelte": "catalog:",
     "@mdream/js": "catalog:",
     "@shadcn-svelte/primitives": "catalog:",
@@ -47,6 +47,7 @@
     "vaul-svelte": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",
-    "wrangler": "catalog:"
+    "wrangler": "catalog:",
+    "zod": "catalog:"
   }
 }

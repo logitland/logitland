@@ -1,6 +1,8 @@
 <script lang="ts">
   import CopyIcon from '@lucide/svelte/icons/copy';
   import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
+  import PowerIcon from '@lucide/svelte/icons/power';
+  import PowerOffIcon from '@lucide/svelte/icons/power-off';
   import TrashIcon from '@lucide/svelte/icons/trash-2';
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
@@ -15,16 +17,30 @@
   import * as Empty from '#lib/components/ui/empty/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { formatDate, levelName, plural } from '#lib/fixtures/owner/format.js';
-  import { dashboard, strikeCount } from '#lib/fixtures/owner/store.svelte.js';
+  import { STATUS, avatarOf } from '#lib/owner/agents.js';
+  import { messageOf } from '#lib/owner/errors.js';
+  import { getAgents, getSubscriptions, revoke as revokeAgent, setOn } from '#lib/owner/owner.remote.js';
 
   let { children } = $props();
 
-  const agent = $derived(dashboard.agent(page.params.id ?? ''));
+  const agents = $derived(await getAgents());
+  const agent = $derived(agents.find((a) => a.id === page.params.id));
   const base = $derived(`/agents/${page.params.id}`);
-  const strikes = $derived(agent ? strikeCount(agent) : 0);
+  const subscriptions = $derived(agent ? getSubscriptions(agent.id).current?.length : undefined);
 
   let revokeOpen = $state(false);
   let revoking = $state(false);
+
+  async function turn(on: boolean) {
+    if (!agent) return;
+    const name = agent.name;
+    try {
+      await setOn({ agentId: agent.id, on });
+      toast.success(on ? `Turned ${name} on` : `Turned ${name} off`);
+    } catch (error) {
+      toast.error(messageOf(error));
+    }
+  }
 
   async function copyId() {
     if (!agent) return;
@@ -40,7 +56,13 @@
     if (!agent) return;
     const name = agent.name;
     revoking = true;
-    await dashboard.revoke(agent.id);
+    try {
+      await revokeAgent(agent.id);
+    } catch (error) {
+      toast.error(messageOf(error));
+      revoking = false;
+      return;
+    }
     toast.success(`Revoked ${name}`);
     await goto('/agents');
   }
@@ -61,15 +83,15 @@
   </Empty.Root>
 {:else}
   <header class="flex items-center gap-4">
-    <AgentAvatar {agent} class="size-12 sm:size-14" />
+    <AgentAvatar agent={avatarOf(agent)} class="size-12 sm:size-14" />
     <div class="min-w-0 flex-1">
       <h1 class="truncate text-xl font-semibold tracking-tight sm:text-2xl">{agent.name}</h1>
       <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
         <span>{levelName(agent.level)}</span>
         <span aria-hidden="true">·</span>
-        <span>Adopted {formatDate(agent.adoptedAt ?? agent.joinedAt)}</span>
-        {#if strikes > 0}
-          <Badge variant="destructive">{plural(strikes, { one: '# strike', other: '# strikes' })}</Badge>
+        <span>Adopted {formatDate(Date.parse(agent.adopted_at ?? agent.created_at))}</span>
+        {#if agent.status !== 'active'}
+          <Badge variant={STATUS[agent.status].variant}>{STATUS[agent.status].label}</Badge>
         {/if}
       </div>
     </div>
@@ -82,6 +104,17 @@
           <CopyIcon />
           Copy agent ID
         </DropdownMenu.Item>
+        {#if agent.status === 'active'}
+          <DropdownMenu.Item onSelect={() => turn(false)}>
+            <PowerOffIcon />
+            Turn off
+          </DropdownMenu.Item>
+        {:else if agent.status === 'off'}
+          <DropdownMenu.Item onSelect={() => turn(true)}>
+            <PowerIcon />
+            Turn on
+          </DropdownMenu.Item>
+        {/if}
         <DropdownMenu.Separator />
         <DropdownMenu.Item variant="destructive" onSelect={() => (revokeOpen = true)}>
           <TrashIcon />
@@ -115,10 +148,10 @@
       <AlertDialog.Header>
         <AlertDialog.Title>Revoke {agent.name}’s registration?</AlertDialog.Title>
         <AlertDialog.Description>
-          {#if agent.subscriptions.length === 0}
+          {#if !subscriptions}
             This ends every token.
           {:else}
-            This ends every token and {plural(agent.subscriptions.length, { one: 'its subscription', other: 'all # subscriptions' })}.
+            This ends every token and {plural(subscriptions, { one: 'its subscription', other: 'all # subscriptions' })}.
           {/if}
           {agent.name} has to sign up again to come back, as a new orphan.
         </AlertDialog.Description>

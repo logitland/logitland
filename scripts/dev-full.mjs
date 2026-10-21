@@ -382,7 +382,7 @@ Try:
   curl -s ${fakeUrl}/_fake/requests
 
 Known limits:
-  - Sign-in and admin standing are real; the dashboards' pages still show their own fixtures (#36).
+  - Sign-in, admin standing and the owner dashboard are real; the admin pages still show their own fixtures (#36).
   - Messages and sessions in the fake live in memory: restarting this script starts a fresh server (use --reset for a fresh database too).
 
 Ctrl-C stops everything.
