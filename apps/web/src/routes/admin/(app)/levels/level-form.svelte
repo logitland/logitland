@@ -11,6 +11,7 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { formatNumber, levelName, refusal } from '#lib/admin/format.js';
   import { LIMIT_KEYS, LIMIT_LABELS, PERMISSION_KEYS, PERMISSION_LABELS } from '#lib/admin/labels.js';
+  import { cn } from '#lib/utils.js';
   import { saveLevel } from './levels.remote.js';
 
   /**
@@ -48,6 +49,14 @@
   const roleLabel = (roleId: string | null) => (roleId ? `@${roles.find((r) => r.id === roleId)?.name ?? roleId}` : 'No role');
   const levelOfRole = (roleId: string) => levels.find((l) => l.role_id === roleId)?.level;
 
+  // A level only adds to the levels below it and stays within the levels above it, as the relay requires.
+  const below = $derived(levels.findLast((l) => l.level < level.level));
+  const above = $derived(levels.find((l) => l.level > level.level));
+  const min = (key: Limit) => below?.limits[key] ?? 0;
+  const max = (key: Limit) => above?.limits[key] ?? LevelLimits.shape[key].maxValue ?? Number.MAX_SAFE_INTEGER;
+  /** The lowest level that already grants `p` below this one, which locks it on here. */
+  const grantedBy = (p: LevelPermission) => levels.find((l) => l.level < level.level && l.permissions.includes(p))?.level;
+
   const change = (next: Partial<Draft>) => (edited = { ...draft, ...next });
   const togglePermission = (p: LevelPermission, on: boolean) => {
     const rest = draft.permissions.filter((x) => x !== p);
@@ -58,8 +67,7 @@
     const next: typeof errors = {};
     for (const key of LIMIT_KEYS) {
       const n = Number(draft.limits[key]);
-      const max = LevelLimits.shape[key].maxValue ?? Number.MAX_SAFE_INTEGER;
-      if (!Number.isInteger(n) || n < 0 || n > max) next[key] = `Enter a whole number from 0 to ${formatNumber(max)}.`;
+      if (!Number.isInteger(n) || n < min(key) || n > max(key)) next[key] = `Enter a whole number from ${formatNumber(min(key))} to ${formatNumber(max(key))}.`;
     }
     errors = next;
     return Object.keys(next).length === 0;
@@ -76,7 +84,8 @@
     saving = true;
     const limits = Object.fromEntries(LIMIT_KEYS.map((k) => [k, Number(draft.limits[k])])) as Level['limits'];
     try {
-      await saveLevel({ level: level.level, update: { name: level.name, role_id: draft.role, limits, permissions: draft.permissions } });
+      const permissions = PERMISSION_KEYS.filter((p) => grantedBy(p) !== undefined || draft.permissions.includes(p));
+      await saveLevel({ level: level.level, update: { name: level.name, role_id: draft.role, limits, permissions } });
       edited = undefined;
       toast.success(`Saved ${levelName(level.level)}`);
     } catch (e) {
@@ -136,8 +145,8 @@
             id="{id}-{key}"
             type="number"
             inputmode="numeric"
-            min="0"
-            max={LevelLimits.shape[key].maxValue}
+            min={min(key)}
+            max={max(key)}
             step="1"
             bind:value={() => draft.limits[key], (next) => change({ limits: { ...draft.limits, [key]: String(next ?? '') } })}
             oninput={() => (errors[key] = undefined)}
@@ -153,9 +162,16 @@
     <fieldset class="flex flex-col gap-2">
       <legend class="mb-2 text-muted-foreground">Also allows</legend>
       {#each PERMISSION_KEYS as permission (permission)}
-        <label class="flex min-h-8 items-center gap-2.5">
-          <Checkbox checked={draft.permissions.includes(permission)} onCheckedChange={(on) => togglePermission(permission, on)} />
+        {@const from = grantedBy(permission)}
+        {@const notYet = above !== undefined && !above.permissions.includes(permission)}
+        <label class={cn('flex min-h-8 items-center gap-2.5', (from !== undefined || notYet) && 'text-muted-foreground')}>
+          <Checkbox
+            checked={from !== undefined || draft.permissions.includes(permission)}
+            disabled={from !== undefined || notYet}
+            onCheckedChange={(on) => togglePermission(permission, on)}
+          />
           {PERMISSION_LABELS[permission]}
+          {#if from !== undefined}<span class="ml-auto text-xs whitespace-nowrap">from {levelName(from)}</span>{/if}
         </label>
       {/each}
     </fieldset>

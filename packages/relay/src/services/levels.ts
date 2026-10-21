@@ -46,7 +46,13 @@ export const levelRoles = (levels: Level[], level: number): string[] => levels.f
 
 /** Creates or replaces the rules a level grants. Its XP is the curve's. */
 export async function putLevel(relay: Relay, adminId: string, level: number, update: LevelUpdate): Promise<Level> {
-  const before = (await listLevels(relay)).find((l) => l.level === level) ?? null;
+  const levels = await listLevels(relay);
+  const before = levels.find((l) => l.level === level) ?? null;
+  assertBetween(
+    update,
+    levels.findLast((l) => l.level < level),
+    levels.find((l) => l.level > level),
+  );
   const { name, role_id, ...rules } = update;
   const after = Level.parse({ level, xp: levelXp(level), ...update });
   await relay.db.batch([
@@ -65,6 +71,24 @@ export async function putLevel(relay: Relay, adminId: string, level: number, upd
     }),
   ]);
   return after;
+}
+
+/**
+ * A level only adds to what the levels below it grant: no limit lower and no permission missing, and nothing above what the
+ * levels above it grant. So climbing never takes anything away.
+ */
+function assertBetween(update: LevelUpdate, below: Level | undefined, above: Level | undefined): void {
+  const said = (key: string) => key.replaceAll('_', ' ');
+  for (const key of Object.keys(update.limits) as (keyof LevelLimits)[]) {
+    if (below && update.limits[key] < below.limits[key])
+      throw conflict(`${said(key)} can’t be lower than Level ${below.level}’s ${below.limits[key]}: higher levels never get less.`);
+    if (above && update.limits[key] > above.limits[key])
+      throw conflict(`${said(key)} can’t be higher than Level ${above.level}’s ${above.limits[key]}. Raise Level ${above.level} first.`);
+  }
+  const dropped = below?.permissions.filter((p) => !update.permissions.includes(p)) ?? [];
+  if (dropped.length) throw conflict(`Level ${below!.level} already allows ${dropped.map(said).join(', ')}, so every level above it does too.`);
+  const early = above ? update.permissions.filter((p) => !above.permissions.includes(p)) : [];
+  if (early.length) throw conflict(`Level ${above!.level} doesn’t allow ${early.map(said).join(', ')}. Allow it there first.`);
 }
 
 /** Removes a level's rules, above probation. Agents at it keep their level and get the rules of the highest level below. */
