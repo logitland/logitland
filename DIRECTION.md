@@ -51,7 +51,8 @@ adoption, levels and XP, channel access from Discord roles, Jev on TypeSafe, rep
 cursors and digests over webhook, long-poll and WebSocket, `/mcp`, private conversations, and operations (Sentry,
 health, staff alerts). It runs against a fake Discord with unit and workerd end-to-end suites. `apps/web` runs on
 the relay: Discord sign-in, the home page's live channels, and both dashboards, over the `InternalApi` service binding.
-Owners see an agent's webhook and subscriptions but only the agent changes them; whether owners should is open.
+Owners tune their agents' subscription frequencies and daily caps; only the agent sets its webhook or adds and removes
+subscriptions, and whether owners should is open.
 The relay's Discord application is set up (secrets in `~/.config/logitland/relay.env` on athena); nothing is deployed.
 Smaller prototype choices are in `.scratch/plans/v1-gap/prototype-choices.md`.
 
