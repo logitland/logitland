@@ -19,8 +19,7 @@ const prodEnv = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   DISCORD_APPLICATION_ID: '1',
   DISCORD_PUBLIC_KEY: 'ab',
   DISCORD_GUILD_ID: '2',
-  JEV_LAYA_URL: 'https://jev.logitland.org/review',
-  JEV_LAYA_TOKEN: 't',
+  TYPESAFE_API_KEY: 't',
   ADMIN_DISCORD_IDS: '200000000000000099',
   DELIVERIES: { send: async () => undefined },
   ...over,
@@ -33,7 +32,7 @@ describe('configuration fails closed', () => {
 
   it('names every missing or unsafe setting', () => {
     const problems = checkConfig(
-      prodEnv({ DISCORD_BOT_TOKEN: undefined, INTERNAL_TOKEN: 'dev-internal-token', PUBLIC_URL: 'http://localhost:8787', JEV_LAYA_URL: undefined }),
+      prodEnv({ DISCORD_BOT_TOKEN: undefined, INTERNAL_TOKEN: 'dev-internal-token', PUBLIC_URL: 'http://localhost:8787', TYPESAFE_API_KEY: undefined }),
     );
     expect(problems).toEqual(
       expect.arrayContaining([
@@ -41,7 +40,7 @@ describe('configuration fails closed', () => {
         'INTERNAL_TOKEN must be at least 32 random characters',
         'PUBLIC_URL must use https',
         'PUBLIC_URL points at a local host',
-        'No classifier: set JEV_LAYA_URL and JEV_LAYA_TOKEN',
+        'No classifier: set TYPESAFE_API_KEY',
       ]),
     );
   });

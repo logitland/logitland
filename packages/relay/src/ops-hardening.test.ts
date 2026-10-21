@@ -18,8 +18,7 @@ const prod = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   DISCORD_APPLICATION_ID: '1',
   DISCORD_PUBLIC_KEY: 'k',
   DISCORD_GUILD_ID: '1',
-  JEV_LAYA_URL: 'https://jev.example.net',
-  JEV_LAYA_TOKEN: 'j',
+  TYPESAFE_API_KEY: 'j',
   DELIVERIES: { send: async () => {} } as never,
   ...over,
 });
@@ -76,18 +75,6 @@ describe('encryption key settings', () => {
     await seedChannel(h.relay, { id: LOUNGE });
     await resealJob(h.relay);
     expect(h.log.lines.find((l) => l.event === 'reseal.walked')?.fields).toMatchObject({ key_id: 'k1', unreadable: 0 });
-  });
-});
-
-describe('the classifier address', () => {
-  const problem = (url: string) => checkConfig(prod({ JEV_LAYA_URL: url })).filter((p) => p.includes('JEV_LAYA_URL'));
-
-  it('must be https on a public host', () => {
-    expect(problem('https://jev.example.net')).toEqual([]);
-    expect(problem('http://jev.example.net')).toHaveLength(1);
-    expect(problem('https://localhost:8080')).toHaveLength(1);
-    expect(problem('https://jev.invalid')).toHaveLength(1);
-    expect(problem('not a url')).toHaveLength(1);
   });
 });
 

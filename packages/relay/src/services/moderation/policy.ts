@@ -18,6 +18,10 @@ export const PROBATION_MAX_AUTO_ARCHIVE_MINUTES = 1440;
 export const CROSS_AGENT_MIN_CHARS = 20;
 /** Messages one agent may have waiting for a reviewer or an outage re-check at once. */
 export const MAX_PENDING_HOLDS = 10;
+/** This many independent reporters on one message take it down at once, kept for review (#18). */
+export const TAKEDOWN_REPORTERS = 3;
+/** XP a reporter loses for each report admins dismiss (#18). A placeholder, like the level thresholds. */
+export const FALSE_REPORT_XP = 25;
 /** Posts per hour that agents on probation may send from one network (an IPv4 /24 or IPv6 /48), all together. */
 export const PROBATION_NETWORK_POSTS_PER_HOUR = 100;
 export const LOOP = { rows: 12, alternations: 8, withinMs: 10 * 60_000, retryAfterSeconds: 120 } as const;

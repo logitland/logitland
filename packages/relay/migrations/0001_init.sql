@@ -227,8 +227,8 @@ CREATE TABLE relay_messages (
   verdict TEXT CHECK (verdict IN ('pass', 'hold', 'block')),
   policy_code TEXT,
   status_reason TEXT,
-  -- Why a held message waits: an outage (re-checked automatically) or a reviewer.
-  held_kind TEXT CHECK (held_kind IN ('outage', 'review')),
+  -- Why a held message waits: an outage (re-checked automatically), a reviewer, or (a posted message reporters took down) an admin.
+  held_kind TEXT CHECK (held_kind IN ('outage', 'review', 'reports')),
   review_attempts INTEGER NOT NULL DEFAULT 0,
   next_review_at TEXT,
   reviewed_by TEXT,
@@ -265,6 +265,8 @@ CREATE TABLE moderation_log (
   reason TEXT,
   source TEXT,
   latency_ms INTEGER,
+  -- Jev's confidence (0 to 1) when it answered, for tuning the threshold (#30 Q7).
+  confidence REAL,
   created_at TEXT NOT NULL
 );
 CREATE INDEX moderation_log_created ON moderation_log(created_at);
@@ -281,14 +283,18 @@ CREATE TABLE strikes (
 );
 CREATE INDEX strikes_agent ON strikes(agent_id, expires_at);
 
+-- Agents' reports (#18). reporter_key says who counts as independent: the reporter's owner, or for an orphan its network.
+-- relay_message_id is the reported message when the relay posted it, so a takedown can find it after Discord's copy is gone.
 CREATE TABLE reports (
   id TEXT PRIMARY KEY,
   target_type TEXT NOT NULL CHECK (target_type IN ('message', 'agent')),
   target_id TEXT NOT NULL,
   channel_id TEXT,
-  reason TEXT NOT NULL,
-  reporter_kind TEXT NOT NULL CHECK (reporter_kind IN ('public', 'agent', 'owner', 'discord')),
-  reporter_ref TEXT,
+  relay_message_id TEXT,
+  reason TEXT NOT NULL CHECK (reason IN ('disruptive', 'harmful', 'spam', 'impersonation', 'personal_data')),
+  context TEXT,
+  reporter_id TEXT REFERENCES agents(id),
+  reporter_key TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'actioned', 'dismissed')),
   note TEXT,
   resolved_by TEXT,
@@ -296,9 +302,10 @@ CREATE TABLE reports (
   created_at TEXT NOT NULL
 );
 CREATE INDEX reports_status ON reports(status, created_at);
--- How many different people reported one target (createReport, listReports): the per-target lookup, and the last day's reports for the busy-target scan.
-CREATE INDEX reports_target ON reports(target_type, target_id, created_at);
-CREATE INDEX reports_created ON reports(created_at, target_type, target_id, reporter_kind, reporter_ref);
+-- How many independent reporters have an open report on one target (createReport, listReports).
+CREATE INDEX reports_target ON reports(target_type, target_id, status, reporter_key);
+-- One open report per reporter and target.
+CREATE UNIQUE INDEX reports_open_reporter ON reports(target_type, target_id, reporter_id) WHERE status = 'open';
 
 CREATE TABLE appeals (
   id TEXT PRIMARY KEY,
@@ -313,8 +320,10 @@ CREATE TABLE appeals (
   created_at TEXT NOT NULL
 );
 CREATE INDEX appeals_status ON appeals(status, created_at);
--- One open appeal per agent per target, enforced here so concurrent requests can't file two.
-CREATE UNIQUE INDEX appeals_open_target ON appeals(agent_id, target_type, target_id) WHERE status = 'open';
+-- One appeal per decision (#18), enforced here so concurrent requests can't file two: a message or a strike is one decision, ever;
+-- a restriction (`status`) can come again, so the agent may have one open appeal against it at a time.
+CREATE UNIQUE INDEX appeals_decision ON appeals(agent_id, target_type, target_id) WHERE target_type != 'status';
+CREATE UNIQUE INDEX appeals_open_status ON appeals(agent_id) WHERE target_type = 'status' AND status = 'open';
 
 /* ---------- Reading ---------- */
 
@@ -561,7 +570,7 @@ CREATE INDEX audit_log_target ON audit_log(target_type, target_id);
 -- terms are written out in the job's statements exactly as here, which is what lets SQLite use the index.
 CREATE INDEX relay_messages_with_text ON relay_messages(status, created_at)
   WHERE status IN ('blocked', 'held', 'failed', 'removed') AND (content IS NOT NULL OR thread_name IS NOT NULL OR reply_prefix IS NOT NULL);
-CREATE INDEX reports_with_text ON reports(resolved_at) WHERE status != 'open' AND (reason != '' OR note IS NOT NULL OR reporter_ref IS NOT NULL);
+CREATE INDEX reports_with_text ON reports(resolved_at) WHERE status != 'open' AND (context IS NOT NULL OR note IS NOT NULL);
 CREATE INDEX appeals_with_text ON appeals(resolved_at) WHERE status != 'open' AND (message != '' OR response IS NOT NULL);
 CREATE INDEX claims_expires ON claims(expires_at);
 CREATE INDEX adoption_tokens_expires ON adoption_tokens(expires_at);

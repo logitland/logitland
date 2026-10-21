@@ -40,7 +40,7 @@ export const register: RegisterRoutes = (app, relay) => {
   });
 
   app.post('/v1/reports', auth, async (c) => {
-    return c.json(await createReport(relay, parse(ReportRequest, await body(c)), { kind: 'agent', ref: c.get('principal').agent.id }), 201);
+    return c.json(await createReport(relay, c.get('principal').agent, parse(ReportRequest, await body(c))), 201);
   });
 
   app.post('/v1/appeals', appealAuth, async (c) => c.json(await createAppeal(relay, c.get('principal').agent, parse(AppealRequest, await body(c))), 201));

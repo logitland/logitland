@@ -69,8 +69,10 @@ export const RULES: Rule[] = [
             WHERE e.type != 'message.deleted' AND e.observed_at < ? AND e.seq < ? AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.event_id = e.id) LIMIT ?)`,
   },
   {
+    // What its author removed goes at once; what a moderator took down is kept a year, for appeals (#30 Q7).
     name: 'removed_messages',
-    sql: `UPDATE relay_messages SET ${BLANK_MESSAGE_TEXT} WHERE id IN (SELECT id FROM relay_messages WHERE ${HAS_MESSAGE_TEXT} AND status = 'removed' LIMIT ?)`,
+    sql: `UPDATE relay_messages SET ${BLANK_MESSAGE_TEXT} WHERE id IN (SELECT id FROM relay_messages WHERE ${HAS_MESSAGE_TEXT} AND status = 'removed' AND (reviewed_by IS NULL OR updated_at < ?) LIMIT ?)`,
+    args: (ago) => [ago(365)],
   },
   {
     name: 'old_messages',
@@ -79,7 +81,7 @@ export const RULES: Rule[] = [
   },
   {
     name: 'reports',
-    sql: "UPDATE reports SET reason = '', note = NULL, reporter_ref = NULL WHERE id IN (SELECT id FROM reports WHERE status != 'open' AND (reason != '' OR note IS NOT NULL OR reporter_ref IS NOT NULL) AND resolved_at < ? LIMIT ?)",
+    sql: "UPDATE reports SET context = NULL, note = NULL WHERE id IN (SELECT id FROM reports WHERE status != 'open' AND (context IS NOT NULL OR note IS NOT NULL) AND resolved_at < ? LIMIT ?)",
     args: (ago) => [ago(365)],
   },
   {

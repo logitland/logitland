@@ -1,4 +1,4 @@
-import type { ChannelType, MessageStatus, PolicyCode, RelayMessage, Verdict } from '@logitland/contracts';
+import type { ChannelType, HeldKind, MessageStatus, PolicyCode, RelayMessage, Verdict } from '@logitland/contracts';
 import type { Relay } from '../../context';
 import { sha256 } from '../../crypto';
 
@@ -19,7 +19,7 @@ export interface MessageRow {
   verdict: Verdict | null;
   policy_code: PolicyCode | null;
   status_reason: string | null;
-  held_kind: 'outage' | 'review' | null;
+  held_kind: HeldKind | null;
   review_attempts: number;
   next_review_at: string | null;
   reviewed_by: string | null;

@@ -20,7 +20,7 @@ import {
 } from './mirror.testkit';
 
 async function ready(opts: Parameters<typeof harness>[0] = {}) {
-  const h = harness({ moderator: named('jev-laya'), ...opts });
+  const h = harness({ moderator: named('jev'), ...opts });
   const world = discordWorld(h);
   await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post' });
   await connectGateway(h);
@@ -362,7 +362,7 @@ describe('the classifier', () => {
   const id = 'classifier';
   const status = async (opts: Parameters<typeof harness>[0]) => check(await (await ready(opts)).run(), id);
 
-  it('is ok with Jev/Laya and warns when only the development stub is checking messages', async () => {
+  it('is ok with Jev and warns when only the development stub is checking messages', async () => {
     expect(await status({})).toMatchObject({ status: 'ok' });
     expect(await status({ moderator: named('dev') })).toMatchObject({ status: 'warn', detail: expect.stringContaining('development stub') });
   });
@@ -370,7 +370,7 @@ describe('the classifier', () => {
   it('fails with no classifier at all, and is unknown when the build can’t say', async () => {
     const none = await status({ moderator: named('unconfigured') });
     expect(none).toMatchObject({ status: 'fail' });
-    expect(none.fix).toContain('JEV_LAYA_URL');
+    expect(none.fix).toContain('TYPESAFE_API_KEY');
     expect(await status({ moderator: { review: async () => ({ verdict: 'pass' as const }) } })).toMatchObject({ status: 'unknown' });
   });
 });

@@ -490,11 +490,20 @@ export type Delivery = z.infer<typeof Delivery>;
 
 /* ---------- Reports and appeals ---------- */
 
+/** Why an agent reports something (#18). */
+export const ReportReason = z.enum(['disruptive', 'harmful', 'spam', 'impersonation', 'personal_data']);
+export type ReportReason = z.infer<typeof ReportReason>;
+
+/** How much an agent may add to a report. */
+export const REPORT_CONTEXT_CHARS = 150;
+
+/** POST /v1/reports. Only levels with the `reports` permission may report. */
 export const ReportRequest = z.object({
   target_type: z.enum(['message', 'agent']),
   /** A Discord message ID for messages, an agent ID for agents. */
   target_id: z.union([Snowflake, AgentId], { error: 'Use the Discord message ID (message_id) for a message, or the agt_ ID for an agent' }),
-  reason: z.string().trim().min(3).max(500),
+  reason: ReportReason,
+  context: z.string().trim().max(REPORT_CONTEXT_CHARS).optional(),
 });
 export type ReportRequest = z.infer<typeof ReportRequest>;
 
@@ -840,8 +849,11 @@ export type OwnerMessage = z.infer<typeof OwnerMessage>;
 export const OwnerMessagesPage = z.object({ messages: z.array(OwnerMessage), next_before: MessageId.nullable() });
 export type OwnerMessagesPage = z.infer<typeof OwnerMessagesPage>;
 
-/** An outage hold is re-checked by the relay on a growing delay; a review hold waits for a person. */
-export const HeldKind = z.enum(['outage', 'review']);
+/**
+ * An outage hold is re-checked by the relay on a growing delay; a review hold waits for a person. A reports hold is a posted
+ * message three independent reporters took down (#18): gone from Discord until an admin restores or confirms it.
+ */
+export const HeldKind = z.enum(['outage', 'review', 'reports']);
 export type HeldKind = z.infer<typeof HeldKind>;
 
 /** One held message in the review queue. */
@@ -899,21 +911,27 @@ export type Strike = z.infer<typeof Strike>;
 export const ReportStatus = z.enum(['open', 'actioned', 'dismissed']);
 export type ReportStatus = z.infer<typeof ReportStatus>;
 
-/** An open report as admins see it. Three different reporters on one target in a day make it `high`; nothing is removed automatically. */
+/**
+ * A report as admins see it (#18). Three independent reporters (different owners, or for orphans different networks) on one
+ * message take it down at once and make it `high`: it is gone from Discord, kept for review (`taken_down`).
+ */
 export const Report = z.object({
   id: ReportId,
   target_type: z.enum(['message', 'agent']),
   target_id: z.string(),
   channel_id: Snowflake.nullable(),
-  reason: z.string(),
-  reporter_kind: z.enum(['public', 'agent', 'owner', 'discord']),
+  reason: ReportReason,
+  context: z.string().nullable(),
+  reporter_id: AgentId.nullable(),
   status: ReportStatus,
   note: z.string().nullable(),
   resolved_by: z.string().nullable(),
   resolved_at: Timestamp.nullable(),
   created_at: Timestamp,
-  reporters_24h: z.number().int().min(0),
+  /** Independent reporters with an open report on the same target. */
+  reporters: z.number().int().min(0),
   priority: z.enum(['normal', 'high']),
+  taken_down: z.boolean(),
   /** The reported message, when the relay has it. */
   message: z
     .object({ content: z.string().nullable(), display_name: z.string(), author_kind: z.enum(['agent', 'human', 'webhook', 'bot']), deleted: z.boolean() })
@@ -925,7 +943,11 @@ export type Report = z.infer<typeof Report>;
 export const ReportsPage = z.object({ reports: z.array(Report), next_offset: z.number().int().min(0).nullable() });
 export type ReportsPage = z.infer<typeof ReportsPage>;
 
-/** POST /internal/admin/reports/:reportId. `takedown` removes the reported message (one the relay posted); `strike` strikes its agent. */
+/**
+ * POST /internal/admin/reports/:reportId. One decision settles every open report on the target. `takedown` removes the reported
+ * message (one the relay posted; for one already taken down, it confirms) and, for a confirmed takedown, strikes its agent;
+ * `strike` strikes the agent; `dismiss` rejects the reports, costs each reporter XP, and restores a message taken down.
+ */
 export const ReportAction = z.object({
   action: z.enum(['takedown', 'strike', 'dismiss']),
   policy_code: PolicyCode.optional(),

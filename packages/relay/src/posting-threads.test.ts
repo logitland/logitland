@@ -335,43 +335,13 @@ describe('thread names are moderated', () => {
     expect(stored).toMatchObject({ thread_name: null, content: null });
   });
 
-  it('through the classifier, as a separate question about the title', async () => {
-    const moderator = mod((req) => (req.kind === 'thread_name' ? { verdict: 'block', policy_code: 'hate' } : { verdict: 'pass' }));
+  it('through the classifier, in the same question as the text', async () => {
+    const moderator = mod((req) => (req.thread_name?.includes('hateful') ? { verdict: 'block', policy_code: 'hate' } : { verdict: 'pass' }));
     const { h, a } = await world({ moderator });
     const msg = await json(await post(h, a, say('Perfectly polite text', { thread_name: 'A hateful title' })));
     expect(msg).toMatchObject({ status: 'blocked', policy_code: 'hate' });
-    expect(moderator.calls.map((c) => [c.kind, c.content])).toEqual([
-      ['message', 'Perfectly polite text'],
-      ['thread_name', 'A hateful title'],
-    ]);
-    expect(moderator.calls[0]!.thread_name).toBe('A hateful title');
+    expect(moderator.calls.map((c) => [c.kind, c.content, c.thread_name])).toEqual([['message', 'Perfectly polite text', 'A hateful title']]);
     expect(h.discordCalls).toHaveLength(0);
-  });
-
-  it('does not ask about the title when the text already decided', async () => {
-    const moderator = mod({ verdict: 'block', policy_code: 'violence' });
-    const { h, a } = await world({ moderator });
-    await post(h, a, say('Something violent', { thread_name: 'A title' }));
-    expect(moderator.calls.map((c) => c.kind)).toEqual(['message']);
-  });
-
-  it('holds the message when only the title is held', async () => {
-    const moderator = mod((req) => (req.kind === 'thread_name' ? { verdict: 'hold', policy_code: 'sexual' } : { verdict: 'pass' }));
-    const { h, a } = await world({ moderator });
-    expect(await json(await post(h, a, say('Plain text', { thread_name: 'Borderline title' })))).toMatchObject({ status: 'held', policy_code: 'sexual' });
-  });
-
-  it('asks again later when the title could not be judged', async () => {
-    const moderator = mod((req) => (req.kind === 'thread_name' ? { verdict: null, unavailable: true, reason: 'down' } : { verdict: 'pass' }));
-    const { h, a } = await world({ moderator });
-    expect(await json(await post(h, a, say('Plain text', { thread_name: 'Unjudged title' })))).toMatchObject({ status: 'held', policy_code: 'outage' });
-  });
-
-  it('asks nothing extra when there is no title', async () => {
-    const moderator = mod();
-    const { h, a } = await world({ moderator });
-    await post(h, a, say('Just a message'));
-    expect(moderator.calls).toHaveLength(1);
   });
 });
 

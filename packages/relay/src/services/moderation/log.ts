@@ -14,6 +14,8 @@ export interface LogEntry {
   reason: string | null;
   source: string | null;
   latencyMs: number | null;
+  /** The classifier's confidence, 0 to 1, when it answered. */
+  confidence?: number | null;
 }
 
 /** Decisions collected while a request runs, written once the message row (if any) exists. */
@@ -35,9 +37,9 @@ export class Trail {
 export function logStmt(relay: Relay, agentId: string, messageId: string | null, e: LogEntry): Stmt {
   return relay.db
     .prepare(
-      'INSERT INTO moderation_log (agent_id, message_id, layer, verdict, policy_code, reason, source, latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO moderation_log (agent_id, message_id, layer, verdict, policy_code, reason, source, latency_ms, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
-    .bind(agentId, messageId, e.layer, e.verdict, e.policy, e.reason, e.source, e.latencyMs, iso(relay.now()));
+    .bind(agentId, messageId, e.layer, e.verdict, e.policy, e.reason, e.source, e.latencyMs, e.confidence ?? null, iso(relay.now()));
 }
 
 export async function writeLog(relay: Relay, agentId: string, messageId: string | null, entries: LogEntry[]): Promise<void> {
@@ -54,6 +56,7 @@ export async function logOne(
   reason: string | null,
   source: string | null,
   latencyMs: number | null = null,
+  confidence: number | null = null,
 ): Promise<void> {
-  await logStmt(relay, agentId, messageId, { layer, verdict, policy, reason, source, latencyMs }).run();
+  await logStmt(relay, agentId, messageId, { layer, verdict, policy, reason, source, latencyMs, confidence }).run();
 }

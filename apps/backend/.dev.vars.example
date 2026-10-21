@@ -7,5 +7,7 @@ INTERNAL_TOKEN=dev-internal-token
 ADMIN_DISCORD_IDS=
 # development: stub moderator and relaxed checks. Accepted only while PUBLIC_URL is local.
 RELAY_MODE=development
+# Optional locally: TypeSafe's key, to check messages with the real Jev instead of the stub.
+# TYPESAFE_API_KEY=
 # Optional locally (the Gateway and the /consent command need them): DISCORD_BOT_TOKEN,
 # DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID, IP_HASH_KEY.

@@ -419,17 +419,17 @@ function classifierCheck(relay: Relay): CheckDef {
     title: 'Messages are checked before they post',
     async run() {
       const name = relay.moderator.name;
-      if (name === 'jev-laya') return ok('Jev checks messages. While it can’t answer, messages wait and are checked again.');
+      if (name === 'jev') return ok('Jev checks messages and names. While it can’t answer, messages wait and are checked again.');
       if (name === 'dev')
         return warn(
           'Only the development stub is checking messages. It passes nearly everything.',
-          'Set JEV_LAYA_URL and JEV_LAYA_TOKEN, and turn off RELAY_MODE=development, before opening the relay to anyone.',
+          'Set TYPESAFE_API_KEY, and turn off RELAY_MODE=development, before opening the relay to anyone.',
         );
-      if (name === 'unconfigured') return fail('No classifier is configured, so every message is held or refused.', 'Set JEV_LAYA_URL and JEV_LAYA_TOKEN.');
+      if (name === 'unconfigured') return fail('No classifier is configured, so every message is held or refused.', 'Set TYPESAFE_API_KEY.');
       return {
         status: 'unknown',
         detail: 'This build of the relay doesn’t say which classifier it uses.',
-        fix: 'Check that JEV_LAYA_URL and JEV_LAYA_TOKEN are set, then send a test message from an agent.',
+        fix: 'Check that TYPESAFE_API_KEY is set, then send a test message from an agent.',
       };
     },
   };

@@ -4,7 +4,8 @@ import type { ChannelSenderClient, GatewayClient, Relay } from './context';
 import { SecretBox } from './crypto';
 import { consoleLogger, type Logger } from './log';
 import { dohResolver, type Resolver } from './services/destinations';
-import { devModerator, httpModerator, type Moderator } from './services/moderation/classifier';
+import { devModerator, unconfiguredModerator, type Moderator } from './services/moderation/classifier';
+import { typesafeModerator } from './services/moderation/jev';
 
 export { internalApp, relayApp } from './app';
 export { authMd } from './docs/auth-doc';
@@ -19,7 +20,8 @@ export { consoleLogger, memoryLogger, type Logger } from './log';
 export { attemptDelivery, drainDue, fanOut, handleDeliveryBatch, replayDelivery, type AttemptResult } from './services/deliveries';
 export { checkUrl, isPublicAddress, preflightDestination, dohResolver, DestinationRefused, type Resolver } from './services/destinations';
 export { ingest, type IntakeBatch } from './services/intake';
-export { devModerator, httpModerator, type Moderator } from './services/moderation/classifier';
+export { devModerator, type Moderator } from './services/moderation/classifier';
+export { typesafeModerator } from './services/moderation/jev';
 export { processSend } from './services/sending';
 export type { AgentPrincipal, AgentRecord, ClientInfo } from './types';
 
@@ -43,12 +45,13 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
   const discord =
     overrides.discord ??
     new DiscordRest({ botToken: env.DISCORD_BOT_TOKEN, fetch: f, ...(config.development && env.DISCORD_API_BASE ? { base: env.DISCORD_API_BASE } : {}) });
-  let moderator = overrides.moderator;
-  if (!moderator) {
-    if (env.JEV_LAYA_URL && env.JEV_LAYA_TOKEN) moderator = httpModerator(env.JEV_LAYA_URL, env.JEV_LAYA_TOKEN, f);
-    else if (config.development) moderator = devModerator();
-    else moderator = { name: 'unconfigured', review: async () => ({ verdict: null, unavailable: true as const, reason: 'Jev/Laya isn’t configured' }) };
-  }
+  const moderator =
+    overrides.moderator ??
+    (env.TYPESAFE_API_KEY
+      ? typesafeModerator(env.TYPESAFE_API_KEY, env.JEV_MODEL || undefined, f)
+      : config.development
+        ? devModerator()
+        : unconfiguredModerator());
   return {
     db: env.DB,
     config,

@@ -17,8 +17,10 @@ export interface RelayBindings {
   DISCORD_APPLICATION_ID?: string;
   DISCORD_PUBLIC_KEY?: string;
   DISCORD_GUILD_ID?: string;
-  JEV_LAYA_URL?: string;
-  JEV_LAYA_TOKEN?: string;
+  /** TypeSafe's API key, for Jev. */
+  TYPESAFE_API_KEY?: string;
+  /** The pinned Jev version; defaults to the one the thresholds were tuned on. */
+  JEV_MODEL?: string;
   ADMIN_DISCORD_IDS?: string;
   BLOCKED_HOSTS?: string;
   MODERATION_OUTAGE?: string;
@@ -118,13 +120,7 @@ export function checkConfig(env: RelayBindings): string[] {
   if (!env.IP_HASH_KEY || env.IP_HASH_KEY.length < 32) problems.push('IP_HASH_KEY must be at least 32 random characters');
   if (!env.DISCORD_BOT_TOKEN) problems.push('DISCORD_BOT_TOKEN is missing');
   for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID'] as const) if (!env[name]) problems.push(`${name} is missing`);
-  if (!(env.JEV_LAYA_URL && env.JEV_LAYA_TOKEN)) problems.push('No classifier: set JEV_LAYA_URL and JEV_LAYA_TOKEN');
-  // Every message the classifier checks, with its context, goes there along with the bearer token.
-  if (env.JEV_LAYA_URL) {
-    const h = host(env.JEV_LAYA_URL);
-    if (!h || !env.JEV_LAYA_URL.startsWith('https://') || LOCAL_HOST.test(h) || PLACEHOLDER_HOST.test(h))
-      problems.push('JEV_LAYA_URL must be an https URL on a public host');
-  }
+  if (!env.TYPESAFE_API_KEY) problems.push('No classifier: set TYPESAFE_API_KEY');
   if (!list(env.ADMIN_DISCORD_IDS).length) problems.push('ADMIN_DISCORD_IDS is empty');
   // Without the queue the cron scan would attempt every delivery itself, inside its own query budget.
   if (!env.DELIVERIES) problems.push('The DELIVERIES queue binding is missing');

@@ -200,7 +200,7 @@ async function run(
   const { req } = draft;
   const trail = new Trail();
   const probation = isOnProbation(agent);
-  const { limits } = await standingOf(relay, agent);
+  const { limits, checks } = await standingOf(relay, agent);
 
   // A refusal after we took over a failed message puts it back as it was, so a later retry is not shut out.
   const refusing = async <T>(step: () => Promise<T>): Promise<T> => {
@@ -239,7 +239,7 @@ async function run(
 
   await refusing(() => countAttempt(relay, agent.id, limits));
 
-  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { probation }));
+  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { probation, checks }));
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason, 'rules');
   if (ruling.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (ruling.verdict !== 'pass') {
@@ -252,19 +252,27 @@ async function run(
     });
   }
 
-  const dup = await findDuplicate(relay, {
-    agentId: agent.id,
-    channelId: channel.id,
-    textHash: draft.textHash,
-    excludeId: draft.existing?.id ?? null,
-    length: normalise(draft.target.text ?? '').length,
-  });
+  const dup = checks.has('duplicates')
+    ? await findDuplicate(relay, {
+        agentId: agent.id,
+        channelId: channel.id,
+        textHash: draft.textHash,
+        excludeId: draft.existing?.id ?? null,
+        length: normalise(draft.target.text ?? '').length,
+      })
+    : null;
   trail.add('limits', dup?.verdict ?? 'pass', dup?.policy ?? null, dup?.reason ?? null, 'limits');
   if (dup?.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (dup) return decided({ status: dup.verdict === 'block' ? 'blocked' : 'held', verdict: dup.verdict, policy: dup.policy, reason: dup.reason });
 
   const conversation: ConversationRow[] = await refusing(() =>
-    checkLoop(relay, { agentId: agent.id, channelId: channel.id, threadId: req.thread_id ?? null, startsThread: Boolean(req.thread_name) && isForum(channel) }),
+    checkLoop(relay, {
+      agentId: agent.id,
+      channelId: channel.id,
+      threadId: req.thread_id ?? null,
+      startsThread: Boolean(req.thread_name) && isForum(channel),
+      enabled: checks.has('loops'),
+    }),
   );
   await refusing(() => enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }));
   trail.add('admission', 'pass', null, null, 'limits');

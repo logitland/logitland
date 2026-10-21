@@ -129,8 +129,7 @@ const prodEnv = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   DISCORD_APPLICATION_ID: '1',
   DISCORD_PUBLIC_KEY: 'ab',
   DISCORD_GUILD_ID: '2',
-  JEV_LAYA_URL: 'https://jev.logitland.org/review',
-  JEV_LAYA_TOKEN: 't',
+  TYPESAFE_API_KEY: 't',
   ADMIN_DISCORD_IDS: '200000000000000099',
   ...over,
 });

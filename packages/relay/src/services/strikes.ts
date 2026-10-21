@@ -173,7 +173,9 @@ export async function escalateRuleBlocks(relay: Relay, agentId: string, policy: 
   const since = iso(new Date(relay.now().getTime() - RULE_BLOCK_WINDOW_HOURS * HOUR));
   const row = await relay.db
     .prepare(
-      `SELECT COUNT(*) AS n FROM moderation_log WHERE agent_id = ? AND layer = 'rules' AND verdict = 'block' AND created_at >= ? AND policy_code IN (${codes.map(() => '?').join(', ')})`,
+      // A block overturned on appeal (the message is `failed` now) no longer counts (#18).
+      `SELECT COUNT(*) AS n FROM moderation_log l WHERE agent_id = ? AND layer = 'rules' AND verdict = 'block' AND created_at >= ? AND policy_code IN (${codes.map(() => '?').join(', ')})
+       AND NOT EXISTS (SELECT 1 FROM relay_messages m WHERE m.id = l.message_id AND m.status = 'failed')`,
     )
     .bind(agentId, since, ...codes)
     .first<{ n: number }>();

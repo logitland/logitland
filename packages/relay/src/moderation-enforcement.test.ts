@@ -3,12 +3,11 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { decideAppeal } from './services/moderation/admin';
 import { OUTAGE_BACKOFF_MINUTES, RULE_BLOCKS_PER_STRIKE, explain, outageGiveUpMinutes, outageRecheckDue } from './services/moderation/policy';
 import { evaluateRules, judge } from './services/moderation/rules';
-import { createReport } from './services/reports';
 import { RECHECK_BUDGET_MS, reviewHeldJob } from './services/review';
 import { sweepStuckJob } from './services/sending';
 import { activeStrikeCount, addStrike } from './services/strikes';
 import { converse, down, json, mod, patch, pass, post, row, say, world } from './posting-fixtures';
-import { ADMIN_DISCORD, LOUNGE, harness, seedOwner, type Harness } from './testing';
+import { ADMIN_DISCORD, LOUNGE, harness, seedAgent, seedOwner, type Harness } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -245,29 +244,32 @@ describe('the stuck-message sweep', () => {
 });
 
 describe('reports', () => {
-  const report = (h: Harness, target: string, ref: string) =>
-    createReport(h.relay, { target_type: 'message', target_id: target, reason: 'not welcome here' }, { kind: 'public', ref });
+  const report = (h: Harness, target: string, from: { token: string }) =>
+    h.call('POST', '/v1/reports', { target_type: 'message', target_id: target, reason: 'disruptive' }, h.as(from.token));
 
   it('lists the busy targets first, with the exact count worked out for the rows on the page', async () => {
     const w = await world();
     const api = await admin(w.h);
     const quiet = await converse(w.h, { content: 'a quiet one' });
     const busy = await converse(w.h, { content: 'a busy one' });
-    await report(w.h, quiet, 'r0');
+    // Each with its own owner, so each counts as an independent reporter.
+    const owners = await Promise.all([1, 2, 3, 4].map((i) => seedOwner(w.h.relay, `20000000000000010${i}`, `reporter-${i}`)));
+    const [r0, r1, r2, r3] = await Promise.all(owners.map((o) => seedAgent(w.h.relay, { level: 3, ownerId: o.id })));
+    await report(w.h, quiet, r0!);
     w.h.advance(1000);
-    for (const ref of ['r1', 'r2', 'r3', 'r3']) {
-      await report(w.h, busy, ref);
+    for (const r of [r1!, r2!, r3!, r3!]) {
+      await report(w.h, busy, r);
       w.h.advance(1000);
     }
     const page = await json(await w.h.internal('GET', '/internal/admin/reports', undefined, api));
-    expect(page.reports.map((r: any) => [r.target_id, r.priority, r.reporters_24h])).toEqual([
+    expect(page.reports.map((r: any) => [r.target_id, r.priority, r.reporters])).toEqual([
       [busy, 'high', 3],
       [busy, 'high', 3],
       [busy, 'high', 3],
       [quiet, 'normal', 1],
     ]);
     const second = await json(await w.h.internal('GET', '/internal/admin/reports?limit=2&offset=2', undefined, api));
-    expect(second.reports.map((r: any) => [r.priority, r.reporters_24h])).toEqual([
+    expect(second.reports.map((r: any) => [r.priority, r.reporters])).toEqual([
       ['high', 3],
       ['normal', 1],
     ]);
@@ -275,7 +277,7 @@ describe('reports', () => {
     expect((await json(await w.h.internal('GET', '/internal/admin/reports?limit=2', undefined, api))).next_offset).toBe(2);
   });
 
-  it('uses the target index for the per-target counts and the last day’s reports', async () => {
+  it('uses an index for the same-reporter check and the per-target count', async () => {
     const w = await world();
     const plan = async (sql: string, ...args: unknown[]) =>
       (
@@ -286,26 +288,14 @@ describe('reports', () => {
       ).results
         .map((r) => r.detail)
         .join('\n');
-    const same = await plan(
-      "SELECT id FROM reports WHERE target_type = ? AND target_id = ? AND reporter_kind = ? AND COALESCE(reporter_ref, '') = ? AND status = 'open'",
-      'message',
-      '1',
-      'public',
-      'x',
-    );
-    expect(same).toContain('reports_target');
+    const same = await plan("SELECT id FROM reports WHERE target_type = ? AND target_id = ? AND reporter_id = ? AND status = 'open'", 'message', '1', 'agt_x');
+    expect(same).toMatch(/USING INDEX reports_(open_reporter|target)/);
     const counted = await plan(
-      "SELECT COUNT(DISTINCT reporter_kind || ':' || COALESCE(reporter_ref, '')) AS n FROM reports WHERE target_type = ? AND target_id = ? AND created_at >= ?",
+      "SELECT COUNT(DISTINCT reporter_key) AS n FROM reports WHERE target_type = ? AND target_id = ? AND status = 'open'",
       'message',
       '1',
-      'a',
     );
     expect(counted).toContain('reports_target');
-    const recent = await plan(
-      "SELECT target_type, target_id FROM reports INDEXED BY reports_created WHERE created_at >= ? GROUP BY target_type, target_id HAVING COUNT(DISTINCT reporter_kind || ':' || COALESCE(reporter_ref, '')) >= 3",
-      'a',
-    );
-    expect(recent).toContain('reports_created');
   });
 });
 

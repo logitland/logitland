@@ -1,9 +1,8 @@
-import { PolicyCode as PolicyCodeSchema, type PolicyCode, type Verdict } from '@logitland/contracts';
+import type { PolicyCode, Verdict } from '@logitland/contracts';
 import type { Relay } from '../../context';
 
-// Jev/Laya sits between an agent's message and Discord (confirmed requirement). Its contract is NOT
-// researched yet: verdicts, timeouts, retries and edit handling are open decisions. This interface keeps
-// the relay's side small so the real contract can slot in.
+// The classifier seam. Production is Jev on TypeSafe's API (jev.ts); local development uses devModerator, and tests supply
+// their own. The pipeline asks once per message (its thread name included) and once per name.
 
 export interface ModerationRequest {
   /** A relay message ID, or `profile:<agent id>` for names. */
@@ -11,8 +10,10 @@ export interface ModerationRequest {
   agent_id: string;
   level: number;
   channel_id: string | null;
-  /** What is being reviewed: message text, a thread title, or a name. */
-  kind: 'message' | 'thread_name' | 'name';
+  /** The channel's name, which tells the classifier where the message is posted. */
+  channel_name?: string | null;
+  /** What is being reviewed: message text (with its thread name, if it starts one) or a name. */
+  kind: 'message' | 'name';
   content: string;
   /** The last few messages in the conversation, oldest first, for context. */
   context?: { author: string; content: string }[];
@@ -20,55 +21,38 @@ export interface ModerationRequest {
   strikes?: number;
 }
 
-/** A pass may carry a policy_code: a flag that lets an established agent through but holds an agent on probation. */
-export type ModerationResult = { verdict: Verdict; policy_code?: PolicyCode; reason?: string } | { verdict: null; unavailable: true; reason: string };
+/**
+ * A pass may carry a policy_code: a flag that lets an established agent through but holds an agent on probation. `confidence`
+ * is the classifier's own (0 to 1), kept in the moderation log for tuning.
+ */
+export type ModerationResult =
+  | { verdict: Verdict; policy_code?: PolicyCode; reason?: string; confidence?: number }
+  | { verdict: null; unavailable: true; reason: string; retryable?: boolean; retryAfterSeconds?: number };
 
 export interface Moderator {
   /** Which classifier this is, for the setup checklist. */
-  readonly name?: 'jev-laya' | 'dev' | 'unconfigured';
+  readonly name?: 'jev' | 'dev' | 'unconfigured';
   review(req: ModerationRequest): Promise<ModerationResult>;
-}
-
-/** Calls a Jev/Laya HTTP endpoint. Request and response shapes are placeholders; a `policy_code` in the answer is kept when it is one of ours. */
-export function httpModerator(url: string, token: string, fetcher: typeof fetch = fetch, timeoutMs = 4000): Moderator {
-  return {
-    name: 'jev-laya',
-    async review(req) {
-      try {
-        const res = await fetcher(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-          body: JSON.stringify(req),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        if (!res.ok) return { verdict: null, unavailable: true, reason: `Jev/Laya answered ${res.status}` };
-        const data = (await res.json()) as { verdict?: string; reason?: string; policy_code?: string };
-        const policy = PolicyCodeSchema.safeParse(data.policy_code);
-        if (data.verdict === 'pass' || data.verdict === 'hold' || data.verdict === 'block')
-          return { verdict: data.verdict, reason: data.reason, ...(policy.success ? { policy_code: policy.data } : {}) };
-        return { verdict: null, unavailable: true, reason: 'Jev/Laya returned no verdict' };
-      } catch (err) {
-        return {
-          verdict: null,
-          unavailable: true,
-          reason: err instanceof Error && err.name === 'TimeoutError' ? 'Jev/Laya timed out' : 'Jev/Laya is unreachable',
-        };
-      }
-    },
-  };
 }
 
 /** For local development only: passes everything except text containing a hold or block marker. */
 export function devModerator(): Moderator {
   return {
     name: 'dev',
-    async review({ content }) {
-      if (content.includes('[block]')) return { verdict: 'block', reason: 'Matched the development block marker' };
-      if (content.includes('[hold]')) return { verdict: 'hold', reason: 'Matched the development hold marker' };
+    async review({ content, thread_name }) {
+      const text = `${content} ${thread_name ?? ''}`;
+      if (text.includes('[block]')) return { verdict: 'block', policy_code: 'harassment', reason: 'Matched the development block marker' };
+      if (text.includes('[hold]')) return { verdict: 'hold', reason: 'Matched the development hold marker' };
       return { verdict: 'pass' };
     },
   };
 }
+
+/** No key outside development: nothing can be checked, so messages wait and names are refused until an admin sets one. */
+export const unconfiguredModerator = (): Moderator => ({
+  name: 'unconfigured',
+  review: async () => ({ verdict: null, unavailable: true, retryable: false, reason: 'Jev isn’t configured (TYPESAFE_API_KEY)' }),
+});
 
 export type Classified = {
   result: ModerationResult;
@@ -84,7 +68,8 @@ export async function classify(relay: Relay, req: ModerationRequest): Promise<Cl
   try {
     result = await relay.moderator.review(req);
   } catch {
-    result = { verdict: null, unavailable: true, reason: 'The classifier failed' };
+    result = { verdict: null, unavailable: true, retryable: true, reason: 'The classifier failed' };
   }
+  if (result.verdict === null && result.retryable === false) relay.log.error('moderation.misconfigured', { reason: result.reason });
   return { result, source: result.verdict === null ? 'none' : 'primary', latencyMs: Date.now() - started };
 }

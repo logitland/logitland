@@ -111,21 +111,28 @@ describe('pruning by age, children first', () => {
 });
 
 describe('text kept in other tables', () => {
-  it('blanks every text column of removed messages at once, and of blocked, held and failed ones after 90 days', async () => {
+  it('blanks every text column of messages their author removed at once, of taken-down ones after a year, and of blocked, held and failed ones after 90 days', async () => {
     const w = await world();
     const { h, agent } = w;
-    const make = async (hash: string, status: string, days: number) => {
+    const make = async (hash: string, status: string, days: number, reviewedBy: string | null = null) => {
       const id = await relayMessage(h, agent.id, { content: `text ${hash}`, status, createdAt: ago(w, days), hash });
-      await h.db.prepare("UPDATE relay_messages SET thread_name = 'a title', reply_prefix = '↪ Replying to Luna' WHERE id = ?").bind(id).run();
+      await h.db
+        .prepare("UPDATE relay_messages SET thread_name = 'a title', reply_prefix = '↪ Replying to Luna', reviewed_by = ? WHERE id = ?")
+        .bind(reviewedBy, id)
+        .run();
       return id;
     };
     const removed = await make('removed', 'removed', 2);
+    const takenDownNew = await make('takenDownNew', 'removed', 300, 'admin');
+    const takenDownOld = await make('takenDownOld', 'removed', 366, 'admin');
     const blockedOld = await make('blockedOld', 'blocked', 95);
     const blockedNew = await make('blockedNew', 'blocked', 5);
     const sent = await make('sent', 'sent', 400);
     await retentionJob(h.relay);
     const text = (id: string) => one(h, 'SELECT content, thread_name, reply_prefix FROM relay_messages WHERE id = ?', id);
     expect(await text(removed)).toEqual({ content: null, thread_name: null, reply_prefix: null });
+    expect(await text(takenDownNew)).toMatchObject({ content: 'text takenDownNew', thread_name: 'a title' });
+    expect(await text(takenDownOld)).toEqual({ content: null, thread_name: null, reply_prefix: null });
     expect(await text(blockedOld)).toEqual({ content: null, thread_name: null, reply_prefix: null });
     expect(await text(blockedNew)).toMatchObject({ content: 'text blockedNew', thread_name: 'a title' });
     expect(await text(sent)).toMatchObject({ content: 'text sent', thread_name: 'a title' });
@@ -137,9 +144,21 @@ describe('text kept in other tables', () => {
     const report = (id: string, status: string, resolvedDays: number | null) =>
       h.db
         .prepare(
-          'INSERT INTO reports (id, target_type, target_id, reason, reporter_kind, reporter_ref, status, note, resolved_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO reports (id, target_type, target_id, reason, context, reporter_id, reporter_key, status, note, resolved_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
-        .bind(id, 'message', msg(1), 'a reason', 'public', 'ip-hash', status, 'a note', resolvedDays === null ? null : ago(w, resolvedDays), ago(w, 500))
+        .bind(
+          id,
+          'message',
+          msg(1),
+          'harmful',
+          'some context',
+          agent.id,
+          agent.id,
+          status,
+          'a note',
+          resolvedDays === null ? null : ago(w, resolvedDays),
+          ago(w, 500),
+        )
         .run();
     await report('rpt_old', 'dismissed', 366);
     await report('rpt_new', 'actioned', 300);
@@ -155,10 +174,10 @@ describe('text kept in other tables', () => {
     await appeal('apl_new', 'overturned', 10);
     await appeal('apl_open', 'open', null);
     expect(await retentionJob(h.relay)).toBe(2);
-    expect(await all(h, 'SELECT id, reason, note, reporter_ref FROM reports ORDER BY id')).toEqual([
-      { id: 'rpt_new', reason: 'a reason', note: 'a note', reporter_ref: 'ip-hash' },
-      { id: 'rpt_old', reason: '', note: null, reporter_ref: null },
-      { id: 'rpt_open', reason: 'a reason', note: 'a note', reporter_ref: 'ip-hash' },
+    expect(await all(h, 'SELECT id, reason, context, note FROM reports ORDER BY id')).toEqual([
+      { id: 'rpt_new', reason: 'harmful', context: 'some context', note: 'a note' },
+      { id: 'rpt_old', reason: 'harmful', context: null, note: null },
+      { id: 'rpt_open', reason: 'harmful', context: 'some context', note: 'a note' },
     ]);
     expect(await all(h, 'SELECT id, message, response FROM appeals ORDER BY id')).toEqual([
       { id: 'apl_new', message: 'please look again', response: 'we did' },

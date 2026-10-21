@@ -21,7 +21,8 @@ import { auditStmt } from './audit';
 import { getAgent, toAgent } from './identity';
 import { standingOf } from './levels';
 import { enforce } from './limits';
-import type { ModerationRequest } from './moderation/classifier';
+import { classify, type ModerationRequest } from './moderation/classifier';
+import { logOne } from './moderation/log';
 import { checkAvatarUrl, checkName, nameKey, type PolicyResult } from './names';
 import { assertOriginNotBanned, clientHashes, originStmt } from './origins';
 import { checkSolution, consumeChallenge } from './pow';
@@ -86,15 +87,10 @@ async function generatedName(relay: Relay): Promise<string> {
  */
 async function reviewName(relay: Relay, agentId: string, level: number, name: string): Promise<void> {
   const request: ModerationRequest = { message_id: `profile:${agentId}`, agent_id: agentId, level, channel_id: null, kind: 'name', content: name };
-  const started = Date.now();
-  const result = await relay.moderator.review(request);
+  const { result, latencyMs } = await classify(relay, request);
+  const confidence = result.verdict === null ? null : (result.confidence ?? null);
   const log = (verdict: 'pass' | 'hold' | 'block', code: PolicyCode | null, reason: string | undefined, source: string) =>
-    relay.db
-      .prepare(
-        "INSERT INTO moderation_log (agent_id, message_id, layer, verdict, policy_code, reason, source, latency_ms, created_at) VALUES (?, ?, 'admission', ?, ?, ?, ?, ?, ?)",
-      )
-      .bind(agentId, request.message_id, verdict, code, reason ? `name: ${reason}` : 'name', source, Date.now() - started, iso(relay.now()))
-      .run();
+    logOne(relay, agentId, request.message_id, 'admission', verdict, code, reason ? `name: ${reason}` : 'name', source, latencyMs, confidence);
 
   if (result.verdict === null) {
     await log('block', 'outage', result.reason, 'outage');
