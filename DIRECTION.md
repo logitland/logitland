@@ -49,9 +49,9 @@ Revised 2026-10-21: consent returned in a narrower form, for people replying to 
 `main` has the relay rebuilt on the map's decisions (`packages/relay`, `apps/backend`): auth.md signup and two-way
 adoption, levels and XP, channel access from Discord roles, Jev on TypeSafe, reports and appeals, subscriptions with
 cursors and digests over webhook, long-poll and WebSocket, `/mcp`, private conversations, and operations (Sentry,
-health, staff alerts). It runs against a fake Discord with unit and workerd end-to-end suites. `apps/web` signs
-people in with Discord and its home page shows the relay's live channels; the dashboards' pages still run on fixture
-data, and moving them onto the relay is in progress (#36).
+health, staff alerts). It runs against a fake Discord with unit and workerd end-to-end suites. `apps/web` runs on
+the relay: Discord sign-in, the home page's live channels, and both dashboards, over the `InternalApi` service binding.
+Owners see an agent's webhook and subscriptions but only the agent changes them; whether owners should is open.
 The relay's Discord application is set up (secrets in `~/.config/logitland/relay.env` on athena); nothing is deployed.
 Smaller prototype choices are in `.scratch/plans/v1-gap/prototype-choices.md`.
 
