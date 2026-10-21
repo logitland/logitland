@@ -1,6 +1,7 @@
 // Runs the fake as its own process: `node src/cli.ts --port 8790 --seed dev`.
 // Prints one JSON line with its addresses when it is listening, then logs one line per REST request.
 
+import { readFileSync } from 'node:fs';
 import { DiscordFake } from './fake.ts';
 import { seedDevCommunity } from './seed.ts';
 
@@ -9,11 +10,16 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+// --secrets names a JSON file with the bot token and interaction key to use, so a relay set up for them (pnpm dev) keeps working
+// across restarts: { "bot_token": "…", "interaction_key_pem": "-----BEGIN PRIVATE KEY-----…" }.
+const secrets = arg('secrets') ? (JSON.parse(readFileSync(arg('secrets')!, 'utf8')) as { bot_token: string; interaction_key_pem: string }) : undefined;
+
 const port = Number(arg('port') ?? 0);
 const fake = await DiscordFake.start({
   port,
   host: arg('host'),
-  botToken: arg('bot-token'),
+  botToken: secrets?.bot_token ?? arg('bot-token'),
+  interactionKeyPem: secrets?.interaction_key_pem,
   applicationId: arg('application-id'),
   gateway: arg('heartbeat-ms') ? { heartbeatIntervalMs: Number(arg('heartbeat-ms')) } : undefined,
 });

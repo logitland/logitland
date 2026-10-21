@@ -221,7 +221,7 @@ export class GatewayConnection {
       this.phase = 'hello';
       this.lastFrame = this.deps.now();
       this.timers.hello = this.deps.setTimer(() => {
-        if (gen === this.gen) this.retryLater('Discord did not say hello');
+        if (gen === this.gen) this.retryLater('Discord did not say hello', this.abandonResume());
       }, HELLO_TIMEOUT_MS);
     } catch (err) {
       if (gen === this.gen) this.failed(err);
@@ -238,7 +238,19 @@ export class GatewayConnection {
         `waiting: Discord’s limit on new sessions is used up, trying again in ${Math.ceil(err.retryAfterMs / 60_000)} min`,
       );
     }
-    this.retryLater(err instanceof Error ? err.message : String(err));
+    this.retryLater(err instanceof Error ? err.message : String(err), this.abandonResume());
+  }
+
+  /**
+   * A resume URL that can't be reached may never come back (Discord retires them, and a session outlives its host), so the
+   * next try identifies afresh instead of retrying it forever. Backfill covers what the lost session missed. Returns the wait
+   * before that fresh session, which grows like any other run of short-lived sessions; undefined when there was nothing to
+   * abandon, for the usual backoff.
+   */
+  private abandonResume(): number | undefined {
+    if (!this.resuming) return undefined;
+    this.loseSession();
+    return this.freshSessionDelay();
   }
 
   private onMessage(gen: number, raw: string | ArrayBuffer): void {

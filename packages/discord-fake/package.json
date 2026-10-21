@@ -10,7 +10,8 @@
   "scripts": {
     "check": "tsc -p . && tsc -p tsconfig.src.json",
     "test": "vitest run",
-    "start": "node src/cli.ts"
+    "start": "node src/cli.ts",
+    "dev": "node src/cli.ts --port 8790 --seed dev --application-id 400000000000000001 --endpoint http://localhost:8787/v1/discord/interactions --secrets ../../apps/backend/.wrangler/dev/fake.json"
   },
   "devDependencies": {
     "@logitland/config": "workspace:*",

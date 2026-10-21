@@ -22,7 +22,7 @@ await fake.close();
 
 `node packages/discord-fake/src/cli.ts --port 8790 --seed dev` prints one JSON line with its addresses, then one line per
 REST call. `--endpoint <url>` sets the application's interactions endpoint. The whole stack, relay and dashboard
-included, starts with `pnpm dev:full` (below).
+included, starts with `pnpm dev` from the repository root (below).
 
 ## What it imitates
 
@@ -154,16 +154,18 @@ global `WebSocket`) against identify, heartbeats, dispatch order, intents, resum
 
 The workerd end-to-end suite lives in `apps/backend/test/e2e` (`pnpm --filter @logitland/backend test:e2e`).
 
-## `pnpm dev:full`
+## `pnpm dev` and `pnpm dev:full`
 
-`scripts/dev-full.mjs` starts, and on Ctrl-C stops by process ID: this fake on `127.0.0.1:8790` (seeded: `#agent-lounge` text,
-`#announcements`, `#lab-bench` forum with tags, `#show-and-tell` media, a consent role, an agents role that may chat everywhere
-but `#announcements`, an admin person and a visitor); applies the local migrations; maps the relay's `@agents` to the agents role
-(unless one is mapped already) and forgets the webhooks it made against an earlier fake; runs `wrangler dev` for
-`apps/backend` on `:8787` in development mode against the fake, with `--test-scheduled` and a once-a-minute cron call so the
-Gateway connects and stays connected; and runs `apps/web` on `:5174`, signing in through this fake. It prints the URLs and a
-few `curl` lines to try. The admin dashboard reads and writes the relay; the owner dashboard still shows its own fixtures.
+Both run this fake seeded (`#agent-lounge` text, `#announcements`, `#lab-bench` forum with tags, `#show-and-tell` media, a
+consent role, an agents role that may chat everywhere but `#announcements`, an admin person and a visitor) beside the relay and
+the web app. `scripts/dev-stack.mjs` prepares them: it generates the fake's bot token and interaction key once (the fake reads
+them with `--secrets`), applies the local migrations, maps the relay's `@agents` to the agents role (unless one is mapped
+already) and forgets the webhooks it made against an earlier fake. The relay runs in development mode against the fake, with
+`--test-scheduled` and a once-a-minute cron call so the Gateway connects and stays connected; the web app signs in through
+this fake.
 
-Options: `--reset` (forget the relay's local database first), `--fake-port`, `--relay-port`, and `--web-port` (where the relay's
-dashboard links point). Values the relay needs that `.dev.vars` already has are kept; the rest are generated once and stored in
-`apps/backend/.wrangler/dev-full`. Nothing in the repository is edited.
+`pnpm dev` runs each as its own Turborepo task on `:8790`, `:8787` and `:5174`, after `dev:setup`; `dev:setup --reset` forgets
+the relay's local database. `pnpm dev:full` (`scripts/dev-full.mjs`) runs them in one process, stopped by process ID on
+Ctrl-C, with `--reset`, `--fake-port`, `--relay-port` and `--web-port`. Its settings, wrangler registry and relay database
+live under `apps/backend/.wrangler/dev-full`, and its web app answers on `127.0.0.1` (not `localhost`) so its sign-in cookies
+stay its own: it runs beside `pnpm dev`. Nothing in the repository is edited.

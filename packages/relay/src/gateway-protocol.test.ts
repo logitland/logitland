@@ -34,7 +34,8 @@ function rig({ random = 0.5, ...over }: Omit<Partial<GatewayDeps>, 'random'> & {
   const dispatched: { t: string; d: unknown; s: number }[] = [];
   const sessions: { session: GatewaySession; why: string }[] = [];
   const ready: boolean[] = [];
-  const state = { random, connectError: null as Error | null, urls: 0 };
+  // resumeDown: only the resume URL refuses connections, as when Discord has retired it.
+  const state = { random, connectError: null as Error | null, resumeDown: false, urls: 0 };
   const conn = new GatewayConnection({
     token: 'bot-token',
     gatewayUrl: async () => {
@@ -43,6 +44,7 @@ function rig({ random = 0.5, ...over }: Omit<Partial<GatewayDeps>, 'random'> & {
     },
     connect: async (url, events) => {
       if (state.connectError) throw state.connectError;
+      if (state.resumeDown && url.includes('resume.discord.gg')) throw new Error('resume host gone');
       const socket = new FakeSocket();
       connections.push({ url, socket, events });
       return socket;
@@ -159,6 +161,40 @@ describe('resuming', () => {
     // The replayed events that follow carry on from the stored sequence.
     r.dispatch(0, 'MESSAGE_CREATE', 9);
     expect(r.conn.current.seq).toBe(9);
+  });
+
+  it('identifies afresh when the resume URL can’t be reached, rather than retrying it forever', async () => {
+    const r = rig({ random: 1 });
+    r.conn.restore(resumable);
+    r.state.resumeDown = true;
+    await r.conn.start();
+    expect(r.statuses[0]).toBe('resuming');
+    await r.advance(1_000);
+    expect(r.last().url).toContain('gateway.discord.gg');
+    r.hello();
+    expect(r.last().socket.sent[0]!.op).toBe(2);
+  });
+
+  it('backs off fresh sessions when resumes keep failing, so a dead resume URL cannot spend the day’s IDENTIFYs', async () => {
+    const r = rig();
+    r.state.resumeDown = true;
+    await r.conn.start();
+    const waits: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const at = r.connections.length - 1;
+      r.hello(at);
+      r.readyFrame(at, 1);
+      await r.advance(30_000);
+      r.connections[at]!.events.close(1006, 'dropped');
+      let waited = 0;
+      while (r.connections.length === at + 1 && waited < 10 * 60_000) {
+        await r.advance(1_000);
+        waited += 1_000;
+      }
+      waits.push(waited);
+    }
+    expect(waits[0]).toBeLessThanOrEqual(2_000);
+    expect(waits.at(-1)!).toBeGreaterThanOrEqual(INVALID_BACKOFF_MAX_MS / 2);
   });
 
   it('identifies instead when a piece of the session is missing', async () => {
