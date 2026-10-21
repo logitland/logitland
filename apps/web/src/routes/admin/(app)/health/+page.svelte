@@ -11,9 +11,9 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { Switch } from '#lib/components/ui/switch/index.js';
   import { HOLD_MS, formatNumber, isUrgent, plural, refusal, timeAgo, timeLeft } from '#lib/admin/format.js';
-  import { KILL_SWITCH_KEYS, KILL_SWITCHES, type KillSwitch } from '#lib/admin/labels.js';
+  import { KILL_SWITCH_KEYS, KILL_SWITCHES, ROLE_KEYS, ROLES, type KillSwitch, type RoleKey } from '#lib/admin/labels.js';
   import { session } from '#lib/session.js';
-  import { health, operations, registerCommands, setAlertsChannel, setSwitch } from './health.remote.js';
+  import { health, operations, registerCommands, setAlertsChannel, setRole, setSwitch } from './health.remote.js';
 
   type Status = 'ok' | 'warning' | 'down';
   const STATUS_ICONS = { ok: CircleCheckIcon, warning: TriangleAlertIcon, down: CircleXIcon } as const;
@@ -48,6 +48,7 @@
   ] as const satisfies { key: keyof BotChannelStanding; label: string }[];
 
   const NO_CHANNEL = 'none';
+  const NO_ROLE = 'none';
 
   const h = $derived(await health());
   const ops = $derived(await operations());
@@ -124,6 +125,16 @@
     try {
       await setAlertsChannel(channel?.id ?? null);
       toast.success(channel ? `Alerts go to #${channel.name}` : 'Turned off staff alerts');
+    } catch (e) {
+      toast.error(refusal(e));
+    }
+  }
+
+  async function roleFor(key: RoleKey, value: string) {
+    const role = ops.roles.find((r) => r.id === value);
+    try {
+      await setRole({ key, roleId: role?.id ?? null });
+      toast.success(`${ROLES[key]}: ${role ? `@${role.name}` : 'none'}`);
     } catch (e) {
       toast.error(refusal(e));
     }
@@ -250,6 +261,33 @@
             </Select.Root>
           </Field.Field>
         </div>
+      </section>
+
+      <section aria-labelledby="roles-heading">
+        <div class="flex min-h-8 items-center">
+          <h2 id="roles-heading" class="text-sm font-medium">Roles</h2>
+        </div>
+        <ul class="mt-2 divide-y overflow-hidden rounded-xl border bg-card">
+          {#each ROLE_KEYS as key (key)}
+            {@const current = ops.roleIds[key]}
+            <li class="px-4 py-3">
+              <Field.Field orientation="horizontal" class="justify-between">
+                <Field.Label for="role-{key}" class="font-normal">{ROLES[key]}</Field.Label>
+                <Select.Root type="single" value={current ?? NO_ROLE} onValueChange={(value) => roleFor(key, value)}>
+                  <Select.Trigger id="role-{key}" class="w-48">
+                    {current ? `@${ops.roles.find((r) => r.id === current)?.name ?? current}` : 'None'}
+                  </Select.Trigger>
+                  <Select.Content class="max-h-72">
+                    <Select.Item value={NO_ROLE} label="None" />
+                    {#each ops.roles as role (role.id)}
+                      <Select.Item value={role.id} label="@{role.name}" />
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+              </Field.Field>
+            </li>
+          {/each}
+        </ul>
       </section>
     </div>
   </div>

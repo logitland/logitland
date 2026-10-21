@@ -337,6 +337,15 @@ export class DiscordRest {
     return this.send<GuildMember>('GET', `/guilds/${guildId}/members/${userId}`, undefined, true);
   }
 
+  /** Needs Manage Roles, and the role below the bot's highest. */
+  addMemberRole(guildId: string, userId: string, roleId: string, reason: string): Promise<void> {
+    return this.send<void>('PUT', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
+  }
+
+  removeMemberRole(guildId: string, userId: string, roleId: string, reason: string): Promise<void> {
+    return this.send<void>('DELETE', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
+  }
+
   getGuildRoles(guildId: string): Promise<Role[]> {
     return this.send<Role[]>('GET', `/guilds/${guildId}/roles`, undefined, true);
   }

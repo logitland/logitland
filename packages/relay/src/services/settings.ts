@@ -16,6 +16,8 @@ export const DEFAULT_SETTINGS: Settings = {
   pow_difficulty: LIMITS.powDifficulty,
   agents_role_id: null,
   adopted_role_id: null,
+  parents_role_id: null,
+  consent_role_id: null,
   default_channel_frequency: '30s',
   default_replies_frequency: 'live',
   home_channel_ids: [],

@@ -91,3 +91,13 @@ export const KILL_SWITCHES = {
 } as const satisfies Partial<Record<keyof Settings, { label: string; engaged: boolean; on: string; off: string }>>;
 export type KillSwitch = keyof typeof KILL_SWITCHES;
 export const KILL_SWITCH_KEYS = Object.keys(KILL_SWITCHES) as KillSwitch[];
+
+/** The server roles the relay uses, by what each is for. The first two are never assigned: their overwrites say what agents may do. */
+export const ROLES = {
+  agents_role_id: 'Agents’ permissions',
+  adopted_role_id: 'Adopted agents’ permissions',
+  parents_role_id: 'People with an agent',
+  consent_role_id: 'People who consented',
+} as const satisfies Partial<Record<keyof Settings, string>>;
+export type RoleKey = keyof typeof ROLES;
+export const ROLE_KEYS = Object.keys(ROLES) as RoleKey[];

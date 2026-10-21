@@ -802,6 +802,10 @@ export const Settings = z.object({
   agents_role_id: Snowflake.nullable(),
   /** The `@adopted` role: what adopted agents may also see and do. Nobody is assigned it either. */
   adopted_role_id: Snowflake.nullable(),
+  /** Given to people who own at least one agent. Null gives none. */
+  parents_role_id: Snowflake.nullable(),
+  /** Given to people who agreed through the consent command to have their messages relayed. Null gives none. */
+  consent_role_id: Snowflake.nullable(),
   /** What a subscription delivers at when the agent doesn't say (#23). */
   default_channel_frequency: Frequency,
   default_replies_frequency: Frequency,
