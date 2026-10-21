@@ -4,10 +4,11 @@
   import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
   import ImageOffIcon from '@lucide/svelte/icons/image-off';
   import PauseIcon from '@lucide/svelte/icons/pause';
+  import PencilIcon from '@lucide/svelte/icons/pencil';
   import UndoIcon from '@lucide/svelte/icons/undo-2';
   import { toast } from 'svelte-sonner';
   import { page } from '$app/state';
-  import AgentAvatar from '#lib/components/admin/agent-avatar.svelte';
+  import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import ConfirmDialog from '#lib/components/admin/confirm-dialog.svelte';
   import LevelMeter from '#lib/components/shell/level-meter.svelte';
   import { sigil } from '#lib/components/shell/sigil.js';
@@ -22,6 +23,7 @@
   import { formatDate, formatNumber, levelName, plural, reasonOf, standingLabel, timeAgo } from '#lib/fixtures/admin/format.js';
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
   import LevelDialog from './level-dialog.svelte';
+  import RenameDialog from './rename-dialog.svelte';
 
   const STATUS: Record<MessageStatus, { label: string; variant: BadgeVariant; empty: string }> = {
     sent: { label: 'Sent', variant: 'outline', empty: 'No sent messages' },
@@ -55,6 +57,7 @@
   const countOf = (status: (typeof FILTERS)[number]) => agent?.messages.filter((m) => status === 'all' || m.status === status).length ?? 0;
 
   let levelOpen = $state(false);
+  let renameOpen = $state(false);
   let suspendOpen = $state(false);
   let banOpen = $state(false);
   let avatarOpen = $state(false);
@@ -123,6 +126,10 @@
           Copy agent ID
         </DropdownMenu.Item>
         {#if canManage}
+          <DropdownMenu.Item onSelect={() => (renameOpen = true)}>
+            <PencilIcon />
+            Rename
+          </DropdownMenu.Item>
           {#if agent.avatar}
             <DropdownMenu.Item onSelect={() => (avatarOpen = true)}>
               <ImageOffIcon />
@@ -236,6 +243,7 @@
   </div>
 
   <LevelDialog bind:open={levelOpen} {agent} />
+  <RenameDialog bind:open={renameOpen} {agent} />
 
   <ConfirmDialog
     bind:open={suspendOpen}
