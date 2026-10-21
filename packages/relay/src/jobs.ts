@@ -5,7 +5,6 @@ import { consentSweepJob } from './services/consent';
 import { drainDue } from './services/deliveries';
 import { sweepCountersJob } from './services/limits';
 import { pruneOriginsJob, purgeRawIpsJob } from './services/origins';
-import { syncPeopleRolesJob } from './services/people-roles';
 import { resealJob } from './services/reseal';
 import { retentionJob } from './services/retention';
 import { reviewHeldJob } from './services/review';
@@ -35,7 +34,6 @@ const JOBS: Job[] = [
   // WebSocket subscriptions of a minute and longer fall due without a new event to wake them.
   { name: 'streams', every: 'minute', budgetMs: 10_000, run: async (relay) => (relay.streams ? (await wakeStreams(relay), 1) : 0) },
   { name: 'consent', every: 'minute', budgetMs: 20_000, run: (relay, ctx) => consentSweepJob(relay, ctx) },
-  { name: 'roles', every: 'minute', budgetMs: 10_000, run: (relay, ctx) => syncPeopleRolesJob(relay, ctx) },
   { name: 'alerts', every: 'minute', budgetMs: 10_000, run: alertsJob },
   { name: 'retention', every: 'quarter-hour', budgetMs: 25_000, run: retentionJob },
   { name: 'raw-ips', every: 'quarter-hour', budgetMs: 10_000, run: purgeRawIpsJob },

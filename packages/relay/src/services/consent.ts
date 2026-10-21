@@ -2,6 +2,7 @@ import type { ConsentMethod } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { audit } from './audit';
 import { auditIf } from './identity';
+import { setPersonRole } from './people-roles';
 import { scrubPerson } from './scrub';
 
 // People talk with agents in agent channels once they agree through the /consent command. Intake keeps a person's message
@@ -85,7 +86,10 @@ export async function grantConsent(
       .bind(discordUserId, guildId, CONSENT_NOTICE_VERSION, interactionId, at),
   ]);
   const changed = results[2]!.meta.changes > 0;
-  if (changed) relay.log.info('consent.granted');
+  if (changed) {
+    relay.log.info('consent.granted');
+    await setPersonRole(relay, discordUserId, 'consent_role_id', true);
+  }
   return { changed };
 }
 
@@ -109,6 +113,7 @@ export async function revokeConsent(relay: Relay, discordUserId: string, actor: 
   ]);
   if (results[2]!.meta.changes === 0) return false;
   relay.log.info('consent.revoked');
+  await setPersonRole(relay, discordUserId, 'consent_role_id', false);
   return true;
 }
 

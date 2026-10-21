@@ -1,67 +1,70 @@
+import { AdoptionToken } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { agree } from './consent.testkit';
-import { syncPeopleRolesJob } from './services/people-roles';
+import { grantConsent, revokeConsent } from './services/consent';
 import { updateSettings } from './services/settings';
-import { harness, seedAgent, seedOwner } from './testing';
+import { asOwner } from './signup.helpers';
+import { GUILD, harness, seedAgent, seedOwner } from './testing';
 
-// The parents and consent roles in Discord follow the relay: who owns an agent, and who agreed through /consent.
+// The parents and consent roles in Discord change with what they stand for: adopting and losing the last agent, agreeing and
+// withdrawing through /consent.
 
 const PARENTS = '130000000000000001';
 const CONSENT = '130000000000000002';
-const OTHER = '130000000000000003';
-const PARENT = '200000000000000010';
+const OWNER = '200000000000000001';
 const PERSON = '200000000000000011';
-const LEFT = '200000000000000012';
+const actor = { type: 'public', id: PERSON } as const;
 
 async function setup() {
   const h = harness();
-  /** Member-role calls, as `PUT user role` or `DELETE user role`. Someone in LEFT has left the server. */
+  /** Member-role calls, as `PUT user role` or `DELETE user role`. */
   const calls: string[] = [];
   h.setDiscord((req) => {
-    const [, user, role] = new URL(req.url).pathname.match(/\/guilds\/\d+\/members\/(\d+)\/roles\/(\d+)$/) ?? [];
-    if (!user) return new Response(null, { status: 404 });
-    calls.push(`${req.method} ${user} ${role}`);
-    if (user === LEFT) return Response.json({ message: 'Unknown Member', code: 10007 }, { status: 404 });
+    const [, user, role] = new URL(req.url).pathname.match(/\/members\/(\d+)\/roles\/(\d+)$/) ?? [];
+    if (user) calls.push(`${req.method} ${user} ${role}`);
     return new Response(null, { status: 204 });
   });
-  const owner = await seedOwner(h.relay, PARENT);
-  const agent = await seedAgent(h.relay, { ownerId: owner.id });
-  await agree(h, PERSON);
-  const sync = async () => {
-    calls.length = 0;
-    await syncPeopleRolesJob(h.relay);
-    return [...calls].sort();
+  await updateSettings(h.relay, 'own_admin', { parents_role_id: PARENTS, consent_role_id: CONSENT });
+  const owner = await seedOwner(h.relay, OWNER);
+  const owned = (method: string, path: string) => h.internal(method, `/internal/owners/${owner.id}${path}`, undefined, asOwner(owner.id));
+  /** Adopts a fresh orphan through an adoption token, as an agent would. */
+  const adopt = async () => {
+    const agent = await seedAgent(h.relay);
+    const { token } = AdoptionToken.parse(await (await owned('POST', '/adoption-tokens')).json());
+    expect((await h.call('POST', '/v1/me/adopt', { token }, h.as(agent.token))).status).toBe(200);
+    return agent;
   };
-  return { h, owner, agent, sync };
+  return { h, calls, owned, adopt };
 }
 
 describe('people’s roles', () => {
-  it('gives nothing until admins pick the roles, then each role to who it is for, once', async () => {
-    const { h, sync } = await setup();
-    expect(await sync()).toEqual([]);
-    await updateSettings(h.relay, 'own_admin', { parents_role_id: PARENTS, consent_role_id: CONSENT });
-    expect(await sync()).toEqual([`PUT ${PARENT} ${PARENTS}`, `PUT ${PERSON} ${CONSENT}`]);
-    expect(await sync()).toEqual([]);
+  it('gives the consent role on agreeing and takes it on withdrawing', async () => {
+    const { h, calls } = await setup();
+    await grantConsent(h.relay, { discordUserId: PERSON, guildId: GUILD, actor });
+    await grantConsent(h.relay, { discordUserId: PERSON, guildId: GUILD, actor });
+    await revokeConsent(h.relay, PERSON, actor);
+    expect(calls).toEqual([`PUT ${PERSON} ${CONSENT}`, `DELETE ${PERSON} ${CONSENT}`]);
   });
 
-  it('takes a role back when it stops applying, and moves people when admins pick another role', async () => {
-    const { h, agent, sync } = await setup();
-    await updateSettings(h.relay, 'own_admin', { parents_role_id: PARENTS, consent_role_id: CONSENT });
-    await sync();
-    await h.db.prepare('UPDATE agents SET owner_id = NULL WHERE id = ?').bind(agent.id).run();
-    await h.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ?').bind(h.now().toISOString(), PERSON).run();
-    await agree(h, PARENT);
-    await updateSettings(h.relay, 'own_admin', { consent_role_id: OTHER });
-    expect(await sync()).toEqual([`DELETE ${PARENT} ${PARENTS}`, `DELETE ${PERSON} ${CONSENT}`, `PUT ${PARENT} ${OTHER}`]);
+  it('gives the parents role on adopting, and takes it only with the last agent', async () => {
+    const { calls, owned, adopt } = await setup();
+    const first = await adopt();
+    const second = await adopt();
+    expect(calls).toEqual([`PUT ${OWNER} ${PARENTS}`, `PUT ${OWNER} ${PARENTS}`]);
+    calls.length = 0;
+    expect((await owned('DELETE', `/agents/${first.id}`)).status).toBe(204);
+    expect(calls).toEqual([`PUT ${OWNER} ${PARENTS}`]);
+    calls.length = 0;
+    expect((await owned('DELETE', `/agents/${second.id}`)).status).toBe(204);
+    expect(calls).toEqual([`DELETE ${OWNER} ${PARENTS}`]);
   });
 
-  it('tries again only after a while for someone who isn’t in the server', async () => {
-    const { h, sync } = await setup();
-    await agree(h, LEFT);
+  it('changes nothing in Discord until admins pick the roles, and a failed call doesn’t undo the change', async () => {
+    const { h, calls } = await setup();
+    await updateSettings(h.relay, 'own_admin', { consent_role_id: null });
+    await grantConsent(h.relay, { discordUserId: PERSON, guildId: GUILD, actor });
+    expect(calls).toEqual([]);
     await updateSettings(h.relay, 'own_admin', { consent_role_id: CONSENT });
-    expect(await sync()).toContain(`PUT ${LEFT} ${CONSENT}`);
-    expect(await sync()).toEqual([]);
-    h.advance(7 * 3_600_000);
-    expect(await sync()).toEqual([`PUT ${LEFT} ${CONSENT}`]);
+    h.setDiscord(() => Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 }));
+    expect(await revokeConsent(h.relay, PERSON, actor)).toBe(true);
   });
 });

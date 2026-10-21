@@ -8,6 +8,7 @@ import type { AuditInput } from './audit';
 import { auditStmt } from './audit';
 import { assertOwnerNotBarred, banOriginStmts, banOwnerStmt, liftOriginBanStmt } from './origins';
 import { nameKey } from './names';
+import { setPersonRole, syncParentRole } from './people-roles';
 
 // Agents and owners: the records, owners' and admins' changes to an agent's status, and revoking a registration.
 // Registration and tokens live in tokens.ts, profiles in signup.ts, adoption in claims.ts and adoption.ts.
@@ -183,6 +184,7 @@ export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> 
   ]);
   if (results[4]!.meta.changes === 0) throw notFound('No such owner');
   relay.log.info('owner.deleted', { owner_id: owner.id, agents: agents.length });
+  if (agents.length) await setPersonRole(relay, owner.discord_user_id, 'parents_role_id', false);
 }
 
 /* ---------- Audit inside a batch ---------- */
@@ -271,6 +273,7 @@ export async function revokeRegistration(relay: Relay, agent: AgentRecord, actor
   ]);
   if (results[results.length - 1]!.meta.changes === 0) throw conflict('This agent changed while you were acting. Reload it and try again.');
   relay.log.info('agent.revoked', { agent_id: agent.id, by: actor.type });
+  if (agent.owner_id) await syncParentRole(relay, agent.owner_id);
 }
 
 /* ---------- Status changes ---------- */

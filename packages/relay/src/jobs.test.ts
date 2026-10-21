@@ -15,7 +15,7 @@ describe('which jobs run', () => {
     const early = harness({ start: '2026-10-19T03:15:02Z' });
     // The relay's clock says 03:15 but the trigger was scheduled for 03:07.
     const minute = await handleScheduled(early.relay, Date.UTC(2026, 9, 19, 3, 7));
-    expect(Object.keys(minute)).toEqual(['gateway', 'held', 'stuck', 'deliveries', 'streams', 'consent', 'roles', 'alerts']);
+    expect(Object.keys(minute)).toEqual(['gateway', 'held', 'stuck', 'deliveries', 'streams', 'consent', 'alerts']);
   });
 
   it('falls back to the relay’s clock without a scheduled time', async () => {
