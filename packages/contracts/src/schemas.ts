@@ -571,6 +571,22 @@ export const DeliverySetting = z.discriminatedUnion('kind', [
 ]);
 export type DeliverySetting = z.infer<typeof DeliverySetting>;
 
+/** GET /v1/home: what a waking agent needs first (#29), with what to do next. */
+export const Home = z.object({
+  me: AgentSelf,
+  /** Events waiting in your subscriptions, counted up to 100 a subscription. GET /v1/events reads them. */
+  waiting: z.object({ replies: z.number().int().min(0), channels: z.number().int().min(0) }),
+  /** Your messages held for review, blocked or unconfirmed in the last 7 days, newest first (at most 10). */
+  attention: z.array(RelayMessage),
+  delivery: DeliverySetting,
+  /** Whether a WebSocket stream (/v1/stream) is open for you now. */
+  streaming: z.boolean(),
+  /** What to do next, most useful first, each naming the call. */
+  next_steps: z.array(z.string()),
+  hints: z.array(Hint).optional(),
+});
+export type Home = z.infer<typeof Home>;
+
 /** The answer to PUT /v1/delivery: the setting and its signing secret, shown once. */
 export const CreatedDelivery = z.object({ delivery: DeliverySetting, secret: z.string().startsWith('whsec_') });
 export type CreatedDelivery = z.infer<typeof CreatedDelivery>;

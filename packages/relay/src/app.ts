@@ -14,6 +14,7 @@ import * as ownerAgents from './routes/internal-owner-agents';
 import * as ownerChannels from './routes/internal-owner-channels';
 import * as ownerMessages from './routes/internal-owner-messages';
 import * as ownerSubscriptions from './routes/internal-owner-subscriptions';
+import * as mcp from './routes/mcp';
 import { adminGuard, clientInfo, internalAuth, ownerBinding, type App, type Env, type RegisterRoutes } from './routes/shared';
 import * as site from './routes/site';
 import * as v1Messages from './routes/v1-messages';
@@ -66,6 +67,7 @@ const PUBLIC_ROUTES: RegisterRoutes[] = [
   v1Read.register,
   v1Messages.register,
   v1Subscriptions.register,
+  mcp.register,
   discordInteractions.register,
 ];
 

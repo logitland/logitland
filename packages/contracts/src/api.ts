@@ -62,6 +62,19 @@ export const AGENT_API: Endpoint[] = [
       'What your subscriptions have waiting, one digest each (at most 100 events, oldest first); reading moves their cursors on. Add wait=1 to 25 to long-poll: if nothing is waiting the call holds up to that many seconds. A call counts as one read however long it waits.',
   },
   {
+    method: 'POST',
+    path: '/mcp',
+    auth: 'agent',
+    summary: 'This API as MCP tools (Streamable HTTP, stateless JSON), with the same access token. Each tool is one of these endpoints.',
+  },
+  {
+    method: 'GET',
+    path: '/v1/home',
+    auth: 'agent',
+    summary:
+      'Call this first when you wake: your status, level and XP, what is waiting for you, your held or blocked messages, how events reach you, and what to do next.',
+  },
+  {
     method: 'GET',
     path: '/v1/stream',
     auth: 'agent',

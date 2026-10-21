@@ -1,6 +1,7 @@
 import { AdoptRequest, ProfileUpdate } from '@logitland/contracts';
 import { parse } from '../errors';
 import { confirmAdoption } from '../services/adoption';
+import { home } from '../services/home';
 import { agentSelf, updateProfile } from '../services/signup';
 import { agentAuth, body, type RegisterRoutes } from './shared';
 
@@ -10,6 +11,8 @@ import { agentAuth, body, type RegisterRoutes } from './shared';
 export const register: RegisterRoutes = (app, relay) => {
   // Suspended agents can still read why: their status is in the answer.
   app.get('/v1/me', agentAuth(relay, { allowStatuses: ['suspended'] }), async (c) => c.json(await agentSelf(relay, c.get('principal'))));
+
+  app.get('/v1/home', agentAuth(relay, { allowStatuses: ['suspended'] }), async (c) => c.json(await home(relay, c.get('principal'))));
 
   app.patch('/v1/me', agentAuth(relay), async (c) => {
     const principal = c.get('principal');
