@@ -1,44 +1,78 @@
 <script lang="ts">
+  import type { AdminRole, Level, Settings } from '@logitland/contracts';
   import { untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import SaveCard from '#lib/components/admin/save-card.svelte';
-  import { Button } from '#lib/components/ui/button/index.js';
   import * as Field from '#lib/components/ui/field/index.js';
+  import { Input } from '#lib/components/ui/input/index.js';
   import * as Select from '#lib/components/ui/select/index.js';
-  import type { LevelRule } from '#lib/fixtures/admin/data.js';
-  import { formatNumber, levelName } from '#lib/fixtures/admin/format.js';
-  import { admin } from '#lib/fixtures/admin/store.svelte.js';
-  import { levelSettings } from '#lib/fixtures/levels.svelte.js';
+  import { formatNumber, levelName, refusal } from '#lib/admin/format.js';
+  import { saveLevel } from '../levels.remote.js';
 
-  /** The Discord level role mapped to this level, and the XP that reaches it (set by the curve on Defaults). */
-  let { level, rule }: { level: number; rule: LevelRule } = $props();
+  /**
+   * The XP that reaches this level and the Discord level role mapped to it. Thresholds rise with the level; probation starts
+   * at 0. `settings` names `@agents` and `@adopted`, which have their own jobs (null without the operate power).
+   */
+  let { level, levels, roles, settings }: { level: Level; levels: Level[]; roles: AdminRole[]; settings: Settings | null } = $props();
 
   const NO_ROLE = 'none';
 
-  let role = $state(untrack(() => rule.role ?? NO_ROLE));
+  let role = $state(untrack(() => level.role_id ?? NO_ROLE));
+  let xp = $state(untrack(() => String(level.xp)));
+  let error = $state<string>();
 
-  const probation = $derived(level === 0);
-  const dirty = $derived(role !== (rule.role ?? NO_ROLE));
+  const probation = $derived(level.level === 0);
+  const dirty = $derived(role !== (level.role_id ?? NO_ROLE) || Number(xp) !== level.xp);
+  const below = $derived(levels.findLast((l) => l.level < level.level));
+  const above = $derived(levels.find((l) => l.level > level.level));
 
-  // `@agents` and `@adopted` have their own jobs; every other agent role can be a level role.
-  const roles = $derived(admin.serverRoles.filter((r) => r.kind === 'agent' && r.id !== 'r_agents' && r.id !== 'r_adopted'));
-  const roleLabel = (roleId: string) => (roleId === NO_ROLE ? 'No role' : `@${admin.role(roleId)?.name}`);
+  // `@agents` and `@adopted` have their own jobs; every other role can be a level role.
+  const options = $derived(roles.filter((r) => r.id !== settings?.agents_role_id && r.id !== settings?.adopted_role_id));
+  const roleLabel = (roleId: string) => (roleId === NO_ROLE ? 'No role' : `@${roles.find((r) => r.id === roleId)?.name ?? roleId}`);
+  const levelOfRole = (roleId: string) => levels.find((l) => l.role_id === roleId)?.level;
+
+  function discard() {
+    role = level.role_id ?? NO_ROLE;
+    xp = String(level.xp);
+    error = undefined;
+  }
 
   async function save() {
-    await admin.saveLevel(level, { role: role === NO_ROLE ? null : role });
-    toast.success(`Saved ${levelName(level)}`);
+    const next = Number(xp);
+    const min = (below?.xp ?? 0) + 1;
+    const max = above ? above.xp - 1 : undefined;
+    if (!probation && (!Number.isInteger(next) || next < min || (max !== undefined && next > max))) {
+      error = max === undefined ? `Enter a whole number from ${formatNumber(min)}.` : `Enter a whole number from ${formatNumber(min)} to ${formatNumber(max)}.`;
+      return;
+    }
+    const { level: n, ...update } = level;
+    try {
+      await saveLevel({ level: n, update: { ...update, xp: next, role_id: role === NO_ROLE ? null : role } });
+      toast.success(`Saved ${levelName(n)}`);
+    } catch (e) {
+      toast.error(refusal(e));
+    }
   }
 </script>
 
-<SaveCard title={probation ? 'Discord role' : 'XP and Discord role'} {dirty} onDiscard={() => (role = rule.role ?? NO_ROLE)} onSave={save}>
+<SaveCard title={probation ? 'Discord role' : 'XP and Discord role'} {dirty} onDiscard={discard} onSave={save}>
   <div class="grid gap-6 sm:grid-cols-2">
     {#if !probation}
-      <Field.Field>
-        <Field.Title>XP to reach {levelName(level)}</Field.Title>
-        <div class="flex h-9 items-center justify-between gap-3 sm:max-w-60">
-          <span class="text-sm tabular-nums">{formatNumber(levelSettings.xp(level))} XP</span>
-          <Button href="/admin/levels/defaults" variant="link" size="sm" class="px-0 underline">Change curve</Button>
-        </div>
+      <Field.Field data-invalid={error ? true : undefined}>
+        <Field.Label for="level-xp">XP to reach {levelName(level.level)}</Field.Label>
+        <Input
+          id="level-xp"
+          type="number"
+          inputmode="numeric"
+          min="1"
+          step="1"
+          bind:value={() => xp, (next) => (xp = String(next ?? ''))}
+          oninput={() => (error = undefined)}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? 'level-xp-error' : undefined}
+          class="tabular-nums sm:max-w-60"
+        />
+        {#if error}<Field.Error id="level-xp-error">{error}</Field.Error>{/if}
       </Field.Field>
     {/if}
     <Field.Field>
@@ -47,9 +81,9 @@
         <Select.Trigger id="level-role" class="w-full sm:max-w-60">{roleLabel(role)}</Select.Trigger>
         <Select.Content>
           <Select.Item value={NO_ROLE} label="No role" />
-          {#each roles as option (option.id)}
-            {@const mapped = admin.levelOfRole(option.id)}
-            {@const taken = mapped !== undefined && mapped !== level}
+          {#each options as option (option.id)}
+            {@const mapped = levelOfRole(option.id)}
+            {@const taken = mapped !== undefined && mapped !== level.level}
             <Select.Item value={option.id} label="@{option.name}" disabled={taken}>
               <span class="flex-1">@{option.name}</span>
               {#if taken}<span class="text-xs text-muted-foreground">{levelName(mapped)}</span>{/if}

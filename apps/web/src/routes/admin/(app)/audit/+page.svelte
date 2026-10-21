@@ -4,9 +4,9 @@
   import * as Empty from '#lib/components/ui/empty/index.js';
   import * as InputGroup from '#lib/components/ui/input-group/index.js';
   import * as Select from '#lib/components/ui/select/index.js';
-  import { ADMINS, AREA_LABELS, RELAY_ACTOR, type Area } from '#lib/fixtures/admin/data.js';
-  import { formatDateTime, timeAgo } from '#lib/fixtures/admin/format.js';
-  import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { formatDateTime, timeAgo } from '#lib/admin/format.js';
+  import { audit } from './audit.remote.js';
+  import { AREA_LABELS, actionOf, actorOf, areaOf, detailOf, targetOf, type Area } from './describe.js';
 
   const PAGE = 20;
   const ALL = 'all';
@@ -16,16 +16,29 @@
   let area = $state<Area | typeof ALL>(ALL);
   let shown = $state(PAGE);
 
-  const actors = [...ADMINS.map((a) => ({ value: a.id, label: a.name })), { value: RELAY_ACTOR, label: 'Relay' }];
-  const actorLabel = $derived(actor === ALL ? 'Everyone' : actors.find((a) => a.value === actor)?.label);
+  const all = $derived(
+    (await audit()).map((entry) => ({
+      ...entry,
+      at: Date.parse(entry.created_at),
+      who: actorOf(entry),
+      area: areaOf(entry),
+      text: actionOf(entry),
+      target: targetOf(entry),
+      detail: detailOf(entry),
+    })),
+  );
+
+  // Everyone who appears in the entries read, the relay last.
+  const actors = $derived([...new Set(all.map((e) => e.who))].sort((a, b) => Number(a === 'Relay') - Number(b === 'Relay') || a.localeCompare(b)));
+  const actorLabel = $derived(actor === ALL ? 'Everyone' : actor);
 
   const entries = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    return admin.audit.filter(
+    return all.filter(
       (e) =>
-        (actor === ALL || e.actor === actor) &&
+        (actor === ALL || e.who === actor) &&
         (area === ALL || e.area === area) &&
-        (!q || [e.action, e.target?.label, e.detail].some((text) => text?.toLowerCase().includes(q))),
+        (!q || [e.text, e.target?.label, e.detail].some((text) => text?.toLowerCase().includes(q))),
     );
   });
 
@@ -50,11 +63,11 @@
     <InputGroup.Input type="search" placeholder="Search changes" aria-label="Search changes" bind:value={query} autocomplete="off" />
   </InputGroup.Root>
   <Select.Root type="single" bind:value={actor}>
-    <Select.Trigger class="w-full" aria-label="Changed by">{actorLabel}</Select.Trigger>
-    <Select.Content>
+    <Select.Trigger class="w-full" aria-label="Changed by"><span class="truncate">{actorLabel}</span></Select.Trigger>
+    <Select.Content class="max-h-72">
       <Select.Item value={ALL} label="Everyone" />
-      {#each actors as option (option.value)}
-        <Select.Item value={option.value} label={option.label} />
+      {#each actors as name (name)}
+        <Select.Item value={name} label={name} />
       {/each}
     </Select.Content>
   </Select.Root>
@@ -85,14 +98,16 @@
     {#each entries.slice(0, shown) as entry (entry.id)}
       <li class="grid gap-x-6 gap-y-1 px-4 py-3 text-sm sm:grid-cols-[6rem_6rem_minmax(0,1fr)]">
         <div class="flex items-baseline gap-2 sm:contents">
-          <span class="font-medium sm:order-2 {entry.actor === RELAY_ACTOR ? 'text-muted-foreground' : ''}">{admin.adminName(entry.actor)}</span>
-          <time datetime={new Date(entry.at).toISOString()} title={formatDateTime(entry.at)} class="text-muted-foreground tabular-nums sm:order-1">{timeAgo(entry.at, admin.now)}</time>
+          <span class="truncate font-medium sm:order-2 {entry.actor_type === 'system' ? 'text-muted-foreground' : ''}">{entry.who}</span>
+          <time datetime={entry.created_at} title={formatDateTime(entry.at)} class="text-muted-foreground tabular-nums sm:order-1">{timeAgo(entry.at)}</time>
         </div>
         <div class="flex min-w-0 flex-col gap-0.5 sm:order-3">
           <span>
-            {entry.action}{#if entry.target}{' · '}<a href={entry.target.href} class="font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{entry.target.label}</a>{/if}
+            {entry.text}{#if entry.target}{' · '}<a href={entry.target.href} class="font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                >{entry.target.label}</a
+              >{/if}
           </span>
-          {#if entry.detail}<span class="text-muted-foreground text-pretty break-words">{entry.detail}</span>{/if}
+          {#if entry.detail}<span class="text-pretty break-words text-muted-foreground">{entry.detail}</span>{/if}
         </div>
       </li>
     {/each}

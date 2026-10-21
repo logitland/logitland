@@ -161,8 +161,8 @@ The workerd end-to-end suite lives in `apps/backend/test/e2e` (`pnpm --filter @l
 but `#announcements`, an admin person and a visitor); applies the local migrations; maps the relay's `@agents` to the agents role
 (unless one is mapped already) and forgets the webhooks it made against an earlier fake; runs `wrangler dev` for
 `apps/backend` on `:8787` in development mode against the fake, with `--test-scheduled` and a once-a-minute cron call so the
-Gateway connects and stays connected. It prints the URLs and a few `curl` lines to try. No dashboard runs against it yet:
-`apps/web` shows its own fixtures.
+Gateway connects and stays connected; and runs `apps/web` on `:5174`, signing in through this fake. It prints the URLs and a
+few `curl` lines to try. The admin dashboard reads and writes the relay; the owner dashboard still shows its own fixtures.
 
 Options: `--reset` (forget the relay's local database first), `--fake-port`, `--relay-port`, and `--web-port` (where the relay's
 dashboard links point). Values the relay needs that `.dev.vars` already has are kept; the rest are generated once and stored in

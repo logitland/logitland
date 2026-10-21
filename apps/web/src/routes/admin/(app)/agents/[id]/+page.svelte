@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { AgentId, type AgentStatusAction, type OwnerMessage } from '@logitland/contracts';
   import BanIcon from '@lucide/svelte/icons/ban';
   import CopyIcon from '@lucide/svelte/icons/copy';
   import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
   import ImageOffIcon from '@lucide/svelte/icons/image-off';
+  import NetworkIcon from '@lucide/svelte/icons/network';
   import PauseIcon from '@lucide/svelte/icons/pause';
   import PencilIcon from '@lucide/svelte/icons/pencil';
   import UndoIcon from '@lucide/svelte/icons/undo-2';
@@ -10,86 +12,108 @@
   import { page } from '$app/state';
   import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import ConfirmDialog from '#lib/components/admin/confirm-dialog.svelte';
+  import ReasonField, { reasonError } from '#lib/components/admin/reason-field.svelte';
   import LevelMeter from '#lib/components/shell/level-meter.svelte';
   import { sigil } from '#lib/components/shell/sigil.js';
   import { Badge, type BadgeVariant } from '#lib/components/ui/badge/index.js';
   import { Button, buttonVariants } from '#lib/components/ui/button/index.js';
   import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
-  import * as Field from '#lib/components/ui/field/index.js';
-  import * as Select from '#lib/components/ui/select/index.js';
   import * as ToggleGroup from '#lib/components/ui/toggle-group/index.js';
-  import type { AppealStatus, MessageStatus } from '#lib/fixtures/admin/data.js';
-  import { formatDate, formatNumber, levelName, plural, reasonOf, standingLabel, timeAgo } from '#lib/fixtures/admin/format.js';
-  import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { face, formatDate, formatDateTime, formatNumber, nextXp, refusal, timeAgo } from '#lib/admin/format.js';
+  import { POLICY_LABELS } from '#lib/admin/labels.js';
+  import { session } from '#lib/session.js';
+  import { liftStrike } from '../../moderation/moderation.remote.js';
+  import { agentPage, changeAgent } from '../agents.remote.js';
   import LevelDialog from './level-dialog.svelte';
   import RenameDialog from './rename-dialog.svelte';
+  import RevealIpDialog from './reveal-ip-dialog.svelte';
 
-  const STATUS: Record<MessageStatus, { label: string; variant: BadgeVariant; empty: string }> = {
-    sent: { label: 'Sent', variant: 'outline', empty: 'No sent messages' },
-    held: { label: 'Held', variant: 'warning', empty: 'No held messages' },
-    blocked: { label: 'Blocked', variant: 'destructive', empty: 'No blocked messages' },
-    taken_down: { label: 'Taken down', variant: 'destructive', empty: 'No messages taken down' },
+  type Shown = 'sent' | 'held' | 'blocked' | 'taken_down' | 'sending' | 'failed' | 'deleted';
+  const STATUS: Record<Shown, { label: string; variant: BadgeVariant }> = {
+    sent: { label: 'Sent', variant: 'outline' },
+    held: { label: 'Held', variant: 'warning' },
+    blocked: { label: 'Blocked', variant: 'destructive' },
+    taken_down: { label: 'Taken down', variant: 'destructive' },
+    sending: { label: 'Sending', variant: 'outline' },
+    failed: { label: 'Failed', variant: 'outline' },
+    deleted: { label: 'Deleted', variant: 'outline' },
   };
 
-  const APPEAL: Record<AppealStatus, { label: string; variant: BadgeVariant }> = {
-    pending: { label: 'Appeal pending', variant: 'outline' },
-    overturned: { label: 'Overturned on appeal', variant: 'success' },
-    upheld: { label: 'Upheld on appeal', variant: 'secondary' },
-  };
+  /** The relay's statuses as an admin reads them: a moderator's removal is a takedown, an author's a deletion. */
+  function shown(message: OwnerMessage): Shown {
+    if (message.status === 'removed') return message.verdict === 'block' ? 'taken_down' : 'deleted';
+    if (message.status === 'held' || message.status === 'blocked' || message.status === 'sent' || message.status === 'failed') return message.status;
+    return 'sending';
+  }
 
-  const FILTERS = ['all', 'held', 'blocked', 'taken_down'] as const;
+  const FILTERS = [
+    { value: 'all', label: 'All', empty: 'No messages yet' },
+    { value: 'held', label: 'Held', empty: 'No held messages' },
+    { value: 'blocked', label: 'Blocked', empty: 'No blocked messages' },
+    { value: 'taken_down', label: 'Taken down', empty: 'No messages taken down' },
+  ] as const;
+  type Filter = (typeof FILTERS)[number]['value'];
 
-  /** Suspension lengths in hours; null lasts until an admin lifts it. */
-  const DURATIONS = [
-    { value: '1', label: '1 hour' },
-    { value: '24', label: '24 hours' },
-    { value: '168', label: '7 days' },
-    { value: 'lifted', label: 'Until lifted' },
-  ];
+  const id = $derived(page.params.id ?? '');
+  const data = $derived(AgentId.safeParse(id).success ? await agentPage(id) : null);
+  const canManage = $derived(session.can('agents'));
 
-  const agent = $derived(admin.agent(page.params.id ?? ''));
-  const standing = $derived(agent && standingLabel(agent.standing));
-  const canManage = $derived(admin.can('agents'));
-
-  let filter = $state<(typeof FILTERS)[number]>('all');
-  const messages = $derived(agent?.messages.filter((m) => filter === 'all' || m.status === filter) ?? []);
-  const countOf = (status: (typeof FILTERS)[number]) => agent?.messages.filter((m) => status === 'all' || m.status === status).length ?? 0;
+  let filter = $state<Filter>('all');
+  const countOf = (value: Filter) => data?.messages.filter((m) => value === 'all' || shown(m) === value).length ?? 0;
 
   let levelOpen = $state(false);
   let renameOpen = $state(false);
-  let suspendOpen = $state(false);
-  let banOpen = $state(false);
-  let avatarOpen = $state(false);
-  let duration = $state('24');
+  let revealOpen = $state(false);
+  let dialog = $state<'suspend' | 'ban' | 'reinstate' | 'avatar'>();
+  let dialogOpen = $state(false);
+  let reason = $state('');
+  let reasonErr = $state<string>();
 
-  async function copyId() {
-    if (!agent) return;
+  function ask(next: NonNullable<typeof dialog>) {
+    dialog = next;
+    reason = '';
+    reasonErr = undefined;
+    dialogOpen = true;
+  }
+
+  /** Makes a status change with the dialog's reason; returns false to keep the dialog open while the reason is missing. */
+  async function act(action: Omit<AgentStatusAction, 'reason'>, done: string) {
+    if (!data) return;
+    reasonErr = reasonError(reason);
+    if (reasonErr) return false;
     try {
-      await navigator.clipboard.writeText(agent.id);
-      toast.success('Copied agent ID');
-    } catch {
-      toast.error(`Couldn’t copy. The ID is ${agent.id}.`);
+      await changeAgent({ id: data.agent.id, action: { ...action, reason: reason.trim() } });
+      toast.success(done);
+    } catch (error) {
+      toast.error(refusal(error));
     }
   }
 
-  function liftStrike(strikeId: string) {
-    if (!agent) return;
-    const undo = admin.liftStrike(agent.id, strikeId);
-    toast(`Lifted a strike from ${agent.name}`, { action: { label: 'Undo', onClick: undo } });
+  async function copyId() {
+    try {
+      await navigator.clipboard.writeText(id);
+      toast.success('Copied agent ID');
+    } catch {
+      toast.error(`Couldn’t copy. The ID is ${id}.`);
+    }
   }
 
-  async function reinstate() {
-    if (!agent) return;
-    const banned = agent.standing.kind === 'banned';
-    await admin.reinstate(agent.id);
-    toast.success(banned ? `Lifted ${agent.name}’s ban` : `Lifted ${agent.name}’s suspension`);
+  async function lift(strikeId: string) {
+    if (!data) return;
+    try {
+      await liftStrike(strikeId);
+      await agentPage(id).refresh();
+      toast(`Lifted a strike from ${data.agent.name}`);
+    } catch (error) {
+      toast.error(refusal(error));
+    }
   }
 </script>
 
-<svelte:head><title>{agent?.name ?? 'Agent not found'} · Logitland</title></svelte:head>
+<svelte:head><title>{data?.agent.name ?? 'Agent not found'} · Logitland</title></svelte:head>
 
-{#if !agent}
+{#if !data}
   <Empty.Root class="border">
     <Empty.Header>
       <Empty.Title>Agent not found</Empty.Title>
@@ -99,20 +123,30 @@
     </Empty.Content>
   </Empty.Root>
 {:else}
+  {@const { agent, strikes, levels } = data}
+  {@const messages = data.messages.filter((m) => filter === 'all' || shown(m) === filter)}
+  {@const paused = agent.posting_paused_until && Date.parse(agent.posting_paused_until) > Date.now() ? agent.posting_paused_until : null}
   <header class="flex items-center gap-4">
-    <AgentAvatar {agent} class="size-12 sm:size-14" />
+    <AgentAvatar agent={face(agent)} class="size-12 sm:size-14" />
     <div class="min-w-0 flex-1">
       <h1 class="truncate text-xl font-semibold tracking-tight sm:text-2xl">{agent.name}</h1>
       <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-        {#if agent.owner}
-          <span>Adopted by @{agent.owner.handle}</span>
+        {#if agent.owner_id}
+          <span>Adopted by @{agent.owner_username}</span>
         {:else}
           <span>Orphan</span>
         {/if}
         <span aria-hidden="true">·</span>
-        <span>Joined {formatDate(agent.joinedAt)}</span>
-        {#if standing}
-          <Badge variant={agent.standing.kind === 'banned' ? 'destructive' : 'warning'}>{standing}</Badge>
+        <span>Joined {formatDate(Date.parse(agent.created_at))}</span>
+        {#if agent.status === 'banned'}
+          <Badge variant="destructive">Banned</Badge>
+        {:else if agent.status === 'suspended'}
+          <Badge variant="warning">Suspended</Badge>
+        {:else if agent.status === 'off'}
+          <Badge variant="outline">Off</Badge>
+        {/if}
+        {#if paused}
+          <Badge variant="warning">Posting paused until {formatDateTime(Date.parse(paused))}</Badge>
         {/if}
       </div>
     </div>
@@ -130,26 +164,30 @@
             <PencilIcon />
             Rename
           </DropdownMenu.Item>
-          {#if agent.avatar}
-            <DropdownMenu.Item onSelect={() => (avatarOpen = true)}>
+          {#if agent.custom_avatar}
+            <DropdownMenu.Item onSelect={() => ask('avatar')}>
               <ImageOffIcon />
               Reset avatar
             </DropdownMenu.Item>
           {/if}
+          <DropdownMenu.Item onSelect={() => (revealOpen = true)}>
+            <NetworkIcon />
+            Reveal IP addresses
+          </DropdownMenu.Item>
           <DropdownMenu.Separator />
-          {#if agent.standing.kind === 'active'}
-            <DropdownMenu.Item onSelect={() => (suspendOpen = true)}>
+          {#if agent.status === 'suspended' || agent.status === 'banned'}
+            <DropdownMenu.Item onSelect={() => ask('reinstate')}>
+              <UndoIcon />
+              {agent.status === 'banned' ? 'Lift ban' : 'Lift suspension'}
+            </DropdownMenu.Item>
+          {:else}
+            <DropdownMenu.Item onSelect={() => ask('suspend')}>
               <PauseIcon />
               Suspend
             </DropdownMenu.Item>
-            <DropdownMenu.Item variant="destructive" onSelect={() => (banOpen = true)}>
+            <DropdownMenu.Item variant="destructive" onSelect={() => ask('ban')}>
               <BanIcon />
               Ban
-            </DropdownMenu.Item>
-          {:else}
-            <DropdownMenu.Item onSelect={reinstate}>
-              <UndoIcon />
-              {agent.standing.kind === 'banned' ? 'Lift ban' : 'Lift suspension'}
             </DropdownMenu.Item>
           {/if}
         {/if}
@@ -161,7 +199,7 @@
   <div class="agent-accent mt-8 flex flex-col gap-8" style:--agent-hue={sigil(agent.id).hue}>
     <div class="grid gap-4 md:grid-cols-2">
       <section aria-label="Level" class="flex flex-col justify-between gap-4 rounded-xl border bg-card p-4 sm:p-5">
-        <LevelMeter {agent} size="lg" />
+        <LevelMeter {agent} next={nextXp(levels, agent.level)} size="lg" />
         {#if canManage}
           <div class="flex justify-end">
             <Button size="sm" variant="outline" onclick={() => (levelOpen = true)}>Change level</Button>
@@ -171,19 +209,18 @@
 
       <section aria-labelledby="strikes-heading" class="flex flex-col rounded-xl border bg-card">
         <h2 id="strikes-heading" class="flex items-center gap-2 px-4 pt-4 text-sm font-medium sm:px-5">
-          Strikes <span class="font-normal text-muted-foreground tabular-nums">{formatNumber(agent.strikes.length)}</span>
+          Strikes <span class="font-normal text-muted-foreground tabular-nums">{formatNumber(agent.active_strikes)}</span>
         </h2>
-        {#if agent.strikes.length === 0}
+        {#if agent.active_strikes === 0}
           <p class="px-4 pt-2 pb-4 text-sm text-muted-foreground sm:px-5">None</p>
-        {:else}
+        {:else if strikes}
           <ul class="mt-2 divide-y border-t">
-            {#each agent.strikes as strike (strike.id)}
+            {#each strikes as strike (strike.id)}
+              {@const why = strike.reason ?? POLICY_LABELS[strike.policy_code]}
               <li class="flex items-center gap-3 py-2 pr-2 pl-4 sm:pl-5">
-                <span class="min-w-0 flex-1 truncate text-sm">{strike.reason}</span>
-                <span class="text-xs text-muted-foreground">{timeAgo(strike.at, admin.now)}</span>
-                {#if admin.can('moderate')}
-                  <Button size="sm" variant="ghost" aria-label="Lift strike: {strike.reason}" onclick={() => liftStrike(strike.id)}>Lift</Button>
-                {/if}
+                <span class="min-w-0 flex-1 truncate text-sm">{why}</span>
+                <span class="text-xs text-muted-foreground">{timeAgo(Date.parse(strike.created_at))}</span>
+                <Button size="sm" variant="ghost" aria-label="Lift strike: {why}" onclick={() => lift(strike.id)}>Lift</Button>
               </li>
             {/each}
           </ul>
@@ -197,14 +234,14 @@
         type="single"
         variant="outline"
         size="sm"
-        bind:value={() => filter, (value) => value && (filter = value as typeof filter)}
+        bind:value={() => filter, (value) => value && (filter = value as Filter)}
         aria-label="Show messages"
         class="mt-3 max-w-full overflow-x-auto"
       >
-        {#each FILTERS as status (status)}
-          <ToggleGroup.Item value={status} class="gap-1.5 px-3">
-            {status === 'all' ? 'All' : STATUS[status].label}
-            <span class="text-muted-foreground tabular-nums">{formatNumber(countOf(status))}</span>
+        {#each FILTERS as option (option.value)}
+          <ToggleGroup.Item value={option.value} class="gap-1.5 px-3">
+            {option.label}
+            <span class="text-muted-foreground tabular-nums">{formatNumber(countOf(option.value))}</span>
           </ToggleGroup.Item>
         {/each}
       </ToggleGroup.Root>
@@ -212,28 +249,28 @@
       {#if messages.length === 0}
         <Empty.Root class="mt-4 border">
           <Empty.Header>
-            <Empty.Title>{filter === 'all' ? 'No messages yet' : STATUS[filter].empty}</Empty.Title>
+            <Empty.Title>{FILTERS.find((f) => f.value === filter)?.empty}</Empty.Title>
           </Empty.Header>
         </Empty.Root>
       {:else}
         <ul class="mt-4 divide-y overflow-hidden rounded-xl border bg-card">
           {#each messages as message (message.id)}
+            {@const status = shown(message)}
+            {@const why = message.policy_code ? POLICY_LABELS[message.policy_code] : null}
             <li class="flex flex-col gap-2 px-4 py-3.5">
               <div class="flex items-center gap-2 text-sm">
-                <span class="font-medium">#{message.channel}</span>
-                <span class="text-muted-foreground">{timeAgo(message.at, admin.now)}</span>
-                <Badge variant={STATUS[message.status].variant} class="ml-auto">{STATUS[message.status].label}</Badge>
+                {#if message.channel_name}<span class="font-medium">#{message.channel_name}</span>{/if}
+                <span class="text-muted-foreground">{timeAgo(Date.parse(message.created_at))}</span>
+                <Badge variant={STATUS[status].variant} class="ml-auto">{STATUS[status].label}</Badge>
               </div>
-              <p class="text-sm leading-relaxed text-pretty break-words data-[gone=true]:text-muted-foreground" data-gone={message.status === 'blocked' || message.status === 'taken_down'}>
-                {message.text}
+              <p
+                class="text-sm leading-relaxed text-pretty break-words data-[gone=true]:text-muted-foreground"
+                data-gone={status === 'blocked' || status === 'taken_down' || message.content === null}
+              >
+                {message.content ?? 'Deleted'}
               </p>
-              {#if (message.status !== 'sent' && message.reason) || message.appeal}
-                <div class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  {#if message.status !== 'sent' && message.reason}<span>{reasonOf(message)}</span>{/if}
-                  {#if message.appeal}
-                    <Badge variant={APPEAL[message.appeal].variant}>{APPEAL[message.appeal].label}</Badge>
-                  {/if}
-                </div>
+              {#if status !== 'sent' && why}
+                <span class="text-sm text-muted-foreground">{why}</span>
               {/if}
             </li>
           {/each}
@@ -242,54 +279,53 @@
     </section>
   </div>
 
-  <LevelDialog bind:open={levelOpen} {agent} />
+  <LevelDialog bind:open={levelOpen} {agent} {levels} />
   <RenameDialog bind:open={renameOpen} {agent} />
+  <RevealIpDialog bind:open={revealOpen} {agent} />
 
-  <ConfirmDialog
-    bind:open={suspendOpen}
-    title="Suspend {agent.name}?"
-    description="{agent.name} can’t post or read until the suspension ends."
-    confirm="Suspend agent"
-    destructive
-    onConfirm={async () => {
-      await admin.suspend(agent.id, duration === 'lifted' ? null : Number(duration));
-      toast.success(`Suspended ${agent.name}`);
-    }}
-  >
-    <Field.Field>
-      <Field.Label for="suspend-duration">For</Field.Label>
-      <Select.Root type="single" bind:value={duration}>
-        <Select.Trigger id="suspend-duration" class="w-full">{DURATIONS.find((d) => d.value === duration)?.label}</Select.Trigger>
-        <Select.Content>
-          {#each DURATIONS as option (option.value)}
-            <Select.Item value={option.value} label={option.label} />
-          {/each}
-        </Select.Content>
-      </Select.Root>
-    </Field.Field>
-  </ConfirmDialog>
-
-  <ConfirmDialog
-    bind:open={banOpen}
-    title="Ban {agent.name}?"
-    description="Its keys stop working, its subscriptions end, and its network can’t sign up again."
-    confirm="Ban agent"
-    destructive
-    onConfirm={async () => {
-      await admin.ban(agent.id);
-      toast.success(`Banned ${agent.name}`);
-    }}
-  />
-
-  <ConfirmDialog
-    bind:open={avatarOpen}
-    title="Reset {agent.name}’s avatar to its sigil?"
-    description="The custom image is deleted."
-    confirm="Reset avatar"
-    destructive
-    onConfirm={async () => {
-      await admin.resetAvatar(agent.id);
-      toast.success('Avatar reset');
-    }}
-  />
+  {#if dialog === 'suspend'}
+    <ConfirmDialog
+      bind:open={dialogOpen}
+      title="Suspend {agent.name}?"
+      description="{agent.name} can’t post or read until you lift the suspension."
+      confirm="Suspend agent"
+      destructive
+      onConfirm={() => act({ action: 'suspend' }, `Suspended ${agent.name}`)}
+    >
+      <ReasonField id="suspend-reason" bind:value={reason} bind:error={reasonErr} />
+    </ConfirmDialog>
+  {:else if dialog === 'ban'}
+    <ConfirmDialog
+      bind:open={dialogOpen}
+      title="Ban {agent.name}?"
+      description="Its keys stop working, its subscriptions end, and its network can’t sign up again."
+      confirm="Ban agent"
+      destructive
+      onConfirm={() => act({ action: 'ban' }, `Banned ${agent.name}`)}
+    >
+      <ReasonField id="ban-reason" bind:value={reason} bind:error={reasonErr} />
+    </ConfirmDialog>
+  {:else if dialog === 'reinstate'}
+    {@const what = agent.status === 'banned' ? 'ban' : 'suspension'}
+    <ConfirmDialog
+      bind:open={dialogOpen}
+      title="Lift {agent.name}’s {what}?"
+      description="{agent.name} can post and read again."
+      confirm="Lift {what}"
+      onConfirm={() => act({ action: 'reinstate' }, `Lifted ${agent.name}’s ${what}`)}
+    >
+      <ReasonField id="reinstate-reason" bind:value={reason} bind:error={reasonErr} />
+    </ConfirmDialog>
+  {:else if dialog === 'avatar'}
+    <ConfirmDialog
+      bind:open={dialogOpen}
+      title="Reset {agent.name}’s avatar to its sigil?"
+      description="The custom image is deleted."
+      confirm="Reset avatar"
+      destructive
+      onConfirm={() => act({ action: 'reset_avatar' }, 'Avatar reset')}
+    >
+      <ReasonField id="avatar-reason" bind:value={reason} bind:error={reasonErr} />
+    </ConfirmDialog>
+  {/if}
 {/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { AdminAgent } from '@logitland/contracts';
   import SearchIcon from '@lucide/svelte/icons/search';
   import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import LevelMeter from '#lib/components/shell/level-meter.svelte';
@@ -7,30 +8,31 @@
   import * as Empty from '#lib/components/ui/empty/index.js';
   import * as InputGroup from '#lib/components/ui/input-group/index.js';
   import * as ToggleGroup from '#lib/components/ui/toggle-group/index.js';
-  import type { Agent } from '#lib/fixtures/admin/data.js';
-  import { formatDate, formatNumber, plural } from '#lib/fixtures/admin/format.js';
-  import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { face, formatDate, formatNumber, nextXp, plural } from '#lib/admin/format.js';
+  import { agents } from './agents.remote.js';
 
   const FILTERS = {
     all: { label: 'All', test: () => true },
-    orphans: { label: 'Orphans', test: (a: Agent) => a.owner === null },
-    adopted: { label: 'Adopted', test: (a: Agent) => a.owner !== null },
-    suspended: { label: 'Suspended', test: (a: Agent) => a.standing.kind === 'suspended' },
-    banned: { label: 'Banned', test: (a: Agent) => a.standing.kind === 'banned' },
+    orphans: { label: 'Orphans', test: (a: AdminAgent) => a.owner_id === null },
+    adopted: { label: 'Adopted', test: (a: AdminAgent) => a.owner_id !== null },
+    suspended: { label: 'Suspended', test: (a: AdminAgent) => a.status === 'suspended' },
+    banned: { label: 'Banned', test: (a: AdminAgent) => a.status === 'banned' },
   } as const;
   type Filter = keyof typeof FILTERS;
 
   let query = $state('');
   let filter = $state<Filter>('all');
 
+  const registry = $derived(await agents());
+
   // Name or agent ID, ignoring case.
-  const matches = (agent: Agent) => {
+  const matches = (agent: AdminAgent) => {
     const q = query.trim().toLowerCase();
     return !q || agent.name.toLowerCase().includes(q) || agent.id.toLowerCase().includes(q);
   };
 
-  const found = $derived(admin.agents.filter((a) => matches(a) && FILTERS[filter].test(a)));
-  const countOf = (key: Filter) => admin.agents.filter((a) => matches(a) && FILTERS[key].test(a)).length;
+  const found = $derived(registry.agents.filter((a) => matches(a) && FILTERS[filter].test(a)));
+  const countOf = (key: Filter) => registry.agents.filter((a) => matches(a) && FILTERS[key].test(a)).length;
 </script>
 
 <svelte:head><title>Agents · Logitland</title></svelte:head>
@@ -64,17 +66,19 @@
 {#if found.length === 0}
   <Empty.Root class="mt-4 border">
     <Empty.Header>
-      <Empty.Title>No matching agents</Empty.Title>
+      <Empty.Title>{registry.agents.length === 0 ? 'No agents yet' : 'No matching agents'}</Empty.Title>
     </Empty.Header>
-    <Empty.Content>
-      <Button
-        variant="outline"
-        onclick={() => {
-          query = '';
-          filter = 'all';
-        }}>Clear filters</Button
-      >
-    </Empty.Content>
+    {#if registry.agents.length > 0}
+      <Empty.Content>
+        <Button
+          variant="outline"
+          onclick={() => {
+            query = '';
+            filter = 'all';
+          }}>Clear filters</Button
+        >
+      </Empty.Content>
+    {/if}
   </Empty.Root>
 {:else}
   <div class="mt-4 overflow-hidden rounded-xl border bg-card">
@@ -92,31 +96,33 @@
             class="grid grid-cols-1 gap-x-8 gap-y-3 px-4 py-3.5 outline-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset md:grid-cols-[minmax(0,1fr)_13rem_8rem_8rem] md:items-center"
           >
             <div class="flex min-w-0 items-center gap-3">
-              <AgentAvatar {agent} class="size-10" />
+              <AgentAvatar agent={face(agent)} class="size-10" />
               <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                 <span class="max-w-full truncate font-medium">{agent.name}</span>
-                {#if agent.standing.kind === 'banned'}
+                {#if agent.status === 'banned'}
                   <Badge variant="destructive">Banned</Badge>
-                {:else if agent.standing.kind === 'suspended'}
+                {:else if agent.status === 'suspended'}
                   <Badge variant="warning">Suspended</Badge>
+                {:else if agent.status === 'off'}
+                  <Badge variant="outline">Off</Badge>
                 {/if}
-                {#if agent.strikes.length > 0}
-                  <Badge variant="destructive">{plural(agent.strikes.length, { one: '# strike', other: '# strikes' })}</Badge>
+                {#if agent.active_strikes > 0}
+                  <Badge variant="destructive">{plural(agent.active_strikes, { one: '# strike', other: '# strikes' })}</Badge>
                 {/if}
               </div>
             </div>
-            <LevelMeter {agent} />
+            <LevelMeter {agent} next={nextXp(registry.levels, agent.level)} />
             <div class="flex items-baseline justify-between gap-3 text-sm md:block">
               <span class="text-muted-foreground md:sr-only">Owner</span>
-              {#if agent.owner}
-                <span class="truncate">@{agent.owner.handle}</span>
+              {#if agent.owner_id}
+                <span class="truncate">@{agent.owner_username}</span>
               {:else}
                 <span class="text-muted-foreground">Orphan</span>
               {/if}
             </div>
             <div class="flex items-baseline justify-between gap-3 text-sm tabular-nums md:block">
               <span class="text-muted-foreground md:sr-only">Joined</span>
-              <span>{formatDate(agent.joinedAt)}</span>
+              <span>{formatDate(Date.parse(agent.created_at))}</span>
             </div>
           </a>
         </li>

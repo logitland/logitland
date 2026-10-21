@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { AdminPermission } from '@logitland/contracts';
   import PlusIcon from '@lucide/svelte/icons/plus';
   import XIcon from '@lucide/svelte/icons/x';
   import { toast } from 'svelte-sonner';
@@ -10,44 +11,56 @@
   import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
   import * as Field from '#lib/components/ui/field/index.js';
-  import { ADMINS, POWER_KEYS, POWER_LABELS, type Power, type RoleGrant } from '#lib/fixtures/admin/data.js';
-  import { admin } from '#lib/fixtures/admin/store.svelte.js';
+  import { refusal } from '#lib/admin/format.js';
+  import { POWER_KEYS, POWER_LABELS } from '#lib/admin/labels.js';
+  import { session } from '#lib/session.js';
+  import { admins, saveRoles } from './admins.remote.js';
 
-  const team = ADMINS.filter((a) => a.team);
+  type Grant = { roleId: string; powers: AdminPermission[] };
 
-  // Every change in the card is a draft until Save, including adding and removing roles.
-  let draft = $state<RoleGrant[]>(structuredClone($state.snapshot(admin.grants)));
+  const data = $derived(await admins());
+  const saved = $derived<Grant[]>(data.roles.filter((r) => r.permissions.length).map((r) => ({ roleId: r.id, powers: r.permissions })));
+
+  // Every change in the card is a draft until Save, including adding and removing roles. Undefined: nothing changed yet.
+  let edited = $state<Grant[]>();
+  const draft = $derived(edited ?? saved);
   let errors = $state<Record<string, string>>({});
 
-  const key = (grants: RoleGrant[]) => JSON.stringify(grants.map((g) => [g.roleId, POWER_KEYS.filter((p) => g.powers.includes(p))]));
-  const dirty = $derived(key(draft) !== key(admin.grants));
-  const unmapped = $derived(admin.serverRoles.filter((r) => r.kind === 'staff' && !draft.some((g) => g.roleId === r.id)));
-  const roleName = (roleId: string) => `@${admin.role(roleId)?.name}`;
+  const key = (grants: Grant[]) => JSON.stringify(grants.map((g) => [g.roleId, POWER_KEYS.filter((p) => g.powers.includes(p))]));
+  const dirty = $derived(key(draft) !== key(saved));
+  const unmapped = $derived(data.roles.filter((r) => !draft.some((g) => g.roleId === r.id)));
+  const roleName = (roleId: string) => `@${data.roles.find((r) => r.id === roleId)?.name ?? roleId}`;
 
-  function toggle(grant: RoleGrant, power: Power, on: boolean) {
-    grant.powers = on ? [...grant.powers, power] : grant.powers.filter((p) => p !== power);
-    delete errors[grant.roleId];
+  /** Edits a copy of the draft, so the saved grants stay as the relay sent them. */
+  function edit(change: (grants: Grant[]) => Grant[]) {
+    edited = change(structuredClone($state.snapshot(draft)));
   }
 
-  function add(roleId: string) {
-    draft.push({ roleId, powers: ['moderate'] });
-  }
-
-  function remove(roleId: string) {
-    draft = draft.filter((g) => g.roleId !== roleId);
+  function toggle(roleId: string, power: AdminPermission, on: boolean) {
+    edit((grants) => grants.map((g) => (g.roleId === roleId ? { ...g, powers: on ? [...g.powers, power] : g.powers.filter((p) => p !== power) } : g)));
     delete errors[roleId];
   }
 
   function discard() {
-    draft = structuredClone($state.snapshot(admin.grants));
+    edited = undefined;
     errors = {};
   }
 
   async function save() {
     errors = Object.fromEntries(draft.filter((g) => g.powers.length === 0).map((g) => [g.roleId, `Give ${roleName(g.roleId)} at least one power, or remove it.`]));
     if (Object.keys(errors).length) return;
-    await admin.saveGrants(draft);
-    toast.success('Saved admin roles');
+    // Roles whose powers changed, and roles removed from the card, which lose theirs.
+    const changes = [
+      ...draft.filter((g) => key([g]) !== key(saved.filter((s) => s.roleId === g.roleId))).map((g) => ({ id: g.roleId, permissions: g.powers })),
+      ...saved.filter((s) => !draft.some((g) => g.roleId === s.roleId)).map((s) => ({ id: s.roleId, permissions: [] })),
+    ];
+    try {
+      await saveRoles(changes);
+      edited = undefined;
+      toast.success('Saved admin roles');
+    } catch (e) {
+      toast.error(refusal(e));
+    }
   }
 </script>
 
@@ -61,16 +74,16 @@
   <section aria-labelledby="team-heading">
     <h2 id="team-heading" class="text-sm font-medium">Developer team</h2>
     <ul class="mt-3 divide-y overflow-hidden rounded-xl border bg-card">
-      {#each team as member (member.id)}
+      {#each data.team as member (member.discord_user_id)}
         <li class="flex items-center gap-3 px-4 py-3">
           <Avatar.Root class="size-8 rounded-full">
             <Avatar.Fallback class="bg-discord text-discord-foreground">{member.name.slice(0, 1)}</Avatar.Fallback>
           </Avatar.Root>
           <div class="flex min-w-0 flex-1 items-baseline gap-2">
             <span class="truncate text-sm font-medium">{member.name}</span>
-            <span class="truncate text-sm text-muted-foreground">@{member.handle}</span>
+            <span class="truncate text-sm text-muted-foreground">@{member.username}</span>
           </div>
-          {#if member.id === admin.admin?.id}<Badge variant="outline">You</Badge>{/if}
+          {#if member.owner_id === session.person?.id}<Badge variant="outline">You</Badge>{/if}
         </li>
       {/each}
     </ul>
@@ -82,9 +95,9 @@
         <DropdownMenu.Trigger class={buttonVariants({ variant: 'outline', size: 'sm' })} disabled={unmapped.length === 0}>
           <PlusIcon />Add role
         </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="end" class="w-48">
+        <DropdownMenu.Content align="end" class="max-h-72 w-48">
           {#each unmapped as role (role.id)}
-            <DropdownMenu.Item onSelect={() => add(role.id)}>@{role.name}</DropdownMenu.Item>
+            <DropdownMenu.Item onSelect={() => edit((grants) => [...grants, { roleId: role.id, powers: ['moderate'] }])}>@{role.name}</DropdownMenu.Item>
           {/each}
         </DropdownMenu.Content>
       </DropdownMenu.Root>
@@ -99,14 +112,19 @@
     {:else}
       <ul class="-my-3 divide-y">
         {#each draft as grant (grant.roleId)}
-          {@const holders = admin.holders(grant.roleId)}
           <li class="flex flex-col gap-3 py-3">
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium">{roleName(grant.roleId)}</span>
-              {#if holders.length}
-                <span class="truncate text-sm text-muted-foreground">{holders.map((h) => h.name).join(', ')}</span>
-              {/if}
-              <Button variant="ghost" size="icon-sm" class="ml-auto" aria-label="Remove {roleName(grant.roleId)}" onclick={() => remove(grant.roleId)}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="ml-auto"
+                aria-label="Remove {roleName(grant.roleId)}"
+                onclick={() => {
+                  edit((grants) => grants.filter((g) => g.roleId !== grant.roleId));
+                  delete errors[grant.roleId];
+                }}
+              >
                 <XIcon />
               </Button>
             </div>
@@ -116,7 +134,7 @@
                   <Checkbox
                     id="{grant.roleId}-{power}"
                     checked={grant.powers.includes(power)}
-                    onCheckedChange={(on) => toggle(grant, power, on)}
+                    onCheckedChange={(on) => toggle(grant.roleId, power, on)}
                     aria-invalid={errors[grant.roleId] ? true : undefined}
                   />
                   <Field.Label for="{grant.roleId}-{power}" class="font-normal">{POWER_LABELS[power]}</Field.Label>
