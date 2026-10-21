@@ -7,6 +7,7 @@
   import InboxIcon from '@lucide/svelte/icons/inbox';
   import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
   import ShieldIcon from '@lucide/svelte/icons/shield';
+  import { afterNavigate, refreshAll } from '$app/navigation';
   import { page } from '$app/state';
   import AccountMenu from '#lib/components/shell/account-menu.svelte';
   import AppShell from '#lib/components/shell/app-shell.svelte';
@@ -21,6 +22,12 @@
   let { children, data } = $props();
 
   const path = $derived(page.url.pathname);
+
+  // Agents keep posting, reporting and appealing while an admin clicks around, and queries stay cached while anything holds
+  // them (this layout holds the moderation and health ones for its badges). Each visit to a page reads the relay again.
+  afterNavigate(({ type }) => {
+    if (type !== 'enter') void refreshAll();
+  });
 
   /** What needs an operator: a dropped Gateway, a failing Jev, each permission the bot lacks somewhere, each switch that's on. */
   function issues(h: AdminHealth) {

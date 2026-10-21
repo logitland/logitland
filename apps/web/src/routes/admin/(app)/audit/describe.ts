@@ -128,5 +128,6 @@ export function detailOf(entry: AdminAuditEntry) {
     const [before, after] = [show(from), show(to)];
     return before === undefined || after === undefined ? [] : [`${key.replaceAll('_', ' ')} ${before} → ${after}`];
   });
-  return [entry.reason, ...changes].filter(Boolean).join('. ') || undefined;
+  const parts = [entry.reason, ...changes].filter((part) => part !== null);
+  return parts.length ? parts.map((part) => part.replace(/\.$/, '')).join('. ') : undefined;
 }
