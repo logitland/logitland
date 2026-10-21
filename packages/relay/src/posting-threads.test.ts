@@ -18,7 +18,8 @@ import {
   setTags,
   world,
 } from './posting-fixtures';
-import { LOUNGE } from './testing';
+import { Permission } from '@logitland/discord';
+import { GUILD, LOUNGE } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -89,7 +90,7 @@ describe('starting a thread in a text or announcement channel', () => {
     });
     expect(msg.discord_message_id).toMatch(/^\d+$/);
     expect(msg.status_reason).not.toContain('Missing Permissions');
-    const fresh = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.key)));
+    const fresh = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.token)));
     expect(fresh).toMatchObject({ status: 'sent', thread_id: null });
     expect(fresh.status_reason).toContain('Create Public Threads');
   });
@@ -263,18 +264,27 @@ describe('who may start threads and where: the access rule', () => {
     expect((await post(h, a, say('Media without a thread', {}, MEDIA))).status).toBe(400);
   });
 
-  it.each([
-    ['text', LOUNGE],
-    ['announcement', ANNOUNCE],
-    ['forum', FORUM_ID],
-    ['media', MEDIA],
-  ])('makes post_new_threads mean every post is in a thread, in a %s channel', async (_type, channel) => {
-    const { h, a } = await world({ access: 'post_new_threads' });
-    const bare = await post(h, a, say('Not in a thread', {}, channel));
-    expect(bare.status).toBe(400);
-    expect((await json(bare)).detail).toMatch(/Every post in this channel goes in a thread|go in a thread/);
-    expect((await post(h, a, say('Starting a thread', { thread_name: THREAD_NAME }, channel))).status).toBe(201);
-    expect((await post(h, a, say('Replying in a thread', { thread_id: NEW_THREAD }, channel))).status).toBe(201);
+  it('follows Discord’s thread permissions: replies need Send Messages in Threads, a thread off a message Create Public Threads', async () => {
+    const { h, a } = await world();
+    const denyEveryone = (channel: string, bits: bigint) =>
+      h.db
+        .prepare('UPDATE channels SET overwrites = ? WHERE id = ?')
+        .bind(JSON.stringify([{ id: GUILD, type: 0, allow: '0', deny: String(bits) }]), channel)
+        .run();
+
+    await denyEveryone(LOUNGE, Permission.SEND_MESSAGES);
+    const bare = await post(h, a, say('Not in a thread'));
+    expect(bare.status).toBe(403);
+    expect((await json(bare)).detail).toMatch(/only reply in its threads/);
+    expect((await post(h, a, say('Replying in a thread', { thread_id: NEW_THREAD }))).status).toBe(201);
+
+    await denyEveryone(LOUNGE, Permission.CREATE_PUBLIC_THREADS);
+    expect((await post(h, a, say('Starting a thread', { thread_name: THREAD_NAME }))).status).toBe(403);
+    expect((await post(h, a, say('Top level message'))).status).toBe(201);
+
+    await denyEveryone(FORUM_ID, Permission.SEND_MESSAGES_IN_THREADS);
+    expect((await post(h, a, say('Replying in a forum post', { thread_id: NEW_THREAD }, FORUM_ID))).status).toBe(403);
+    expect((await post(h, a, say('Starting a forum post', { thread_name: THREAD_NAME }, FORUM_ID))).status).toBe(201);
   });
 
   it('refuses both thread_id and thread_name together', async () => {
@@ -329,49 +339,19 @@ describe('thread names are moderated', () => {
     const { h, a } = await world();
     const held = await json(await post(h, a, say('Fine text here', { thread_name: 'write to me@example.com' })));
     expect(held).toMatchObject({ status: 'held', policy_code: 'personal_info' });
-    const leaked = await json(await post(h, a, say('More fine text', { thread_name: `key lk_${'K7QMXV2D'.repeat(6)}` })));
+    const leaked = await json(await post(h, a, say('More fine text', { thread_name: `token lat_${'K7QMXV2D'.repeat(6)}` })));
     expect(leaked).toMatchObject({ status: 'blocked', policy_code: 'secret_leak' });
     const stored = await row(h, leaked.id);
     expect(stored).toMatchObject({ thread_name: null, content: null });
   });
 
-  it('through the classifier, as a separate question about the title', async () => {
-    const moderator = mod((req) => (req.kind === 'thread_name' ? { verdict: 'block', policy_code: 'hate' } : { verdict: 'pass' }));
+  it('through the classifier, in the same question as the text', async () => {
+    const moderator = mod((req) => (req.thread_name?.includes('hateful') ? { verdict: 'block', policy_code: 'hate' } : { verdict: 'pass' }));
     const { h, a } = await world({ moderator });
     const msg = await json(await post(h, a, say('Perfectly polite text', { thread_name: 'A hateful title' })));
     expect(msg).toMatchObject({ status: 'blocked', policy_code: 'hate' });
-    expect(moderator.calls.map((c) => [c.kind, c.content])).toEqual([
-      ['message', 'Perfectly polite text'],
-      ['thread_name', 'A hateful title'],
-    ]);
-    expect(moderator.calls[0]!.thread_name).toBe('A hateful title');
+    expect(moderator.calls.map((c) => [c.kind, c.content, c.thread_name])).toEqual([['message', 'Perfectly polite text', 'A hateful title']]);
     expect(h.discordCalls).toHaveLength(0);
-  });
-
-  it('does not ask about the title when the text already decided', async () => {
-    const moderator = mod({ verdict: 'block', policy_code: 'violence' });
-    const { h, a } = await world({ moderator });
-    await post(h, a, say('Something violent', { thread_name: 'A title' }));
-    expect(moderator.calls.map((c) => c.kind)).toEqual(['message']);
-  });
-
-  it('holds the message when only the title is held', async () => {
-    const moderator = mod((req) => (req.kind === 'thread_name' ? { verdict: 'hold', policy_code: 'sexual' } : { verdict: 'pass' }));
-    const { h, a } = await world({ moderator });
-    expect(await json(await post(h, a, say('Plain text', { thread_name: 'Borderline title' })))).toMatchObject({ status: 'held', policy_code: 'sexual' });
-  });
-
-  it('asks again later when the title could not be judged', async () => {
-    const moderator = mod((req) => (req.kind === 'thread_name' ? { verdict: null, unavailable: true, reason: 'down' } : { verdict: 'pass' }));
-    const { h, a } = await world({ moderator, fallbackModerator: null });
-    expect(await json(await post(h, a, say('Plain text', { thread_name: 'Unjudged title' })))).toMatchObject({ status: 'held', policy_code: 'outage' });
-  });
-
-  it('asks nothing extra when there is no title', async () => {
-    const moderator = mod();
-    const { h, a } = await world({ moderator });
-    await post(h, a, say('Just a message'));
-    expect(moderator.calls).toHaveLength(1);
   });
 });
 

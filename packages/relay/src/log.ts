@@ -12,7 +12,10 @@ export interface Logger {
 
 const errorName = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message.slice(0, 200)}` : String(e).slice(0, 200));
 
-export function consoleLogger(base: LogFields = {}): Logger {
+/** Receives the `error` of every error line, named by its event: the Worker passes Sentry's captureException. */
+export type ErrorReporter = (error: unknown, event: string) => void;
+
+export function consoleLogger(base: LogFields = {}, report?: ErrorReporter): Logger {
   const line = (level: string, event: string, fields: LogFields = {}) => {
     const { error, ...rest } = fields;
     return JSON.stringify({ level, event, ...base, ...rest, ...(error === undefined ? {} : { error: errorName(error) }) });
@@ -20,7 +23,10 @@ export function consoleLogger(base: LogFields = {}): Logger {
   return {
     info: (event, fields) => console.log(line('info', event, fields)),
     warn: (event, fields) => console.warn(line('warn', event, fields)),
-    error: (event, fields) => console.error(line('error', event, fields)),
+    error: (event, fields) => {
+      console.error(line('error', event, fields));
+      if (report && fields?.error !== undefined) report(fields.error, event);
+    },
   };
 }
 

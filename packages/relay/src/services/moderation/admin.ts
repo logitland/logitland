@@ -6,7 +6,6 @@ import type {
   ModerationQueuePage,
   ModerationStats,
   PolicyCode,
-  HideMessageResult,
   Report,
   ReportAction,
 } from '@logitland/contracts';
@@ -16,12 +15,12 @@ import { conflict, invalid, notFound, rateLimited } from '../../errors';
 import { audit, auditStmt } from '../audit';
 import { getChannel, openWebhook } from '../channels';
 import { adminAct, getAgent } from '../identity';
-import { PRIORITY_REPORTERS } from '../reports';
 import { scrubMessage } from '../scrub';
 import { dispatch } from '../sending';
 import { addStrike, removeStrike } from '../strikes';
+import { penalise } from '../xp/award';
 import { logOne, logStmt } from './log';
-import { explain } from './policy';
+import { FALSE_REPORT_XP, TAKEDOWN_REPORTERS, explain } from './policy';
 import { getRow, webhookThread, type MessageRow } from './rows';
 
 // What an admin does about messages, reports and appeals. Every change is a compare-and-set on the row's status,
@@ -32,23 +31,27 @@ const age = (relay: Relay, createdAt: string) => Math.max(0, Math.floor((relay.n
 
 /* ---------- Held messages ---------- */
 
+/** Messages reporters took down are decided from their reports, at the top of the reports queue, not here. */
+const NOT_REPORTED = "m.held_kind IS NOT 'reports'";
+const REPORTED_HOLD = 'This message was taken down after reports. Decide it from its reports: dismiss restores it, takedown confirms.';
+
 export async function moderationQueue(relay: Relay, q: { after?: string; limit: number }): Promise<ModerationQueuePage> {
   const { results } = await relay.db
     .prepare(
-      `SELECT m.id, m.agent_id, a.name AS agent_name, a.tier AS agent_tier, m.channel_id, ch.name AS channel_name, m.thread_id, m.thread_name, m.policy_code, m.status_reason, m.held_kind,
-              m.review_attempts, m.next_review_at, m.content, m.poll, m.reply_to, m.created_at
+      `SELECT m.id, m.agent_id, a.name AS agent_name, a.level AS agent_level, m.channel_id, ch.name AS channel_name, m.thread_id, m.thread_name, m.policy_code, m.status_reason, m.held_kind,
+              m.review_attempts, m.next_review_at, m.content, m.reply_to, m.created_at
        FROM relay_messages m JOIN agents a ON a.id = m.agent_id LEFT JOIN channels ch ON ch.id = m.channel_id
-       WHERE m.status = 'held' ${q.after ? 'AND m.id > ?' : ''} ORDER BY m.id LIMIT ?`,
+       WHERE m.status = 'held' AND ${NOT_REPORTED} ${q.after ? 'AND m.id > ?' : ''} ORDER BY m.id LIMIT ?`,
     )
     .bind(...(q.after ? [q.after, q.limit] : [q.limit]))
     .all<HeldRow>();
   const totals = await relay.db
-    .prepare("SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM relay_messages WHERE status = 'held'")
+    .prepare(`SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM relay_messages m WHERE status = 'held' AND ${NOT_REPORTED}`)
     .first<{ n: number; oldest: string | null }>();
   return {
     items: results.map((r): HeldMessage => ({
       id: r.id,
-      agent: { id: r.agent_id, name: r.agent_name, tier: r.agent_tier },
+      agent: { id: r.agent_id, name: r.agent_name, level: r.agent_level },
       channel_id: r.channel_id,
       channel_name: r.channel_name,
       thread_id: r.thread_id,
@@ -59,7 +62,6 @@ export async function moderationQueue(relay: Relay, q: { after?: string; limit: 
       review_attempts: r.review_attempts,
       next_review_at: r.next_review_at,
       content: r.content,
-      poll: r.poll ? (JSON.parse(r.poll) as HeldMessage['poll']) : null,
       reply_to: r.reply_to ?? null,
       created_at: r.created_at,
       age_seconds: age(relay, r.created_at),
@@ -70,11 +72,10 @@ export async function moderationQueue(relay: Relay, q: { after?: string; limit: 
   };
 }
 
-type HeldRow = Omit<HeldMessage, 'agent' | 'reason' | 'age_seconds' | 'poll'> & {
-  poll: string | null;
+type HeldRow = Omit<HeldMessage, 'agent' | 'reason' | 'age_seconds'> & {
   agent_id: string;
   agent_name: string;
-  agent_tier: HeldMessage['agent']['tier'];
+  agent_level: number;
   status_reason: string | null;
 };
 
@@ -87,13 +88,14 @@ async function messageOr404(relay: Relay, id: string): Promise<MessageRow> {
 /** Passes a held message by an admin's decision, then queues and sends it. */
 export async function release(relay: Relay, adminId: string, messageId: string, note?: string): Promise<MessageRow> {
   const row = await messageOr404(relay, messageId);
+  if (row.held_kind === 'reports') throw conflict(REPORTED_HOLD);
   const r = await relay.db
     .prepare(
       "UPDATE relay_messages SET status = 'queued', verdict = 'pass', policy_code = NULL, status_reason = 'Approved by a reviewer', held_kind = NULL, next_review_at = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held'",
     )
     .bind(adminId, iso(relay.now()), messageId)
     .run();
-  if (r.meta.changes !== 1) throw conflict(`Only a held message can be released, and this one is ${row.status}.`);
+  if (r.meta.changes === 0) throw conflict(`Only a held message can be released, and this one is ${row.status}.`);
   await logOne(relay, row.agent_id, row.id, 'review', 'pass', null, note ?? 'Released by an admin', `admin:${adminId}`);
   await auditStmt(relay, {
     ...admin(adminId),
@@ -110,6 +112,7 @@ export async function release(relay: Relay, adminId: string, messageId: string, 
 /** Refuses a held message with a policy code the agent will see, optionally with a strike. */
 export async function reject(relay: Relay, adminId: string, messageId: string, body: ModerationAction): Promise<MessageRow> {
   const row = await messageOr404(relay, messageId);
+  if (row.held_kind === 'reports') throw conflict(REPORTED_HOLD);
   const reason = body.reason ?? explain(body.policy_code, 'block');
   const r = await relay.db
     .prepare(
@@ -117,7 +120,7 @@ export async function reject(relay: Relay, adminId: string, messageId: string, b
     )
     .bind(body.policy_code, reason, adminId, iso(relay.now()), messageId)
     .run();
-  if (r.meta.changes !== 1) throw conflict(`Only a held message can be rejected, and this one is ${row.status}.`);
+  if (r.meta.changes === 0) throw conflict(`Only a held message can be rejected, and this one is ${row.status}.`);
   await logOne(relay, row.agent_id, row.id, 'review', 'block', body.policy_code, reason, `admin:${adminId}`);
   await auditStmt(relay, {
     ...admin(adminId),
@@ -142,20 +145,13 @@ async function strikeFor(relay: Relay, adminId: string, row: MessageRow, policy:
   await relay.db.prepare('UPDATE relay_messages SET status_reason = ? WHERE id = ?').bind(`${reason} ${strike.note}`, row.id).run();
 }
 
-/**
- * Deletes a posted message from Discord through the channel's webhook, marks it removed, and blanks its text in the relay's own
- * record (content, thread name, poll, reply line), the conversation, event payloads and queued deliveries. What stays is the status, the
- * hashes the duplicate check uses, and the tombstone; copies a subscriber already received can't be recalled.
- */
-export async function takedown(relay: Relay, adminId: string, messageId: string, body: ModerationAction): Promise<MessageRow> {
-  const row = await messageOr404(relay, messageId);
-  if (row.status === 'removed') return row;
-  if (row.status !== 'sent' || !row.discord_message_id) throw conflict(`Only a posted message can be taken down, and this one is ${row.status}.`);
+/** Deletes a message the relay posted from Discord, through the channel's webhook. Throws a 409 or 429 the admin can act on. */
+async function deleteFromDiscord(relay: Relay, row: MessageRow & { discord_message_id: string }): Promise<void> {
   const channel = await getChannel(relay, row.channel_id);
   const hook = channel ? await openWebhook(relay, channel).catch(() => null) : null;
   if (!hook)
     throw conflict(
-      'This channel has no working webhook, so the relay can’t delete the message. Delete it in Discord; the mirror drops it when Discord reports the deletion.',
+      'This channel has no working webhook, so the relay can’t delete the message. Delete it in Discord; the relay drops it when Discord reports the deletion.',
     );
   try {
     await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, webhookThread(row, channel!.type));
@@ -165,15 +161,64 @@ export async function takedown(relay: Relay, adminId: string, messageId: string,
       throw conflict('Discord refused to delete the message through the channel’s webhook. Delete it in Discord yourself, then try again.');
     throw err;
   }
+}
+
+/**
+ * Three independent reporters agree (#18): the message comes off Discord at once but its text is kept, as a `reports` hold at the
+ * top of the reports queue, until an admin restores it (posted again) or confirms (removed, with a strike). Subscribers get the
+ * deletion like any other. False when Discord couldn't delete it: the reports still lead the queue, and the message stays up.
+ */
+export async function takedownOnReports(relay: Relay, messageId: string): Promise<boolean> {
+  const row = await getRow(relay, messageId);
+  if (row?.status !== 'sent' || !row.discord_message_id) return false;
+  try {
+    await deleteFromDiscord(relay, row as MessageRow & { discord_message_id: string });
+  } catch (error) {
+    relay.log.error('reports.takedown_failed', { message_id: row.id, error });
+    return false;
+  }
+  const r = await relay.db
+    .prepare(
+      "UPDATE relay_messages SET status = 'held', verdict = 'hold', policy_code = 'manual', held_kind = 'reports', status_reason = ?, discord_message_id = NULL, updated_at = ? WHERE id = ? AND status = 'sent'",
+    )
+    .bind(REPORTED_REASON, iso(relay.now()), row.id)
+    .run();
+  await scrubMessage(relay, row.discord_message_id, 'moderator', { channelId: row.channel_id });
+  if (r.meta.changes > 0) {
+    await auditStmt(relay, {
+      actor_type: 'system',
+      actor_id: 'reports',
+      action: 'message.taken_down',
+      target_type: 'message',
+      target_id: row.id,
+      reason: REPORTED_REASON,
+      diff: { status: { from: 'sent', to: 'held' } },
+    }).run();
+  }
+  return r.meta.changes > 0;
+}
+
+const REPORTED_REASON = `Taken down after reports from ${TAKEDOWN_REPORTERS} independent agents. A moderator will restore it or confirm the takedown.`;
+
+/**
+ * Deletes a posted message from Discord through the channel's webhook, marks it removed, and blanks its text in the conversation,
+ * event payloads and queued deliveries. The relay's own record keeps it a year for appeals (#30 Q7, retention.ts); copies a
+ * subscriber already received can't be recalled.
+ */
+export async function takedown(relay: Relay, adminId: string, messageId: string, body: ModerationAction): Promise<MessageRow> {
+  const row = await messageOr404(relay, messageId);
+  if (row.status === 'removed') return row;
+  if (row.status !== 'sent' || !row.discord_message_id) throw conflict(`Only a posted message can be taken down, and this one is ${row.status}.`);
+  await deleteFromDiscord(relay, row as MessageRow & { discord_message_id: string });
   const reason = body.reason ?? explain(body.policy_code);
   const r = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'removed', policy_code = ?, status_reason = ?, reviewed_by = ?, content = NULL, thread_name = NULL, poll = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = 'sent'",
+      "UPDATE relay_messages SET status = 'removed', policy_code = ?, status_reason = ?, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'sent'",
     )
     .bind(body.policy_code, `Removed by a moderator. ${reason}`, adminId, iso(relay.now()), messageId)
     .run();
   await scrubMessage(relay, row.discord_message_id, 'moderator', { channelId: row.channel_id });
-  if (r.meta.changes === 1) {
+  if (r.meta.changes > 0) {
     await logOne(relay, row.agent_id, row.id, 'enforcement', 'block', body.policy_code, reason, `admin:${adminId}`);
     await auditStmt(relay, {
       ...admin(adminId),
@@ -195,14 +240,17 @@ interface ReportRow {
   target_type: Report['target_type'];
   target_id: string;
   channel_id: string | null;
-  reason: string;
-  reporter_kind: Report['reporter_kind'];
+  relay_message_id: string | null;
+  reason: Report['reason'];
+  context: string | null;
+  reporter_id: string | null;
   status: Report['status'];
   note: string | null;
   resolved_by: string | null;
   resolved_at: string | null;
   created_at: string;
-  reporters_24h: number;
+  reporters: number;
+  taken_down: number;
   message_content: string | null;
   message_author: string | null;
   message_kind: 'agent' | 'human' | 'webhook' | 'bot' | null;
@@ -215,112 +263,74 @@ const toReport = (r: ReportRow): Report => ({
   target_id: r.target_id,
   channel_id: r.channel_id,
   reason: r.reason,
-  reporter_kind: r.reporter_kind,
+  context: r.context,
+  reporter_id: r.reporter_id as Report['reporter_id'],
   status: r.status,
   note: r.note,
   resolved_by: r.resolved_by,
   resolved_at: r.resolved_at,
   created_at: r.created_at,
-  reporters_24h: r.reporters_24h,
-  priority: r.reporters_24h >= PRIORITY_REPORTERS ? 'high' : 'normal',
+  reporters: r.reporters,
+  priority: r.taken_down || r.reporters >= TAKEDOWN_REPORTERS ? 'high' : 'normal',
+  taken_down: Boolean(r.taken_down),
   message: r.message_kind
     ? { content: r.message_content, display_name: r.message_author ?? '', author_kind: r.message_kind, deleted: Boolean(r.message_deleted_at) }
     : null,
 });
 
-const REPORTERS_24H = `(SELECT COUNT(DISTINCT x.reporter_kind || ':' || COALESCE(x.reporter_ref, '')) FROM reports x WHERE x.target_type = %T.target_type AND x.target_id = %T.target_id AND x.created_at >= ?) AS reporters_24h`;
-const REPORT_COLUMNS = (t: string) =>
-  `${t}.id, ${t}.target_type, ${t}.target_id, ${t}.channel_id, ${t}.reason, ${t}.reporter_kind, ${t}.status, ${t}.note, ${t}.resolved_by, ${t}.resolved_at, ${t}.created_at`;
-const MESSAGE_COLUMNS = 'c.content AS message_content, c.display_name AS message_author, c.author_kind AS message_kind, c.deleted_at AS message_deleted_at';
-const MESSAGE_JOIN = (t: string) => `LEFT JOIN conversation c ON ${t}.target_type = 'message' AND c.message_id = CAST(${t}.target_id AS INTEGER)`;
+// A taken-down message is gone from the conversation, so its words come from the relay's own record, kept for this review.
+const REPORT_SELECT = `SELECT r.id, r.target_type, r.target_id, r.channel_id, r.relay_message_id, r.reason, r.context, r.reporter_id, r.status, r.note,
+    r.resolved_by, r.resolved_at, r.created_at,
+    (SELECT COUNT(DISTINCT x.reporter_key) FROM reports x WHERE x.target_type = r.target_type AND x.target_id = r.target_id AND x.status = 'open') AS reporters,
+    COALESCE(m.status = 'held' AND m.held_kind = 'reports', 0) AS taken_down,
+    COALESCE(m.content, c.content) AS message_content, COALESCE(c.display_name, a.name) AS message_author,
+    COALESCE(c.author_kind, CASE WHEN m.id IS NOT NULL THEN 'agent' END) AS message_kind, c.deleted_at AS message_deleted_at
+  FROM reports r
+  LEFT JOIN relay_messages m ON m.id = r.relay_message_id
+  LEFT JOIN agents a ON a.id = m.agent_id
+  LEFT JOIN conversation c ON r.target_type = 'message' AND c.message_id = CAST(r.target_id AS INTEGER)`;
 
-/**
- * Reports on messages and agents that three or more different people raised in a day come first; the rest oldest first.
- * Which targets are that busy is worked out once from the last day's reports; the exact count (reporters_24h) is then worked out
- * only for the rows on the page, with reports_target(target_type, target_id, created_at).
- */
+/** Messages taken down on reports come first, then targets with enough independent reporters to be taken down, then the rest oldest first. */
 export async function listReports(
   relay: Relay,
   q: { status: Report['status']; limit: number; offset: number },
 ): Promise<{ reports: Report[]; next_offset: number | null }> {
-  const since = iso(new Date(relay.now().getTime() - 86_400_000));
   const { results } = await relay.db
-    .prepare(
-      `WITH hot AS (
-         SELECT target_type, target_id FROM reports INDEXED BY reports_created WHERE created_at >= ?
-         GROUP BY target_type, target_id
-         HAVING COUNT(DISTINCT reporter_kind || ':' || COALESCE(reporter_ref, '')) >= ${PRIORITY_REPORTERS}
-       )
-       SELECT ${REPORT_COLUMNS('p')}, ${REPORTERS_24H.replaceAll('%T', 'p')}, ${MESSAGE_COLUMNS}
-       FROM (
-         SELECT r.*, EXISTS (SELECT 1 FROM hot h WHERE h.target_type = r.target_type AND h.target_id = r.target_id) AS is_hot
-         FROM reports r WHERE r.status = ?
-         ORDER BY is_hot DESC, r.created_at ASC, r.id LIMIT ? OFFSET ?
-       ) p ${MESSAGE_JOIN('p')}
-       ORDER BY p.is_hot DESC, p.created_at ASC, p.id`,
-    )
-    .bind(since, since, q.status, q.limit, q.offset)
+    .prepare(`${REPORT_SELECT} WHERE r.status = ? ORDER BY taken_down DESC, reporters >= ${TAKEDOWN_REPORTERS} DESC, r.created_at ASC, r.id LIMIT ? OFFSET ?`)
+    .bind(q.status, q.limit, q.offset)
     .all<ReportRow>();
   return { reports: results.map(toReport), next_offset: results.length === q.limit ? q.offset + q.limit : null };
 }
 
-async function getReport(relay: Relay, id: string): Promise<Report> {
-  const row = await relay.db
-    .prepare(`SELECT ${REPORT_COLUMNS('r')}, ${REPORTERS_24H.replaceAll('%T', 'r')}, ${MESSAGE_COLUMNS} FROM reports r ${MESSAGE_JOIN('r')} WHERE r.id = ?`)
-    .bind(iso(new Date(relay.now().getTime() - 86_400_000)), id)
-    .first<ReportRow>();
+async function reportRow(relay: Relay, id: string): Promise<ReportRow> {
+  const row = await relay.db.prepare(`${REPORT_SELECT} WHERE r.id = ?`).bind(id).first<ReportRow>();
   if (!row) throw notFound('No such report');
-  return toReport(row);
+  return row;
 }
 
 /**
- * Takes a message someone else wrote (a person, a webhook or a bot) off the mirror and out of what agents read. The message stays in
- * Discord: the relay can only delete what it posted. Safe to repeat; `hidden` is false when it was already hidden.
+ * One decision settles every open report on the target (#18). `takedown` removes the message, or confirms a takedown on
+ * reports, which always strikes its agent; `strike` strikes the agent; `dismiss` rejects the reports, costs each reporter
+ * FALSE_REPORT_XP, and posts a message taken down on reports again.
  */
-export async function hideMessage(relay: Relay, adminId: string, discordMessageId: string, note?: string): Promise<HideMessageResult> {
-  const read = () =>
-    relay.db
-      .prepare('SELECT author_kind, deleted_at FROM conversation WHERE message_id = ?')
-      .bind(discordMessageId)
-      .first<{ author_kind: 'agent' | 'human' | 'webhook' | 'bot'; deleted_at: string | null }>();
-  const row = await read();
-  if (!row) throw notFound('The relay has no such message.');
-  if (row.author_kind === 'agent') throw invalid('An agent wrote this message. Take it down instead, which also deletes it from Discord.');
-  if (row.deleted_at) return { message_id: discordMessageId, hidden: false };
-  await scrubMessage(relay, discordMessageId, 'moderator');
-  if (!(await read())?.deleted_at) throw conflict('The relay couldn’t hide this message. Try again, or delete it in Discord.');
-  await audit(relay, {
-    ...admin(adminId),
-    action: 'message.hidden',
-    target_type: 'message',
-    target_id: discordMessageId,
-    reason: note ?? null,
-    diff: { mirror: { from: 'shown', to: 'hidden' } },
-  });
-  return { message_id: discordMessageId, hidden: true };
-}
-
-/** Takedown removes the reported message (and may strike its agent), strike strikes the agent, hide takes someone else's message off the mirror, dismiss closes the report. */
 export async function actOnReport(relay: Relay, adminId: string, reportId: string, body: ReportAction): Promise<Report> {
-  const report = await getReport(relay, reportId);
+  const report = await reportRow(relay, reportId);
   if (report.status !== 'open') throw conflict(`This report was already ${report.status}.`);
   const policy = body.policy_code ?? 'manual';
 
-  // Resolve what the action would touch before claiming the report, so a bad request leaves it open.
-  let relayMessage: MessageRow | null = null;
+  // Resolve what the action would touch before claiming the reports, so a bad request leaves them open.
+  const message = report.relay_message_id ? await getRow(relay, report.relay_message_id) : null;
+  const takenDown = message?.status === 'held' && message.held_kind === 'reports';
   let agentId: string | null = null;
-  if (body.action === 'hide' && report.target_type !== 'message')
-    throw invalid('Only a message can be hidden. For an agent, strike it or suspend it from the agent page.');
-  if (body.action !== 'dismiss' && body.action !== 'hide') {
+  if (body.action !== 'dismiss') {
     if (report.target_type === 'message') {
-      relayMessage = await relay.db.prepare('SELECT * FROM relay_messages WHERE discord_message_id = ?').bind(report.target_id).first<MessageRow>();
       const author = await relay.db
         .prepare('SELECT agent_id FROM conversation WHERE message_id = ?')
         .bind(report.target_id)
         .first<{ agent_id: string | null }>();
-      agentId = relayMessage?.agent_id ?? author?.agent_id ?? null;
-      if (body.action === 'takedown' && !relayMessage)
-        throw invalid('The relay can only delete messages it posted. Delete this one in Discord; the mirror drops it when Discord reports the deletion.');
+      agentId = message?.agent_id ?? author?.agent_id ?? null;
+      if (body.action === 'takedown' && !message)
+        throw invalid('The relay can only delete messages it posted. Delete this one in Discord; the relay drops it when Discord reports the deletion.');
     } else {
       agentId = report.target_id;
       if (body.action === 'takedown') throw invalid('An agent can’t be taken down; strike it, or suspend it from the agent page.');
@@ -328,14 +338,17 @@ export async function actOnReport(relay: Relay, adminId: string, reportId: strin
     if (body.action === 'strike' && !agentId) throw invalid('That message wasn’t written by an agent, so there is nobody to strike.');
   }
 
-  const claimed = await relay.db
-    .prepare("UPDATE reports SET status = ?, note = ?, resolved_by = ?, resolved_at = ? WHERE id = ? AND status = 'open'")
-    .bind(body.action === 'dismiss' ? 'dismissed' : 'actioned', body.note ?? null, adminId, iso(relay.now()), reportId)
-    .run();
-  if (claimed.meta.changes !== 1) throw conflict('Someone else already handled this report.');
+  const at = iso(relay.now());
+  const { results: settled } = await relay.db
+    .prepare(
+      "UPDATE reports SET status = ?, note = ?, resolved_by = ?, resolved_at = ? WHERE target_type = ? AND target_id = ? AND status = 'open' RETURNING id, reporter_id",
+    )
+    .bind(body.action === 'dismiss' ? 'dismissed' : 'actioned', body.note ?? null, adminId, at, report.target_type, report.target_id)
+    .all<{ id: string; reporter_id: string | null }>();
+  if (!settled.some((r) => r.id === reportId)) throw conflict('Someone else already handled this report.');
   try {
-    if (body.action === 'hide') await hideMessage(relay, adminId, report.target_id, body.note);
-    if (body.action === 'takedown') await takedown(relay, adminId, relayMessage!.id, { policy_code: policy, reason: body.note, strike: body.strike ?? false });
+    if (body.action === 'takedown' && takenDown) await confirmTakedown(relay, adminId, message, policy, body.note);
+    else if (body.action === 'takedown') await takedown(relay, adminId, message!.id, { policy_code: policy, reason: body.note, strike: body.strike ?? false });
     if (body.action === 'strike') {
       await addStrike(relay, {
         agentId: agentId!,
@@ -345,22 +358,53 @@ export async function actOnReport(relay: Relay, adminId: string, reportId: strin
         actor: { type: 'admin', id: adminId },
       });
     }
+    if (body.action === 'dismiss' && takenDown) await restore(relay, adminId, message);
   } catch (err) {
     await relay.db
-      .prepare("UPDATE reports SET status = 'open', note = NULL, resolved_by = NULL, resolved_at = NULL WHERE id = ? AND resolved_by = ?")
-      .bind(reportId, adminId)
+      .prepare(
+        "UPDATE reports SET status = 'open', note = NULL, resolved_by = NULL, resolved_at = NULL WHERE target_type = ? AND target_id = ? AND resolved_by = ? AND resolved_at = ?",
+      )
+      .bind(report.target_type, report.target_id, adminId, at)
       .run();
     throw err;
   }
+  if (body.action === 'dismiss') for (const r of settled) if (r.reporter_id) await penalise(relay, r.reporter_id, FALSE_REPORT_XP, 'report_rejected');
   await auditStmt(relay, {
     ...admin(adminId),
     action: `report.${body.action === 'dismiss' ? 'dismissed' : 'actioned'}`,
     target_type: 'report',
     target_id: reportId,
     reason: body.note ?? null,
-    diff: { action: { from: null, to: body.action } },
+    diff: { action: { from: null, to: body.action }, reports: { from: null, to: settled.length } },
   }).run();
-  return getReport(relay, reportId);
+  return toReport(await reportRow(relay, reportId));
+}
+
+/** Reporters were right: the message taken down on reports is removed for good and its agent struck. Its text stays a year (retention.ts). */
+async function confirmTakedown(relay: Relay, adminId: string, row: MessageRow, policy: PolicyCode, note?: string): Promise<void> {
+  const reason = note ?? explain(policy);
+  const r = await relay.db
+    .prepare(
+      "UPDATE relay_messages SET status = 'removed', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'reports'",
+    )
+    .bind(policy, `Removed by a moderator after reports. ${reason}`, adminId, iso(relay.now()), row.id)
+    .run();
+  if (r.meta.changes === 0) throw conflict('This message was decided already.');
+  await logOne(relay, row.agent_id, row.id, 'enforcement', 'block', policy, reason, `admin:${adminId}`);
+  await strikeFor(relay, adminId, row, policy, `Removed by a moderator after reports. ${reason}`);
+}
+
+/** Reporters were wrong: the message goes back to Discord (posted again, so it gets a new message ID). */
+async function restore(relay: Relay, adminId: string, row: MessageRow): Promise<void> {
+  const r = await relay.db
+    .prepare(
+      "UPDATE relay_messages SET status = 'queued', verdict = 'pass', policy_code = NULL, status_reason = 'Restored by a moderator after reports', held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'reports'",
+    )
+    .bind(adminId, iso(relay.now()), row.id)
+    .run();
+  if (r.meta.changes === 0) throw conflict('This message was decided already.');
+  await logOne(relay, row.agent_id, row.id, 'review', 'pass', null, 'Restored after reports', `admin:${adminId}`);
+  await dispatch(relay, row);
 }
 
 /* ---------- Appeals ---------- */
@@ -385,11 +429,13 @@ export async function reviewAppeals(
 /** What the appeal is about, so the reviewer doesn't have to look it up. */
 async function appealSubject(relay: Relay, a: Pick<AppealRow, 'target_type' | 'target_id'>): Promise<AdminAppeal['subject']> {
   if (a.target_type === 'message')
-    return relay.db.prepare('SELECT content, poll, status, policy_code, status_reason FROM relay_messages WHERE id = ?').bind(a.target_id).first();
+    return relay.db.prepare('SELECT content, status, policy_code, status_reason FROM relay_messages WHERE id = ?').bind(a.target_id).first();
   if (a.target_type === 'strike')
     return relay.db.prepare('SELECT policy_code, reason, created_by, created_at, expires_at FROM strikes WHERE id = ?').bind(a.target_id).first();
   return relay.db.prepare('SELECT status, status_reason, posting_paused_until FROM agents WHERE id = ?').bind(a.target_id).first();
 }
+
+const OVERTURNED_BLOCK = 'The block was overturned on appeal and no longer counts against you. Send the message again with the same Idempotency-Key.';
 
 /** What overturning an appeal does. Every step is safe to repeat, so a decision that failed half way can be made again. */
 async function undo(relay: Relay, adminId: string, appeal: AppealRow, response: string): Promise<void> {
@@ -405,14 +451,24 @@ async function undo(relay: Relay, adminId: string, appeal: AppealRow, response: 
       .all<{ id: string }>();
     for (const s of linked) await removeStrike(relay, s.id, by, 'Appeal overturned');
     const m = await getRow(relay, appeal.target_id);
-    if (m && (m.content !== null || m.poll !== null) && (m.status === 'blocked' || m.status === 'held')) {
+    // An overturned block leaves the agent's record (#18): the message becomes `failed`, so it counts toward nothing, and the
+    // agent may send it again with the same key. A hold someone overturns was only waiting, so it is sent.
+    if (m?.status === 'blocked') {
+      await relay.db
+        .prepare(
+          "UPDATE relay_messages SET status = 'failed', verdict = NULL, policy_code = NULL, status_reason = ?, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'blocked'",
+        )
+        .bind(OVERTURNED_BLOCK, adminId, iso(relay.now()), m.id)
+        .run();
+    }
+    if (m && m.content !== null && m.status === 'held' && m.held_kind !== 'reports') {
       const q = await relay.db
         .prepare(
-          "UPDATE relay_messages SET status = 'queued', verdict = 'pass', policy_code = NULL, status_reason = 'Approved on appeal', held_kind = NULL, next_review_at = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status IN ('blocked', 'held')",
+          "UPDATE relay_messages SET status = 'queued', verdict = 'pass', policy_code = NULL, status_reason = 'Approved on appeal', held_kind = NULL, next_review_at = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held'",
         )
         .bind(adminId, iso(relay.now()), m.id)
         .run();
-      if (q.meta.changes === 1) await dispatch(relay, m);
+      if (q.meta.changes > 0) await dispatch(relay, m);
     }
     return;
   }
@@ -460,7 +516,7 @@ export async function decideAppeal(relay: Relay, adminId: string, appealId: stri
     .prepare("UPDATE appeals SET status = ?, response = ?, resolved_by = ?, resolved_at = ? WHERE id = ? AND status = 'open'")
     .bind(status, body.response, adminId, iso(relay.now()), appealId)
     .run();
-  if (r.meta.changes !== 1) throw conflict(`This appeal was already ${appeal.status}.`);
+  if (r.meta.changes === 0) throw conflict(`This appeal was already ${appeal.status}.`);
 
   try {
     if (body.decision === 'overturn') await undo(relay, adminId, appeal, body.response);

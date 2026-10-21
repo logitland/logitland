@@ -1,4 +1,3 @@
-import { LIMITS } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { ConfigError, checkConfig, type RelayBindings } from './config';
 import { SecretBox } from './crypto';
@@ -14,14 +13,11 @@ const prod = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   IP_HASH_KEY: 'h'.repeat(40),
   PUBLIC_URL: 'https://relay.logitland.org',
   DASHBOARD_URL: 'https://logitland.org',
-  ADMIN_DISCORD_IDS: '200000000000000099',
   DISCORD_BOT_TOKEN: 't',
   DISCORD_APPLICATION_ID: '1',
   DISCORD_PUBLIC_KEY: 'k',
   DISCORD_GUILD_ID: '1',
-  DISCORD_CONSENT_ROLE_ID: '1',
-  JEV_LAYA_URL: 'https://jev.example.net',
-  JEV_LAYA_TOKEN: 'j',
+  TYPESAFE_API_KEY: 'j',
   DELIVERIES: { send: async () => {} } as never,
   ...over,
 });
@@ -78,61 +74,6 @@ describe('encryption key settings', () => {
     await seedChannel(h.relay, { id: LOUNGE });
     await resealJob(h.relay);
     expect(h.log.lines.find((l) => l.event === 'reseal.walked')?.fields).toMatchObject({ key_id: 'k1', unreadable: 0 });
-  });
-});
-
-describe('the classifier address', () => {
-  const problem = (url: string) => checkConfig(prod({ JEV_LAYA_URL: url })).filter((p) => p.includes('JEV_LAYA_URL'));
-
-  it('must be https on a public host', () => {
-    expect(problem('https://jev.example.net')).toEqual([]);
-    expect(problem('http://jev.example.net')).toHaveLength(1);
-    expect(problem('https://localhost:8080')).toHaveLength(1);
-    expect(problem('https://jev.invalid')).toHaveLength(1);
-    expect(problem('not a url')).toHaveLength(1);
-  });
-});
-
-describe('the public mirror under load', () => {
-  const mirror = async () => {
-    const h = harness();
-    await seedChannel(h.relay, { publicMirror: true });
-    return h;
-  };
-  const counters = (h: Awaited<ReturnType<typeof mirror>>) =>
-    h.db
-      .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(count), 0) AS total FROM rate_counters WHERE key LIKE 'public:read:%'")
-      .first<{ n: number; total: number }>();
-
-  it('writes nothing for the requests it refuses', async () => {
-    const h = await mirror();
-    for (let n = 0; n < LIMITS.publicReadsPerMinute; n++) expect((await h.call('GET', '/public/channels')).status).toBe(200);
-    for (let n = 0; n < 20; n++) expect((await h.call('GET', '/public/channels')).status).toBe(429);
-    expect(await counters(h)).toEqual({ n: 1, total: LIMITS.publicReadsPerMinute });
-  });
-
-  it('turns away parameters it does not read before touching the database', async () => {
-    const h = await mirror();
-    const res = await h.call('GET', `/public/channels/${LOUNGE}/messages?x=1`);
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { detail: string }).detail).toContain('before, thread_id, limit');
-    expect((await h.call('GET', '/public/channels?cb=7')).status).toBe(400);
-    expect((await h.call('GET', `/public/channels/${LOUNGE}/threads?include_archived=true&limit=5`)).status).toBe(200);
-    expect((await h.call('GET', `/public/channels/${LOUNGE}/messages?limit=5&before=310000000000000009&thread_id=310000000000000001`)).status).toBe(200);
-    expect(await counters(h)).toEqual({ n: 1, total: 2 });
-  });
-
-  it('asks crawlers to stay out, in robots.txt and on every answer', async () => {
-    const h = await mirror();
-    const robots = await h.call('GET', '/robots.txt');
-    expect(robots.status).toBe(200);
-    expect(robots.headers.get('content-type')).toContain('text/plain');
-    const text = await robots.text();
-    expect(text).toContain('User-agent: *\nDisallow: /public/');
-    expect(text).toContain('User-agent: GPTBot');
-    expect(text).toContain('User-agent: CCBot');
-    expect((await h.call('GET', '/public/channels')).headers.get('x-robots-tag')).toBe('noindex, noai');
-    expect((await h.call('GET', '/public/channels?bad=1')).headers.get('x-robots-tag')).toBe('noindex, noai');
   });
 });
 

@@ -3,7 +3,6 @@ import { getSettings, updateSettings } from './services/settings';
 import { processSend, sweepStuckJob } from './services/sending';
 import { release } from './services/moderation/admin';
 import { reviewHeldJob } from './services/review';
-import { resolveUncertain } from './services/messages';
 import { STUCK_AFTER_MS } from './services/moderation/policy';
 import { down, json, mod, post, row, say, world } from './posting-fixtures';
 import { ADMIN_DISCORD, seedAgent, seedOwner } from './testing';
@@ -15,7 +14,7 @@ async function queued(opts: Parameters<typeof world>[0] = {}) {
   const handed: string[] = [];
   const w = await world({ sender: { enqueue: async (_c, id) => void handed.push(id) }, ...opts });
   const admin = await seedOwner(w.h.relay, ADMIN_DISCORD, 'admin');
-  const send = async (who: { key: string } = w.a, text = 'waiting its turn') => {
+  const send = async (who: { token: string } = w.a, text = 'waiting its turn') => {
     const res = await post(w.h, who, say(text));
     expect(res.status).toBe(202);
     return (await json(res)).id as string;
@@ -45,7 +44,7 @@ describe('kill switches reach messages that were already accepted', () => {
 
   it('holds back the messages of a paused agent only, until the pause ends', async () => {
     const { h, a, send } = await queued();
-    const other = await seedAgent(h.relay, { tier: 'trusted' });
+    const other = await seedAgent(h.relay);
     const mine = await send(a, 'from the paused one');
     const theirs = await send(other, 'from another agent');
     await h.db
@@ -64,12 +63,12 @@ describe('kill switches reach messages that were already accepted', () => {
     expect((await row(h, mine))!.status).toBe('sent');
   });
 
-  it('holds back an agent on probation, claimed or not, when posting is off for them, but not a trusted one', async () => {
+  it('holds back an agent on probation when posting is off for them, but not one past it', async () => {
     const { h, a, admin, send } = await queued();
-    const trusted = await seedAgent(h.relay, { tier: 'trusted' });
-    const first = await send(a, 'claimed but still on probation');
-    const second = await send(trusted, 'trusted');
-    await updateSettings(h.relay, admin.id, { new_agent_posting: false });
+    const fresh = await seedAgent(h.relay, { level: 0 });
+    const first = await send(fresh, 'still on probation');
+    const second = await send(a, 'level one');
+    await updateSettings(h.relay, admin.id, { probation_posting: false });
 
     await processSend(h.relay, first);
     await processSend(h.relay, second);
@@ -94,7 +93,7 @@ describe('kill switches reach messages that were already accepted', () => {
     expect(handed).toEqual([id]);
   });
 
-  it('applies to an admin release, a recheck after an outage, and a resend of an uncertain send', async () => {
+  it('applies to an admin release and a recheck after an outage', async () => {
     const down1 = mod(down);
     const { h, admin, a, handed } = await queued({ moderator: down1 });
     // An outage hold, re-checked by the job once the classifier is back.
@@ -102,9 +101,6 @@ describe('kill switches reach messages that were already accepted', () => {
     expect((await row(h, outage))!.status).toBe('held');
     // A review hold, released by an admin.
     const review = (await json(await post(h, a, say('write to me@example.com about it')))).id as string;
-    // An uncertain send, resent.
-    const uncertain = (await json(await post(h, a, say('probably out there')))).id as string;
-    await h.db.prepare("UPDATE relay_messages SET status = 'uncertain', status_reason = 'x' WHERE id = ?").bind(uncertain).run();
     await updateSettings(h.relay, admin.id, { relay_read_only: true });
     handed.length = 0;
     h.relay.moderator = mod({ verdict: 'pass' });
@@ -112,10 +108,9 @@ describe('kill switches reach messages that were already accepted', () => {
     h.advance(70_000);
     await reviewHeldJob(h.relay);
     await release(h.relay, admin.id, review);
-    await resolveUncertain(h.relay, { type: 'admin', id: admin.id }, uncertain, 'resend');
-    expect(handed.sort()).toEqual([outage, review, uncertain].sort());
+    expect(handed.sort()).toEqual([outage, review].sort());
     for (const id of handed) await processSend(h.relay, id);
-    for (const id of [outage, review, uncertain]) expect(await row(h, id), id).toMatchObject({ status: 'queued', discord_message_id: null });
+    for (const id of [outage, review]) expect(await row(h, id), id).toMatchObject({ status: 'queued', discord_message_id: null });
     expect(posted(h)).toBe(0);
   });
 });
@@ -163,14 +158,12 @@ describe('settings are read key by key', () => {
       h.db.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)').bind(key, value, h.now().toISOString()).run();
     await put('relay_read_only', 'true');
     await put('pow_difficulty', '"hard"');
-    await put('probation_posts', '999999');
-    await put('public_mirror', '{not json');
+    await put('probation_posting', '"no"');
     await put('unknown_key', 'true');
     const s = await getSettings(h.relay);
     expect(s.relay_read_only).toBe(true);
     expect(s.pow_difficulty).toBe(20);
-    expect(s.probation_posts).toBe(20);
-    expect(s.public_mirror).toBe(true);
+    expect(s.probation_posting).toBe(true);
     expect(s).not.toHaveProperty('unknown_key');
   });
 

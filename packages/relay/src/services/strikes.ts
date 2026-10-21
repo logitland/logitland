@@ -114,16 +114,10 @@ export async function addStrike(
     // Everything that depends on the agent not being banned yet goes before the status update, which comes last of these.
     const guard = "EXISTS (SELECT 1 FROM agents WHERE id = ? AND status != 'banned')";
     const stopped = effect === 'banned' ? 'banned' : 'suspended';
+    // Its subscriptions stay, and deliver again if it is reinstated; what is waiting for its webhook goes.
     stmts.push(
       relay.db
-        .prepare(
-          `UPDATE subscriptions SET status = 'paused', paused_reason = ?, paused_at = COALESCE(paused_at, ?) WHERE agent_id = ? AND status = 'active' AND ${guard}`,
-        )
-        .bind(`Agent ${stopped}`, at, input.agentId, input.agentId),
-      relay.db
-        .prepare(
-          `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL WHERE status IN ('pending', 'retrying') AND subscription_id IN (SELECT id FROM subscriptions WHERE agent_id = ?) AND ${guard}`,
-        )
+        .prepare(`UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL WHERE agent_id = ? AND status IN ('pending', 'retrying') AND ${guard}`)
         .bind(input.agentId, input.agentId),
     );
     if (effect === 'banned') {
@@ -141,7 +135,7 @@ export async function addStrike(
         .bind(stopped, note, at, input.agentId),
     );
     if (effect === 'banned')
-      stmts.push(relay.db.prepare('UPDATE api_keys SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL').bind(at, input.agentId));
+      stmts.push(relay.db.prepare('UPDATE access_tokens SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL').bind(at, input.agentId));
   } else {
     stmts.push(relay.db.prepare('UPDATE agents SET status_reason = ?, updated_at = ? WHERE id = ?').bind(note, at, input.agentId));
   }
@@ -173,7 +167,9 @@ export async function escalateRuleBlocks(relay: Relay, agentId: string, policy: 
   const since = iso(new Date(relay.now().getTime() - RULE_BLOCK_WINDOW_HOURS * HOUR));
   const row = await relay.db
     .prepare(
-      `SELECT COUNT(*) AS n FROM moderation_log WHERE agent_id = ? AND layer = 'rules' AND verdict = 'block' AND created_at >= ? AND policy_code IN (${codes.map(() => '?').join(', ')})`,
+      // A block overturned on appeal (the message is `failed` now) no longer counts (#18).
+      `SELECT COUNT(*) AS n FROM moderation_log l WHERE agent_id = ? AND layer = 'rules' AND verdict = 'block' AND created_at >= ? AND policy_code IN (${codes.map(() => '?').join(', ')})
+       AND NOT EXISTS (SELECT 1 FROM relay_messages m WHERE m.id = l.message_id AND m.status = 'failed')`,
     )
     .bind(agentId, since, ...codes)
     .first<{ n: number }>();
@@ -218,7 +214,7 @@ export async function removeStrike(relay: Relay, strikeId: string, actor: Actor,
       diff: { policy_code: { from: row.policy_code, to: null } },
     }),
   ]);
-  if (del!.meta.changes !== 1) return false;
+  if (del!.meta.changes === 0) return false;
   const left = await activeStrikeCount(relay, row.agent_id);
   if (left < 2) {
     await relay.db

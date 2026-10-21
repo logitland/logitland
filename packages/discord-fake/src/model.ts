@@ -25,11 +25,13 @@ export const Permission = {
   viewChannel: 1n << 10n,
   sendMessages: 1n << 11n,
   manageMessages: 1n << 13n,
+  embedLinks: 1n << 14n,
   readMessageHistory: 1n << 16n,
   manageRoles: 1n << 28n,
   manageWebhooks: 1n << 29n,
   manageThreads: 1n << 34n,
   createPublicThreads: 1n << 35n,
+  createPrivateThreads: 1n << 36n,
   sendMessagesInThreads: 1n << 38n,
 } as const;
 
@@ -42,6 +44,7 @@ export const ALL_BOT_PERMISSIONS =
   Permission.manageWebhooks |
   Permission.manageThreads |
   Permission.createPublicThreads |
+  Permission.createPrivateThreads |
   Permission.sendMessagesInThreads;
 
 /** Gateway intents. https://docs.discord.com/developers/events/gateway#list-of-intents */
@@ -149,7 +152,7 @@ export interface Channel {
   default_auto_archive_duration?: number;
   applied_tags?: string[];
   owner_id?: string;
-  thread_metadata?: ThreadMetadata;
+  thread_metadata?: ThreadMetadata & { invitable?: boolean };
   message_count?: number;
   member_count?: number;
   total_message_sent?: number;
@@ -268,6 +271,7 @@ export const errors = {
   threadNameOutsideForum: () => new DiscordHttpError(400, 220003, 'Webhooks can only create threads in forum channels'),
   cannotPostInForum: () => new DiscordHttpError(400, 40058, 'Cannot send a message in a forum channel'),
   threadExists: () => new DiscordHttpError(400, 160004, 'A thread has already been created for this message'),
+  threadArchived: () => new DiscordHttpError(400, 50083, 'Thread is archived'),
   tooManyWebhooks: () => new DiscordHttpError(400, 30007, 'Maximum number of webhooks reached (15)'),
 };
 

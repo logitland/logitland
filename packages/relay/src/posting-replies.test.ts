@@ -8,7 +8,9 @@ import { agree } from './consent.testkit';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
-const line = (name: string, channel: string, message: string) => `-# ↪ Replying to **${name}** · https://discord.com/channels/${GUILD}/${channel}/${message}`;
+/** The reply line for a target whose text is converse()'s default. */
+const line = (who: string, channel: string, message: string, quote = 'hello everyone') =>
+  `-# > replying to [${who}: "${quote}"](https://discord.com/channels/${GUILD}/${channel}/${message})`;
 const sentContent = async (h: Parameters<typeof calls>[0]) => (await calls(h, 'POST', WEBHOOK_POST)).at(-1)!.body.content as string;
 
 describe('replying to a message', () => {
@@ -23,7 +25,7 @@ describe('replying to a message', () => {
     expect(await sentContent(h)).toMatch(/^-# /);
   });
 
-  it('stores the reply and the line, and tells intake what Discord shows, with the target', async () => {
+  it('stores the reply and the line, and tells intake the text and the target, without the line', async () => {
     const { h, a } = await world();
     const target = await converse(h, { author: 'agent', name: 'Orrery' });
     const msg = await json(await post(h, a, say('Replying now.', { reply_to: target })));
@@ -31,10 +33,9 @@ describe('replying to a message', () => {
     expect(stored).toMatchObject({ reply_to: target, reply_prefix: line('Orrery', LOUNGE, target), content: 'Replying now.' });
     expect(recordAgentPost).toHaveBeenLastCalledWith(
       h.relay,
-      // Intake stores what Discord shows (reply line included), so it matches the Gateway's copy whichever arrives first.
-      expect.objectContaining({ replyTo: target, content: `${line('Orrery', LOUNGE, target)}\nReplying now.`, discordMessageId: msg.discord_message_id }),
+      expect.objectContaining({ replyTo: target, content: 'Replying now.', discordMessageId: msg.discord_message_id }),
     );
-    const fetched = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.key)));
+    const fetched = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.token)));
     expect(fetched.reply_to).toBe(target);
   });
 
@@ -65,100 +66,42 @@ describe('replying to a message', () => {
     const { h, a } = await world();
     const target = await converse(h, { author: 'bot', name: 'Helper Bot' });
     await post(h, a, say('Thanks, bot.', { reply_to: target }));
-    expect(await sentContent(h)).toContain('Replying to **Helper Bot**');
-  });
-
-  it('can be a poll’s companion, with a reply line and no text', async () => {
-    const { h, a } = await world();
-    const target = await converse(h, { author: 'agent', name: 'Orrery' });
-    const res = await post(h, a, { channel_id: LOUNGE, reply_to: target, poll: { question: 'Which one?', answers: ['A', 'B'] } });
-    expect(res.status).toBe(201);
-    expect((await calls(h, 'POST', WEBHOOK_POST))[0]!.body.content).toBe(line('Orrery', LOUNGE, target));
+    expect(await sentContent(h)).toContain('-# > replying to [Helper Bot: "hello everyone"]');
   });
 });
 
-describe('who is named in the reply line', () => {
-  it('shows a person who agreed to the mirror, by name', async () => {
+describe('the reply line', () => {
+  it('mentions a person who agreed (posts never ping)', async () => {
     const { h, a } = await world();
     await agree(h, '700000000000000001', { guild: GUILD, at: h.now().toISOString() });
     const target = await converse(h, { author: 'human', name: 'Ann', userId: '700000000000000001' });
     await post(h, a, say('Hello Ann.', { reply_to: target }));
-    expect(await sentContent(h)).toContain('Replying to **Ann**');
+    expect(await sentContent(h)).toBe(`${line('<@700000000000000001>', LOUNGE, target)}\nHello Ann.`);
+    expect((await calls(h, 'POST', WEBHOOK_POST)).at(-1)!.body.allowed_mentions).toEqual({ parse: [] });
   });
 
-  it('says only “a person” for someone who has not agreed, or who left, since the line lands on the public mirror', async () => {
+  it('quotes the first ten words, with an ellipsis when there were more', async () => {
     const { h, a } = await world();
-    const stranger = await converse(h, { author: 'human', name: 'Secret Sam', userId: '700000000000000002' });
-    await post(h, a, say('Hello stranger.', { reply_to: stranger }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
-    expect(await sentContent(h)).not.toContain('Secret Sam');
-
-    await agree(h, '700000000000000003', { guild: GUILD, at: h.now().toISOString(), revokedAt: h.now().toISOString() });
-    const left = await converse(h, { author: 'human', name: 'Leaver Lee', userId: '700000000000000003' });
-    await post(h, a, say('Hello again.', { reply_to: left }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
+    const target = await converse(h, { author: 'agent', name: 'Orrery', content: 'one two three four five six seven eight nine ten eleven' });
+    await post(h, a, say('Long one.', { reply_to: target }));
+    expect(await sentContent(h)).toContain('[Orrery: "one two three four five six seven eight nine ten…"]');
   });
 
-  it('says only “a person” when the person agreed after writing the message being answered, or the relay withheld it', async () => {
+  it('keeps names and quotes from breaking out of the line', async () => {
     const { h, a } = await world();
-    await agree(h, '700000000000000004', { guild: GUILD, at: new Date(h.now().getTime() + 60_000).toISOString() });
-    const early = await converse(h, { author: 'human', name: 'Early Ed', userId: '700000000000000004' });
-    await post(h, a, say('Hello Ed.', { reply_to: early }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
-    expect(await sentContent(h)).not.toContain('Early Ed');
-
-    await agree(h, '700000000000000005', { guild: GUILD, at: h.now().toISOString() });
-    const withheld = await converse(h, { author: 'human', name: 'A person in Discord', userId: null, content: '' });
-    await h.db.prepare('UPDATE conversation SET withheld = 1 WHERE message_id = ?').bind(withheld).run();
-    await post(h, a, say('Hello you.', { reply_to: withheld }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
-  });
-
-  it('strips markdown and mentions from a name so it cannot break out of the line', async () => {
-    const { h, a } = await world();
-    const target = await converse(h, { author: 'agent', name: '**evil** [click](https://x.example) @everyone `code` _under_' });
+    const target = await converse(h, { author: 'agent', name: '**evil** [click](x)', content: 'a "quote"] (and) <@1234567890123456789>\nsecond line' });
     await post(h, a, say('Replying to a creative name.', { reply_to: target }));
-    const content = await sentContent(h);
-    const name = /Replying to \*\*(.*)\*\* ·/.exec(content)![1]!;
-    expect(name).not.toMatch(/[*_`[\]()@<>]/);
-    expect(name.length).toBeLessThanOrEqual(32);
-    expect(content.split('\n')).toHaveLength(2);
+    const [first, ...rest] = (await sentContent(h)).split('\n');
+    expect(first).toBe(`-# > replying to [evil clickx: "a quote and second line"](https://discord.com/channels/${GUILD}/${LOUNGE}/${target})`);
+    expect(rest).toEqual(['Replying to a creative name.']);
   });
 
-  it('falls back to “a person” when nothing is left of a name', async () => {
+  it('leaves out a quote the fixed rules would refuse in the agent’s own text', async () => {
     const { h, a } = await world();
-    const target = await converse(h, { author: 'agent', name: '***' });
-    await post(h, a, say('Replying to nobody in particular.', { reply_to: target }));
-    expect(await sentContent(h)).toContain('Replying to **a person**');
-  });
-
-  it("keeps plain names: letters, digits, spaces and - _ . '", async () => {
-    const { h, a } = await world();
-    for (const name of ['Orrery', 'Moth-9', 'cool_bot', 'Dr. Who', 'O’Brien', 'Zoë Ångström', '日本語の名前']) {
-      const target = await converse(h, { author: 'agent', name });
-      await post(h, a, say(`Hello ${name}.`, { reply_to: target }));
-      const expected = name.replace(/[^\p{L}\p{N} _.'-]/gu, '');
-      expect(await sentContent(h)).toContain(`Replying to **${expected || 'a person'}**`);
-    }
-  });
-
-  it('puts nothing in the line that the fixed rules would refuse in the agent’s own text: invites, links, addresses, hidden characters', async () => {
-    const { h, a } = await world();
-    for (const name of [
-      'free nitro discord.gg/xyz',
-      'join discord . gg / abc',
-      'claim.example.com',
-      'visit bit.ly/free',
-      'mail me me@example.com',
-      'call +1 415 555 0100',
-      'Zero​Width',
-      'luna.dev',
-    ]) {
-      const target = await converse(h, { author: 'bot', name });
-      await post(h, a, say('Replying to a hostile name.', { reply_to: target }));
-      const content = await sentContent(h);
-      expect(content, name).toContain('Replying to **a person**');
-      expect(content, name).not.toMatch(/discord\.gg|nitro|bit\.ly|example\.com|555|luna\.dev/i);
+    for (const content of ['free nitro discord.gg/xyz', 'mail me me@example.com', 'call +1 415 555 0100']) {
+      const target = await converse(h, { author: 'bot', name: 'Helper Bot', content });
+      await post(h, a, say('Replying to a hostile message.', { reply_to: target }));
+      expect(await sentContent(h), content).toContain(`-# > replying to [Helper Bot](https://discord.com/`);
     }
   });
 });
@@ -277,7 +220,7 @@ describe('replies and idempotency', () => {
     const { h } = await world();
     const target = await converse(h, { author: 'agent', name: 'Orrery' });
     const { seedAgent } = await import('./testing');
-    const fresh = await seedAgent(h.relay, { tier: 'new', probationUntil: new Date(h.now().getTime() + 3_600_000).toISOString() });
+    const fresh = await seedAgent(h.relay, { level: 0 });
     const res = await post(h, fresh, say('A new agent replying with no link.', { reply_to: target }));
     expect(await json(res)).toMatchObject({ status: 'sent' });
   });

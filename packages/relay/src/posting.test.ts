@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { sha256 } from './crypto';
-import { authenticateKey } from './services/identity';
 import { sendMessage } from './services/messages';
+import { authenticateToken } from './services/tokens';
 import { recordAgentPost } from './services/intake';
 import type { Moderator } from './services/moderation/classifier';
 import { processSend, sweepStuckJob } from './services/sending';
 import { updateSettings } from './services/settings';
 import { NO_CLIENT } from './types';
 import type { Relay, Stmt } from './context';
-import { BENCH, FORUM, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness, type HarnessOptions } from './testing';
+import { BENCH, FORUM, LOUNGE, harness, seedAgent, seedChannel, seedOwner, setAccess, type Harness, type HarnessOptions } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -59,17 +59,29 @@ const passAll: Moderator = { review: async () => ({ verdict: 'pass' }) };
 async function setup(opts: HarnessOptions = {}, agent: Parameters<typeof seedAgent>[1] = {}) {
   const h = harness({ moderator: passAll, ...opts });
   await seedChannel(h.relay, { id: LOUNGE, access: 'post' });
-  const a = await seedAgent(h.relay, { tier: 'claimed', ...agent });
+  const a = await seedAgent(h.relay, agent);
   return { h, a };
 }
 
 let counter = 0;
 const key = () => `key-${++counter}-padding`;
-const post = (h: Harness, a: { key: string }, body: Record<string, unknown>, idem: string | null = key()) =>
-  h.call('POST', '/v1/messages', body, { ...h.as(a.key), ...(idem ? { 'idempotency-key': idem } : {}) });
+const post = (h: Harness, a: { token: string }, body: Record<string, unknown>, idem: string | null = key()) =>
+  h.call('POST', '/v1/messages', body, { ...h.as(a.token), ...(idem ? { 'idempotency-key': idem } : {}) });
 const say = (text: string, extra: Record<string, unknown> = {}) => ({ channel_id: LOUNGE, content: text, ...extra });
 const row = (h: Harness, id: string) => h.db.prepare('SELECT * FROM relay_messages WHERE id = ?').bind(id).first<Record<string, unknown>>();
 const json = async (res: Response) => (await res.json()) as Record<string, any>;
+
+/** A Discord where the bot lacks Manage Webhooks until `allow()`; every webhook post is accepted. */
+function refuseWebhooks(h: Harness) {
+  let allowed = false;
+  h.setDiscord(async (req) => {
+    if (!/\/channels\/\d+\/webhooks$/.test(new URL(req.url).pathname))
+      return Response.json({ id: '300000000000000001', channel_id: LOUNGE, content: '', timestamp: h.now().toISOString(), edited_timestamp: null });
+    if (!allowed) return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
+    return Response.json({ id: '600000000000000001', token: 'fixed', channel_id: LOUNGE, name: 'Logitland agents' });
+  });
+  return { allow: () => void (allowed = true) };
+}
 
 describe('POST /v1/messages', () => {
   it('needs an Idempotency-Key, and says why', async () => {
@@ -100,26 +112,24 @@ describe('POST /v1/messages', () => {
     const url = new URL(call.url);
     expect(url.pathname).toBe('/api/v10/webhooks/600000000000000001/token-' + LOUNGE);
     expect(url.searchParams.get('wait')).toBe('true');
-    expect(await call.json()).toEqual({ content: 'hello @everyone', username: a.name, allowed_mentions: { parse: [] } });
+    expect(await call.json()).toEqual({
+      content: 'hello @everyone',
+      username: a.name,
+      avatar_url: `https://relay.logitland.test/v1/avatars/${a.id}.png`,
+      allowed_mentions: { parse: [] },
+    });
   });
 
-  it('uses the avatar only for trusted agents, whatever a stale row says', async () => {
+  it('posts with the agent’s custom avatar when it has one, else its sigil', async () => {
     const { h, a } = await setup();
-    const trusted = await seedAgent(h.relay, { tier: 'trusted' });
-    await h.db.prepare("UPDATE agents SET avatar_url = 'https://cdn.example.com/t.png' WHERE id = ?").bind(trusted.id).run();
-    await post(h, trusted, say('first'));
+    const custom = await seedAgent(h.relay, { level: 5, avatarUrl: 'https://cdn.example.com/t.png' });
+    await post(h, custom, say('first'));
     expect(await h.discordCalls[0]!.json()).toMatchObject({ avatar_url: 'https://cdn.example.com/t.png' });
-
-    await h.db.prepare("UPDATE agents SET avatar_url = 'https://cdn.example.com/a.png' WHERE id = ?").bind(a.id).run();
     await post(h, a, say('second one'));
-    expect(await h.discordCalls[1]!.json()).not.toHaveProperty('avatar_url');
-    const fresh = await seedAgent(h.relay, { tier: 'new', probationUntil: null });
-    await h.db.prepare("UPDATE agents SET avatar_url = 'https://cdn.example.com/b.png', probation_posts = 99 WHERE id = ?").bind(fresh.id).run();
-    await post(h, fresh, say('third one'));
-    expect(await h.discordCalls[2]!.json()).not.toHaveProperty('avatar_url');
+    expect(await h.discordCalls[1]!.json()).toMatchObject({ avatar_url: `https://relay.logitland.test/v1/avatars/${a.id}.png` });
   });
 
-  it('records the post with intake and counts it toward probation', async () => {
+  it('records the post with intake', async () => {
     const { h, a } = await setup();
     const msg = await json(await post(h, a, say('count me')));
     expect(recordAgentPost).toHaveBeenCalledWith(
@@ -134,7 +144,6 @@ describe('POST /v1/messages', () => {
         relayMessageId: msg.id,
       }),
     );
-    expect((await h.db.prepare('SELECT probation_posts AS n FROM agents WHERE id = ?').bind(a.id).first<{ n: number }>())!.n).toBe(1);
   });
 
   it('stores the hash of the lowercased, whitespace-collapsed text', async () => {
@@ -154,12 +163,12 @@ describe('POST /v1/messages', () => {
     await seedChannel(h.relay, { id: BENCH, name: 'bench', access: 'read_only' });
     expect((await post(h, a, say('hi there', { channel_id: BENCH }))).status).toBe(403);
     expect((await post(h, a, say('hi there', { channel_id: '119999999999999999' }))).status).toBe(404);
-    await h.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'off');
     expect((await post(h, a, say('hi there'))).status).toBe(404);
   });
 });
 
-describe('read-only mode, pauses and the new tier', () => {
+describe('read-only mode, pauses and probation', () => {
   it('answers 503 when the relay is read-only, before anything else', async () => {
     const { h, a } = await setup();
     const admin = await seedOwner(h.relay, '200000000000000099', 'admin');
@@ -183,21 +192,20 @@ describe('read-only mode, pauses and the new tier', () => {
     expect((await post(h, a, say('let me speak'))).status).toBe(201);
   });
 
-  it('turns agents on probation away when their posting is off, claimed or not, but not trusted ones', async () => {
+  it('turns agents on probation away when their posting is off, adopted or not, but not agents past it', async () => {
     const { h } = await setup();
-    const fresh = await seedAgent(h.relay, { tier: 'new', probationUntil: null });
-    const claimed = await seedAgent(h.relay, { tier: 'claimed' });
-    const trusted = await seedAgent(h.relay, { tier: 'trusted' });
+    const owner = await seedOwner(h.relay);
+    const orphan = await seedAgent(h.relay, { level: 0 });
+    const adopted = await seedAgent(h.relay, { level: 0, ownerId: owner.id });
+    const levelled = await seedAgent(h.relay, { level: 1 });
     const admin = await seedOwner(h.relay, '200000000000000099', 'admin');
-    await updateSettings(h.relay, admin.id, { new_agent_posting: false });
-    for (const who of [fresh, claimed]) {
+    await updateSettings(h.relay, admin.id, { probation_posting: false });
+    for (const who of [orphan, adopted]) {
       const res = await post(h, who, say('hello while on probation'));
       expect(res.status).toBe(403);
-      const { detail } = await json(res);
-      expect(detail).toMatch(/agents on probation/);
-      expect(detail).not.toMatch(/claim/);
+      expect((await json(res)).detail).toMatch(/agents on probation/);
     }
-    expect((await post(h, trusted, say('hello from trusted'))).status).toBe(201);
+    expect((await post(h, levelled, say('hello from level one'))).status).toBe(201);
   });
 });
 
@@ -227,7 +235,7 @@ describe('idempotency', () => {
 
   it('scopes keys to the agent', async () => {
     const { h, a } = await setup();
-    const other = await seedAgent(h.relay, { tier: 'claimed' });
+    const other = await seedAgent(h.relay);
     const k = key();
     const one = await json(await post(h, a, say('same key, other agent'), k));
     const two = await json(await post(h, other, say('same key, other agent, other words'), k));
@@ -235,7 +243,7 @@ describe('idempotency', () => {
   });
 
   // These call the service directly: concurrent HTTP requests in the test runner don't interleave at the database.
-  const asAgent = (h: Harness, a: { key: string }) => authenticateKey(h.relay, a.key, NO_CLIENT);
+  const asAgent = (h: Harness, a: { token: string }) => authenticateToken(h.relay, a.token, NO_CLIENT);
 
   it('lets a concurrent insert race resolve to one message and one send', async () => {
     const { h, a } = await setup();
@@ -254,15 +262,13 @@ describe('idempotency', () => {
   it('retries a failed message through one compare-and-set, so concurrent retries send once', async () => {
     const h = harness({ moderator: passAll });
     await seedChannel(h.relay, { id: LOUNGE, access: 'post', webhookUrl: null });
-    const a = await seedAgent(h.relay, { tier: 'claimed' });
+    const a = await seedAgent(h.relay);
     const k = key();
+    const webhooks = refuseWebhooks(h);
     const failed = await json(await post(h, a, say('send me when the hook is back'), k));
-    expect(failed).toMatchObject({ status: 'failed', status_reason: expect.stringContaining('webhook is missing') });
-    expect(h.discordCalls).toHaveLength(0);
+    expect(failed).toMatchObject({ status: 'failed', status_reason: expect.stringContaining('couldn’t make a webhook') });
 
-    const sealed = await h.relay.secrets.seal('https://discord.com/api/webhooks/600000000000000001/fixed', `channels.webhook:${LOUNGE}`);
-    await h.db.prepare('UPDATE channels SET webhook_ciphertext = ?, webhook_id = ? WHERE id = ?').bind(sealed, '600000000000000001', LOUNGE).run();
-
+    webhooks.allow();
     const principal = await asAgent(h, a);
     const writes = interleave(h.relay, { sql: 'idempotency_key = ?', parties: 3 });
     const opts = { idempotencyKey: k, net: null };
@@ -270,7 +276,7 @@ describe('idempotency', () => {
     expect(new Set(results.map((r) => r.message.id))).toEqual(new Set([failed.id]));
     const claims = writes.filter((w) => w.sql.includes("SET status = 'moderating'"));
     expect(claims.map((w) => w.changes).sort()).toEqual([0, 0, 1]);
-    expect(h.discordCalls).toHaveLength(1);
+    expect(h.discordCalls.filter((r) => r.url.includes('/webhooks/600000000000000001/fixed'))).toHaveLength(1);
     expect((await row(h, failed.id))!.status).toBe('sent');
     // Only the winner counted as an attempt: the first failed try, and the retry.
     expect((await h.db.prepare("SELECT SUM(count) AS n FROM rate_counters WHERE key LIKE 'attempt:%:m'").first<{ n: number }>())!.n).toBe(2);
@@ -279,10 +285,12 @@ describe('idempotency', () => {
   it('puts a failed message back as it was when the retry is refused', async () => {
     const h = harness({ moderator: passAll });
     await seedChannel(h.relay, { id: LOUNGE, access: 'post', webhookUrl: null });
-    const a = await seedAgent(h.relay, { tier: 'claimed' });
+    const a = await seedAgent(h.relay);
     const k = key();
+    refuseWebhooks(h);
     const failed = await json(await post(h, a, say('retry me later'), k));
-    await h.db.prepare('UPDATE channels SET pace_per_agent_per_minute = 0 WHERE id = ?').bind(LOUNGE).run();
+    expect(failed.status).toBe('failed');
+    await setAccess(h.db, LOUNGE, 'read_only');
     expect((await post(h, a, say('retry me later'), k)).status).toBe(403);
     expect((await row(h, failed.id))!).toMatchObject({ status: 'failed', status_reason: failed.status_reason });
   });
@@ -362,7 +370,7 @@ describe('what Discord answers', () => {
 
   it('finishes the send when the Gateway reported the message before Discord answered', async () => {
     const { h, a } = await setup();
-    await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum', access: 'post_new_threads' });
+    await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum' });
     // Intake settles a send it recognises: same text, same agent name, still `sending`.
     h.setDiscord(async () => {
       await h.db.prepare("UPDATE relay_messages SET status = 'sent', discord_message_id = '300000000000000808' WHERE status = 'sending'").run();
@@ -376,19 +384,23 @@ describe('what Discord answers', () => {
     });
     const msg = await json(await post(h, a, say('seen twice', { channel_id: FORUM, thread_name: 'Early bird' })));
     expect(msg).toMatchObject({ status: 'sent', discord_message_id: '300000000000000808', thread_id: '120000000000000808', status_reason: null });
-    expect((await h.db.prepare('SELECT probation_posts AS n FROM agents WHERE id = ?').bind(a.id).first<{ n: number }>())!.n).toBe(1);
+    // It still counts as sent once: one XP award.
+    expect((await h.db.prepare('SELECT COUNT(*) AS n FROM xp_events WHERE message_id = ?').bind(msg.id).first<{ n: number }>())!.n).toBe(1);
     expect(recordAgentPost).toHaveBeenLastCalledWith(
       h.relay,
       expect.objectContaining({ discordMessageId: '300000000000000808', threadId: '120000000000000808' }),
     );
   });
 
-  it('fails with the webhook-missing sentence on a 404', async () => {
+  it('fails a 404 with a sentence saying to send it again', async () => {
     const { h, a } = await setup();
     h.setDiscord(() => Response.json({ message: 'Unknown Webhook', code: 10015 }, { status: 404 }));
     const res = await post(h, a, say('hello webhook'));
     expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ status: 'failed', status_reason: 'This channel’s webhook is missing; an admin needs to set it again.' });
+    expect(await json(res)).toMatchObject({
+      status: 'failed',
+      status_reason: 'Discord no longer knows this channel’s webhook, so the message wasn’t sent. Send it again with the same Idempotency-Key.',
+    });
   });
 
   it('says the thread is gone when a thread post gets Unknown Channel', async () => {
@@ -403,7 +415,7 @@ describe('what Discord answers', () => {
     for (const [status, text] of [
       [400, /refused the message/],
       [403, /refused this channel’s webhook/],
-      [401, /refused this channel’s webhook/],
+      [401, /no longer knows this channel’s webhook/],
     ] as const) {
       const { h, a } = await setup();
       h.setDiscord(() => Response.json({ message: 'INTERNAL DISCORD DETAIL https://discord.com/api/webhooks/1/secret', code: 50035 }, { status }));
@@ -493,12 +505,12 @@ describe('sending inline and through the sender seam', () => {
 describe('GET /v1/messages/:id', () => {
   it('shows an agent its own messages only', async () => {
     const { h, a } = await setup();
-    const other = await seedAgent(h.relay, { tier: 'claimed' });
+    const other = await seedAgent(h.relay);
     const msg = await json(await post(h, a, say('mine')));
-    const own = await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.key));
+    const own = await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.token));
     expect(own.status).toBe(200);
     expect(await json(own)).toMatchObject({ id: msg.id, status: 'sent', content: 'mine' });
-    expect((await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(other.key))).status).toBe(404);
-    expect((await h.call('GET', '/v1/messages/msg_NOSUCHMESSAGE0', undefined, h.as(a.key))).status).toBe(404);
+    expect((await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(other.token))).status).toBe(404);
+    expect((await h.call('GET', '/v1/messages/msg_NOSUCHMESSAGE0', undefined, h.as(a.token))).status).toBe(404);
   });
 });

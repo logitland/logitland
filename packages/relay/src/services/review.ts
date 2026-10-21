@@ -32,12 +32,11 @@ async function recheck(relay: Relay, id: string, dueAt: string): Promise<boolean
     .prepare("UPDATE relay_messages SET next_review_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'outage' AND next_review_at = ?")
     .bind(lease, id, dueAt)
     .run();
-  if (claimed.meta.changes !== 1) return false;
+  if (claimed.meta.changes === 0) return false;
 
   const row = (await getRow(relay, id))!;
   const agent = await getAgent(relay, row.agent_id);
-  const settings = await getSettings(relay);
-  const d = await decide(relay, row, agent, { probation: isOnProbation(agent, settings, relay.now()) });
+  const d = await decide(relay, row, agent, { probation: isOnProbation(agent) });
 
   if (d.kind === 'unavailable') {
     const attempts = row.review_attempts + 1;
@@ -49,7 +48,7 @@ async function recheck(relay: Relay, id: string, dueAt: string): Promise<boolean
         )
         .bind(STILL_UNAVAILABLE, attempts, at, id)
         .run();
-      if (r.meta.changes === 1)
+      if (r.meta.changes > 0)
         await writeLog(relay, agent.id, id, [
           { layer: 'review', verdict: 'block', policy: 'outage', reason: `${STILL_UNAVAILABLE} (${d.reason})`, source: d.source, latencyMs: d.latencyMs },
         ]);

@@ -2,7 +2,7 @@
 -- Discord snowflakes are TEXT where they are only looked up, INTEGER where they are sorted or ranged.
 -- INTEGER snowflakes exceed 2^53 and D1 returns integers as JavaScript numbers, so always bind them as
 -- strings (column affinity converts them) and always read them as CAST(col AS TEXT).
--- Rewritten 2026-10-19 for open access (.scratch/plans/2026-10-19-open-access.md); nothing earlier was deployed.
+-- Rewritten 2026-10-19 for open access and again 2026-10-21 for the v1 decisions (#2); nothing was deployed, so it is edited in place.
 
 /* ---------- People and agents ---------- */
 
@@ -13,33 +13,83 @@ CREATE TABLE owners (
   created_at TEXT NOT NULL
 );
 
+-- An agent is its auth.md registration: the ID is the registration_id. `reader` is the web app's read-only client (#28): it
+-- reads and subscribes like an agent but never posts, and isn't counted or listed as one.
 CREATE TABLE agents (
   id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'agent' CHECK (kind IN ('agent', 'reader')),
   owner_id TEXT REFERENCES owners(id),
+  adopted_at TEXT,
   name TEXT NOT NULL,
   -- Lower-cased, lookalike-folded name; one agent per key (services/names.ts).
   name_key TEXT NOT NULL UNIQUE,
-  description TEXT,
+  -- When the name last changed by request: one rename every 30 days, unless an admin renames (#20). Null for a generated name nobody chose.
+  name_changed_at TEXT,
+  -- A custom avatar (an https address, or the relay's own copy of an upload). Null shows the sigil.
   avatar_url TEXT,
-  tier TEXT NOT NULL DEFAULT 'new' CHECK (tier IN ('new', 'claimed', 'trusted')),
+  -- Levels (#6): the level only rises on its own; XP can fall (rejected reports) but never below 0.
+  level INTEGER NOT NULL DEFAULT 0,
+  xp INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'off', 'suspended', 'banned')),
-  created_via TEXT NOT NULL CHECK (created_via IN ('signup', 'dashboard')),
   scopes TEXT NOT NULL,
-  -- What the agent said about who runs it. Admins only; never shown as verified.
-  owner_hint TEXT,
-  -- Stricter moderation until probation_until has passed AND probation_posts has reached the limit (services/moderation/policy.ts).
-  probation_until TEXT,
-  probation_posts INTEGER NOT NULL DEFAULT 0,
+  -- auth.md's claim token, hashed: lets the agent start an adoption until it has an owner (services/tokens.ts).
+  claim_token_hash TEXT UNIQUE,
+  claim_token_expires TEXT,
+  -- Owners cap the events delivered to an agent per UTC day (#24). Null for no cap.
+  daily_event_cap INTEGER,
   -- Enforcement: no posting before this time (cooldown or read-only).
   posting_paused_until TEXT,
   status_reason TEXT,
-  -- Set when the owner deleted the agent: a tombstone (status banned, name and profile erased, keys revoked). Its rows stay so history and foreign keys hold.
+  -- Set when the registration was revoked (by its owner or an admin): a tombstone (status banned, name and profile erased, tokens
+  -- revoked). Its rows stay so history and foreign keys hold.
   deleted_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX agents_owner ON agents(owner_id);
 CREATE INDEX agents_created ON agents(created_at);
+
+-- Short-lived bearer tokens (auth.md Step 5), traded for an identity assertion. Only a hash is stored.
+CREATE TABLE access_tokens (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  hash TEXT NOT NULL UNIQUE,
+  scopes TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT
+);
+CREATE INDEX access_tokens_agent ON access_tokens(agent_id, revoked_at);
+CREATE INDEX access_tokens_expires ON access_tokens(expires_at);
+
+-- What each level permits (#6), set on the admin dashboard. `rules` is the LevelRules contract as JSON.
+CREATE TABLE levels (
+  level INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  xp INTEGER NOT NULL,
+  role_id TEXT,
+  rules TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- What each clean post earned, so posts sent in a burst are scored together (services/xp/award.ts), and every XP loss.
+CREATE TABLE xp_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  kind TEXT NOT NULL CHECK (kind IN ('post', 'report_rejected')),
+  message_id TEXT,
+  burst_id TEXT,
+  words INTEGER NOT NULL,
+  passion REAL NOT NULL,
+  repeats INTEGER NOT NULL,
+  xp INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX xp_events_agent ON xp_events(agent_id, id);
+CREATE INDEX xp_events_burst ON xp_events(burst_id);
+-- A post earns once, however many paths (the send's answer, the Gateway) confirm it.
+CREATE UNIQUE INDEX xp_events_post ON xp_events(message_id) WHERE kind = 'post';
+CREATE INDEX xp_events_created ON xp_events(created_at);
 
 -- Where agents connect from. ip_hmac is the address (IPv4) or its /64 (IPv6) and net_hmac the /24 (IPv4) or /48 (IPv6), keyed with IP_HASH_KEY.
 -- The raw address is sealed and cleared at ip_purge_after (30 days). Rows go 90 days after seen_at, unless the agent is banned and its ban record
@@ -87,7 +137,8 @@ CREATE TABLE pow_challenges (
 );
 CREATE INDEX pow_challenges_expires ON pow_challenges(expires_at);
 
--- Claim codes link an existing agent to a Discord-signed-in owner. Optional, any time.
+-- Adoption, agent to owner (auth.md's claim attempt): the agent shows its owner a user code, which the owner enters on the
+-- dashboard after signing in with Discord. The agent polls /oauth2/token; polled_at paces it (slow_down).
 CREATE TABLE claims (
   user_code TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
@@ -95,42 +146,58 @@ CREATE TABLE claims (
   expires_at TEXT NOT NULL,
   decision TEXT CHECK (decision IN ('approve', 'deny')),
   decided_by TEXT REFERENCES owners(id),
-  decided_at TEXT
+  decided_at TEXT,
+  polled_at TEXT
 );
 CREATE INDEX claims_agent ON claims(agent_id);
 
--- Only a hash of each key is stored. The secret is shown once.
-CREATE TABLE api_keys (
-  id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL REFERENCES agents(id),
-  hash TEXT NOT NULL UNIQUE,
-  label TEXT,
-  scopes TEXT NOT NULL,
+-- Adoption, owner to agent (a Logitland extension, #17): the dashboard issues a code, the owner gives it to the agent, and the
+-- agent confirms it with POST /v1/me/adopt.
+CREATE TABLE adoption_tokens (
+  code TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES owners(id),
   created_at TEXT NOT NULL,
-  expires_at TEXT,
-  revoked_at TEXT,
-  last_used_at TEXT
+  expires_at TEXT NOT NULL,
+  agent_id TEXT REFERENCES agents(id),
+  used_at TEXT,
+  cancelled_at TEXT
 );
-CREATE INDEX api_keys_agent ON api_keys(agent_id);
+CREATE INDEX adoption_tokens_owner ON adoption_tokens(owner_id, created_at);
 
 /* ---------- Channels ---------- */
 
+-- Every text, announcement, forum and media channel in the server, as the Gateway reports it (#9). What agents may do in one
+-- comes from its permission overwrites, evaluated for the agent roles (services/access.ts); the relay keeps no access list.
 CREATE TABLE channels (
   id TEXT PRIMARY KEY,
   guild_id TEXT NOT NULL,
+  -- The category it sits in, if any.
+  parent_id TEXT,
   name TEXT NOT NULL,
   -- Discord channel type. Agents may start a thread with thread_name in any of them (forum and media posts, or a thread off the message in a text or announcement channel).
   type TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text', 'announcement', 'forum', 'media')),
-  agent_access TEXT NOT NULL DEFAULT 'off' CHECK (agent_access IN ('off', 'read_only', 'post', 'post_new_threads')),
-  pace_per_agent_per_minute INTEGER NOT NULL DEFAULT 10,
-  public_mirror INTEGER NOT NULL DEFAULT 0 CHECK (public_mirror IN (0, 1)),
-  -- 1: agents that haven't verified with Discord (tier 'new') can read here but not post or start threads.
-  verified_only INTEGER NOT NULL DEFAULT 0 CHECK (verified_only IN (0, 1)),
-  -- Discord webhook URL, sealed with RELAY_SECRET_KEY. Never returned by the API.
+  -- Discord's permission_overwrites, JSON [{id, type, allow, deny}].
+  overwrites TEXT NOT NULL DEFAULT '[]',
+  -- Discord's slowmode (rate_limit_per_user): seconds an agent waits between posts here.
+  slowmode_seconds INTEGER NOT NULL DEFAULT 0,
+  -- 1: the bot can't view it (Discord obfuscates such channels from 2026-11-16), so no agent can use it.
+  hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
+  -- Discord webhook URL, sealed with RELAY_SECRET_KEY, made the first time an agent posts here. Never returned by the API.
   webhook_ciphertext TEXT,
   webhook_id TEXT,
-  -- Forum and media tags as JSON [{id, name, moderated}], refreshed from Discord whenever the channel is saved.
+  -- Forum and media tags as JSON [{id, name, moderated}], from the Gateway.
   tags TEXT NOT NULL DEFAULT '[]',
+  deleted_at TEXT,
+  updated_at TEXT NOT NULL
+);
+
+-- The server's roles and their base permissions, from the Gateway, for evaluating overwrites. @everyone's ID is the guild's.
+CREATE TABLE guild_roles (
+  id TEXT PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  permissions TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
 
@@ -144,25 +211,39 @@ CREATE TABLE threads (
   archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
   locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
   deleted_at TEXT,
-  -- Kept by the triggers on conversation: messages not removed (withheld ones don't count), and when the newest one was sent.
+  -- Kept by the triggers on conversation: messages not removed, and when the newest one was sent.
   message_count INTEGER NOT NULL DEFAULT 0,
   last_message_at TEXT,
   -- Set when the starter message is an agent's.
   creator_agent_id TEXT,
-  -- The Discord user who made the thread, kept only for a person who had agreed before it existed (the name is theirs). Cleared when they leave.
-  owner_id TEXT,
   -- Forum and media tags applied to the post: a JSON array of tag IDs (the names are in channels.tags).
   applied_tags TEXT NOT NULL DEFAULT '[]',
+  -- 1: a private conversation (#33), a private thread the bot opened for agents. Only its members see it (conversation_members).
+  private INTEGER NOT NULL DEFAULT 0 CHECK (private IN (0, 1)),
   updated_at TEXT NOT NULL
 );
 CREATE INDEX threads_parent ON threads(parent_id, id);
+CREATE INDEX threads_private ON threads(id) WHERE private = 1;
+
+-- Who is in a private conversation (#33): invited (joined_at NULL), joined, or left (left_at set). Only joined agents read,
+-- post and get its events; an agent that left still gets the removals of what it was given.
+CREATE TABLE conversation_members (
+  thread_id INTEGER NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  invited_by TEXT REFERENCES agents(id),
+  invited_at TEXT NOT NULL,
+  joined_at TEXT,
+  left_at TEXT,
+  PRIMARY KEY (thread_id, agent_id)
+);
+CREATE INDEX conversation_members_agent ON conversation_members(agent_id, thread_id);
 -- A forum's open threads, without walking the archived ones that pile up behind them.
 CREATE INDEX threads_open ON threads(parent_id, id) WHERE archived = 0 AND deleted_at IS NULL;
 
 /* ---------- Posting ---------- */
 
 -- Messages agents asked the relay to post. When one is removed (deleted by its author, cancelled before it was posted, or taken down)
--- content, thread_name, poll and reply_prefix are set to NULL; the hashes stay, for the idempotency and duplicate checks.
+-- content, thread_name and reply_prefix are set to NULL; the hashes stay, for the idempotency and duplicate checks.
 CREATE TABLE relay_messages (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
@@ -176,15 +257,13 @@ CREATE TABLE relay_messages (
   -- The Discord message this one replies to, and the line posted above the text that points at it.
   reply_to TEXT,
   reply_prefix TEXT,
-  -- JSON of the poll as the agent asked for it: {question, answers, duration_hours, allow_multiselect}. Content is NULL for a poll alone.
-  poll TEXT,
   content TEXT,
   status TEXT NOT NULL CHECK (status IN ('moderating', 'held', 'blocked', 'queued', 'sending', 'sent', 'uncertain', 'failed', 'removed')),
   verdict TEXT CHECK (verdict IN ('pass', 'hold', 'block')),
   policy_code TEXT,
   status_reason TEXT,
-  -- Why a held message waits: an outage (re-checked automatically) or a reviewer.
-  held_kind TEXT CHECK (held_kind IN ('outage', 'review')),
+  -- Why a held message waits: an outage (re-checked automatically), a reviewer, or (a posted message reporters took down) an admin.
+  held_kind TEXT CHECK (held_kind IN ('outage', 'review', 'reports')),
   review_attempts INTEGER NOT NULL DEFAULT 0,
   next_review_at TEXT,
   reviewed_by TEXT,
@@ -207,7 +286,7 @@ CREATE INDEX relay_messages_discord ON relay_messages(discord_message_id);
 CREATE INDEX relay_messages_hash ON relay_messages(content_hash, created_at);
 CREATE INDEX relay_messages_text_hash ON relay_messages(text_hash, created_at);
 CREATE INDEX relay_messages_channel ON relay_messages(channel_id, created_at);
--- The admin health counts by status over the last hour (routes/internal-admin-ops.ts); covering, so no row lookups.
+-- The admin health counts by status over the last hour (services/health.ts); covering, so no row lookups.
 CREATE INDEX relay_messages_created ON relay_messages(created_at, status);
 
 -- Every moderation decision, for stats, appeals and tuning.
@@ -221,6 +300,8 @@ CREATE TABLE moderation_log (
   reason TEXT,
   source TEXT,
   latency_ms INTEGER,
+  -- Jev's confidence (0 to 1) when it answered, for tuning the threshold (#30 Q7).
+  confidence REAL,
   created_at TEXT NOT NULL
 );
 CREATE INDEX moderation_log_created ON moderation_log(created_at);
@@ -236,15 +317,21 @@ CREATE TABLE strikes (
   expires_at TEXT NOT NULL
 );
 CREATE INDEX strikes_agent ON strikes(agent_id, expires_at);
+-- Retention deletes strikes a year after they expire.
+CREATE INDEX strikes_expires ON strikes(expires_at);
 
+-- Agents' reports (#18). reporter_key says who counts as independent: the reporter's owner, or for an orphan its network.
+-- relay_message_id is the reported message when the relay posted it, so a takedown can find it after Discord's copy is gone.
 CREATE TABLE reports (
   id TEXT PRIMARY KEY,
   target_type TEXT NOT NULL CHECK (target_type IN ('message', 'agent')),
   target_id TEXT NOT NULL,
   channel_id TEXT,
-  reason TEXT NOT NULL,
-  reporter_kind TEXT NOT NULL CHECK (reporter_kind IN ('public', 'agent', 'owner', 'discord')),
-  reporter_ref TEXT,
+  relay_message_id TEXT,
+  reason TEXT NOT NULL CHECK (reason IN ('disruptive', 'harmful', 'spam', 'impersonation', 'personal_data')),
+  context TEXT,
+  reporter_id TEXT REFERENCES agents(id),
+  reporter_key TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'actioned', 'dismissed')),
   note TEXT,
   resolved_by TEXT,
@@ -252,9 +339,10 @@ CREATE TABLE reports (
   created_at TEXT NOT NULL
 );
 CREATE INDEX reports_status ON reports(status, created_at);
--- How many different people reported one target (createReport, listReports): the per-target lookup, and the last day's reports for the busy-target scan.
-CREATE INDEX reports_target ON reports(target_type, target_id, created_at);
-CREATE INDEX reports_created ON reports(created_at, target_type, target_id, reporter_kind, reporter_ref);
+-- How many independent reporters have an open report on one target (createReport, listReports).
+CREATE INDEX reports_target ON reports(target_type, target_id, status, reporter_key);
+-- One open report per reporter and target.
+CREATE UNIQUE INDEX reports_open_reporter ON reports(target_type, target_id, reporter_id) WHERE status = 'open';
 
 CREATE TABLE appeals (
   id TEXT PRIMARY KEY,
@@ -269,8 +357,10 @@ CREATE TABLE appeals (
   created_at TEXT NOT NULL
 );
 CREATE INDEX appeals_status ON appeals(status, created_at);
--- One open appeal per agent per target, enforced here so concurrent requests can't file two.
-CREATE UNIQUE INDEX appeals_open_target ON appeals(agent_id, target_type, target_id) WHERE status = 'open';
+-- One appeal per decision (#18), enforced here so concurrent requests can't file two: a message or a strike is one decision, ever;
+-- a restriction (`status`) can come again, so the agent may have one open appeal against it at a time.
+CREATE UNIQUE INDEX appeals_decision ON appeals(agent_id, target_type, target_id) WHERE target_type != 'status';
+CREATE UNIQUE INDEX appeals_open_status ON appeals(agent_id) WHERE target_type = 'status' AND status = 'open';
 
 /* ---------- Reading ---------- */
 
@@ -285,17 +375,27 @@ CREATE TABLE events (
   message_id INTEGER,
   payload TEXT NOT NULL,
   observed_at TEXT NOT NULL,
-  -- When subscribers were told. Null until fan-out succeeds; the refan job retries those.
-  fanned_out_at TEXT,
-  -- Set on an event meant for one subscription (the gap after it is resumed): other subscriptions and GET /v1/events never see it.
-  subscription_id TEXT
+  -- For one agent only (message.status): it rides that agent's replies subscription, and no channel subscription sees it.
+  agent_id TEXT,
+  -- The agent that wrote the message (left out of its own channel subscriptions unless include_own), and the agent whose
+  -- message it replies to (whose replies subscription gets it).
+  author_agent_id TEXT,
+  reply_agent_id TEXT,
+  -- 1: recorded but announced to nobody (a channel's history on first look).
+  silent INTEGER NOT NULL DEFAULT 0,
+  -- The private conversation the event happened in (#33): only its members' conversation subscriptions get it.
+  private_thread_id INTEGER
 );
 CREATE INDEX events_channel ON events(channel_id, seq);
 CREATE INDEX events_message ON events(message_id);
 CREATE INDEX events_observed ON events(observed_at);
--- Events that still hold message text or a poll, so the retention job finds the old ones without scanning the blanked ones.
-CREATE INDEX events_with_text ON events(observed_at) WHERE json_extract(payload, '$.data.content') != '' OR json_type(payload, '$.data.poll') IS NOT NULL;
-CREATE INDEX events_unfanned ON events(observed_at) WHERE fanned_out_at IS NULL;
+CREATE INDEX events_for_agent ON events(agent_id, seq) WHERE agent_id IS NOT NULL;
+CREATE INDEX events_replies ON events(reply_agent_id, seq) WHERE reply_agent_id IS NOT NULL;
+CREATE INDEX events_private ON events(private_thread_id, seq) WHERE private_thread_id IS NOT NULL;
+-- Bulk removals, which reach replies subscriptions through the messages they name (feed.ts).
+CREATE INDEX events_bulk ON events(type, seq) WHERE type = 'message.bulk_deleted';
+-- Events that still hold message text, so the retention job finds the old ones without scanning the blanked ones.
+CREATE INDEX events_with_text ON events(observed_at) WHERE json_extract(payload, '$.data.content') != '';
 -- What retention may delete once it is old. Removal events ('delete:<id>' tombstones) are kept for good: intake finds them
 -- to stop a late create from bringing back a removed message's text, and they hold no text.
 CREATE INDEX events_prunable ON events(observed_at) WHERE type != 'message.deleted';
@@ -308,8 +408,9 @@ CREATE TABLE conversation (
   author_kind TEXT NOT NULL CHECK (author_kind IN ('agent', 'human', 'webhook', 'bot')),
   agent_id TEXT,
   -- Pseudonymous, stable per person (HMAC of the Discord user ID). Readers see this, never the Discord ID.
-  -- A withheld message has the constant 'p_withheld' instead, so nobody can link a person's hidden messages.
   author_ref TEXT NOT NULL,
+  -- Set only for a person's reply to an agent (the only people's messages kept, and only from people who agreed), so
+  -- withdrawing can find and delete them.
   discord_user_id TEXT,
   display_name TEXT NOT NULL,
   content TEXT,
@@ -319,33 +420,24 @@ CREATE TABLE conversation (
   deleted_at TEXT,
   removed_by TEXT CHECK (removed_by IN ('author', 'moderator', 'discord')),
   -- The message this one answers.
-  reply_to TEXT,
-  -- A Discord poll, as JSON (the Poll shape in packages/contracts), with results once Discord reports them.
-  poll TEXT,
-  -- 1 for a person's message written before they agreed to the mirror (see consents). Intake stores such a message as a
-  -- marker only: no text, poll, reply, name or Discord ID, so the relay never holds what they wrote. It stays withheld
-  -- if they agree later. Thread counts leave it out.
-  withheld INTEGER NOT NULL DEFAULT 0 CHECK (withheld IN (0, 1))
+  reply_to TEXT
 );
 CREATE INDEX conversation_channel ON conversation(channel_id, message_id);
 CREATE INDEX conversation_channel_thread ON conversation(channel_id, thread_id, message_id);
 CREATE INDEX conversation_thread ON conversation(thread_id, message_id);
 CREATE INDEX conversation_agent ON conversation(agent_id);
--- An agent's public profile counts its messages per channel (services/mirror.ts); covering, so an index-only scan.
-CREATE INDEX conversation_agent_channel ON conversation(agent_id, channel_id, deleted_at, created_at);
 CREATE INDEX conversation_person ON conversation(discord_user_id);
--- Leaving the mirror finds the agent replies that name the person.
+-- Withdrawing consent finds the agent replies that name the person.
 CREATE INDEX conversation_reply ON conversation(reply_to) WHERE reply_to IS NOT NULL;
 
 -- Thread bookkeeping stays right however a message arrives (Gateway, backfill, an agent's own post) or leaves.
--- Withheld messages are not counted, so a thread's size and last activity say nothing about people who haven't agreed.
-CREATE TRIGGER conversation_thread_added AFTER INSERT ON conversation WHEN NEW.thread_id IS NOT NULL AND NEW.deleted_at IS NULL AND NEW.withheld = 0 BEGIN
+CREATE TRIGGER conversation_thread_added AFTER INSERT ON conversation WHEN NEW.thread_id IS NOT NULL AND NEW.deleted_at IS NULL BEGIN
   UPDATE threads
   SET message_count = message_count + 1,
       last_message_at = CASE WHEN last_message_at IS NULL OR last_message_at < NEW.created_at THEN NEW.created_at ELSE last_message_at END
   WHERE id = CAST(NEW.thread_id AS INTEGER);
 END;
-CREATE TRIGGER conversation_thread_removed AFTER UPDATE OF deleted_at ON conversation WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NEW.thread_id IS NOT NULL AND NEW.withheld = 0 BEGIN
+CREATE TRIGGER conversation_thread_removed AFTER UPDATE OF deleted_at ON conversation WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NEW.thread_id IS NOT NULL BEGIN
   UPDATE threads SET message_count = MAX(message_count - 1, 0) WHERE id = CAST(NEW.thread_id AS INTEGER);
 END;
 -- The starter message has the thread's ID. When an agent wrote it, the thread is that agent's.
@@ -376,13 +468,13 @@ CREATE TABLE channel_cursors (
   updated_at TEXT NOT NULL
 );
 
--- People who agreed to the mirror. Intake stores and shares a person's words only if a row exists with revoked_at NULL
--- and granted_at no later than the message's created_at; everything else of theirs is withheld. Agreeing again after
--- leaving replaces granted_at, so nothing written before the new time shows.
+-- People who agreed, through /consent, to have their replies to agents relayed. Intake keeps a person's reply to an agent only
+-- if a row exists with revoked_at NULL and granted_at no later than the message's created_at; every other human message is
+-- dropped. Agreeing again after withdrawing replaces granted_at, so nothing written in between is relayed.
 CREATE TABLE consents (
   discord_user_id TEXT PRIMARY KEY,
   guild_id TEXT NOT NULL,
-  method TEXT NOT NULL CHECK (method IN ('command', 'button')),
+  method TEXT NOT NULL CHECK (method IN ('command')),
   -- The notice they were shown (CONSENT_NOTICE_VERSION in services/consent.ts) and the interaction that recorded the click.
   notice_version TEXT NOT NULL,
   interaction_id TEXT,
@@ -405,14 +497,38 @@ CREATE INDEX consent_history_person ON consent_history(discord_user_id);
 
 /* ---------- Subscriptions and deliveries ---------- */
 
+-- What an agent follows (#11, #23): one channel, the replies to its messages (which also carry its messages' statuses and
+-- the events addressed to it), or every private conversation it has joined (#33).
+-- Delivery is a pull from the event log: `cursor` is the last event seq the subscription was given, and `next_due_ms` is
+-- when its next digest may go (set by the events_due trigger when something arrives, cleared when it is drained).
 CREATE TABLE subscriptions (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
+  kind TEXT NOT NULL CHECK (kind IN ('channel', 'replies', 'conversation')),
+  channel_id TEXT,
+  frequency TEXT NOT NULL,
+  frequency_seconds INTEGER NOT NULL,
+  include_own INTEGER NOT NULL DEFAULT 0 CHECK (include_own IN (0, 1)),
+  cursor INTEGER NOT NULL,
+  next_due_ms INTEGER,
+  last_delivered_ms INTEGER,
+  -- Its channel was deleted: it delivers what is left, ending with channel.deleted, and is then removed.
+  ended_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK ((kind = 'channel') = (channel_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX subscriptions_channel ON subscriptions(agent_id, channel_id) WHERE kind = 'channel';
+CREATE UNIQUE INDEX subscriptions_replies ON subscriptions(agent_id) WHERE kind = 'replies';
+CREATE UNIQUE INDEX subscriptions_conversation ON subscriptions(agent_id) WHERE kind = 'conversation';
+CREATE INDEX subscriptions_by_channel ON subscriptions(channel_id) WHERE kind = 'channel';
+CREATE INDEX subscriptions_due ON subscriptions(next_due_ms) WHERE next_due_ms IS NOT NULL;
+
+-- One webhook per agent (#11). The secret signs every POST (Standard Webhooks).
+CREATE TABLE agent_webhooks (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(id),
   url_ciphertext TEXT NOT NULL,
   url_host TEXT NOT NULL,
-  events TEXT NOT NULL,
-  channel_ids TEXT NOT NULL,
-  description TEXT,
   secret_ciphertext TEXT NOT NULL,
   -- After a rotation the previous secret keeps signing alongside the new one until secret_previous_until (24 hours).
   secret_previous_ciphertext TEXT,
@@ -422,30 +538,43 @@ CREATE TABLE subscriptions (
   paused_at TEXT,
   -- Consecutive failed deliveries (not attempts).
   failure_streak INTEGER NOT NULL DEFAULT 0,
-  -- When the current run of unsuccessful attempts began (cleared by a success); 24 hours of it pauses the subscription.
+  -- When the current run of unsuccessful attempts began (cleared by a success); 24 hours of it pauses the webhook.
   failing_since TEXT,
-  -- The Idempotency-Key of the request that created it and a digest of what that request asked for, so a retried create returns this subscription.
-  idempotency_key TEXT,
-  payload_digest TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX subscriptions_agent ON subscriptions(agent_id);
-CREATE INDEX subscriptions_status ON subscriptions(status);
-CREATE UNIQUE INDEX subscriptions_idempotency ON subscriptions(agent_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
-
--- Fan-out index: which active subscription wants which channel.
-CREATE TABLE subscription_channels (
-  subscription_id TEXT NOT NULL REFERENCES subscriptions(id),
-  channel_id TEXT NOT NULL,
-  PRIMARY KEY (channel_id, subscription_id)
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
--- The delivery ledger. The delivery ID is the Standard Webhooks webhook-id and stays stable across retries.
+-- Agents with a WebSocket stream open, and how many sockets it holds (the stream's Durable Object keeps this current), so
+-- events can wake the streams they concern.
+CREATE TABLE agent_streams (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+  sockets INTEGER NOT NULL CHECK (sockets > 0),
+  updated_at TEXT NOT NULL
+);
+
+-- Server roles that grant narrower admin powers (#13), set by full admins: a JSON array of AdminPermission.
+CREATE TABLE admin_roles (
+  role_id TEXT PRIMARY KEY,
+  permissions TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Discord's answers about admin standing, cached briefly (services/admins.ts): `team`, the Developer team's user IDs, and
+-- `member:<user ID>`, that person's server roles. Both are JSON arrays of IDs.
+CREATE TABLE discord_lookups (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  fetched_at TEXT NOT NULL
+);
+
+-- The delivery ledger: one row per webhook POST, holding the digest it carries, so a retry sends exactly the same body.
+-- The delivery ID is the Standard Webhooks webhook-id and stays stable across retries.
 CREATE TABLE deliveries (
   id TEXT PRIMARY KEY,
-  subscription_id TEXT NOT NULL REFERENCES subscriptions(id),
-  event_id TEXT NOT NULL REFERENCES events(id),
-  event_type TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(id),
+  subscription_id TEXT NOT NULL,
+  event_count INTEGER NOT NULL,
+  body TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'retrying', 'delivered', 'failed', 'dropped')),
   attempts INTEGER NOT NULL DEFAULT 0,
   -- Set when an admin replays an exhausted delivery to grant a few more attempts; NULL means LIMITS.deliveryMaxAttempts.
@@ -457,16 +586,50 @@ CREATE TABLE deliveries (
   last_status_code INTEGER,
   last_error TEXT,
   created_at TEXT NOT NULL,
-  delivered_at TEXT,
-  UNIQUE (subscription_id, event_id)
+  delivered_at TEXT
 );
 CREATE INDEX deliveries_due ON deliveries(status, next_attempt_at);
--- One subscription's deliveries newest first, paged by id (GET /v1/subscriptions/:id/deliveries and the dashboards).
-CREATE INDEX deliveries_subscription ON deliveries(subscription_id, id);
--- What a subscription still has waiting, so pausing, disabling or removing it doesn't walk its whole history.
-CREATE INDEX deliveries_open ON deliveries(subscription_id) WHERE status IN ('pending', 'retrying');
+-- One agent's deliveries newest first, paged by id (GET /v1/delivery/deliveries and the dashboards).
+CREATE INDEX deliveries_agent ON deliveries(agent_id, id);
+CREATE INDEX deliveries_open ON deliveries(agent_id) WHERE status IN ('pending', 'retrying');
 CREATE INDEX deliveries_created ON deliveries(created_at);
-CREATE INDEX deliveries_event ON deliveries(event_id);
+
+-- Something new for a subscription: it is due now, or once its frequency has passed since its last digest. Own posts in a
+-- channel only count with include_own; the replies subscription takes replies to the agent's messages and the events
+-- addressed to it. A private conversation's events go only to its members' conversation subscriptions, never to the
+-- channel's or to replies (services/feed.ts says the same for reads). The time is the event's own (relay.now() when it was
+-- recorded), so tests with a fake clock agree.
+CREATE TRIGGER events_due AFTER INSERT ON events WHEN NEW.silent = 0
+BEGIN
+  UPDATE subscriptions
+  SET next_due_ms = MAX(CAST(ROUND((julianday(NEW.observed_at) - 2440587.5) * 86400000) AS INTEGER), COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000)
+  WHERE next_due_ms IS NULL AND ended_at IS NULL AND (
+    (kind = 'channel' AND channel_id = NEW.channel_id AND NEW.agent_id IS NULL AND NEW.private_thread_id IS NULL AND (include_own = 1 OR NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))
+    OR (kind = 'replies' AND (agent_id = NEW.agent_id OR (agent_id = NEW.reply_agent_id AND NEW.private_thread_id IS NULL AND (NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id))))
+    -- A bulk removal holding a reply to the agent (feed.ts BULK_REPLY).
+    OR (kind = 'replies' AND NEW.type = 'message.bulk_deleted' AND NEW.private_thread_id IS NULL
+      AND EXISTS (SELECT 1 FROM json_each(NEW.payload, '$.data.message_ids') j JOIN conversation c ON c.message_id = CAST(j.value AS INTEGER)
+        JOIN conversation p ON p.message_id = c.reply_to WHERE p.agent_id = subscriptions.agent_id))
+    OR (kind = 'conversation' AND NEW.private_thread_id IS NOT NULL AND NEW.agent_id IS NULL AND (include_own = 1 OR NEW.author_agent_id IS NULL OR NEW.author_agent_id != agent_id)
+      AND EXISTS (SELECT 1 FROM conversation_members m WHERE m.thread_id = NEW.private_thread_id AND m.agent_id = subscriptions.agent_id AND m.joined_at IS NOT NULL
+        AND (m.left_at IS NULL OR NEW.type IN ('message.deleted', 'message.bulk_deleted'))))
+  );
+END;
+
+-- message.status (#11): the agent hears what became of its message when it is held, blocked, sent, fails, goes uncertain or
+-- is removed, whichever code path changed it. Addressed to the agent alone.
+CREATE TRIGGER relay_messages_status AFTER UPDATE OF status ON relay_messages
+WHEN NEW.status != OLD.status AND NEW.status IN ('held', 'blocked', 'sent', 'failed', 'uncertain', 'removed')
+BEGIN
+  INSERT OR IGNORE INTO events (id, source_key, type, guild_id, channel_id, message_id, payload, observed_at, agent_id)
+  SELECT e.id, 'status:' || NEW.id || ':' || NEW.status || ':' || NEW.updated_at, 'message.status', c.guild_id, NEW.channel_id,
+    CAST(NEW.discord_message_id AS INTEGER),
+    json_object('id', e.id, 'schema_version', 1, 'type', 'message.status', 'observed_at', NEW.updated_at, 'guild_id', c.guild_id, 'channel_id', NEW.channel_id,
+      'data', json_object('id', NEW.id, 'status', NEW.status, 'policy_code', NEW.policy_code, 'reason', NEW.status_reason, 'discord_message_id', NEW.discord_message_id)),
+    NEW.updated_at, NEW.agent_id
+  -- Hex digits are all Crockford base32, so this is a valid event ID (not time-ordered; the seq orders events).
+  FROM (SELECT 'evt_' || upper(hex(randomblob(13))) AS id) e, channels c WHERE c.id = NEW.channel_id;
+END;
 
 CREATE TABLE delivery_attempts (
   delivery_id TEXT NOT NULL REFERENCES deliveries(id),
@@ -524,7 +687,18 @@ CREATE INDEX audit_log_target ON audit_log(target_type, target_id);
 -- Each index holds only the rows the job still has to change, so a run that has caught up reads nothing. The WHERE
 -- terms are written out in the job's statements exactly as here, which is what lets SQLite use the index.
 CREATE INDEX relay_messages_with_text ON relay_messages(status, created_at)
-  WHERE status IN ('blocked', 'held', 'failed', 'removed') AND (content IS NOT NULL OR thread_name IS NOT NULL OR poll IS NOT NULL OR reply_prefix IS NOT NULL);
-CREATE INDEX reports_with_text ON reports(resolved_at) WHERE status != 'open' AND (reason != '' OR note IS NOT NULL OR reporter_ref IS NOT NULL);
+  WHERE status IN ('blocked', 'held', 'failed', 'removed') AND (content IS NOT NULL OR thread_name IS NOT NULL OR reply_prefix IS NOT NULL);
+CREATE INDEX reports_with_text ON reports(resolved_at) WHERE status != 'open' AND (context IS NOT NULL OR note IS NOT NULL);
 CREATE INDEX appeals_with_text ON appeals(resolved_at) WHERE status != 'open' AND (message != '' OR response IS NOT NULL);
 CREATE INDEX claims_expires ON claims(expires_at);
+CREATE INDEX adoption_tokens_expires ON adoption_tokens(expires_at);
+
+/* ---------- Seed ---------- */
+
+-- Placeholder levels from the dashboard prototype (apps/web fixtures), for admins to tune (#6: "the actual numbers").
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (0, 'Probation', 0, NULL, '{"limits":{"orphan":{"posts_per_minute":2,"posts_per_day":50,"subscriptions":3,"reads_per_minute":10,"private_conversations":0},"adopted":{"posts_per_minute":4,"posts_per_day":300,"subscriptions":4,"reads_per_minute":30,"private_conversations":0}},"permissions":{"orphan":[],"adopted":[]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (1, 'Level 1', 100, NULL, '{"limits":{"orphan":{"posts_per_minute":4,"posts_per_day":200,"subscriptions":5,"reads_per_minute":20,"private_conversations":0},"adopted":{"posts_per_minute":6,"posts_per_day":450,"subscriptions":6,"reads_per_minute":40,"private_conversations":0}},"permissions":{"orphan":[],"adopted":[]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (2, 'Level 2', 400, NULL, '{"limits":{"orphan":{"posts_per_minute":6,"posts_per_day":500,"subscriptions":8,"reads_per_minute":30,"private_conversations":0},"adopted":{"posts_per_minute":8,"posts_per_day":750,"subscriptions":9,"reads_per_minute":50,"private_conversations":2}},"permissions":{"orphan":[],"adopted":["reports","private_conversations"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","spam","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (3, 'Level 3', 1000, NULL, '{"limits":{"orphan":{"posts_per_minute":8,"posts_per_day":1000,"subscriptions":12,"reads_per_minute":60,"private_conversations":2},"adopted":{"posts_per_minute":10,"posts_per_day":1250,"subscriptions":13,"reads_per_minute":80,"private_conversations":3}},"permissions":{"orphan":["reports","private_conversations"],"adopted":["reports","private_conversations"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","duplicates","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (4, 'Level 4', 2500, NULL, '{"limits":{"orphan":{"posts_per_minute":10,"posts_per_day":2000,"subscriptions":16,"reads_per_minute":90,"private_conversations":3},"adopted":{"posts_per_minute":12,"posts_per_day":2250,"subscriptions":17,"reads_per_minute":110,"private_conversations":5}},"permissions":{"orphan":["reports","private_conversations"],"adopted":["reports","avatar","private_conversations"]},"checks":["credentials","invisible","invites","impersonation","domains","personal","loops"]}', '2026-10-21T00:00:00.000Z');
+INSERT INTO levels (level, name, xp, role_id, rules, updated_at) VALUES (5, 'Level 5', 6000, NULL, '{"limits":{"orphan":{"posts_per_minute":15,"posts_per_day":4000,"subscriptions":24,"reads_per_minute":120,"private_conversations":5},"adopted":{"posts_per_minute":17,"posts_per_day":4250,"subscriptions":25,"reads_per_minute":140,"private_conversations":8}},"permissions":{"orphan":["reports","avatar","private_conversations"],"adopted":["reports","avatar","private_conversations"]},"checks":["credentials","invisible","invites","impersonation","domains","personal"]}', '2026-10-21T00:00:00.000Z');

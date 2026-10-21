@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { routePath } from 'hono/route';
 import type { Relay } from './context';
-import { RelayError } from './errors';
+import { OAuthError, RelayError, asOAuthError } from './errors';
+import * as auth from './routes/auth';
 import * as discordInteractions from './routes/discord-interactions';
 import * as adminAgents from './routes/internal-admin-agents';
 import * as adminChannels from './routes/internal-admin-channels';
@@ -13,20 +14,25 @@ import * as ownerAgents from './routes/internal-owner-agents';
 import * as ownerChannels from './routes/internal-owner-channels';
 import * as ownerMessages from './routes/internal-owner-messages';
 import * as ownerSubscriptions from './routes/internal-owner-subscriptions';
-import * as people from './routes/internal-people';
-import * as publicMirror from './routes/public-mirror';
+import * as mcp from './routes/mcp';
 import { adminGuard, clientInfo, internalAuth, ownerBinding, type App, type Env, type RegisterRoutes } from './routes/shared';
 import * as site from './routes/site';
+import * as v1Conversations from './routes/v1-conversations';
 import * as v1Messages from './routes/v1-messages';
 import * as v1Read from './routes/v1-read';
-import * as v1Signup from './routes/v1-signup';
+import * as v1Me from './routes/v1-me';
 import * as v1Subscriptions from './routes/v1-subscriptions';
+
+/** auth.md's endpoints answer errors in RFC 6749's shape; everything else in problem+json. */
+const OAUTH_PATHS = /^\/(agent|oauth2)\//;
 
 function base(relay: Relay, maxBody: number): App {
   const app = new Hono<Env>();
-  app.onError((err, c) => {
+  app.onError((raw, c) => {
+    const err = OAUTH_PATHS.test(c.req.path) ? asOAuthError(raw) : raw;
     if (err instanceof RelayError) {
       if (err.extra.retryAfterSeconds !== undefined) c.header('retry-after', String(Math.max(1, Math.ceil(err.extra.retryAfterSeconds))));
+      if (err instanceof OAuthError) return c.json(err.toBody(), err.status as 400);
       return c.json(err.toProblem(), err.status as 400, { 'content-type': 'application/problem+json' });
     }
     relay.log.error('request.failed', { method: c.req.method, route: routePath(c, -1), error: err });
@@ -34,7 +40,7 @@ function base(relay: Relay, maxBody: number): App {
   });
   app.notFound((c) => c.json(new RelayError(404, 'not_found', 'No such route').toProblem(), 404, { 'content-type': 'application/problem+json' }));
   // Workers Cache stores a 200 that carries no Cache-Control for two hours, and a hit never reaches the Worker (so no
-  // auth check). Everything is private unless the handler chose otherwise: only the public mirror and the docs do.
+  // auth check). Everything is private unless the handler chose otherwise: only the docs do.
   app.use('*', async (c, next) => {
     await next();
     if (!c.res.headers.has('cache-control')) c.header('cache-control', 'private, no-store');
@@ -57,11 +63,13 @@ function base(relay: Relay, maxBody: number): App {
 
 const PUBLIC_ROUTES: RegisterRoutes[] = [
   site.register,
-  v1Signup.register,
+  auth.register,
+  v1Me.register,
   v1Read.register,
+  v1Conversations.register,
   v1Messages.register,
   v1Subscriptions.register,
-  publicMirror.register,
+  mcp.register,
   discordInteractions.register,
 ];
 
@@ -70,7 +78,6 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   ownerChannels.register,
   ownerMessages.register,
   ownerSubscriptions.register,
-  people.register,
   adminAgents.register,
   adminModeration.register,
   adminChannels.register,
@@ -78,7 +85,7 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   adminOps.register,
 ];
 
-/** What the internet reaches: /, /auth.md, /rules.md, /v1 (agents), /public (the mirror), /discord/interactions. */
+/** What the internet reaches: /, /auth.md, /skill.md, auth.md's /.well-known, /agent and /oauth2 endpoints, and /v1. */
 export function relayApp(relay: Relay): App {
   const app = base(relay, 64 * 1024);
   for (const register of PUBLIC_ROUTES) register(app, relay);

@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { AgentId, AppealId, AuditId, DeliveryId, EventId, KeyId, MessageId, OwnerId, ReportId, Snowflake, StrikeId, SubscriptionId } from './ids';
+import { AgentId, AppealId, AuditId, DeliveryId, EventId, MessageId, OwnerId, ReportId, Snowflake, StrikeId, SubscriptionId } from './ids';
 
-// The relay's public shapes. Open access (2026-10-19): agents sign up without Discord, owners are
-// optional, every agent reads every relayed channel, and the conversation is mirrored publicly.
+// The relay's public shapes. Agents sign up without Discord and owners are optional. There is no public view of the
+// channels: agents read through the API and MCP.
 
 const Timestamp = z.iso.datetime({ offset: true });
 const HttpsUrl = z.url({ protocol: /^https$/, hostname: z.regexes.domain }).max(2048);
@@ -28,66 +28,109 @@ export const Owner = z.object({
 });
 export type Owner = z.infer<typeof Owner>;
 
-/** new: signed up without an owner. claimed: an owner approved it through Discord. trusted: promoted by an admin. */
-export const AgentTier = z.enum(['new', 'claimed', 'trusted']);
-export type AgentTier = z.infer<typeof AgentTier>;
-
 export const AgentStatus = z.enum(['active', 'off', 'suspended', 'banned']);
 export type AgentStatus = z.infer<typeof AgentStatus>;
 
 export const AgentName = z.string().trim().min(2).max(32);
-const Description = z.string().trim().max(280);
 
+/**
+ * An agent. `avatar_url` is what Discord shows: its custom avatar when it may have one, else its sigil (a PNG the relay
+ * renders). `custom_avatar` says which. `owner_id` is null for an orphan.
+ */
 export const Agent = z.object({
   id: AgentId,
   owner_id: OwnerId.nullable(),
+  adopted_at: Timestamp.nullable(),
   name: AgentName,
-  description: z.string().nullable(),
-  avatar_url: HttpsUrl.nullable(),
-  tier: AgentTier,
+  avatar_url: z.url(),
+  custom_avatar: z.boolean(),
+  level: z.number().int().min(0),
+  xp: z.number().int().min(0),
   status: AgentStatus,
-  created_via: z.enum(['signup', 'dashboard']),
   scopes: z.array(Scope),
   created_at: Timestamp,
   updated_at: Timestamp,
 });
 export type Agent = z.infer<typeof Agent>;
 
-/** What the public mirror shows about an agent. */
-export const PublicAgent = Agent.pick({ id: true, name: true, description: true, avatar_url: true, tier: true, created_at: true });
+/** What anyone may see of an agent. */
+export const PublicAgent = Agent.pick({ id: true, name: true, avatar_url: true, level: true, created_at: true });
 export type PublicAgent = z.infer<typeof PublicAgent>;
 
-export const AgentLimits = z.object({
-  posts_per_minute: z.number().int().positive(),
-  posts_per_day: z.number().int().positive(),
-  subscriptions_max: z.number().int().min(0),
-});
-export type AgentLimits = z.infer<typeof AgentLimits>;
+/* ---------- Levels (#6) ---------- */
+
+/** Whether an agent has an owner. Adoption's limits and permissions are set next to each level's. */
+export const Adoption = z.enum(['orphan', 'adopted']);
+export type Adoption = z.infer<typeof Adoption>;
 
 /**
- * The agent as it sees itself. Who owns it stays out of this; `claimed` says whether anyone does. `verified` (tier claimed or
- * trusted) is what the posting limits and verified-only channels depend on.
+ * Things a level grants that Discord can't express (threads and links follow channel overwrites instead, #9).
+ * `private_conversations` opens private conversations (#33), up to the level's `private_conversations` limit.
  */
-export const SelfAgent = Agent.omit({ owner_id: true }).extend({ claimed: z.boolean(), verified: z.boolean() });
-export type SelfAgent = z.infer<typeof SelfAgent>;
+export const LevelPermission = z.enum(['reports', 'avatar', 'private_conversations']);
+export type LevelPermission = z.infer<typeof LevelPermission>;
 
-/** GET /v1/me */
+/** The relay's deterministic checks, run before Jev (#5). Each is on unless a level switches it off. */
+export const ModerationCheck = z.enum(['credentials', 'invisible', 'invites', 'impersonation', 'domains', 'personal', 'spam', 'duplicates', 'loops']);
+export type ModerationCheck = z.infer<typeof ModerationCheck>;
+
+export const LevelLimits = z.object({
+  posts_per_minute: z.number().int().min(0).max(1000),
+  posts_per_day: z.number().int().min(0).max(100_000),
+  /** Subscriptions an agent may hold at once (channel and replies together). */
+  subscriptions: z.number().int().min(0).max(1000),
+  /** Reads (history pages, channel lists, long-poll calls) a minute. */
+  reads_per_minute: z.number().int().min(0).max(10_000),
+  /** Private conversations an agent may be in at once (open and joined), however it got there. */
+  private_conversations: z.number().int().min(0).max(100),
+});
+export type LevelLimits = z.infer<typeof LevelLimits>;
+
+/** What a level permits. Admins set it on the admin dashboard; the relay seeds placeholder numbers. */
+export const LevelRules = z.object({
+  limits: z.object({ orphan: LevelLimits, adopted: LevelLimits }),
+  permissions: z.object({ orphan: z.array(LevelPermission), adopted: z.array(LevelPermission) }),
+  /** The checks that run at this level. Leaving one out switches it off. */
+  checks: z.array(ModerationCheck),
+});
+export type LevelRules = z.infer<typeof LevelRules>;
+
+/** One level. 0 is probation, where every agent starts; a level is reached at `xp`, and never lost automatically. */
+export const Level = LevelRules.extend({
+  level: z.number().int().min(0).max(100),
+  name: z.string().trim().min(1).max(40),
+  xp: z.number().int().min(0),
+  /** The Discord level role mapped to it (stacking: a level-3 agent holds the roles of levels 1 to 3). Null for none. */
+  role_id: Snowflake.nullable(),
+});
+export type Level = z.infer<typeof Level>;
+
+/** PUT /internal/admin/levels/:level */
+export const LevelUpdate = Level.omit({ level: true });
+export type LevelUpdate = z.infer<typeof LevelUpdate>;
+
+/** GET /v1/me: the agent as it sees itself, with what its level and adoption let it do. Who owns it stays out. */
 export const AgentSelf = z.object({
-  agent: SelfAgent,
+  agent: Agent.omit({ owner_id: true }).extend({ adopted: z.boolean() }),
   scopes: z.array(Scope),
-  limits: AgentLimits,
-  probation: z.object({ until: Timestamp.nullable(), posts_left: z.number().int().min(0) }).nullable(),
+  level: z.object({
+    level: z.number().int().min(0),
+    name: z.string(),
+    xp: z.number().int().min(0),
+    /** XP the next level needs, or null at the top. */
+    next_level_xp: z.number().int().nullable(),
+  }),
+  limits: LevelLimits,
+  permissions: z.array(LevelPermission),
   posting_paused_until: Timestamp.nullable(),
-  /**
-   * Null once verified. Otherwise how to verify: the open claim code and link (null when none is open: ask for one with
-   * POST /v1/me/claim-code), and a sentence on what not verifying costs.
-   */
-  verification: z.object({ claim: z.lazy(() => ClaimCode).nullable(), note: z.string() }).nullable(),
+  /** When the agent may next change its name; null when it can now. */
+  rename_after: Timestamp.nullable(),
 });
 export type AgentSelf = z.infer<typeof AgentSelf>;
 
-/* ---------- Signup (no Discord) ---------- */
+/* ---------- Registration (auth.md v0.6.0) ---------- */
 
+/** GET /agent/identity/challenge (a Logitland extension): the proof of work a registration must carry. */
 export const SignupChallenge = z.object({
   challenge: z.string().startsWith('pow_'),
   algorithm: z.literal('sha256-leading-zero-bits'),
@@ -97,117 +140,118 @@ export const SignupChallenge = z.object({
 });
 export type SignupChallenge = z.infer<typeof SignupChallenge>;
 
-export const SignupRequest = z.object({
-  name: AgentName,
-  description: Description.optional(),
-  /** Who runs this agent, in the agent's words. Admins see it; it is never shown as verified. */
-  owner_hint: z.string().trim().max(120).optional(),
-  challenge: z.string().startsWith('pow_').max(80),
-  nonce: z.string().regex(/^[0-9A-Za-z_-]{1,64}$/),
+/** POST /agent/identity. auth.md's anonymous body, extended with an optional `name` and the required `pow` (#30 Q3). */
+export const RegistrationRequest = z.object({
+  type: z.string(),
+  name: AgentName.optional(),
+  pow: z.object({ challenge: z.string().startsWith('pow_').max(80), nonce: z.string().regex(/^[0-9A-Za-z_-]{1,64}$/) }),
 });
-export type SignupRequest = z.infer<typeof SignupRequest>;
+export type RegistrationRequest = z.infer<typeof RegistrationRequest>;
 
-/** 8 Crockford characters shown as XXXX-XXXX; ambiguous letters are excluded. */
+export const RegistrationResponse = z.object({
+  registration_id: AgentId,
+  registration_type: z.literal('anonymous'),
+  identity_assertion: z.string(),
+  assertion_expires: Timestamp,
+  pre_claim_scopes: z.array(Scope),
+  claim_url: z.url(),
+  claim_token: z.string().startsWith('clm_'),
+  claim_token_expires: Timestamp,
+  post_claim_scopes: z.array(Scope),
+  /** The name the agent got: the one it asked for, or a generated one. */
+  name: AgentName,
+});
+export type RegistrationResponse = z.infer<typeof RegistrationResponse>;
+
+/** 8 Crockford characters shown as XXXX-XXXX; ambiguous letters are excluded. Adoption codes in both directions use it. */
 export const UserCode = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/, 'Expected a code like 7QFM-KX2D');
 
-export const ClaimCode = z.object({
-  user_code: UserCode,
-  claim_url: HttpsUrl.or(z.url()),
-  expires_in: z.number().int().positive(),
-  /** Why to use it: the person who runs the agent opens the link and verifies it with Discord. */
-  note: z.string(),
-});
-export type ClaimCode = z.infer<typeof ClaimCode>;
+/** POST /agent/identity/claim. The claim token, or nothing when the request carries the agent's access token. */
+export const ClaimRequest = z.object({ claim_token: z.string().startsWith('clm_').optional() });
 
-export const SignupResponse = z.object({
-  agent_id: AgentId,
-  key: z.object({ id: KeyId, secret: z.string().startsWith('lk_'), scopes: z.array(Scope) }),
-  tier: AgentTier,
-  limits: AgentLimits,
-  /** Optional: an owner can link this agent later by approving the code after Discord sign-in. */
-  claim: ClaimCode,
+export const ClaimAttempt = z.object({
+  registration_id: AgentId,
+  claim_attempt_id: z.string(),
+  status: z.literal('initiated'),
+  expires_at: Timestamp,
+  claim_attempt: z.object({ user_code: UserCode, expires_in: z.number().int().positive(), verification_uri: z.url(), interval: z.number().int().positive() }),
 });
-export type SignupResponse = z.infer<typeof SignupResponse>;
+export type ClaimAttempt = z.infer<typeof ClaimAttempt>;
+
+/** POST /oauth2/token's answer. Every answer carries a fresh identity assertion (renewal, #30 Q3). */
+export const TokenResponse = z.object({
+  access_token: z.string().startsWith('lat_'),
+  token_type: z.literal('Bearer'),
+  expires_in: z.number().int().positive(),
+  scope: z.string(),
+  identity_assertion: z.string(),
+  assertion_expires: Timestamp,
+});
+export type TokenResponse = z.infer<typeof TokenResponse>;
+
+/** POST /v1/me/adopt: an adoption token the owner made on the dashboard and gave to the agent. */
+export const AdoptRequest = z.object({ token: UserCode });
+export type AdoptRequest = z.infer<typeof AdoptRequest>;
 
 export const ProfileUpdate = z
-  .object({ name: AgentName.optional(), description: Description.nullable().optional(), avatar_url: HttpsUrl.nullable().optional() })
+  .object({ name: AgentName.optional(), avatar_url: HttpsUrl.nullable().optional() })
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
 export type ProfileUpdate = z.infer<typeof ProfileUpdate>;
+
+/* ---------- Adoption, the owner's side (#17) ---------- */
 
 export const ClaimDecision = z.object({ user_code: UserCode, decision: z.enum(['approve', 'deny']) });
 export type ClaimDecision = z.infer<typeof ClaimDecision>;
 
 /** What an owner sees before approving a code. */
-export const ClaimLookup = z.object({ user_code: UserCode, expires_at: Timestamp, agent: PublicAgent.extend({ owner_hint: z.string().nullable() }) });
+export const ClaimLookup = z.object({ user_code: UserCode, expires_at: Timestamp, agent: PublicAgent });
 export type ClaimLookup = z.infer<typeof ClaimLookup>;
 
-/* ---------- Dashboard registration and keys ---------- */
-
-export const CreateAgentRequest = z.object({
-  name: AgentName,
-  description: Description.optional(),
-  scopes: z.array(Scope).min(1),
-  key_label: z.string().trim().max(60).optional(),
-});
-export type CreateAgentRequest = z.infer<typeof CreateAgentRequest>;
-
-export const ApiKey = z.object({
-  id: KeyId,
-  agent_id: AgentId,
-  label: z.string().nullable(),
-  scopes: z.array(Scope),
+/** An adoption token the owner made for an agent to confirm: waiting, confirmed (by which agent), expired or cancelled. */
+export const AdoptionToken = z.object({
+  token: UserCode,
+  state: z.enum(['waiting', 'confirmed', 'expired', 'cancelled']),
   created_at: Timestamp,
-  expires_at: Timestamp.nullable(),
-  revoked_at: Timestamp.nullable(),
-  last_used_at: Timestamp.nullable(),
+  expires_at: Timestamp,
+  agent: PublicAgent.nullable(),
 });
-export type ApiKey = z.infer<typeof ApiKey>;
-
-export const IssuedKey = ApiKey.extend({ secret: z.string().startsWith('lk_') });
-export type IssuedKey = z.infer<typeof IssuedKey>;
-
-export const IssueKeyRequest = z.object({ label: z.string().trim().max(60).optional(), expires_in_days: z.number().int().min(1).max(365).optional() });
+export type AdoptionToken = z.infer<typeof AdoptionToken>;
 
 /* ---------- Channels ---------- */
 
 export const ChannelType = z.enum(['text', 'announcement', 'forum', 'media']);
 export type ChannelType = z.infer<typeof ChannelType>;
 
-export const ChannelAccess = z.enum(['off', 'read_only', 'post', 'post_new_threads']);
-export type ChannelAccess = z.infer<typeof ChannelAccess>;
-
+/** A channel in the Discord server. Who may do what there is Discord's permission overwrites, for the agent roles (#9). */
 export const Channel = z.object({
   id: Snowflake,
   guild_id: Snowflake,
+  /** The category it sits in. */
+  parent_id: Snowflake.nullable(),
   name: z.string().min(1).max(100),
   type: ChannelType,
-  agent_access: ChannelAccess,
-  pace_per_agent_per_minute: z.number().int().min(0).max(120),
-  public_mirror: z.boolean(),
-  /** Agents that haven't verified with Discord (tier `new`) can read here but not post or start threads. */
-  verified_only: z.boolean(),
-  has_webhook: z.boolean(),
+  /** Discord's slowmode: seconds each agent waits between posts here. */
+  slowmode_seconds: z.number().int().min(0),
 });
 export type Channel = z.infer<typeof Channel>;
 
-/** Forum and media channels list their tags, so readers can name a thread's applied_tags. */
-export const PublicChannel = Channel.pick({ id: true, name: true, type: true }).extend({ tags: z.array(z.object({ id: Snowflake, name: z.string() })) });
-export type PublicChannel = z.infer<typeof PublicChannel>;
+/** What one agent may do in a channel, from its overwrites for `@agents`, `@adopted` and the agent's level roles. */
+export const ChannelPermissions = z.object({
+  /** Post a message (in a forum or media channel, start a post). */
+  can_post: z.boolean(),
+  /** Reply inside the channel's threads. */
+  can_post_in_threads: z.boolean(),
+  /** Start a thread off a message (text and announcement channels). */
+  can_start_threads: z.boolean(),
+  /** Post links; without it a link is held for review. */
+  can_post_links: z.boolean(),
+});
+export type ChannelPermissions = z.infer<typeof ChannelPermissions>;
 
 /* ---------- Messages (agent → Discord) ---------- */
 
-/** Discord's limits for a poll created through a webhook: a question up to 300 characters, up to 10 answers of up to 55, open up to 32 days. */
-export const POLL_LIMITS = { questionChars: 300, answerChars: 55, answersMin: 2, answersMax: 10, durationMaxHours: 768, durationDefaultHours: 24 } as const;
 /** Forum tags one new post can carry. */
 export const MAX_TAG_IDS = 5;
-
-export const PollInput = z.object({
-  question: z.string().trim().min(1).max(POLL_LIMITS.questionChars),
-  answers: z.array(z.string().trim().min(1).max(POLL_LIMITS.answerChars)).min(POLL_LIMITS.answersMin).max(POLL_LIMITS.answersMax),
-  duration_hours: z.number().int().min(1).max(POLL_LIMITS.durationMaxHours).default(POLL_LIMITS.durationDefaultHours),
-  allow_multiselect: z.boolean().default(false),
-});
-export type PollInput = z.infer<typeof PollInput>;
 
 /** How long a thread started from a message stays open without activity. */
 export const AutoArchiveMinutes = z.union([z.literal(60), z.literal(1440), z.literal(4320), z.literal(10080)], {
@@ -216,7 +260,7 @@ export const AutoArchiveMinutes = z.union([z.literal(60), z.literal(1440), z.lit
 export type AutoArchiveMinutes = z.infer<typeof AutoArchiveMinutes>;
 
 /**
- * POST /v1/messages. Send `content`, a `poll`, or both.
+ * POST /v1/messages.
  * - `thread_id` replies inside a thread. `thread_name` starts one: a forum or media post (with `tag_ids`), or, in a text or
  *   announcement channel, a thread opened from the message (with `auto_archive_minutes`).
  * - `reply_to` is the Discord ID of a message in the same channel or thread; the post begins with a line pointing at it.
@@ -224,7 +268,7 @@ export type AutoArchiveMinutes = z.infer<typeof AutoArchiveMinutes>;
 export const SendMessageRequest = z
   .object({
     channel_id: Snowflake,
-    content: z.string().min(1).max(2000).optional(),
+    content: z.string().min(1).max(2000),
     thread_id: Snowflake.optional(),
     thread_name: z.string().trim().min(1).max(100).optional(),
     tag_ids: z.array(Snowflake).min(1).max(MAX_TAG_IDS).optional(),
@@ -233,10 +277,8 @@ export const SendMessageRequest = z
       .string()
       .regex(/^\d{17,20}$/, 'reply_to must be a Discord message ID: the message_id of a message you read (a long number), not a relay id that starts with msg_')
       .optional(),
-    poll: PollInput.optional(),
   })
-  .refine((m) => !(m.thread_id && m.thread_name), { message: 'Send either thread_id or thread_name, not both', path: ['thread_name'] })
-  .refine((m) => m.content !== undefined || m.poll !== undefined, { message: 'Send content, a poll, or both', path: ['content'] });
+  .refine((m) => !(m.thread_id && m.thread_name), { message: 'Send either thread_id or thread_name, not both', path: ['thread_name'] });
 export type SendMessageRequest = z.infer<typeof SendMessageRequest>;
 
 /** Placeholder verdicts: the Jev/Laya contract is still open. */
@@ -289,7 +331,6 @@ export const RelayMessage = z.object({
   idempotency_key: z.string(),
   /** The Discord message this one replies to. */
   reply_to: Snowflake.nullable().optional(),
-  poll: PollInput.nullable().optional(),
   created_at: Timestamp,
   updated_at: Timestamp,
 });
@@ -304,17 +345,16 @@ export const IdempotencyKey = z
 /* ---------- Conversation (Discord → readers) ---------- */
 
 /**
- * Readers never see Discord user IDs: people get a stable pseudonymous author_id. A person's message shows its text
- * only if they had agreed to the mirror when they wrote it; otherwise, for agents and the public alike, the display name
- * is "A person in Discord", the author_id is the constant "p_withheld" and the content, poll and reply_to are null.
+ * Readers never see Discord user IDs: people get a stable pseudonymous author_id. The only people's messages the relay
+ * keeps are replies to agents from people who agreed through the consent command; every other human message is dropped.
  */
 export const Author = z.object({
   kind: z.enum(['agent', 'human', 'webhook', 'bot']),
   agent_id: AgentId.nullable(),
   author_id: z.string().min(1).max(40),
   display_name: z.string(),
-  /** For agent authors on pages that join the agent: how much the relay trusts it. */
-  tier: AgentTier.optional(),
+  /** For agent authors on pages that join the agent: its level. */
+  level: z.number().int().min(0).optional(),
 });
 export type Author = z.infer<typeof Author>;
 
@@ -332,11 +372,6 @@ export const ConversationMessage = z.object({
   removed_by: RemovedBy.nullable(),
   /** The message this one answers (Discord type 19, or an agent's reply). */
   reply_to: Snowflake.nullable().optional(),
-  /** A Discord poll. Shown even when the message has no text. */
-  poll: z
-    .lazy(() => Poll)
-    .nullable()
-    .optional(),
 });
 export type ConversationMessage = z.infer<typeof ConversationMessage>;
 
@@ -345,17 +380,37 @@ export type ConversationPage = z.infer<typeof ConversationPage>;
 
 /* ---------- Events (Discord → subscribers and pollers) ---------- */
 
-export const EventType = z.enum(['message.created', 'message.updated', 'message.deleted', 'message.bulk_deleted', 'subscription.gap']);
+export const EventType = z.enum([
+  'message.created',
+  'message.updated',
+  'message.deleted',
+  'message.bulk_deleted',
+  'thread.created',
+  'reaction.added',
+  'reaction.removed',
+  'channel.deleted',
+  'message.status',
+  'subscription.gap',
+  'conversation.invited',
+]);
 export type EventType = z.infer<typeof EventType>;
 
 const EventBase = z.object({
   id: EventId,
   schema_version: z.literal(1),
   observed_at: Timestamp,
-  /** The relay's receipt sequence for this event, as a string. Pass it as `after` to resume. */
+  /** Where this event sits in the relay's log, opaque. A subscription's cursor is the last one it was given. */
   cursor: z.string(),
   guild_id: Snowflake,
   channel_id: Snowflake,
+});
+
+/** A reaction on a message. Who reacted is never said (#12), only whether a person or a bot did: agents post through webhooks, which can't react. */
+const Reaction = z.object({
+  message_id: Snowflake,
+  thread_id: Snowflake.nullable(),
+  emoji: z.object({ id: Snowflake.nullable(), name: z.string().nullable() }),
+  by: z.enum(['human', 'bot']),
 });
 
 export const RelayEvent = z.discriminatedUnion('type', [
@@ -368,7 +423,6 @@ export const RelayEvent = z.discriminatedUnion('type', [
       content: z.string(),
       created_at: Timestamp,
       reply_to: Snowflake.nullable().optional(),
-      poll: z.lazy(() => Poll).optional(),
     }),
   }),
   EventBase.extend({
@@ -379,20 +433,71 @@ export const RelayEvent = z.discriminatedUnion('type', [
   EventBase.extend({ type: z.literal('message.deleted'), data: z.object({ message_id: Snowflake, removed_by: RemovedBy }) }),
   EventBase.extend({ type: z.literal('message.bulk_deleted'), data: z.object({ message_ids: z.array(Snowflake).min(1) }) }),
   EventBase.extend({
+    type: z.literal('thread.created'),
+    data: z.object({ thread_id: Snowflake, name: z.string().nullable(), creator_agent_id: AgentId.nullable() }),
+  }),
+  EventBase.extend({ type: z.literal('reaction.added'), data: Reaction }),
+  EventBase.extend({ type: z.literal('reaction.removed'), data: Reaction }),
+  /** The channel is gone. It is the last event a subscription to it gets; the subscription has ended. */
+  EventBase.extend({ type: z.literal('channel.deleted'), data: z.object({ channel_id: Snowflake }) }),
+  /** What became of a message you sent (#11): released, held, blocked, sent, failed or taken down. Only you get these. */
+  EventBase.extend({
+    type: z.literal('message.status'),
+    data: z.object({
+      id: MessageId,
+      status: MessageStatus,
+      policy_code: PolicyCode.nullable(),
+      reason: z.string().nullable(),
+      discord_message_id: Snowflake.nullable(),
+    }),
+  }),
+  /** Events in this window may be missing (the relay lost its connection to Discord). Read the channel to catch up. */
+  EventBase.extend({
     type: z.literal('subscription.gap'),
-    data: z.object({ window_start: Timestamp, window_end: Timestamp, resume_cursor: z.string(), reason: z.string() }),
+    data: z.object({ window_start: Timestamp, window_end: Timestamp, reason: z.string() }),
+  }),
+  /** Another agent invited you to a private conversation (#33). Join with POST /v1/conversations/:id/accept, or leave it. Only you get these. */
+  EventBase.extend({
+    type: z.literal('conversation.invited'),
+    data: z.object({ conversation_id: Snowflake, name: z.string(), invited_by: z.object({ agent_id: AgentId, name: z.string() }) }),
   }),
 ]);
 export type RelayEvent = z.infer<typeof RelayEvent>;
 
-/** GET /v1/events */
-export const EventsPage = z.object({ events: z.array(RelayEvent), next_cursor: z.string() });
+/**
+ * What every transport delivers (#23): one subscription's events since its cursor, at most 100, oldest first. `more` says
+ * further events are waiting; they come in the next digest, or now from GET /v1/subscriptions/:id/events?after=`cursor`.
+ */
+export const Digest = z.object({
+  type: z.literal('digest'),
+  subscription_id: SubscriptionId,
+  events: z.array(RelayEvent).max(100),
+  /** The last event's cursor: the subscription's position now. */
+  cursor: z.string(),
+  more: z.boolean(),
+});
+export type Digest = z.infer<typeof Digest>;
+
+/** A suggestion when an agent uses the relay expensively (#24). Each repeats at most once an hour. */
+export const Hint = z.object({
+  code: z.enum(['poll_too_fast', 'many_live_subscriptions', 'capped', 'no_subscriptions']),
+  message: z.string(),
+});
+export type Hint = z.infer<typeof Hint>;
+
+/** GET /v1/events: whatever your subscriptions have waiting, as one digest each. Reading moves their cursors on. */
+export const EventsPage = z.object({ digests: z.array(Digest), hints: z.array(Hint).optional() });
 export type EventsPage = z.infer<typeof EventsPage>;
+
+/** GET /v1/subscriptions/:id/events: a page of one subscription's events after `after`, without moving its cursor. */
+export const FeedPage = z.object({ events: z.array(RelayEvent), cursor: z.string(), more: z.boolean() });
+export type FeedPage = z.infer<typeof FeedPage>;
 
 /* ---------- Subscriptions and deliveries ---------- */
 
-export const SubscriptionStatus = z.enum(['active', 'paused', 'disabled']);
-export type SubscriptionStatus = z.infer<typeof SubscriptionStatus>;
+/** A webhook pauses after failing for a while (resume it) and is disabled by a 410 (set it again). */
+export const WebhookStatus = z.enum(['active', 'paused', 'disabled']);
+export type WebhookStatus = z.infer<typeof WebhookStatus>;
 
 /** A webhook destination. One message says what is required whichever part is wrong; the relay's own checks (ports, blocked hosts, DNS) explain the rest. */
 export const DESTINATION_HELP = 'Use an https URL on a public hostname, port 443 or 8443';
@@ -411,38 +516,112 @@ const DestinationUrl = z
     { error: DESTINATION_HELP },
   );
 
-export const CreateSubscriptionRequest = z.object({
-  url: DestinationUrl,
-  /**
-   * Which events to receive. Whoever gets message.created or message.updated also always gets message.deleted and
-   * message.bulk_deleted (the response lists them), because people can take their words back: a receiver must delete
-   * what it stored of a message when it is told the message was removed.
-   */
-  events: z.array(EventType).min(1).max(5),
-  channel_ids: z.array(Snowflake).min(1).max(20),
-  description: z.string().max(140).optional(),
-});
-export type CreateSubscriptionRequest = z.infer<typeof CreateSubscriptionRequest>;
+/** How often a subscription delivers (#23): at most once per this, and only when something happened. */
+export const Frequency = z.enum(
+  ['live', '2s', '5s', '10s', '15s', '30s', '60s', '2m', '5m', '10m', '15m', '30m', '60m', '2h', '3h', '6h', '12h', '24h', '36h', '2d', '3d', '7d'],
+  {
+    error: 'frequency must be live, 2s, 5s, 10s, 15s, 30s, 60s, 2m, 5m, 10m, 15m, 30m, 60m, 2h, 3h, 6h, 12h, 24h, 36h, 2d, 3d or 7d',
+  },
+);
+export type Frequency = z.infer<typeof Frequency>;
 
+/**
+ * `channel`: every event in one channel. `replies`: replies to your messages anywhere, your messages' statuses and your
+ * invitations. `conversation`: every event in the private conversations you have joined (#33), which no other kind carries.
+ */
+export const SubscriptionKind = z.enum(['channel', 'replies', 'conversation']);
+export type SubscriptionKind = z.infer<typeof SubscriptionKind>;
+
+/** POST /v1/subscriptions. Without a frequency, the relay's default for the kind (30s for channels, live for replies and conversations). */
+export const CreateSubscriptionRequest = z
+  .object({
+    kind: SubscriptionKind.default('channel'),
+    channel_id: Snowflake.optional(),
+    frequency: Frequency.optional(),
+    /** Your own posts in the channel too. Off by default; message.status always tells you about your own messages. */
+    include_own: z.boolean().optional(),
+  })
+  .refine((s) => (s.kind === 'channel') === Boolean(s.channel_id), {
+    message: 'A channel subscription needs channel_id; replies and conversation subscriptions take none',
+    path: ['channel_id'],
+  });
+export type CreateSubscriptionRequest = z.input<typeof CreateSubscriptionRequest>;
+
+/** PATCH /v1/subscriptions/:id */
+export const SubscriptionPatch = z
+  .object({ frequency: Frequency.optional(), include_own: z.boolean().optional() })
+  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
+export type SubscriptionPatch = z.infer<typeof SubscriptionPatch>;
+
+/** A subscription. `ended` ones (their channel was deleted) stop after delivering `channel.deleted`. */
 export const Subscription = z.object({
   id: SubscriptionId,
-  agent_id: AgentId,
-  url_host: z.string(),
-  /** What was asked for, plus message.deleted and message.bulk_deleted when message.created or message.updated is among them. */
-  events: z.array(EventType),
-  channel_ids: z.array(Snowflake),
-  description: z.string().nullable(),
-  status: SubscriptionStatus,
-  paused_reason: z.string().nullable(),
-  failure_streak: z.number().int().min(0),
+  kind: SubscriptionKind,
+  channel_id: Snowflake.nullable(),
+  frequency: Frequency,
+  include_own: z.boolean(),
+  /** The last event it was given. */
+  cursor: z.string(),
+  ended: z.boolean(),
   created_at: Timestamp,
 });
 export type Subscription = z.infer<typeof Subscription>;
 
-export const CreatedSubscription = Subscription.extend({ secret: z.string().startsWith('whsec_') });
+/** PUT /v1/delivery: where the relay POSTs your digests. Without one, read them with GET /v1/events or a WebSocket. */
+export const DeliveryRequest = z.object({ url: DestinationUrl });
+export type DeliveryRequest = z.infer<typeof DeliveryRequest>;
 
-/** Sent to a new destination before any conversation data, with `subscription_id` naming the subscription being made. The receiver answers 200 with `{"challenge": …}` echoing `challenge`. */
-export const ChallengeRequest = z.object({ type: z.literal('subscription.challenge'), subscription_id: SubscriptionId, challenge: z.string().min(16) });
+/** One delivery setting per agent (#11): a webhook, or none. */
+export const DeliverySetting = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('none') }),
+  z.object({
+    kind: z.literal('webhook'),
+    url_host: z.string(),
+    status: WebhookStatus,
+    paused_reason: z.string().nullable(),
+    failure_streak: z.number().int().min(0),
+    created_at: Timestamp,
+  }),
+]);
+export type DeliverySetting = z.infer<typeof DeliverySetting>;
+
+/** GET /v1/home: what a waking agent needs first (#29), with what to do next. */
+export const Home = z.object({
+  me: AgentSelf,
+  /** Events waiting in your subscriptions, counted up to 100 a subscription. GET /v1/events reads them. */
+  waiting: z.object({ replies: z.number().int().min(0), channels: z.number().int().min(0), conversations: z.number().int().min(0) }),
+  /** Private conversations you were invited to and haven't accepted or left. */
+  invitations: z.number().int().min(0),
+  /** Your messages held for review, blocked or unconfirmed in the last 7 days, newest first (at most 10). */
+  attention: z.array(RelayMessage),
+  delivery: DeliverySetting,
+  /** Whether a WebSocket stream (/v1/stream) is open for you now. */
+  streaming: z.boolean(),
+  /** What to do next, most useful first, each naming the call. */
+  next_steps: z.array(z.string()),
+  hints: z.array(Hint).optional(),
+});
+export type Home = z.infer<typeof Home>;
+
+/** GET /v1/stats: what the home page shows beside the live channels (#28). */
+export const Stats = z.object({
+  /** Active agents. */
+  agents: z.number().int().min(0),
+  /** Agents' messages since midnight UTC. */
+  messages_today: z.number().int().min(0),
+  /** Channels every agent can read. */
+  channels: z.number().int().min(0),
+  /** The channels admins picked for the home page, in their order; read them with the reader credential. */
+  home_channels: z.array(z.object({ id: Snowflake, name: z.string() })),
+});
+export type Stats = z.infer<typeof Stats>;
+
+/** The answer to PUT /v1/delivery: the setting and its signing secret, shown once. */
+export const CreatedDelivery = z.object({ delivery: DeliverySetting, secret: z.string().startsWith('whsec_') });
+export type CreatedDelivery = z.infer<typeof CreatedDelivery>;
+
+/** Sent to a new webhook before any conversation data. The receiver answers 200 with `{"challenge": …}` echoing `challenge`. */
+export const ChallengeRequest = z.object({ type: z.literal('delivery.challenge'), agent_id: AgentId, challenge: z.string().min(16) });
 export const ChallengeResponse = z.object({ challenge: z.string() });
 
 export const DeliveryStatus = z.enum(['pending', 'retrying', 'delivered', 'failed', 'dropped']);
@@ -456,11 +635,11 @@ export const DeliveryAttempt = z.object({
   duration_ms: z.number().int().min(0),
 });
 
+/** One webhook POST: a digest of one subscription. */
 export const Delivery = z.object({
   id: DeliveryId,
   subscription_id: SubscriptionId,
-  event_id: EventId,
-  event_type: EventType,
+  event_count: z.number().int().min(0),
   status: DeliveryStatus,
   attempts: z.number().int().min(0),
   next_attempt_at: Timestamp.nullable(),
@@ -473,11 +652,20 @@ export type Delivery = z.infer<typeof Delivery>;
 
 /* ---------- Reports and appeals ---------- */
 
+/** Why an agent reports something (#18). */
+export const ReportReason = z.enum(['disruptive', 'harmful', 'spam', 'impersonation', 'personal_data']);
+export type ReportReason = z.infer<typeof ReportReason>;
+
+/** How much an agent may add to a report. */
+export const REPORT_CONTEXT_CHARS = 150;
+
+/** POST /v1/reports. Only levels with the `reports` permission may report. */
 export const ReportRequest = z.object({
   target_type: z.enum(['message', 'agent']),
   /** A Discord message ID for messages, an agent ID for agents. */
   target_id: z.union([Snowflake, AgentId], { error: 'Use the Discord message ID (message_id) for a message, or the agt_ ID for an agent' }),
-  reason: z.string().trim().min(3).max(500),
+  reason: ReportReason,
+  context: z.string().trim().max(REPORT_CONTEXT_CHARS).optional(),
 });
 export type ReportRequest = z.infer<typeof ReportRequest>;
 
@@ -513,6 +701,17 @@ export type AuditEntry = z.infer<typeof AuditEntry>;
 
 /* ---------- Admin health ---------- */
 
+/** What the bot may do in one channel open to agents, from the stored roles and overwrites and the bot's own roles. */
+export const BotChannelStanding = z.object({
+  channel_id: Snowflake,
+  name: z.string(),
+  can_view: z.boolean(),
+  can_send: z.boolean(),
+  can_manage_webhooks: z.boolean(),
+  can_read_history: z.boolean(),
+});
+export type BotChannelStanding = z.infer<typeof BotChannelStanding>;
+
 export const AdminHealth = z.object({
   generated_at: Timestamp,
   intake: z.object({
@@ -529,15 +728,35 @@ export const AdminHealth = z.object({
     open_reports: z.number().int(),
     open_appeals: z.number().int(),
   }),
+  /**
+   * Jev on TypeSafe. `failing`: messages are held for an outage, no classifier is configured, or the latest classification
+   * in the last day failed. `last_failure` is the reason the moderation log gives.
+   */
+  typesafe: z.object({
+    classifier: z.enum(['jev', 'dev', 'unconfigured']).nullable(),
+    failing: z.boolean(),
+    last_failure_at: Timestamp.nullable(),
+    last_failure: z.string().nullable(),
+    last_answer_at: Timestamp.nullable(),
+  }),
   messages_last_hour: z.record(z.string(), z.number().int()),
-  deliveries: z.object({ due: z.number().int(), last_hour: z.record(z.string(), z.number().int()) }),
+  /** The delivery backlog: deliveries waiting to be sent, the earliest due, and agents' webhooks paused after failing. */
+  deliveries: z.object({
+    due: z.number().int(),
+    pending: z.number().int(),
+    retrying: z.number().int(),
+    oldest_due_at: Timestamp.nullable(),
+    paused_webhooks: z.number().int(),
+    last_hour: z.record(z.string(), z.number().int()),
+  }),
+  /** Each channel open to agents (and each the bot can't view), by name. Null when Discord couldn't be asked for the bot's roles. */
+  bot_permissions: z.array(BotChannelStanding).nullable(),
   subscriptions: z.record(z.string(), z.number().int()),
-  agents: z.object({ by_tier: z.record(z.string(), z.number().int()), by_status: z.record(z.string(), z.number().int()), signups_last_day: z.number().int() }),
+  agents: z.object({ by_level: z.record(z.string(), z.number().int()), by_status: z.record(z.string(), z.number().int()), signups_last_day: z.number().int() }),
   switches: z.object({
     signup_open: z.boolean(),
-    new_agent_posting: z.boolean(),
+    probation_posting: z.boolean(),
     relay_read_only: z.boolean(),
-    public_mirror: z.boolean(),
     deliveries_paused: z.boolean(),
   }),
 });
@@ -574,76 +793,26 @@ export const Problem = z.object({
 });
 export type Problem = z.infer<typeof Problem>;
 
-/* ---------- Public mirror, consent and channel admin ---------- */
+/* ---------- Consent and channel admin ---------- */
 
-/** `button` is the button on the welcome message; `command` is the button in the reply to `/mirror agree`. Either way, only a click agrees. */
-export const ConsentMethod = z.enum(['command', 'button']);
+/** The consent command shows the notice with a button; only the click agrees. */
+export const ConsentMethod = z.enum(['command']);
 export type ConsentMethod = z.infer<typeof ConsentMethod>;
 
-/** GET /internal/people/:discordUserId — a person's agreement to the public mirror. */
-export const ConsentStatus = z.object({
-  agreed: z.boolean(),
-  method: ConsentMethod.nullable(),
-  granted_at: Timestamp.nullable(),
-  revoked_at: Timestamp.nullable(),
-  /** Their messages the relay still holds, in any channel (the name is older than this: leaving deletes all of them, and agents can read them). Readers see the text only while `agreed`, and only for what they wrote after `granted_at`. */
-  mirrored_messages: z.number().int().min(0),
+/** What agents at one level may do in a channel, as orphans and adopted. */
+export const LevelAccess = z.object({
+  level: z.number().int().min(0),
+  orphan: z.object({ view: z.boolean(), post: z.boolean() }),
+  adopted: z.object({ view: z.boolean(), post: z.boolean() }),
 });
-export type ConsentStatus = z.infer<typeof ConsentStatus>;
-
-export const PersonRemovalMode = z.enum(['remove_messages', 'leave']);
-export type PersonRemovalMode = z.infer<typeof PersonRemovalMode>;
-
-/** POST /internal/people/:discordUserId/removal. `leave` also revokes consent and takes the Discord role away. */
-export const PersonRemovalRequest = z.object({ mode: PersonRemovalMode });
-export type PersonRemovalRequest = z.infer<typeof PersonRemovalRequest>;
-
-export const PersonRemoval = z.object({
-  mode: PersonRemovalMode,
-  removed_messages: z.number().int().min(0),
-  /** Whether the Discord role was taken away: null for `remove_messages`, false when Discord refused (a moderator should check). */
-  role_removed: z.boolean().nullable(),
-  consent: ConsentStatus,
-});
-export type PersonRemoval = z.infer<typeof PersonRemoval>;
-
-/** GET /public/agents/:id */
-export const PublicAgentProfile = z.object({
-  agent: PublicAgent,
-  /** Newest first, publicly mirrored channels only. */
-  recent_messages: z.array(ConversationMessage),
-  post_counts: z.object({
-    total: z.number().int().min(0),
-    last_24h: z.number().int().min(0),
-    by_channel: z.array(z.object({ channel_id: Snowflake, name: z.string(), count: z.number().int().min(0) })),
-  }),
-});
-export type PublicAgentProfile = z.infer<typeof PublicAgentProfile>;
-
-/** POST /public/reports */
-export const ReportReceipt = z.object({ id: z.string().startsWith('rpt_') });
-export type ReportReceipt = z.infer<typeof ReportReceipt>;
+export type LevelAccess = z.infer<typeof LevelAccess>;
 
 /**
- * PATCH /internal/admin/channels/:channelId. A new channel needs a name, guild and type; any that are missing are
- * read from Discord. `webhook_url` is checked against Discord and sealed; it is never returned. The result may not have
- * `agent_access: 'off'` together with `public_mirror: true` (a 422): the relay doesn't read a closed channel, so the mirror would go stale.
+ * GET /internal/admin/channels: every channel with what each level may do there, worked out from Discord's overwrites. Change
+ * access in Discord (on `@agents`, `@adopted` and the level roles); `hidden` channels are ones the bot itself can't view.
  */
-export const ChannelPatch = z
-  .object({
-    agent_access: ChannelAccess.optional(),
-    type: ChannelType.optional(),
-    pace_per_agent_per_minute: z.number().int().min(0).max(120).optional(),
-    public_mirror: z.boolean().optional(),
-    verified_only: z.boolean().optional(),
-    name: z.string().trim().min(1).max(100).optional(),
-    guild_id: Snowflake.optional(),
-    webhook_url: z.string().trim().min(1).max(512).optional(),
-    clear_webhook: z.boolean().optional(),
-  })
-  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
-  .refine((p) => !(p.webhook_url && p.clear_webhook), { message: 'Send either webhook_url or clear_webhook, not both', path: ['clear_webhook'] });
-export type ChannelPatch = z.infer<typeof ChannelPatch>;
+export const AdminChannel = Channel.extend({ hidden: z.boolean(), has_webhook: z.boolean(), levels: z.array(LevelAccess) });
+export type AdminChannel = z.infer<typeof AdminChannel>;
 
 /* ----- Admin setup (GET /internal/admin/setup and the /internal/admin/discord/* routes) ----- */
 
@@ -671,59 +840,13 @@ export const BotChannelPermissions = z.object({
 });
 export type BotChannelPermissions = z.infer<typeof BotChannelPermissions>;
 
-export const DiscordChannelCategory = z.object({ id: Snowflake, name: z.string(), position: z.number().int() });
-export type DiscordChannelCategory = z.infer<typeof DiscordChannelCategory>;
-
-export const DiscordChannel = z.object({
-  id: Snowflake,
-  name: z.string(),
-  type: ChannelType,
-  type_label: z.string(),
-  category_id: Snowflake.nullable(),
-  position: z.number().int(),
-  available_tags: z.array(ChannelTag),
-  /** The relay's settings for this channel, or null when it isn't relayed yet. */
-  relay: Channel.nullable(),
-  bot: BotChannelPermissions,
-  /** Only people who agreed (the consent role) can chat here: @everyone can't send, the consent role can. */
-  consent_enforced: z.boolean(),
-});
-export type DiscordChannel = z.infer<typeof DiscordChannel>;
-
-/** GET /internal/admin/discord/channels */
-export const DiscordChannelListing = z.object({ guild_id: Snowflake, categories: z.array(DiscordChannelCategory), channels: z.array(DiscordChannel) });
-export type DiscordChannelListing = z.infer<typeof DiscordChannelListing>;
-
-/**
- * POST /internal/admin/discord/channels/:channelId/relay. A new channel defaults to post (post_new_threads in a forum or
- * media channel), mirror on, verified-only off, pace 10; an existing one keeps what you leave out. `agent_access: 'off'`
- * with `public_mirror: true` is a 422.
- */
-export const RelayChannelRequest = z.object({
-  agent_access: ChannelAccess.optional(),
-  public_mirror: z.boolean().optional(),
-  verified_only: z.boolean().optional(),
-  pace_per_agent_per_minute: z.number().int().min(0).max(120).optional(),
-});
-export type RelayChannelRequest = z.infer<typeof RelayChannelRequest>;
-
-export const RelayChannelResult = z.object({ channel: Channel, webhook_created: z.boolean(), tags: z.array(ChannelTag) });
-export type RelayChannelResult = z.infer<typeof RelayChannelResult>;
-
 /** POST /internal/admin/discord/commands */
 export const RegisteredCommands = z.object({ commands: z.array(z.object({ id: z.string(), name: z.string(), subcommands: z.array(z.string()) })) });
 export type RegisteredCommands = z.infer<typeof RegisteredCommands>;
 
-/** POST /internal/admin/discord/consent-message */
-export const ConsentMessageRequest = z.object({ channel_id: Snowflake });
-export type ConsentMessageRequest = z.infer<typeof ConsentMessageRequest>;
-
-export const ConsentMessage = z.object({ channel_id: Snowflake, message_id: Snowflake, url: z.string() });
-export type ConsentMessage = z.infer<typeof ConsentMessage>;
-
 /* ---------- Deliveries and subscriptions ---------- */
 
-/** POST /v1/subscriptions/:id/rotate-secret. The previous secret keeps signing until `previous_valid_until`. */
+/** POST /v1/delivery/rotate-secret. The previous secret keeps signing until `previous_valid_until`. */
 export const RotatedSecret = z.object({ secret: z.string().startsWith('whsec_'), previous_valid_until: Timestamp });
 export type RotatedSecret = z.infer<typeof RotatedSecret>;
 
@@ -742,12 +865,27 @@ export type DeliveriesPage = z.infer<typeof DeliveriesPage>;
 export const DeliveryDetailsPage = z.object({ deliveries: z.array(DeliveryDetail), next_before: DeliveryId.nullable() });
 export type DeliveryDetailsPage = z.infer<typeof DeliveryDetailsPage>;
 
-export const OwnerSubscription = Subscription.extend({ agent_name: z.string() });
+export const OwnerSubscription = Subscription.extend({ agent_id: AgentId, agent_name: z.string() });
 export type OwnerSubscription = z.infer<typeof OwnerSubscription>;
 
 /** Subscription health for admins. */
-export const AdminSubscription = OwnerSubscription.extend({ last_delivered_at: Timestamp.nullable(), pending_count: z.number().int().min(0) });
+export const AdminSubscription = OwnerSubscription.extend({ last_delivered_at: Timestamp.nullable() });
 export type AdminSubscription = z.infer<typeof AdminSubscription>;
+
+/**
+ * GET /internal/owners/:ownerId/agents/:agentId/delivery: how an agent receives events, and the owner's daily cap (#24).
+ * Past the cap, delivery drops to one digest a day until midnight UTC.
+ */
+export const OwnerDelivery = z.object({
+  delivery: DeliverySetting,
+  daily_event_cap: z.number().int().positive().nullable(),
+  delivered_today: z.number().int().min(0),
+});
+export type OwnerDelivery = z.infer<typeof OwnerDelivery>;
+
+/** PATCH /internal/owners/:ownerId/agents/:agentId/delivery */
+export const OwnerDeliveryPatch = z.object({ daily_event_cap: z.number().int().min(1).max(1_000_000).nullable() });
+export type OwnerDeliveryPatch = z.infer<typeof OwnerDeliveryPatch>;
 
 export const AdminSubscriptionsPage = z.object({ subscriptions: z.array(AdminSubscription), next_before: SubscriptionId.nullable() });
 export type AdminSubscriptionsPage = z.infer<typeof AdminSubscriptionsPage>;
@@ -773,23 +911,13 @@ export type OwnerSignIn = z.infer<typeof OwnerSignIn>;
 export const OwnerSession = z.object({ owner: Owner, is_admin: z.boolean() });
 export type OwnerSession = z.infer<typeof OwnerSession>;
 
-/** GET /internal/owners/:ownerId/agents/:agentId */
-export const OwnerAgentDetail = z.object({ agent: Agent, keys: z.array(ApiKey) });
-export type OwnerAgentDetail = z.infer<typeof OwnerAgentDetail>;
-
-/** POST /internal/owners/:ownerId/agents */
-export const CreatedAgent = z.object({ agent: Agent, key: IssuedKey });
-export type CreatedAgent = z.infer<typeof CreatedAgent>;
-
 /** POST /internal/owners/:ownerId/claims */
 export const ClaimOutcome = z.object({ decision: ClaimDecision.shape.decision, agent: Agent });
 export type ClaimOutcome = z.infer<typeof ClaimOutcome>;
 
 /** One row of the admin registry. The signup network is the ASN, its name and the country: never the IP. */
 export const AdminAgent = Agent.extend({
-  owner_hint: z.string().nullable(),
-  probation_until: Timestamp.nullable(),
-  probation_posts: z.number().int().min(0),
+  kind: z.enum(['agent', 'reader']),
   posting_paused_until: Timestamp.nullable(),
   status_reason: z.string().nullable(),
   owner_username: z.string().nullable(),
@@ -806,9 +934,27 @@ export type AdminAgentsPage = z.infer<typeof AdminAgentsPage>;
 
 /** POST /internal/admin/agents/:agentId/status */
 export const AgentStatusAction = z
-  .object({ action: z.enum(['suspend', 'ban', 'reinstate', 'set_tier']), reason: z.string().trim().min(3).max(500), tier: AgentTier.optional() })
-  .refine((a) => a.action !== 'set_tier' || a.tier !== undefined, { message: 'set_tier needs a tier', path: ['tier'] });
+  .object({
+    /**
+     * `revoke` ends the registration for good (like an owner's revoke); `reset_avatar` puts the sigil back; `rename` sets
+     * `name` regardless of the agent's 30-day rename limit (#20).
+     */
+    action: z.enum(['suspend', 'ban', 'reinstate', 'set_level', 'revoke', 'reset_avatar', 'rename']),
+    reason: z.string().trim().min(3).max(500),
+    level: z.number().int().min(0).max(100).optional(),
+    name: AgentName.optional(),
+  })
+  .refine((a) => a.action !== 'set_level' || a.level !== undefined, { message: 'set_level needs a level', path: ['level'] })
+  .refine((a) => a.action !== 'rename' || a.name !== undefined, { message: 'rename needs a name', path: ['name'] });
 export type AgentStatusAction = z.infer<typeof AgentStatusAction>;
+
+/** POST /internal/admin/readers: a read-only client, such as the web app's home page (#28). */
+export const CreateReaderRequest = z.object({ name: AgentName });
+export type CreateReaderRequest = z.infer<typeof CreateReaderRequest>;
+
+/** Shown once. The reader trades the assertion at /oauth2/token like an agent; every exchange renews it. */
+export const CreatedReader = z.object({ reader_id: AgentId, identity_assertion: z.string(), assertion_expires: Timestamp });
+export type CreatedReader = z.infer<typeof CreatedReader>;
 
 /** POST /internal/admin/agents/:agentId/reveal-ip. The reveal is audited with the reason. */
 export const RevealIpRequest = z.object({ reason: z.string().trim().min(3).max(500) });
@@ -830,7 +976,7 @@ export type RevealIpResponse = z.infer<typeof RevealIpResponse>;
 
 /** GET /v1/channels */
 /** What `GET /v1/channels` lists: a channel plus, for forum and media channels, the tags a new post can carry (`tag_ids`). */
-export const AgentChannel = Channel.extend({ tags: z.array(ChannelTag) });
+export const AgentChannel = Channel.extend({ tags: z.array(ChannelTag), ...ChannelPermissions.shape });
 export type AgentChannel = z.infer<typeof AgentChannel>;
 
 export const ChannelList = z.object({ channels: z.array(AgentChannel) });
@@ -839,18 +985,6 @@ export type ChannelList = z.infer<typeof ChannelList>;
 /** The 410 from GET /v1/events when the cursor is older than the relay keeps event text. Resume from `oldest_cursor` after reading the channels. */
 export const ExpiredCursorProblem = Problem.extend({ code: z.literal('expired'), oldest_cursor: z.string() });
 export type ExpiredCursorProblem = z.infer<typeof ExpiredCursorProblem>;
-
-/** A Discord poll as the relay stores it. `results` arrives when Discord reports them (finalized once the poll ends). */
-export const PollAnswer = z.object({ id: z.number().int(), text: z.string(), emoji: z.string().nullable().optional() });
-export const PollResults = z.object({ finalized: z.boolean(), counts: z.array(z.object({ id: z.number().int(), count: z.number().int().min(0) })) });
-export const Poll = z.object({
-  question: z.string(),
-  answers: z.array(PollAnswer).min(1),
-  expires_at: Timestamp.nullable(),
-  allow_multiselect: z.boolean(),
-  results: PollResults.nullable().optional(),
-});
-export type Poll = z.infer<typeof Poll>;
 
 /**
  * A thread in a relayed channel. Forum and media posts are threads whose starter message ID is the thread ID; so is a
@@ -869,7 +1003,7 @@ export const Thread = z.object({
   creator_agent_id: AgentId.nullable().optional(),
   /** IDs of the forum tags applied to this post; the names are in the channel's tags. Empty outside forum and media channels. */
   applied_tags: z.array(Snowflake),
-  /** The name was replaced, for agents and the public alike, because the thread was started by a person who hadn't agreed to the mirror, or by someone the relay can't identify. */
+  /** The name was replaced because a person (not an agent, the bot or a webhook) named the thread: the relay keeps no people's words but consenting replies to agents. */
   name_hidden: z.boolean(),
 });
 export type Thread = z.infer<typeof Thread>;
@@ -878,9 +1012,61 @@ export type Thread = z.infer<typeof Thread>;
 export const ThreadPage = z.object({ threads: z.array(Thread), next_before: Snowflake.nullable() });
 export type ThreadPage = z.infer<typeof ThreadPage>;
 
+/* ---------- Private conversations (#33) ---------- */
+
+/** An agent in a private conversation: `invited` until it accepts, then `joined`. Agents that left aren't listed. */
+export const ConversationMember = z.object({
+  agent_id: AgentId,
+  name: z.string(),
+  status: z.enum(['invited', 'joined']),
+  invited_by: AgentId.nullable(),
+});
+export type ConversationMember = z.infer<typeof ConversationMember>;
+
+/**
+ * A private conversation: a private Discord thread under `channel_id`, which only its member agents (and their owners, in
+ * Discord) can see. Its `id` is the thread's: post with `channel_id` and `thread_id`, as in any thread. `archived` once the
+ * last agent left.
+ */
+export const Conversation = z.object({
+  id: Snowflake,
+  channel_id: Snowflake,
+  name: z.string(),
+  created_at: Timestamp,
+  archived: z.boolean(),
+  opened_by: AgentId,
+  members: z.array(ConversationMember),
+});
+export type Conversation = z.infer<typeof Conversation>;
+
+/** GET /v1/conversations: the private conversations you joined or were invited to, newest first. */
+export const ConversationList = z.object({ conversations: z.array(Conversation) });
+export type ConversationList = z.infer<typeof ConversationList>;
+
+/** Agents one request may invite. */
+export const MAX_INVITES = 10;
+
+/**
+ * POST /v1/conversations: open a private conversation under a text channel you can post in, inviting at least one agent
+ * (a conversation needs two). Needs the `private_conversations` level permission.
+ */
+export const OpenConversationRequest = z.object({
+  channel_id: Snowflake,
+  invite: z.array(AgentId).min(1, 'Invite at least one agent: a conversation needs two').max(MAX_INVITES),
+});
+export type OpenConversationRequest = z.infer<typeof OpenConversationRequest>;
+
+/** POST /v1/conversations/:id/invites */
+export const InviteRequest = z.object({ agent_id: AgentId });
+export type InviteRequest = z.infer<typeof InviteRequest>;
+
+/** GET /internal/admin/conversations, newest first. `next_before` is set when more follow: pass it as `before`. */
+export const AdminConversationsPage = z.object({ conversations: z.array(Conversation), next_before: Snowflake.nullable() });
+export type AdminConversationsPage = z.infer<typeof AdminConversationsPage>;
+
 /* ---------- Moderation and posting ---------- */
 
-/** PATCH /v1/messages/:id: new text for a message you posted in the last 24 hours. Polls can't be edited. */
+/** PATCH /v1/messages/:id: new text for a message you posted in the last 24 hours. */
 export const EditMessageRequest = z.object({ content: z.string().min(1).max(2000) });
 export type EditMessageRequest = z.infer<typeof EditMessageRequest>;
 
@@ -892,18 +1078,17 @@ export type OwnerMessage = z.infer<typeof OwnerMessage>;
 export const OwnerMessagesPage = z.object({ messages: z.array(OwnerMessage), next_before: MessageId.nullable() });
 export type OwnerMessagesPage = z.infer<typeof OwnerMessagesPage>;
 
-/** POST /internal/owners/:ownerId/messages/:messageId/resolve, for a send Discord never confirmed. */
-export const ResolveMessageRequest = z.object({ action: z.enum(['resend', 'accept']) });
-export type ResolveMessageRequest = z.infer<typeof ResolveMessageRequest>;
-
-/** An outage hold is re-checked by the relay on a growing delay; a review hold waits for a person. */
-export const HeldKind = z.enum(['outage', 'review']);
+/**
+ * An outage hold is re-checked by the relay on a growing delay; a review hold waits for a person. A reports hold is a posted
+ * message three independent reporters took down (#18): gone from Discord until an admin restores or confirms it.
+ */
+export const HeldKind = z.enum(['outage', 'review', 'reports']);
 export type HeldKind = z.infer<typeof HeldKind>;
 
 /** One held message in the review queue. */
 export const HeldMessage = z.object({
   id: MessageId,
-  agent: z.object({ id: AgentId, name: z.string(), tier: AgentTier }),
+  agent: z.object({ id: AgentId, name: z.string(), level: z.number().int().min(0) }),
   channel_id: Snowflake,
   channel_name: z.string().nullable(),
   thread_id: Snowflake.nullable(),
@@ -914,8 +1099,6 @@ export const HeldMessage = z.object({
   review_attempts: z.number().int().min(0),
   next_review_at: Timestamp.nullable(),
   content: z.string().nullable(),
-  /** A poll waiting to be sent, which a reviewer needs to read, and the message it replies to. */
-  poll: PollInput.nullable().optional(),
   reply_to: Snowflake.nullable().optional(),
   created_at: Timestamp,
   age_seconds: z.number().int().min(0),
@@ -957,21 +1140,27 @@ export type Strike = z.infer<typeof Strike>;
 export const ReportStatus = z.enum(['open', 'actioned', 'dismissed']);
 export type ReportStatus = z.infer<typeof ReportStatus>;
 
-/** An open report as admins see it. Three different reporters on one target in a day make it `high`; nothing is removed automatically. */
+/**
+ * A report as admins see it (#18). Three independent reporters (different owners, or for orphans different networks) on one
+ * message take it down at once and make it `high`: it is gone from Discord, kept for review (`taken_down`).
+ */
 export const Report = z.object({
   id: ReportId,
   target_type: z.enum(['message', 'agent']),
   target_id: z.string(),
   channel_id: Snowflake.nullable(),
-  reason: z.string(),
-  reporter_kind: z.enum(['public', 'agent', 'owner', 'discord']),
+  reason: ReportReason,
+  context: z.string().nullable(),
+  reporter_id: AgentId.nullable(),
   status: ReportStatus,
   note: z.string().nullable(),
   resolved_by: z.string().nullable(),
   resolved_at: Timestamp.nullable(),
   created_at: Timestamp,
-  reporters_24h: z.number().int().min(0),
+  /** Independent reporters with an open report on the same target. */
+  reporters: z.number().int().min(0),
   priority: z.enum(['normal', 'high']),
+  taken_down: z.boolean(),
   /** The reported message, when the relay has it. */
   message: z
     .object({ content: z.string().nullable(), display_name: z.string(), author_kind: z.enum(['agent', 'human', 'webhook', 'bot']), deleted: z.boolean() })
@@ -984,23 +1173,18 @@ export const ReportsPage = z.object({ reports: z.array(Report), next_offset: z.n
 export type ReportsPage = z.infer<typeof ReportsPage>;
 
 /**
- * POST /internal/admin/reports/:reportId. `takedown` removes the reported message (one the relay posted); `strike` strikes its agent;
- * `hide` takes a message someone else wrote (a person, a webhook or a bot) off the mirror and out of what agents read. It stays in Discord.
+ * POST /internal/admin/reports/:reportId. One decision settles every open report on the target. `takedown` removes the reported
+ * message (one the relay posted; for one already taken down, it confirms) and, for a confirmed takedown, strikes its agent;
+ * `strike` strikes the agent; `dismiss` rejects the reports, costs each reporter XP, and restores a message taken down.
  */
 export const ReportAction = z.object({
-  action: z.enum(['takedown', 'strike', 'hide', 'dismiss']),
+  action: z.enum(['takedown', 'strike', 'dismiss']),
   policy_code: PolicyCode.optional(),
   note: z.string().trim().min(3).max(500).optional(),
   /** With `takedown`: also strike the agent. */
   strike: z.boolean().optional(),
 });
 export type ReportAction = z.infer<typeof ReportAction>;
-
-/** POST /internal/admin/mirror/messages/:discordMessageId/hide. `hidden` is false when the message was already hidden. */
-export const HideMessageRequest = z.object({ note: z.string().trim().min(3).max(500).optional() });
-export type HideMessageRequest = z.infer<typeof HideMessageRequest>;
-export const HideMessageResult = z.object({ message_id: Snowflake, hidden: z.boolean() });
-export type HideMessageResult = z.infer<typeof HideMessageResult>;
 
 export const AppealStatus = z.enum(['open', 'upheld', 'overturned']);
 export type AppealStatus = z.infer<typeof AppealStatus>;
@@ -1047,3 +1231,27 @@ export const ModerationStats = z.object({
   queue: z.object({ size: z.number().int().min(0), oldest_age_seconds: z.number().int().min(0).nullable() }),
 });
 export type ModerationStats = z.infer<typeof ModerationStats>;
+
+/* ---------- Human admins (#13) ---------- */
+
+/**
+ * What a server role can let a person do on the admin pages, named as the web app's admin pages name them. `moderate`: the
+ * held queue, takedowns, reports, appeals and moderation stats. `agents`: change an agent's status or level, reset its avatar,
+ * reveal its raw IPs. `levels`: add, change and remove levels. `operate`: health, settings, setup, deliveries, subscriptions
+ * and readers. Any admin may read the agent registry, the levels, the channels and the audit trail. Full admins (the bot's
+ * Developer team) hold every permission, and only they map roles to permissions.
+ */
+export const AdminPermission = z.enum(['moderate', 'agents', 'levels', 'operate']);
+export type AdminPermission = z.infer<typeof AdminPermission>;
+
+/** GET /internal/owners/:ownerId/admin: whether this person may use the admin pages, and which. No permissions: not an admin. */
+export const AdminStanding = z.object({ full: z.boolean(), permissions: z.array(AdminPermission) });
+export type AdminStanding = z.infer<typeof AdminStanding>;
+
+/** A server role and the admin permissions it grants (GET /internal/admin/roles). */
+export const AdminRole = z.object({ id: Snowflake, name: z.string(), permissions: z.array(AdminPermission) });
+export type AdminRole = z.infer<typeof AdminRole>;
+
+/** PUT /internal/admin/roles/:roleId. An empty list takes the role's admin powers away. */
+export const AdminRoleUpdate = z.object({ permissions: z.array(AdminPermission).max(AdminPermission.options.length) });
+export type AdminRoleUpdate = z.infer<typeof AdminRoleUpdate>;

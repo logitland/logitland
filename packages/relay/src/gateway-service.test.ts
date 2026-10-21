@@ -11,13 +11,16 @@ import {
   type SocketEvents,
 } from './gateway';
 import { snowflakeTime } from './services/events';
-import { NEWS, all, at, conversation, moreChannels, msg, one, subscribe, world } from './intake-fixtures';
-import { BENCH, FORUM, GUILD as GUILD_ID, LOUNGE, type Harness } from './testing';
+import { AGENT_POST, NEWS, all, at, conversation, moreChannels, msg, one, subscribe, world } from './intake-fixtures';
+import { BENCH, FORUM, GUILD as GUILD_ID, LOUNGE, seedAgent, setAccess, type Harness } from './testing';
 
 // WebCrypto answers on the thread pool, so the work behind a dispatch takes a few turns of the event loop.
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
-const AUTHOR = { id: '200000000000000001', username: 'luna', global_name: 'Luna' };
+// A bot: intake keeps what bots write as it is, so these tests are about the Gateway, not about whose words are kept.
+const AUTHOR = { id: '200000000000000001', username: 'luna', global_name: 'Luna', bot: true };
 const THREAD = '120000000000000001';
+/** The conversation rows the Gateway stored: world() stores AGENT_POST itself. */
+const FED = `FROM conversation WHERE message_id != ${AGENT_POST}`;
 
 class FakeSocket implements GatewaySocket {
   sent: { op: number; d: any }[] = [];
@@ -165,12 +168,12 @@ describe('connecting and recording', () => {
     const g = service(h, clock);
     await g.svc.ensure();
     // A channel with no cursor is looked at once, so the mirror isn't empty.
-    expect(calls).toEqual(['GET /gateway/bot', `GET /channels/${LOUNGE}/messages?limit=100`]);
+    await vi.waitFor(() => expect(calls).toEqual(['GET /gateway/bot', `GET /channels/${LOUNGE}/messages?limit=100`]));
     expect(g.last().url).toBe('wss://gateway.discord.gg/?v=10&encoding=json');
     expect((await g.state())!.status).toBe('connecting');
 
     g.hello();
-    expect(g.last().socket.sent[0]).toMatchObject({ op: 2, d: { token: 'bot-token', intents: 33281 } });
+    expect(g.last().socket.sent[0]).toMatchObject({ op: 2, d: { token: 'bot-token', intents: 34305 } });
     g.ready(1);
     await settle();
     expect(await g.state()).toMatchObject({ status: 'connected', session_id: 'sess-1', seq: 1, last_event_at: null });
@@ -180,10 +183,7 @@ describe('connecting and recording', () => {
     await settle();
     expect(await conversation(h, 1)).toBeNull();
     await clock.advance(500);
-    expect((await all<{ id: string }>(h, 'SELECT CAST(message_id AS TEXT) AS id FROM conversation ORDER BY message_id')).map((r) => r.id)).toEqual([
-      msg(1),
-      msg(2),
-    ]);
+    expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]);
     expect(await all(h, 'SELECT type FROM events ORDER BY seq')).toHaveLength(2);
     expect(g.storage.get('session')).toEqual({ sessionId: 'sess-1', resumeUrl: 'wss://resume.discord.gg', seq: 3 });
     expect(g.wakes.at(-1)! - clock.now()).toBeLessThanOrEqual(WAKE_MS);
@@ -205,7 +205,7 @@ describe('connecting and recording', () => {
     g.ready(1);
     for (let i = 1; i <= 50; i++) g.message(i + 1, i);
     // No timer has been advanced: the batch size alone triggered the write.
-    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(50), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(50), { timeout: 5_000 });
   });
 
   it('answers status() with what the admin page shows', async () => {
@@ -268,10 +268,7 @@ describe('restarts', () => {
     second.message(3, 2);
     second.message(4, 1);
     await clock.advance(500);
-    expect((await all<{ id: string }>(h, 'SELECT CAST(message_id AS TEXT) AS id FROM conversation ORDER BY message_id')).map((r) => r.id)).toEqual([
-      msg(1),
-      msg(2),
-    ]);
+    expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]);
     expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(2);
     // A resumed session is not a gap.
     expect(await all(h, "SELECT 1 FROM events WHERE type = 'subscription.gap'")).toHaveLength(0);
@@ -355,11 +352,11 @@ describe('a lost session', () => {
     );
     expect(gaps.map((g) => g.channel_id)).toEqual([LOUNGE]);
     const data = JSON.parse(gaps[0]!.payload).data;
-    expect(data).toMatchObject({ window_start: lastEvent, window_end: h.now().toISOString(), resume_cursor: String(gaps[0]!.seq) });
+    expect(data).toMatchObject({ window_start: lastEvent, window_end: h.now().toISOString() });
     expect(data.reason).toContain('edits and deletions made during it can’t be recovered');
 
     expect(calls.filter((c) => c.includes('after='))).toEqual([`GET /channels/${LOUNGE}/messages?limit=100&after=${msg(2)}`]);
-    expect(await conversation(h, 4)).toMatchObject({ content: 'while you were away', author_kind: 'human' });
+    expect(await conversation(h, 4)).toMatchObject({ content: 'while you were away', author_kind: 'bot' });
     const created = await all<{ seq: number; type: string }>(h, "SELECT seq, type FROM events WHERE type IN ('message.created') ORDER BY seq");
     expect(created.at(-1)!.seq).toBeGreaterThan(gaps[0]!.seq);
     expect(second.storage.get('backfill')).toBeUndefined();
@@ -375,7 +372,8 @@ describe('a lost session', () => {
     const prepare = h.db.prepare.bind(h.db);
     let failures = 1;
     h.db.prepare = (sql: string) => {
-      if (failures > 0 && sql === "SELECT id FROM channels WHERE agent_access != 'off'") {
+      // The open-channel lookup (openChannelIds) the gap starts with.
+      if (failures > 0 && sql === 'SELECT * FROM channels WHERE deleted_at IS NULL ORDER BY name, id') {
         failures--;
         throw new Error('D1 hiccup');
       }
@@ -681,7 +679,7 @@ describe('threads that were already there when their channel was relayed', () =>
     await clock.advance(500);
     expect(await one(h, 'SELECT 1 AS found FROM threads WHERE id = ?', THREAD)).toBeNull();
 
-    await h.db.prepare("UPDATE channels SET agent_access = 'post' WHERE id = ?").bind(BENCH).run();
+    await setAccess(h.db, BENCH, 'post');
     await clock.advance(SEED_CHECK_MS + 1_000);
     await g.svc.ensure();
     await settle();
@@ -799,7 +797,7 @@ describe('when writing fails', () => {
 describe('a channel new to the relay', () => {
   it('has its latest page fetched once, and kept for readers without being announced', async () => {
     const { h } = await world();
-    await h.db.prepare("UPDATE channels SET agent_access = 'off' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'off');
     const clock = clockFor(h);
     const calls = discord(h, {
       messages: (_channel, after) =>
@@ -816,7 +814,7 @@ describe('a channel new to the relay', () => {
     expect(calls.filter((c) => c.includes('/messages'))).toEqual([]);
 
     // An admin opens the channel; the first ensure (cron, or the alarm) after SEED_CHECK_MS looks at it.
-    await h.db.prepare("UPDATE channels SET agent_access = 'read_only' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'read_only');
     await g.svc.ensure();
     await settle();
     expect(calls.filter((c) => c.includes('/messages'))).toEqual([]);
@@ -837,7 +835,7 @@ describe('a channel new to the relay', () => {
   it('looks at every new channel, with a few REST calls', async () => {
     const { h } = await world();
     await moreChannels(h);
-    await h.db.prepare("UPDATE channels SET type = 'text', agent_access = 'read_only' WHERE id != ?").bind(BENCH).run();
+    await h.db.prepare("UPDATE channels SET type = 'text' WHERE id != ?").bind(BENCH).run();
     const clock = clockFor(h);
     const calls = discord(h);
     const g = service(h, clock);
@@ -860,17 +858,9 @@ describe('a channel that changes in Discord', () => {
     await clock.advance(500);
     expect(await one(h, 'SELECT name, type FROM channels WHERE id = ?', LOUNGE)).toEqual({ name: 'common-room', type: 'text' });
 
-    g.dispatch('GUILD_CREATE', 3, {
-      id: GUILD_ID,
-      channels: [
-        { id: LOUNGE, guild_id: GUILD_ID, name: 'lounge-again', type: 5 },
-        { id: BENCH, guild_id: GUILD_ID, name: 'not relayed', type: 0 },
-      ],
-      threads: [],
-    });
+    g.dispatch('GUILD_CREATE', 3, { id: GUILD_ID, channels: [{ id: LOUNGE, guild_id: GUILD_ID, name: 'lounge-again', type: 5 }], threads: [] });
     await clock.advance(500);
     expect(await one(h, 'SELECT name, type FROM channels WHERE id = ?', LOUNGE)).toEqual({ name: 'lounge-again', type: 'announcement' });
-    expect(await one(h, 'SELECT name FROM channels WHERE id = ?', BENCH)).toEqual({ name: 'bench' });
   });
 });
 
@@ -928,10 +918,10 @@ describe('a full buffer', () => {
     expect(firstKept!.seq).toBeGreaterThan(gaps[0]!.seq);
 
     // And the messages that were dropped are fetched from Discord, starting where the relay stood before.
-    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(131), { timeout: 5_000 });
     expect(calls.some((c) => c.includes(`after=${msg(1)}`))).toBe(true);
     for (const n of [2, 15, 31, 32, 131]) expect(await conversation(h, n)).not.toBeNull();
-    expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131);
+    expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(131);
   });
 
   it('never drops the batch being written, so what overflows is the part that was not written, and the gap is recorded before newer events', async () => {
@@ -954,7 +944,7 @@ describe('a full buffer', () => {
     expect(storage.get('lost')).toMatchObject({ channels: [LOUNGE] });
     release();
     await clock.advance(5_000);
-    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(131), { timeout: 5_000 });
     const gaps = await all<{ seq: number }>(h, "SELECT seq FROM events WHERE type = 'subscription.gap'");
     expect(gaps).toHaveLength(1);
     // Nothing the buffer kept after the dropped part was written ahead of the gap.
@@ -985,17 +975,20 @@ describe('a full buffer', () => {
     const { h, clock, g } = await outage(500);
     for (let n = 2; n <= 131; n++) g.message(n + 1, n);
     await clock.advance(500);
-    await vi.waitFor(async () => expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(131), { timeout: 5_000 });
+    await vi.waitFor(async () => expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(131), { timeout: 5_000 });
     expect(await all(h, "SELECT 1 FROM events WHERE type = 'subscription.gap'")).toHaveLength(0);
     expect(g.svc.snapshot().events_dropped).toBe(false);
   });
 });
 
 describe('a backlog of events', () => {
+  /** More than one invocation's query budget can write. */
+  const BACKLOG = 600;
+
   it('is written a share per flush, within the D1 query budget, and the rest at the next alarm', async () => {
-    const { h, agent } = await world();
-    // Three subscribers per event make every event cost a fan-out each, so a round of 100 is expensive.
-    for (let i = 0; i < 3; i++) await subscribe(h, agent.id);
+    const { h } = await world();
+    // Three subscribers, so every event recorded makes subscriptions due, as in use.
+    for (let i = 0; i < 3; i++) await subscribe(h, (await seedAgent(h.relay)).id);
     const hook = { author: { id: '600000000000000555', username: 'hook', bot: true }, webhook_id: '600000000000000555' };
     const clock = clockFor(h);
     discord(h);
@@ -1004,15 +997,15 @@ describe('a backlog of events', () => {
     g.hello();
     g.ready(1);
     await settle();
-    // The database is out of reach while 300 events arrive; nothing is dropped (the cap is 5,000).
+    // The database is out of reach while the backlog arrives; nothing is dropped (the cap is 5,000).
     const batch = h.db.batch.bind(h.db);
     h.db.batch = async () => {
       throw new Error('D1 is down');
     };
-    for (let n = 1; n <= 300; n++) g.message(n + 1, n, hook);
+    for (let n = 1; n <= BACKLOG; n++) g.message(n + 1, n, hook);
     await settle();
     await clock.advance(500);
-    expect(g.svc.snapshot()).toMatchObject({ buffered: 300, events_dropped: false });
+    expect(g.svc.snapshot()).toMatchObject({ buffered: BACKLOG, events_dropped: false });
 
     // Counts every D1 call the way the budget does: each statement of a batch separately.
     let queries = 0;
@@ -1045,7 +1038,7 @@ describe('a backlog of events', () => {
     // Some rounds fit; the next might not, so the rest waits for a fresh invocation (the next alarm).
     const left = g.svc.snapshot().buffered as number;
     expect(left).toBeGreaterThan(0);
-    expect(left).toBeLessThan(300);
+    expect(left).toBeLessThan(BACKLOG);
     expect(queries).toBeLessThanOrEqual(QUERY_BUDGET + 350);
     expect(g.wakes.at(-1)! - clock.now()).toBeGreaterThan(0);
     expect(g.wakes.at(-1)! - clock.now()).toBeLessThanOrEqual(CONTINUE_MS);
@@ -1053,13 +1046,13 @@ describe('a backlog of events', () => {
     for (let i = 0; i < 10 && (g.svc.snapshot().buffered as number) > 0; i++) {
       queries = 0;
       await g.svc.tick();
-      await vi.waitFor(async () => expect((await all(h, 'SELECT 1 FROM conversation')).length).toBeGreaterThan(300 - left), { timeout: 10_000 });
+      await vi.waitFor(async () => expect((await all(h, `SELECT 1 ${FED}`)).length).toBeGreaterThan(BACKLOG - left), { timeout: 10_000 });
       await settle();
       expect(queries).toBeLessThanOrEqual(QUERY_BUDGET + 350);
     }
-    expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(300);
+    expect(await all(h, `SELECT 1 ${FED}`)).toHaveLength(BACKLOG);
     expect(g.svc.snapshot().buffered).toBe(0);
-    expect(g.storage.get('session')).toMatchObject({ seq: 301 });
+    expect(g.storage.get('session')).toMatchObject({ seq: BACKLOG + 1 });
   }, 30_000);
 });
 

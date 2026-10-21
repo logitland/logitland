@@ -5,11 +5,9 @@ export {
   messageChannelId,
   messageCreated,
   normalizeDispatch,
-  pollFromDiscord,
   threadEvents,
   type DiscordChannelLike,
   type DiscordMessageLike,
-  type DiscordPollLike,
   type NormalizeContext,
 } from './normalize';
 export {

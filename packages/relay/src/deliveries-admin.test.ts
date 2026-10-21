@@ -1,6 +1,6 @@
+import type { Subscription } from '@logitland/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { HOOK_HOST, one, publish, recorder, setup, subscribe, type Created } from './deliveries.testkit';
-import { attemptDelivery } from './services/deliveries';
+import { HOOK, HOOK_HOST, echoChallenge, say, setup, subscribe } from './deliveries.testkit';
 import { ADMIN_DISCORD, seedAgent, seedOwner } from './testing';
 
 interface Page<T> {
@@ -10,7 +10,10 @@ interface Page<T> {
 }
 type Row = Record<string, unknown> & { id: string; attempt_log?: { n: number; status_code: number | null }[] };
 
-// Two owners, one agent each (plus one with no owner), an admin, and a mix of delivery outcomes.
+/**
+ * Two owners, one agent each (plus one with no owner), an admin, and three rounds of digests to each agent's webhook. Alice's
+ * receiver answers 200, then 503, then 404; Bob's always 404; the stray's always 200.
+ */
 async function world() {
   const s = await setup();
   const alice = await seedOwner(s.relay, '200000000000000001', 'alice');
@@ -19,30 +22,25 @@ async function world() {
   const aAgent = await seedAgent(s.relay, { name: 'AliceBot', ownerId: alice.id });
   const bAgent = await seedAgent(s.relay, { name: 'BobBot', ownerId: bob.id });
   const stray = await seedAgent(s.relay, { name: 'Stray' });
-  const subA = await subscribe(s, {}, s.as(aAgent.key));
-  const subB = await subscribe(s, {}, s.as(bAgent.key));
-  const subS = await subscribe(s, {}, s.as(stray.key));
-
-  let status = 200;
-  const rec = recorder(() => new Response(null, { status }));
-  s.receivers[HOOK_HOST] = rec.handler;
-  const ids: string[] = [];
-  for (let i = 0; i < 3; i++) {
-    s.advance(1000);
-    ids.push(...(await publish(s)).ids);
+  const answers: Record<string, number> = { '/logitland/AliceBot': 200, '/logitland/BobBot': 404, '/logitland/Stray': 200 };
+  s.receivers[HOOK_HOST] = async (req) => {
+    if (((await req.clone().json()) as { type: string }).type === 'delivery.challenge') return echoChallenge(req);
+    return new Response(null, { status: answers[new URL(req.url).pathname] });
+  };
+  const subs: Subscription[] = [];
+  for (const agent of [aAgent, bAgent, stray]) {
+    subs.push(await subscribe(s, { frequency: 'live' }, s.as(agent.token)));
+    expect((await s.call('PUT', '/v1/delivery', { url: `${HOOK}/${agent.name}` }, s.as(agent.token))).status).toBe(200);
   }
-  const mine = async (sub: Created) =>
-    (await s.db.prepare('SELECT id FROM deliveries WHERE subscription_id = ? ORDER BY id').bind(sub.id).all<{ id: string }>()).results.map((r) => r.id);
-  const [a1, a2, a3] = await mine(subA);
-  const [b1] = await mine(subB);
-  status = 200;
-  await attemptDelivery(s.relay, a1!);
-  status = 503;
-  await attemptDelivery(s.relay, a2!);
-  status = 404;
-  await attemptDelivery(s.relay, a3!);
-  await attemptDelivery(s.relay, b1!);
-  return { s, alice, bob, admin, aAgent, bAgent, stray, subA, subB, subS, a: [a1!, a2!, a3!], b1: b1!, ids };
+  for (const status of [200, 503, 404]) {
+    answers['/logitland/AliceBot'] = status;
+    s.advance(1000);
+    await say(s, `round ${status}`);
+  }
+  const mine = async (agentId: string) =>
+    (await s.db.prepare('SELECT id FROM deliveries WHERE agent_id = ? ORDER BY id').bind(agentId).all<{ id: string }>()).results.map((r) => r.id);
+  const [subA, subB, subS] = subs as [Subscription, Subscription, Subscription];
+  return { s, alice, bob, admin, aAgent, bAgent, stray, subA, subB, subS, a: await mine(aAgent.id) };
 }
 
 const as = (ownerId: string) => ({ 'x-logitland-owner': ownerId });
@@ -54,42 +52,59 @@ describe('owner listings', () => {
     w = await world();
   });
 
-  it('lists the subscriptions of the owner’s agents with the agent’s name, and nobody else’s', async () => {
+  it('lists the subscriptions of the owner’s agents with the agent’s name, and not ones the agent deleted', async () => {
     const res = await w.s.internal('GET', `/internal/owners/${w.alice.id}/subscriptions`, undefined, as(w.alice.id));
     expect(res.status).toBe(200);
-    const body = await json<{ subscriptions: Row[] }>(res);
-    expect(body.subscriptions).toMatchObject([{ id: w.subA.id, agent_id: w.aAgent.id, agent_name: 'AliceBot', url_host: HOOK_HOST, status: 'active' }]);
-    expect(JSON.stringify(body)).not.toContain('secret');
-    expect(JSON.stringify(body)).not.toContain('ciphertext');
-
-    const bobs = await json<{ subscriptions: Row[] }>(await w.s.internal('GET', `/internal/owners/${w.bob.id}/subscriptions`, undefined, as(w.bob.id)));
-    expect(bobs.subscriptions.map((x) => x.id)).toEqual([w.subB.id]);
-  });
-
-  it('shows disabled subscriptions but not ones the agent deleted', async () => {
-    await w.s.db
-      .prepare("UPDATE subscriptions SET status = 'disabled', paused_reason = 'The destination answered 410 Gone' WHERE id = ?")
-      .bind(w.subA.id)
-      .run();
-    const listed = await json<{ subscriptions: Row[] }>(await w.s.internal('GET', `/internal/owners/${w.alice.id}/subscriptions`, undefined, as(w.alice.id)));
-    expect(listed.subscriptions).toMatchObject([{ id: w.subA.id, status: 'disabled', paused_reason: 'The destination answered 410 Gone' }]);
-    await w.s.call('DELETE', `/v1/subscriptions/${w.subB.id}`, undefined, w.s.as(w.bAgent.key));
+    expect((await json<{ subscriptions: Row[] }>(res)).subscriptions).toEqual([
+      { ...w.subA, cursor: expect.any(String), agent_id: w.aAgent.id, agent_name: 'AliceBot' },
+    ]);
+    await w.s.call('DELETE', `/v1/subscriptions/${w.subB.id}`, undefined, w.s.as(w.bAgent.token));
     const bobs = await json<{ subscriptions: Row[] }>(await w.s.internal('GET', `/internal/owners/${w.bob.id}/subscriptions`, undefined, as(w.bob.id)));
     expect(bobs.subscriptions).toEqual([]);
+  });
+
+  it('lets the owner change an agent’s subscription, audited as theirs, and no one else’s', async () => {
+    const path = (sub: Subscription) => `/internal/owners/${w.alice.id}/subscriptions/${sub.id}`;
+    const res = await w.s.internal('PATCH', path(w.subA), { frequency: '15m' }, as(w.alice.id));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: w.subA.id, frequency: '15m' });
+    expect(await w.s.db.prepare("SELECT actor_type, actor_id FROM audit_log WHERE action = 'subscription.updated'").first()).toEqual({
+      actor_type: 'owner',
+      actor_id: w.alice.id,
+    });
+    expect((await w.s.internal('PATCH', path(w.subB), { frequency: '15m' }, as(w.alice.id))).status).toBe(404);
+  });
+
+  it('shows and sets an agent’s delivery and daily event cap', async () => {
+    const path = `/internal/owners/${w.alice.id}/agents/${w.aAgent.id}/delivery`;
+    const shown = await json<Record<string, unknown>>(await w.s.internal('GET', path, undefined, as(w.alice.id)));
+    expect(shown).toMatchObject({ delivery: { kind: 'webhook', url_host: HOOK_HOST, status: 'active' }, daily_event_cap: null, delivered_today: 3 });
+    const set = await w.s.internal('PATCH', path, { daily_event_cap: 500 }, as(w.alice.id));
+    expect(set.status).toBe(200);
+    expect(await set.json()).toMatchObject({ daily_event_cap: 500 });
+    expect(await w.s.db.prepare("SELECT actor_id FROM audit_log WHERE action = 'agent.cap_set'").first()).toEqual({ actor_id: w.alice.id });
+    expect((await w.s.internal('GET', `/internal/owners/${w.alice.id}/agents/${w.bAgent.id}/delivery`, undefined, as(w.alice.id))).status).toBe(404);
   });
 
   it('lists deliveries to the owner’s agents with attempts, newest first, and filters and pages them', async () => {
     const res = await w.s.internal('GET', `/internal/owners/${w.alice.id}/deliveries`, undefined, as(w.alice.id));
     expect(res.status).toBe(200);
     const page = await json<Page<Row>>(res);
-    expect(page.deliveries!.map((d) => d.id)).toEqual([...w.a].sort().reverse());
+    expect(page.deliveries!.map((d) => d.id)).toEqual([...w.a].reverse());
     expect(page.next_before).toBeNull();
     const byId = Object.fromEntries(page.deliveries!.map((d) => [d.id, d]));
-    expect(byId[w.a[0]!]).toMatchObject({ status: 'delivered', attempts: 1, url_host: HOOK_HOST, agent_id: w.aAgent.id, agent_name: 'AliceBot' });
+    expect(byId[w.a[0]!]).toMatchObject({
+      status: 'delivered',
+      attempts: 1,
+      event_count: 1,
+      subscription_id: w.subA.id,
+      url_host: HOOK_HOST,
+      agent_id: w.aAgent.id,
+      agent_name: 'AliceBot',
+    });
     expect(byId[w.a[0]!]!.attempt_log).toMatchObject([{ n: 1, status_code: 200 }]);
     expect(byId[w.a[1]!]).toMatchObject({ status: 'retrying', last_status_code: 503 });
     expect(byId[w.a[2]!]).toMatchObject({ status: 'failed', last_status_code: 404 });
-    expect(page.deliveries!.some((d) => d.agent_id === w.bAgent.id)).toBe(false);
 
     const failed = await json<Page<Row>>(await w.s.internal('GET', `/internal/owners/${w.alice.id}/deliveries?status=failed`, undefined, as(w.alice.id)));
     expect(failed.deliveries!.map((d) => d.id)).toEqual([w.a[2]]);
@@ -100,7 +115,7 @@ describe('owner listings', () => {
     const rest = await json<Page<Row>>(
       await w.s.internal('GET', `/internal/owners/${w.alice.id}/deliveries?limit=2&before=${first.next_before}`, undefined, as(w.alice.id)),
     );
-    expect([...first.deliveries!, ...rest.deliveries!].map((d) => d.id)).toEqual([...w.a].sort().reverse());
+    expect([...first.deliveries!, ...rest.deliveries!].map((d) => d.id)).toEqual([...w.a].reverse());
     expect(rest.next_before).toBeNull();
   });
 
@@ -113,7 +128,7 @@ describe('owner listings', () => {
   });
 
   it('is bound to the signed-in owner', async () => {
-    for (const path of ['subscriptions', 'deliveries']) {
+    for (const path of ['subscriptions', 'deliveries', `agents/${w.aAgent.id}/delivery`]) {
       expect((await w.s.internal('GET', `/internal/owners/${w.alice.id}/${path}`, undefined, as(w.bob.id))).status, path).toBe(403);
       expect((await w.s.internal('GET', `/internal/owners/${w.alice.id}/${path}`)).status, path).toBe(403);
       expect((await w.s.call('GET', `/internal/owners/${w.alice.id}/${path}`)).status, path).toBe(404); // not served by the public app
@@ -144,9 +159,8 @@ describe('admin listings and replay', () => {
     expect(mine.attempt_log).toMatchObject([{ n: 1, status_code: 503 }]);
     expect(page.deliveries!.map((d) => d.agent_name)).toEqual(expect.arrayContaining(['AliceBot', 'BobBot', 'Stray']));
 
-    const pending = await json<Page<Row>>(await get('/internal/admin/deliveries?status=pending'));
-    expect(pending.deliveries!.every((d) => d.status === 'pending')).toBe(true);
-    expect(pending.deliveries).toHaveLength(9 - 4);
+    const failed = await json<Page<Row>>(await get('/internal/admin/deliveries?status=failed'));
+    expect(failed.deliveries!.map((d) => d.agent_name).sort()).toEqual(['AliceBot', 'BobBot', 'BobBot', 'BobBot']);
 
     const seen: string[] = [];
     let before = '';
@@ -156,28 +170,13 @@ describe('admin listings and replay', () => {
       if (!next.next_before) break;
       before = `&before=${next.next_before}`;
     }
-    expect(seen).toEqual([...page.deliveries!.map((d) => d.id)]);
-    expect(new Set(seen).size).toBe(9);
+    expect(seen).toEqual(page.deliveries!.map((d) => d.id));
   });
 
-  it('lists subscription health: status, failure streak, last delivered and pending count', async () => {
+  it('lists every subscription with its agent and when it last delivered, paged', async () => {
     const page = await json<{ subscriptions: Row[]; next_before: string | null }>(await get('/internal/admin/subscriptions'));
-    expect(page.subscriptions).toHaveLength(3);
-    const a = page.subscriptions.find((x) => x.id === w.subA.id)!;
-    expect(a).toMatchObject({
-      agent_name: 'AliceBot',
-      status: 'active',
-      failure_streak: 1,
-      pending_count: 1,
-      last_delivered_at: w.s.relay.now().toISOString(),
-    });
-    const stray = page.subscriptions.find((x) => x.id === w.subS.id)!;
-    expect(stray).toMatchObject({ failure_streak: 0, pending_count: 3, last_delivered_at: null });
-    expect(JSON.stringify(page)).not.toContain('ciphertext');
-
-    await w.s.db.prepare("UPDATE subscriptions SET status = 'paused' WHERE id = ?").bind(w.subB.id).run();
-    const paused = await json<{ subscriptions: Row[] }>(await get('/internal/admin/subscriptions?status=paused'));
-    expect(paused.subscriptions.map((x) => x.id)).toEqual([w.subB.id]);
+    expect(page.subscriptions.map((x) => x.id).sort()).toEqual([w.subA.id, w.subB.id, w.subS.id].sort());
+    expect(page.subscriptions.find((x) => x.id === w.subA.id)).toMatchObject({ agent_name: 'AliceBot', last_delivered_at: w.s.now().toISOString() });
 
     const first = await json<{ subscriptions: Row[]; next_before: string | null }>(await get('/internal/admin/subscriptions?limit=2'));
     expect(first.subscriptions).toHaveLength(2);
@@ -185,7 +184,6 @@ describe('admin listings and replay', () => {
       await get(`/internal/admin/subscriptions?limit=2&before=${first.next_before}`),
     );
     expect([...first.subscriptions, ...rest.subscriptions].map((x) => x.id)).toEqual(page.subscriptions.map((x) => x.id));
-    expect((await get('/internal/admin/subscriptions?status=nope')).status).toBe(400);
   });
 
   it('replays a delivery, audits it, and refuses unknown or in-flight ones', async () => {
@@ -204,7 +202,7 @@ describe('admin listings and replay', () => {
       { n: 1, status_code: 404 },
       { n: 2, status_code: 200 },
     ]);
-    expect(await one(w.s, "SELECT actor_type, actor_id, target_id FROM audit_log WHERE action = 'delivery.replayed'")).toEqual({
+    expect(await w.s.db.prepare("SELECT actor_type, actor_id, target_id FROM audit_log WHERE action = 'delivery.replayed'").first()).toEqual({
       actor_type: 'admin',
       actor_id: w.admin.id,
       target_id: w.a[2],
@@ -212,9 +210,9 @@ describe('admin listings and replay', () => {
   });
 
   it('reports a replay that is dropped again, with the reason', async () => {
-    await w.s.db.prepare("UPDATE subscriptions SET status = 'paused' WHERE id = ?").bind(w.subA.id).run();
+    expect((await w.s.call('DELETE', '/v1/delivery', undefined, w.s.as(w.aAgent.token))).status).toBe(204);
     const res = await w.s.internal('POST', `/internal/admin/deliveries/${w.a[2]}/replay`, undefined, as(w.admin.id));
     expect(res.status).toBe(200);
-    expect(await json<{ outcome: string; reason: string }>(res)).toMatchObject({ outcome: 'dropped', reason: 'The subscription is no longer active' });
+    expect(await json<{ outcome: string; reason: string }>(res)).toMatchObject({ outcome: 'dropped', reason: 'The webhook was removed or disabled' });
   });
 });

@@ -5,6 +5,8 @@
   "main": "src/index.ts",
   // Not later than the workerd bundled with the pinned wrangler (1.20261001.1).
   "compatibility_date": "2026-10-01",
+  // Sentry (@sentry/cloudflare) keeps each request's scope in AsyncLocalStorage.
+  "compatibility_flags": ["nodejs_als"],
 
   // The top level is local development (`wrangler dev`, with .dev.vars). Deploy with `--env production`.
   // Never on workers.dev: the dashboard's API is a named entrypoint, and nothing else should be public by accident.
@@ -12,8 +14,8 @@
   "preview_urls": false,
   // Invocation logs record "<Method> <URL>", and URLs carry claim codes, so they stay off. relay.log lines (console) are kept.
   "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
-  // Workers Cache serves repeat GETs of /public without running the Worker (Cache-Control decides). It also covers
-  // service-binding calls, and a hit skips the Worker's auth, so the dashboard's entrypoint is switched off.
+  // Workers Cache serves repeat GETs of the docs (/auth.md, /skill.md, /v1/rules.md) without running the Worker (Cache-Control decides). It also
+  // covers service-binding calls, and a hit skips the Worker's auth, so the dashboard's entrypoint is switched off.
   "cache": { "enabled": true },
   "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },
 
@@ -29,9 +31,13 @@
     "bindings": [
       { "name": "GATEWAY", "class_name": "DiscordGateway" },
       { "name": "CHANNEL_SENDER", "class_name": "ChannelSender" },
+      { "name": "AGENT_STREAM", "class_name": "AgentStream" },
     ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
+    { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
+  ],
   "queues": {
     "producers": [{ "binding": "DELIVERIES", "queue": "logitland-deliveries" }],
     "consumers": [
@@ -45,6 +51,7 @@
     "PUBLIC_URL": "http://localhost:8787",
     "DASHBOARD_URL": "http://localhost:5173",
     "MODERATION_OUTAGE": "hold",
+    "SENTRY_ENVIRONMENT": "development",
   },
 
   "env": {
@@ -62,6 +69,7 @@
         "PUBLIC_URL": "https://relay.REPLACE.invalid",
         "DASHBOARD_URL": "https://REPLACE.invalid",
         "MODERATION_OUTAGE": "hold",
+        "SENTRY_ENVIRONMENT": "production",
       },
       "d1_databases": [
         {
@@ -75,21 +83,23 @@
         "bindings": [
           { "name": "GATEWAY", "class_name": "DiscordGateway" },
           { "name": "CHANNEL_SENDER", "class_name": "ChannelSender" },
+          { "name": "AGENT_STREAM", "class_name": "AgentStream" },
         ],
       },
-      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] }],
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
+        { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
+      ],
       "queues": {
         "producers": [{ "binding": "DELIVERIES", "queue": "logitland-deliveries" }],
         "consumers": [
           { "queue": "logitland-deliveries", "max_batch_size": 10, "max_concurrency": 10, "max_retries": 24, "dead_letter_queue": "logitland-deliveries-dlq" },
         ],
       },
-      // The fallback classifier. Only in production: Workers AI always runs remotely.
-      "ai": { "binding": "AI" },
       "triggers": { "crons": ["* * * * *"] },
     },
   },
   // Secrets (wrangler secret put --env production): RELAY_SECRET_KEY, IP_HASH_KEY, INTERNAL_TOKEN,
-  // DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID, DISCORD_CONSENT_ROLE_ID,
-  // JEV_LAYA_URL, JEV_LAYA_TOKEN, ADMIN_DISCORD_IDS, optionally BLOCKED_HOSTS. See DEPLOY.md.
+  // DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
+  // TYPESAFE_API_KEY, optionally JEV_MODEL, BLOCKED_HOSTS and SENTRY_DSN. See DEPLOY.md.
 }

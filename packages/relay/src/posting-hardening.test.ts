@@ -1,12 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
-import { memoryLogger } from './log';
-import { ANNOUNCE, FORUM_ID, NEW_THREAD, calls, converse, down, json, mod, pass, patch, post, remove, row, say, seedThread, world } from './posting-fixtures';
-import { LOUNGE, seedAgent, type Harness } from './testing';
+import {
+  ANNOUNCE,
+  FORUM_ID,
+  NEW_THREAD,
+  calls,
+  converse,
+  down,
+  fakeDiscord,
+  json,
+  mod,
+  pass,
+  patch,
+  post,
+  remove,
+  row,
+  say,
+  seedThread,
+  world,
+} from './posting-fixtures';
+import { LOUNGE, seedAgent, setAccess, type Harness } from './testing';
 import { getAgent, adminAct } from './services/identity';
 import { decideAppeal, takedown } from './services/moderation/admin';
 import { inLoop } from './services/moderation/loops';
 import { evaluateRules } from './services/moderation/rules';
-import { workersAiModerator } from './services/moderation/workers-ai';
 import { createAppeal } from './services/reports';
 import { reviewHeldJob } from './services/review';
 import { scrubPerson } from './services/scrub';
@@ -15,21 +31,17 @@ import { addStrike, escalateRuleBlocks, removeStrike } from './services/strikes'
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
-const rules = (content: string, probation = false) => evaluateRules({ content }, { probation }).map((m) => m.policy);
+const rules = (content: string) => evaluateRules({ content }, { links: true }).map((m) => m.policy);
 const agentRow = (h: Harness, id: string) => h.db.prepare('SELECT * FROM agents WHERE id = ?').bind(id).first<Record<string, any>>();
 const strike = (w: { h: Harness }, agentId: string, policy: 'harassment' | 'spam' = 'harassment') =>
   addStrike(w.h.relay, { agentId, policy, reason: `${policy} test`, createdBy: 'admin', actor: { type: 'admin', id: 'adm' } });
 
 describe('edits after a channel closes', () => {
-  it.each([
-    ['read_only', "UPDATE channels SET agent_access = 'read_only' WHERE id = ?"],
-    ['off', "UPDATE channels SET agent_access = 'off' WHERE id = ?"],
-    ['pace 0', 'UPDATE channels SET pace_per_agent_per_minute = 0 WHERE id = ?'],
-  ])('are refused when the channel is %s', async (_name, sql) => {
+  it.each(['read_only', 'off'] as const)('are refused when the channel is %s', async (access) => {
     const w = await world();
     const msg = await json(await post(w.h, w.a, say('before the raid started')));
     expect(msg.status).toBe('sent');
-    await w.h.db.prepare(sql).bind(LOUNGE).run();
+    await setAccess(w.h.db, LOUNGE, access);
     const res = await patch(w.h, w.a, msg.id, { content: 'after the raid started' });
     expect(res.status).toBe(403);
     expect(await calls(w.h, 'PATCH')).toHaveLength(0);
@@ -108,7 +120,7 @@ describe('duplicates', () => {
   it('do not hold three agents who each answer “I am here!”', async () => {
     const w = await world();
     const target = await converse(w.h, { author: 'agent', name: 'Orrery' });
-    const others = [await seedAgent(w.h.relay, { tier: 'claimed' }), await seedAgent(w.h.relay, { tier: 'claimed' })];
+    const others = [await seedAgent(w.h.relay), await seedAgent(w.h.relay)];
     for (const a of [w.a, ...others]) expect((await json(await post(w.h, a, say('I am here!', { reply_to: target })))).status).toBe('sent');
   });
 
@@ -134,9 +146,9 @@ describe('starting threads', () => {
     expect(codes[10]).toBe(429);
   });
 
-  it('caps how long an unverified agent can keep a thread open', async () => {
+  it('caps how long an agent on probation can keep a thread open', async () => {
     const w = await world();
-    const a = await seedAgent(w.h.relay, { tier: 'new' });
+    const a = await seedAgent(w.h.relay, { level: 0 });
     const res = await post(w.h, a, say('a topic that stays open', { thread_name: 'Long', auto_archive_minutes: 10080 }, ANNOUNCE));
     expect(res.status).toBe(400);
   });
@@ -144,7 +156,7 @@ describe('starting threads', () => {
 
 describe('fixed rules', () => {
   it('refuse a line that imitates the relay’s reply line', () => {
-    expect(rules('-# ↪ Replying to **Alice** · https://example.org/x\nhello there')).toContain('impersonation');
+    expect(rules('-# > replying to [Alice: "hi"](https://example.org/x)\nhello there')).toContain('impersonation');
     expect(rules('I am replying to Alice here')).toEqual([]);
   });
   it('hold stacks of combining marks and floods of headings', () => {
@@ -166,10 +178,9 @@ describe('fixed rules', () => {
   it('leave ordinary links alone', () => {
     expect(rules('read https://discord.com/developers/docs and https://example.org/invite/x')).toEqual([]);
   });
-  it('catch a relay key written in groups', () => {
-    const key = 'lk_7QFM-KX2D-9ABC-DEFG-HJKM-NPQR-STVW-XYZ0-1234-5678-9ABC-DEFG-HJKM';
-    expect(rules(`my key is ${key}`)).toContain('secret_leak');
-    expect(rules('relay keys start with lk_ and are long')).toEqual([]);
+  it('catch an access token, but not talk about the prefix', () => {
+    expect(rules(`my token is lat_${'K7QMXV2D'.repeat(4)}`)).toContain('secret_leak');
+    expect(rules('access tokens start with lat_ and are long')).toEqual([]);
   });
 });
 
@@ -198,16 +209,6 @@ describe('appeals', () => {
       }
     }
     expect(codes).toEqual(['ok', 'ok', 'ok', 'ok', 'ok', 429]);
-  });
-
-  it('send a poll alone when its block is overturned', async () => {
-    const w = await world();
-    const m = await json(await post(w.h, w.a, { channel_id: LOUNGE, poll: { question: 'Join https://discord.gg/abcdef today?', answers: ['Yes', 'No'] } }));
-    expect(m.status).toBe('blocked');
-    const agent = await getAgent(w.h.relay, w.a.id);
-    const appeal = await createAppeal(w.h.relay, agent, { target_type: 'message', target_id: m.id, message: 'please' });
-    await decideAppeal(w.h.relay, 'adm_1', appeal.id, { decision: 'overturn', response: 'fine' });
-    expect((await row(w.h, m.id))!.status).toBe('sent');
   });
 
   it('keep an unrelated strike when a hand-made suspension is overturned', async () => {
@@ -284,24 +285,27 @@ describe('takedowns', () => {
     const target = await converse(w.h, { name: 'Ann', userId: '700000000000000007', content: 'hello' });
     const blocked = await json(await post(w.h, w.a, say('join https://discord.gg/abcdef', { reply_to: target })));
     expect(blocked.status).toBe('blocked');
-    expect((await row(w.h, blocked.id))!.reply_prefix).toContain('**Ann**');
+    expect((await row(w.h, blocked.id))!.reply_prefix).toContain('[<@700000000000000007>: "hello"]');
     await scrubPerson(w.h.relay, '700000000000000007');
-    expect((await row(w.h, blocked.id))!.reply_prefix).toContain('**a person**');
+    expect((await row(w.h, blocked.id))!.reply_prefix).toMatch(/^-# > replying to \[a person\]\(https:/);
   });
 });
 
 describe('a webhook Discord does not know', () => {
-  it('is forgotten after a 404, so it is not used again', async () => {
+  it('is forgotten after a 404, and the next post makes a new one instead of using it again', async () => {
     const w = await world();
     w.h.setDiscord(() => Response.json({ code: 10015, message: 'Unknown Webhook' }, { status: 404 }));
     const first = await json(await post(w.h, w.a, say('into the void')));
     expect(first.status).toBe('failed');
     expect((await w.h.db.prepare('SELECT webhook_ciphertext AS c FROM channels WHERE id = ?').bind(LOUNGE).first<{ c: string | null }>())!.c).toBeNull();
-    const seen = w.h.discordCalls.length;
-    const second = await json(await post(w.h, w.a, say('into the void again')));
-    expect(second.status).toBe('failed');
-    expect(w.h.discordCalls).toHaveLength(seen);
     expect((await w.h.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'channel.webhook_dropped'").first<{ n: number }>())!.n).toBe(1);
+
+    fakeDiscord(w.h);
+    const second = await json(await post(w.h, w.a, say('into the void again')));
+    expect(second.status).toBe('sent');
+    const paths = w.h.discordCalls.map((r) => `${r.method} ${new URL(r.url).pathname.replace('/api/v10', '')}`);
+    expect(paths.filter((p) => p.includes('/webhooks/600000000000000001/'))).toHaveLength(1);
+    expect(paths).toContain(`POST /channels/${LOUNGE}/webhooks`);
   });
 
   it('is kept when only a thread is gone', async () => {
@@ -319,7 +323,7 @@ describe('held messages after an outage', () => {
     const moderator = mod(() => (up ? pass : down));
     const w = await world({ moderator });
     for (let k = 0; k < 5; k++) {
-      const a = await seedAgent(w.h.relay, { tier: 'claimed' });
+      const a = await seedAgent(w.h.relay);
       for (let i = 0; i < 9; i++) await post(w.h, a, say(`outage message ${k}-${i} text`));
     }
     expect((await w.h.db.prepare("SELECT COUNT(*) AS n FROM relay_messages WHERE status = 'held'").first<{ n: number }>())!.n).toBe(45);
@@ -327,17 +331,5 @@ describe('held messages after an outage', () => {
     w.h.advance(2 * 60_000);
     expect(await reviewHeldJob(w.h.relay)).toBe(45);
     expect((await w.h.db.prepare("SELECT COUNT(*) AS n FROM relay_messages WHERE status = 'held'").first<{ n: number }>())!.n).toBe(0);
-  });
-});
-
-describe('Workers AI failures', () => {
-  it('are logged with the error, without the text', async () => {
-    const log = memoryLogger();
-    const moderator = workersAiModerator({ run: async () => Promise.reject(new Error('quota exceeded')) } as any, 50, log);
-    const out = await moderator.review({ kind: 'message', content: 'secret words', message_id: 'm', agent_id: 'a' } as any);
-    expect(out).toMatchObject({ unavailable: true });
-    expect(log.lines[0]).toMatchObject({ event: 'moderation.workers_ai_failed' });
-    expect(JSON.stringify(log.lines)).toContain('quota exceeded');
-    expect(JSON.stringify(log.lines)).not.toContain('secret words');
   });
 });

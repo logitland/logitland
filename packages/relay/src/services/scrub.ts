@@ -1,15 +1,18 @@
 import { iso, type Relay, type Stmt } from '../context';
 import { sha256 } from '../crypto';
+import { inPrivateSql } from './conversation';
 import { chunk, commitPlan, compareSnowflakes, placeholders, planEvent, type PlannedEvent } from './events';
+import { isReplyLine, unnamedReplyLine } from './replies';
 
-// Removing text everywhere the relay keeps it (conversation, event payloads, queued deliveries, and the relay's own
-// record of a message an agent posted), for Discord deletes, moderator takedowns and people leaving the mirror. What stays: the tombstone (who, when, why) and
-// the removal event, so readers and subscribers learn the message is gone. A person leaving also takes their name
-// out of the reply lines agents wrote to them and the names of the threads they started.
+// Removing text everywhere the relay keeps it (conversation, event payloads, which queued deliveries are read from again when
+// sent, and the relay's own record of a message an agent posted), for Discord deletes, moderator takedowns and people
+// withdrawing their consent. What
+// stays: the tombstone (who, when, why) and the removal event, so readers and subscribers learn the message is gone. A person
+// withdrawing also takes their name out of the reply lines agents wrote to them.
 
 export type RemovedBy = 'author' | 'moderator' | 'discord';
 
-/** What a person who left the mirror becomes in tombstones and event payloads. */
+/** What a person who withdrew becomes in tombstones and event payloads. */
 export const FORMER_PARTICIPANT = 'Former participant';
 export const REMOVED_AUTHOR_REF = 'p_removed';
 
@@ -27,7 +30,7 @@ export interface ScrubJob {
   kind: 'single' | 'bulk';
   /** Tell subscribers. By default only when the relay held at least one of the messages. */
   fan?: boolean;
-  /** A person leaving the mirror: the tombstones also stop saying who they were. */
+  /** A person withdrawing: the tombstones also stop saying who they were. */
   anonymise?: boolean;
 }
 
@@ -53,7 +56,7 @@ export function anonymiseStatements(relay: Relay, ids: string[]): Stmt[] {
   return stmts;
 }
 
-/** The statements that take the text out: the conversation tombstone, event payloads, the relay's own record of an agent's post and queued deliveries. Safe to repeat. */
+/** The statements that take the text out: the conversation tombstone, event payloads, and the relay's own record of an agent's post. Safe to repeat. */
 export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedBy, opts: { anonymise?: boolean } = {}): Stmt[] {
   const now = iso(relay.now());
   const stmts: Stmt[] = [];
@@ -63,30 +66,26 @@ export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedB
     stmts.push(
       relay.db
         .prepare(
-          `UPDATE conversation SET content = NULL, poll = NULL, deleted_at = COALESCE(deleted_at, ?), removed_by = CASE WHEN ? = 'discord' THEN COALESCE(removed_by, ?) ELSE ? END WHERE message_id IN (${marks})`,
+          `UPDATE conversation SET content = NULL, deleted_at = COALESCE(deleted_at, ?), removed_by = CASE WHEN ? = 'discord' THEN COALESCE(removed_by, ?) ELSE ? END WHERE message_id IN (${marks})`,
         )
         .bind(now, removedBy, removedBy, removedBy, ...part),
-      // Edits without text have no content key, and must not gain one. A poll's question and answers go with the text.
+      // Edits without text have no content key, and must not gain one.
       relay.db
         .prepare(
-          `UPDATE events SET payload = json_remove(json_set(payload, '$.data.content', ''), '$.data.poll') WHERE message_id IN (${marks}) AND type IN ('message.created', 'message.updated') AND json_type(payload, '$.data.content') = 'text'`,
+          `UPDATE events SET payload = json_set(payload, '$.data.content', '') WHERE message_id IN (${marks}) AND type IN ('message.created', 'message.updated') AND json_type(payload, '$.data.content') = 'text'`,
         )
-        .bind(...part),
-      // The relay's own copy of a post an agent made: its text, thread title, poll and reply line go too (the hash stays).
-      relay.db
-        .prepare(`UPDATE relay_messages SET content = NULL, thread_name = NULL, poll = NULL, reply_prefix = NULL WHERE discord_message_id IN (${marks})`)
         .bind(...part),
       // The title of a thread an agent started is its starter's words (the thread's ID is the starter's ID).
       relay.db.prepare(`UPDATE threads SET name = NULL WHERE creator_agent_id IS NOT NULL AND name IS NOT NULL AND id IN (${marks})`).bind(...part),
-      relay.db
-        .prepare(
-          `UPDATE deliveries SET status = 'dropped', next_attempt_at = NULL, last_error = 'The message was removed before it was delivered'
-           WHERE id IN (
-             SELECT d.id FROM events e JOIN deliveries d INDEXED BY deliveries_event ON d.event_id = e.id
-             WHERE e.message_id IN (${marks}) AND e.type IN ('message.created', 'message.updated') AND d.status IN ('pending', 'retrying'))`,
-        )
-        .bind(...part),
     );
+    // The relay's own copy of a post an agent made: its text, thread title and reply line go too (the hash stays). A
+    // moderator's removal keeps it a year for appeals (#30 Q7, retention.ts).
+    if (removedBy !== 'moderator')
+      stmts.push(
+        relay.db
+          .prepare(`UPDATE relay_messages SET content = NULL, thread_name = NULL, reply_prefix = NULL WHERE discord_message_id IN (${marks})`)
+          .bind(...part),
+      );
   }
   return opts.anonymise ? [...stmts, ...anonymiseStatements(relay, ids)] : stmts;
 }
@@ -95,6 +94,11 @@ export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedB
 export async function planRemoval(relay: Relay, job: Omit<ScrubJob, 'guildId'> & { guildId: string }): Promise<PlannedEvent> {
   if (job.kind === 'single') {
     const id = job.ids[0]!;
+    // A removed reply to an agent goes to that agent's replies subscription too, which had its text.
+    const replied = await relay.db
+      .prepare('SELECT p.agent_id FROM conversation c JOIN conversation p ON p.message_id = c.reply_to WHERE c.message_id = ? AND p.agent_id IS NOT NULL')
+      .bind(id)
+      .first<{ agent_id: string }>();
     return planEvent(relay, {
       type: 'message.deleted',
       guildId: job.guildId,
@@ -102,7 +106,8 @@ export async function planRemoval(relay: Relay, job: Omit<ScrubJob, 'guildId'> &
       messageId: id,
       sourceKey: `delete:${id}`,
       data: { message_id: id, removed_by: job.removedBy },
-      fan: job.fan,
+      replyAgentId: replied?.agent_id ?? null,
+      silent: job.fan === false,
     });
   }
   const sorted = [...job.ids].sort(compareSnowflakes);
@@ -113,16 +118,16 @@ export async function planRemoval(relay: Relay, job: Omit<ScrubJob, 'guildId'> &
     messageId: null,
     sourceKey: `bulk:${await sha256(sorted.join(','))}`,
     data: { message_ids: sorted },
-    fan: job.fan,
+    silent: job.fan === false,
   });
 }
 
-/** Blanks the text, drops queued deliveries and records the removal, in one transaction. Safe to repeat. */
-export async function scrubIds(relay: Relay, job: ScrubJob): Promise<{ recorded: boolean; deliveries: number }> {
+/** Blanks the text and records the removal, in one transaction. Safe to repeat. */
+export async function scrubIds(relay: Relay, job: ScrubJob): Promise<{ recorded: boolean }> {
   const stmts = scrubStatements(relay, job.ids, job.removedBy, { anonymise: job.anonymise });
   if (job.guildId === null) {
     await relay.db.batch(stmts);
-    return { recorded: false, deliveries: 0 };
+    return { recorded: false };
   }
   let fan = job.fan;
   if (fan === undefined) {
@@ -131,7 +136,7 @@ export async function scrubIds(relay: Relay, job: ScrubJob): Promise<{ recorded:
       held +=
         (
           await relay.db
-            .prepare(`SELECT COUNT(*) AS n FROM conversation WHERE withheld = 0 AND message_id IN (${placeholders(part.length)})`)
+            .prepare(`SELECT COUNT(*) AS n FROM conversation WHERE message_id IN (${placeholders(part.length)})`)
             .bind(...part)
             .first<{ n: number }>()
         )?.n ?? 0;
@@ -139,8 +144,8 @@ export async function scrubIds(relay: Relay, job: ScrubJob): Promise<{ recorded:
     fan = held > 0;
   }
   const event = await planRemoval(relay, { ...job, guildId: job.guildId, fan });
-  const { recorded, deliveries } = await commitPlan(relay, [...stmts, event.stmt], [{ at: stmts.length, event }]);
-  return { recorded: recorded > 0, deliveries };
+  const { recorded } = await commitPlan(relay, [...stmts, event.stmt], [{ at: stmts.length, event }]);
+  return { recorded: recorded > 0 };
 }
 
 /**
@@ -175,72 +180,46 @@ export async function scrubMessage(relay: Relay, discordMessageId: string, remov
 /** At most this many messages per call; a person with more can call again. */
 const PERSON_LIMIT = 5000;
 
-// An agent's reply starts with a line naming the person it answers (see the posting pipeline's reply line). A name never
-// contains '*', so the first '** · ' ends it.
-const REPLY_OPEN = '-# ↪ Replying to **';
-const REPLY_CLOSE = '** · ';
-const isReplyLine = (col: string) => `instr(${col}, '${REPLY_OPEN}') = 1 AND instr(${col}, '${REPLY_CLOSE}') > 0`;
-const unnamed = (col: string) => `'${REPLY_OPEN}a person' || substr(${col}, instr(${col}, '${REPLY_CLOSE}'))`;
-/** Agent messages that reply to a message the person wrote and the relay still knows as theirs; one placeholder, the person's Discord ID. */
-const REPLIES_TO_PERSON = `SELECT r.message_id, r.relay_message_id FROM conversation r WHERE r.author_kind = 'agent' AND r.reply_to IN (SELECT CAST(p.message_id AS TEXT) FROM conversation p WHERE p.discord_user_id = ?)`;
-
 /**
- * What still names a person after their messages are gone: the reply lines agents wrote to them (in the conversation, the
- * posting records and event payloads) become "a person", and the titles of threads they started or named are dropped. Run before
- * the messages are anonymised, while they can still be found by the person's ID. Safe to repeat.
+ * What still names a person after their messages are gone: the reply lines agents' posts carry to them (mention and quote)
+ * become "a person" in the posting records. The conversation and events hold agents' text without the line (`reply_to`
+ * instead), so nothing else names them. Run before the messages are anonymised, while they can still be found by the
+ * person's ID. Safe to repeat.
  */
 function unnameStatements(relay: Relay, discordUserId: string): Stmt[] {
-  const text = "json_extract(payload, '$.data.content')";
   return [
     relay.db
       .prepare(
-        `UPDATE conversation SET content = ${unnamed('content')} WHERE author_kind = 'agent' AND ${isReplyLine('content')}
+        `UPDATE relay_messages SET reply_prefix = ${unnamedReplyLine('reply_prefix')} WHERE reply_prefix IS NOT NULL AND ${isReplyLine('reply_prefix')}
            AND reply_to IN (SELECT CAST(p.message_id AS TEXT) FROM conversation p WHERE p.discord_user_id = ?)`,
       )
       .bind(discordUserId),
-    // Sends not yet in the conversation (still being moderated or sent) carry the line too.
-    relay.db
-      .prepare(
-        `UPDATE relay_messages SET reply_prefix = ${unnamed('reply_prefix')} WHERE reply_prefix IS NOT NULL AND ${isReplyLine('reply_prefix')}
-           AND (id IN (SELECT relay_message_id FROM (${REPLIES_TO_PERSON}) WHERE relay_message_id IS NOT NULL)
-             OR (status IN ('moderating', 'held', 'queued', 'sending', 'uncertain', 'blocked', 'failed') AND reply_to IN (SELECT CAST(p.message_id AS TEXT) FROM conversation p WHERE p.discord_user_id = ?)))`,
-      )
-      .bind(discordUserId, discordUserId),
-    relay.db
-      .prepare(
-        `UPDATE events SET payload = json_set(payload, '$.data.content', ${unnamed(text)}) WHERE type IN ('message.created', 'message.updated')
-           AND json_type(payload, '$.data.content') = 'text' AND ${isReplyLine(text)} AND message_id IN (SELECT message_id FROM (${REPLIES_TO_PERSON}))`,
-      )
-      .bind(discordUserId),
-    // The thread's ID is its starter message's ID.
-    relay.db
-      .prepare('UPDATE threads SET name = NULL WHERE name IS NOT NULL AND id IN (SELECT message_id FROM conversation WHERE discord_user_id = ?)')
-      .bind(discordUserId),
-    // And the ones they named without starting (a thread made from someone else's message).
-    relay.db.prepare('UPDATE threads SET name = NULL, owner_id = NULL WHERE owner_id = ?').bind(discordUserId),
   ];
 }
 
 /**
- * Removes every mirrored message a person wrote (one `message.bulk_deleted` per channel) and makes what remains
- * anonymous: tombstones, event payloads, agents' reply lines and thread titles stop naming them. Messages already removed are anonymised too.
+ * Removes every reply the relay holds of a person (one `message.bulk_deleted` per channel) and makes what remains
+ * anonymous: tombstones, event payloads and agents' reply lines stop naming them. Messages already removed are anonymised too.
  * `messages` counts the ones removed now.
  */
 export async function scrubPerson(relay: Relay, discordUserId: string): Promise<{ messages: number; more: boolean }> {
   await relay.db.batch(unnameStatements(relay, discordUserId));
+  // Grouped by channel, and apart for each private conversation (#33): one removal event goes only where its messages went.
   const { results } = await relay.db
     .prepare(
-      'SELECT CAST(message_id AS TEXT) AS id, channel_id, deleted_at IS NULL AS live FROM conversation WHERE discord_user_id = ? ORDER BY message_id LIMIT ?',
+      `SELECT CAST(c.message_id AS TEXT) AS id, c.channel_id, c.deleted_at IS NULL AS live, CASE WHEN ${inPrivateSql('c')} THEN c.thread_id ELSE '' END AS place
+       FROM conversation c WHERE c.discord_user_id = ? ORDER BY c.message_id LIMIT ?`,
     )
     .bind(discordUserId, PERSON_LIMIT)
-    .all<{ id: string; channel_id: string; live: number }>();
-  const live = new Map<string, string[]>();
+    .all<{ id: string; channel_id: string; live: number; place: string }>();
+  const live = new Map<string, { channelId: string; ids: string[] }>();
   const gone: string[] = [];
   for (const r of results) {
-    if (r.live) live.set(r.channel_id, [...(live.get(r.channel_id) ?? []), r.id]);
+    const key = `${r.channel_id}:${r.place}`;
+    if (r.live) live.set(key, { channelId: r.channel_id, ids: [...(live.get(key)?.ids ?? []), r.id] });
     else gone.push(r.id);
   }
-  for (const [channelId, ids] of live) {
+  for (const { channelId, ids } of live.values()) {
     const channel = await relay.db.prepare('SELECT guild_id FROM channels WHERE id = ?').bind(channelId).first<{ guild_id: string }>();
     await scrubIds(relay, { ids, guildId: channel?.guild_id ?? null, channelId, removedBy: 'author', kind: 'bulk', fan: true, anonymise: true });
   }

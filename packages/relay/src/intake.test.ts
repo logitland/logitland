@@ -4,7 +4,6 @@ import {
   all,
   at,
   conversation,
-  deliveryCount,
   edit,
   eventTypes,
   fromWebhook,
@@ -12,18 +11,18 @@ import {
   HUMAN,
   msg,
   one,
-  poll,
   push,
   relayMessage,
   remove,
   subscribe,
+  waiting,
   WEBHOOK,
   world,
 } from './intake-fixtures';
 import { authorRef } from './services/conversation';
 import { ingest, recordAgentPost, recordGap } from './services/intake';
 import { contentHash } from './services/moderation/rows';
-import { BENCH, LOUNGE } from './testing';
+import { BENCH, LOUNGE, seedAgent } from './testing';
 
 describe('creating messages', () => {
   it('stores people, bots and other webhooks as pseudonymous authors', async () => {
@@ -95,7 +94,7 @@ describe('creating messages', () => {
     const { h } = await world();
     const r = await push(h, human(1, { channel_id: BENCH }), human(2), human(3, { channel_id: '119999999999999999' }));
     expect(r).toMatchObject({ recorded: 1, ignored: 2 });
-    expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(1);
+    expect(await all(h, "SELECT 1 FROM conversation WHERE author_kind = 'human'")).toHaveLength(1);
   });
 
   it('maps thread messages to the parent channel with thread_id and remembers threads of open channels', async () => {
@@ -139,26 +138,22 @@ describe('creating messages', () => {
     expect((await one<{ last: string }>(h, 'SELECT CAST(last_message_id AS TEXT) AS last FROM channel_cursors WHERE channel_id = ?', LOUNGE))!.last).toBe(
       nineteen,
     );
-    expect((await all<{ id: string }>(h, 'SELECT CAST(message_id AS TEXT) AS id FROM conversation ORDER BY message_id')).map((r) => r.id)).toEqual([
-      eighteen,
-      '1000000000000000000',
-      nineteen,
-    ]);
+    expect(
+      (await all<{ id: string }>(h, "SELECT CAST(message_id AS TEXT) AS id FROM conversation WHERE author_kind = 'human' ORDER BY message_id")).map(
+        (r) => r.id,
+      ),
+    ).toEqual([eighteen, '1000000000000000000', nineteen]);
   });
 });
 
 describe('idempotency', () => {
-  it('records nothing new, and sends nothing new, when the same events arrive again', async () => {
-    const { h, agent } = await world();
-    await subscribe(h, agent.id);
+  it('records nothing new when the same events arrive again', async () => {
+    const { h } = await world();
     const batch = [human(1), human(2), edit(1, 'changed', 5), remove(2)];
-    const first = await push(h, ...batch);
-    expect(first).toMatchObject({ recorded: 4, deliveries: 4 });
-    const before = { events: await all(h, 'SELECT seq FROM events'), deliveries: await deliveryCount(h) };
-    const again = await push(h, ...batch);
-    expect(again).toMatchObject({ recorded: 0, deliveries: 0, ignored: 4 });
-    expect(await all(h, 'SELECT seq FROM events')).toEqual(before.events);
-    expect(await deliveryCount(h)).toBe(before.deliveries);
+    expect(await push(h, ...batch)).toMatchObject({ recorded: 4 });
+    const before = await all(h, 'SELECT seq FROM events');
+    expect(await push(h, ...batch)).toMatchObject({ recorded: 0, ignored: 4 });
+    expect(await all(h, 'SELECT seq FROM events')).toEqual(before);
     expect(await conversation(h, 1)).toMatchObject({ content: 'changed' });
   });
 
@@ -177,14 +172,6 @@ describe('idempotency', () => {
     );
     // A bulk delete leaves a tombstone for each message the relay didn't hold.
     expect(keys).toEqual([`create:${msg(1)}`, `update:${msg(1)}:${at(5)}`, `delete:${msg(1)}`, 'bulk:<hash>', `delete:${msg(9)}`, `delete:${msg(8)}`]);
-  });
-
-  it('fans out only events that are new, to subscriptions that asked for the type', async () => {
-    const { h, agent } = await world();
-    await subscribe(h, agent.id, LOUNGE, ['message.created']);
-    await push(h, human(1), edit(1, 'x', 5));
-    expect(await deliveryCount(h)).toBe(1);
-    expect((await all<{ event_type: string }>(h, 'SELECT event_type FROM deliveries')).map((d) => d.event_type)).toEqual(['message.created']);
   });
 
   it('does not let one bad event reject the batch', async () => {
@@ -217,10 +204,10 @@ describe('edits', () => {
 
   it('are recorded but not sent on for messages the relay never saw', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
-    const r = await push(h, edit(7, 'who knows', 5));
-    expect(r).toMatchObject({ recorded: 1, deliveries: 0 });
+    const sub = await subscribe(h, agent.id);
+    expect(await push(h, edit(7, 'who knows', 5))).toMatchObject({ recorded: 1 });
     expect(await eventTypes(h)).toEqual(['message.updated']);
+    expect(await waiting(h, sub)).toEqual([]);
     expect(await conversation(h, 7)).toBeNull();
   });
 
@@ -242,10 +229,10 @@ describe('edits', () => {
 describe('deletes', () => {
   it('leave a tombstone and tell subscribers', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
+    const sub = await subscribe(h, agent.id);
     await push(h, human(1));
-    const r = await push(h, remove(1));
-    expect(r).toMatchObject({ recorded: 1, deliveries: 1 });
+    expect(await push(h, remove(1))).toMatchObject({ recorded: 1 });
+    expect(await waiting(h, sub)).toEqual(['message.created', 'message.deleted']);
     expect(await conversation(h, 1)).toMatchObject({ content: null, removed_by: 'discord' });
     expect((await conversation(h, 1))!.deleted_at).not.toBeNull();
     expect(JSON.parse((await one<{ payload: string }>(h, "SELECT payload FROM events WHERE type = 'message.deleted'"))!.payload).data).toEqual({
@@ -256,14 +243,13 @@ describe('deletes', () => {
 
   it('that arrive before their create stop the late create from bringing the text back', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
-    const early = await push(h, remove(1));
-    expect(early).toMatchObject({ recorded: 1, deliveries: 0 });
-    const late = await push(h, human(1));
-    expect(late).toMatchObject({ recorded: 0, deliveries: 0 });
+    const sub = await subscribe(h, agent.id);
+    expect(await push(h, remove(1))).toMatchObject({ recorded: 1 });
+    expect(await push(h, human(1))).toMatchObject({ recorded: 0 });
     expect(await conversation(h, 1)).toMatchObject({ content: null, removed_by: 'discord', author_kind: 'human' });
     expect(await eventTypes(h)).toEqual(['message.deleted']);
-    expect(await deliveryCount(h)).toBe(0);
+    // A removal of a message nobody was told about is announced to nobody.
+    expect(await waiting(h, sub)).toEqual([]);
   });
 
   it('keep the order of a create and a delete in one batch', async () => {
@@ -283,11 +269,12 @@ describe('deletes', () => {
 
   it('are handled in bulk, once, whatever the order of the IDs', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
+    const sub = await subscribe(h, agent.id);
     await push(h, human(1), human(2), human(3));
     const bulk = { kind: 'message_delete_bulk' as const, channel_id: LOUNGE, message_ids: [msg(2), msg(1), msg(99)] };
     // The removal event, and a tombstone for the one message the relay doesn't hold (not announced).
-    expect(await push(h, bulk)).toMatchObject({ recorded: 2, deliveries: 1 });
+    expect(await push(h, bulk)).toMatchObject({ recorded: 2 });
+    expect(await waiting(h, sub)).toEqual(['message.created', 'message.created', 'message.created', 'message.bulk_deleted']);
     expect(await push(h, { ...bulk, message_ids: [msg(99), msg(1), msg(2)] })).toMatchObject({ recorded: 0 });
     expect((await conversation(h, 1))!.content).toBeNull();
     expect((await conversation(h, 2))!.content).toBeNull();
@@ -301,14 +288,14 @@ describe('deletes', () => {
 describe('a bulk delete before the messages are written', () => {
   it('keeps a message that arrives late (a backfill page, a seed) from bringing its text back or being announced', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
+    const sub = await subscribe(h, agent.id);
     await push(h, { kind: 'message_delete_bulk', channel_id: LOUNGE, message_ids: [msg(7), msg(8)] });
-    const before = await deliveryCount(h);
+    const before = await waiting(h, sub);
     await push(h, human(7, { content: 'doxx: address' }), human(8, { content: 'more' }), human(9));
     for (const n of [7, 8]) expect(await conversation(h, n)).toMatchObject({ content: null, removed_by: 'discord' });
     expect((await conversation(h, 7))!.deleted_at).not.toBeNull();
     expect(await conversation(h, 9)).toMatchObject({ content: 'message 9' });
-    expect(await deliveryCount(h)).toBe(before + 1);
+    expect(await waiting(h, sub)).toEqual([...before, 'message.created']);
     expect(
       (await all<{ message_id: string }>(h, "SELECT CAST(message_id AS TEXT) AS message_id FROM events WHERE type = 'message.created'")).map(
         (e) => e.message_id,
@@ -387,24 +374,8 @@ describe('telling agents’ posts from other webhooks', () => {
     expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', id)).toEqual({ status: 'sent', discord_message_id: msg(5) });
   });
 
-  it('prefers the send in flight to an older uncertain one, and tells polls apart by their question', async () => {
+  it('prefers the send in flight to an older uncertain one', async () => {
     const { h, agent } = await world();
-    const hash = await contentHash('');
-    const a = await relayMessage(h, agent.id, { content: '', status: 'uncertain', hash });
-    h.advance(1_000);
-    const b = await relayMessage(h, agent.id, { content: '', status: 'sending', hash });
-    await h.db
-      .prepare('UPDATE relay_messages SET poll = ? WHERE id = ?')
-      .bind(JSON.stringify({ question: 'Soup?' }), a)
-      .run();
-    await h.db
-      .prepare('UPDATE relay_messages SET poll = ? WHERE id = ?')
-      .bind(JSON.stringify({ question: 'Noodles?' }), b)
-      .run();
-    await push(h, fromWebhook(5, 'Moth-9', '', { poll: poll({ question: 'Noodles?' }) }));
-    expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', b)).toEqual({ status: 'sent', discord_message_id: msg(5) });
-    expect(await one(h, 'SELECT status, discord_message_id FROM relay_messages WHERE id = ?', a)).toEqual({ status: 'uncertain', discord_message_id: null });
-    // Without a poll question to go on, the one still in flight goes first.
     const c = await relayMessage(h, agent.id, { content: 'plain', status: 'uncertain', hash: await contentHash('plain') });
     h.advance(1_000);
     const d = await relayMessage(h, agent.id, { content: 'plain', status: 'sending', hash: await contentHash('plain') });
@@ -446,9 +417,9 @@ describe('recording agent posts directly', () => {
     ...over,
   });
 
-  it('writes the conversation row and the event, and fans out, without the Gateway', async () => {
+  it('writes the conversation row and the event, and announces it, without the Gateway', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
+    const sub = await subscribe(h, (await seedAgent(h.relay)).id);
     await recordAgentPost(h.relay, post(agent.id));
     expect(await conversation(h, 5)).toMatchObject({
       author_kind: 'agent',
@@ -459,17 +430,15 @@ describe('recording agent posts directly', () => {
       created_at: at(1),
     });
     expect(await eventTypes(h)).toEqual(['message.created']);
-    expect(await deliveryCount(h)).toBe(1);
+    expect(await waiting(h, sub)).toEqual(['message.created']);
     expect((await one<{ last: string }>(h, 'SELECT CAST(last_message_id AS TEXT) AS last FROM channel_cursors'))!.last).toBe(msg(5));
   });
 
   it('records the event once whichever of the Gateway and the pipeline gets there first', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
     await recordAgentPost(h.relay, post(agent.id));
     await push(h, fromWebhook(5, 'Moth-9', 'Good morning'));
     expect(await eventTypes(h)).toEqual(['message.created']);
-    expect(await deliveryCount(h)).toBe(1);
 
     await push(h, fromWebhook(6, 'Moth-9', 'Second'));
     await recordAgentPost(h.relay, post(agent.id, { discordMessageId: msg(6), content: 'Second' }));
@@ -504,9 +473,9 @@ describe('recording agent posts directly', () => {
 });
 
 describe('gaps', () => {
-  it('records a gap event per channel with a resume cursor that is the event’s own, and fans out', async () => {
+  it('records a gap event per channel, announced to the channel’s subscribers', async () => {
     const { h, agent } = await world();
-    await subscribe(h, agent.id);
+    const sub = await subscribe(h, agent.id);
     await push(h, human(1));
     const n = await recordGap(h.relay, {
       channelIds: [LOUNGE, BENCH],
@@ -528,15 +497,11 @@ describe('gaps', () => {
       expect(payload.data).toEqual({
         window_start: '2026-10-19T02:00:00.000Z',
         window_end: '2026-10-19T02:05:00.000Z',
-        resume_cursor: String(r.seq),
         reason: 'The relay lost its session',
       });
       expect(() => RelayEvent.parse({ ...payload, cursor: String(r.seq) })).not.toThrow();
     }
-    // Only the open channel has a subscriber.
-    expect(await deliveryCount(h)).toBe(2);
-    const sent = await all<{ event_type: string }>(h, "SELECT event_type FROM deliveries WHERE event_type = 'subscription.gap'");
-    expect(sent).toHaveLength(1);
+    expect(await waiting(h, sub)).toEqual(['message.created', 'subscription.gap']);
   });
 
   it('is recorded once for the same window', async () => {
@@ -545,23 +510,6 @@ describe('gaps', () => {
     expect(await recordGap(h.relay, gap)).toBe(1);
     expect(await recordGap(h.relay, gap)).toBe(0);
     expect(await recordGap(h.relay, { ...gap, channelIds: [] })).toBe(0);
-  });
-
-  it('for a resumed subscription resumes after the last event from before the window, so the events it missed are not skipped', async () => {
-    const { h } = await world();
-    await push(h, human(1));
-    h.advance(60_000);
-    const windowStart = h.now().toISOString();
-    h.advance(1_000);
-    await push(h, human(2), human(3));
-    h.advance(60_000);
-    const before = (await one<{ seq: number }>(h, "SELECT seq FROM events WHERE message_id = ? AND type = 'message.created'", msg(1)))!.seq;
-    expect(
-      await recordGap(h.relay, { channelIds: [LOUNGE], windowStart, windowEnd: h.now().toISOString(), reason: 'paused', subscriptionId: 'sub_01JB7Q2M8R' }),
-    ).toBe(1);
-    const gap = await one<{ seq: number; payload: string }>(h, "SELECT seq, payload FROM events WHERE type = 'subscription.gap'");
-    expect(JSON.parse(gap!.payload).data.resume_cursor).toBe(String(before));
-    expect(gap!.seq).toBeGreaterThan(before + 2);
   });
 });
 
@@ -588,7 +536,7 @@ describe('limits', () => {
     expect((await push(h, ...mixed)).recorded).toBe(250);
     // Three rounds of at most 100 events each.
     expect(queries).toBeLessThan(1000);
-    expect(await all(h, 'SELECT 1 FROM conversation')).toHaveLength(200);
+    expect(await all(h, "SELECT 1 FROM conversation WHERE author_kind = 'human'")).toHaveLength(200);
   });
 
   it('chunks long ID lists under D1’s limit of 100 bound parameters', async () => {
@@ -620,14 +568,5 @@ describe('intake errors', () => {
     await expect(ingest(h.relay, { source: 'test', events: [human(1)] })).rejects.toThrow('D1 is down');
     h.db.batch = original;
     expect((await ingest(h.relay, { source: 'test', events: [human(1)] })).recorded).toBe(1);
-  });
-
-  it('does not undo a recorded event when its fan-out fails', async () => {
-    const { h, agent } = await world();
-    await subscribe(h, agent.id);
-    await h.db.prepare('DROP TABLE deliveries').run();
-    const r = await push(h, human(1));
-    expect(r.recorded).toBe(1);
-    expect(h.log.lines.some((l) => l.event === 'intake.fan_out_failed')).toBe(true);
   });
 });

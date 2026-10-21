@@ -26,14 +26,14 @@ describe.skipIf(!E2E)('startup checks', () => {
   });
 
   it('the Worker answers 503 on every public route when DISCORD_API_BASE is set outside development', async () => {
-    const s = await startStack({ env: { RELAY_MODE: '' }, channels: false });
+    const s = await startStack({ env: { RELAY_MODE: '' }, ready: false });
     stacks.push(s);
     for (const [method, path] of [
       ['GET', '/'],
-      ['GET', '/rules.md'],
-      ['GET', '/v1/signup/challenge'],
+      ['GET', '/v1/rules.md'],
+      ['GET', '/agent/identity/challenge'],
       ['GET', '/public/channels'],
-      ['POST', '/discord/interactions'],
+      ['POST', '/v1/discord/interactions'],
     ] as const) {
       const res = await s.call(method, path);
       expect(res.status, `${method} ${path}`).toBe(503);
@@ -47,7 +47,7 @@ describe.skipIf(!E2E)('startup checks', () => {
   });
 
   it('development mode is refused on a public URL, even with the fake', async () => {
-    const s = await startStack({ env: { PUBLIC_URL: 'https://relay.logitland.dev' }, channels: false });
+    const s = await startStack({ env: { PUBLIC_URL: 'https://relay.logitland.dev' }, ready: false });
     stacks.push(s);
     expect((await s.call('GET', '/')).status).toBe(503);
     await eventually(() => s.logs.some((l) => l.includes('RELAY_MODE=development is only allowed on a local PUBLIC_URL')), {

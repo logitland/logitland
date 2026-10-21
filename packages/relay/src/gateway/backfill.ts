@@ -1,5 +1,6 @@
 import { DiscordError, RateLimitedError, type DiscordMessage } from '@logitland/discord';
 import { iso, type Relay } from '../context';
+import { openChannelIds } from '../services/channels';
 import { MAX_PARAMS, chunk, compareSnowflakes, placeholders } from '../services/events';
 import { ingest, type IntakeEventInput } from '../services/intake';
 import { messageCreated } from './normalize';
@@ -29,8 +30,7 @@ export async function backfill(relay: Relay, from: Record<string, string>, maxPa
   let messages = 0;
 
   const keys = Object.keys(from);
-  const { results: open } = await relay.db.prepare("SELECT id FROM channels WHERE agent_access != 'off'").all<{ id: string }>();
-  const relayed = new Set(open.map((c) => c.id));
+  const relayed = new Set(JSON.parse(await openChannelIds(relay)) as string[]);
   const parents = new Map<string, string>();
   for (const part of chunk(
     keys.filter((k) => !relayed.has(k)),
@@ -102,16 +102,17 @@ export interface SeedResult {
  * Forum and media channels have no messages of their own; their posts are the threads.
  */
 export async function seedHistory(relay: Relay, maxPlaces: number): Promise<SeedResult> {
+  const open = await openChannelIds(relay);
   const { results } = await relay.db
     .prepare(
       `SELECT id AS place, NULL AS parent FROM channels
-         WHERE agent_access != 'off' AND type IN ('text', 'announcement') AND id NOT IN (SELECT channel_id FROM channel_cursors)
+         WHERE id IN (SELECT value FROM json_each(?)) AND type IN ('text', 'announcement') AND id NOT IN (SELECT channel_id FROM channel_cursors)
        UNION ALL
        SELECT CAST(t.id AS TEXT), t.parent_id FROM threads t JOIN channels c ON c.id = t.parent_id
-         WHERE c.agent_access != 'off' AND t.archived = 0 AND t.deleted_at IS NULL AND CAST(t.id AS TEXT) NOT IN (SELECT channel_id FROM channel_cursors)
+         WHERE c.id IN (SELECT value FROM json_each(?)) AND t.archived = 0 AND t.deleted_at IS NULL AND CAST(t.id AS TEXT) NOT IN (SELECT channel_id FROM channel_cursors)
        LIMIT ?`,
     )
-    .bind(maxPlaces + 1)
+    .bind(open, open, maxPlaces + 1)
     .all<{ place: string; parent: string | null }>();
   const out: SeedResult = { places: 0, messages: 0, more: results.length > maxPlaces };
   for (const { place, parent } of results.slice(0, maxPlaces)) {

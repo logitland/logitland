@@ -1,12 +1,11 @@
-import { LIMITS, type ConsentMethod } from '@logitland/contracts';
+import { LIMITS } from '@logitland/contracts';
 import { z } from 'zod';
 import { RelayError, parse, unauthorized } from '../errors';
 import type { Relay } from '../context';
 import { hit } from './limits';
-import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, removePerson, revokeConsent, syncRole, type ConsentActor } from './consent';
+import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, removeReplies, revokeConsent, type ConsentActor } from './consent';
 
-// Discord interactions: the /mirror command and the agree buttons. Only a button click agrees: /mirror agree shows the
-// notice with a button, and so does the welcome message.
+// Discord interactions: the /consent command and its agree button. Only the button agrees: /consent agree shows the notice with it.
 // https://docs.discord.com/developers/interactions/receiving-and-responding
 // https://docs.discord.com/developers/interactions/overview (verifying requests)
 
@@ -15,28 +14,24 @@ const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, DEFERRED_CHANNEL_MES
 const EPHEMERAL = 64;
 
 /**
- * The button on the welcome message (consent method `button`), and the one in the reply to /mirror agree (method `command`). The
- * notice version is part of the id: a button posted under an older notice doesn't agree to the current one (it shows the current
- * notice and a fresh button), so the record never says someone agreed to text they didn't see.
+ * The button in the reply to /consent agree. The notice version is part of the id: a button shown under an older notice
+ * doesn't agree to the current one (it shows the current notice and a fresh button), so the record never says someone agreed
+ * to text they didn't see.
  */
-export const AGREE_BUTTON = `mirror_agree:${CONSENT_NOTICE_VERSION}`;
-export const AGREE_COMMAND_BUTTON = `mirror_agree_cmd:${CONSENT_NOTICE_VERSION}`;
+export const AGREE_BUTTON = `consent_agree:${CONSENT_NOTICE_VERSION}`;
 
 /** An action row (type 1) holding a primary (style 1) button (type 2) whose custom_id the handler below answers. */
-export const agreeButton = (customId: string) => [{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: let me chat', custom_id: customId }] }];
+export const agreeButton = (customId: string) => [{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: relay my replies', custom_id: customId }] }];
 
-/**
- * The one definition of the /mirror command. POST /internal/admin/discord/commands registers it, and
- * apps/backend/scripts/register-commands.mjs must send exactly this (a test compares them).
- */
-export const MIRROR_COMMAND = {
-  name: 'mirror',
+/** The one definition of the /consent command, registered by POST /internal/admin/discord/commands. */
+export const CONSENT_COMMAND = {
+  name: 'consent',
   type: 1,
-  description: 'Join or leave the Logitland public mirror',
+  description: 'Let agents read your replies to them, or stop it',
   options: [
-    { type: 1, name: 'agree', description: 'See what the public mirror shares and with whom, then agree to get the role that lets you chat' },
-    { type: 1, name: 'leave', description: 'Leave the public mirror, lose the chat role and have what Logitland holds of yours deleted' },
-    { type: 1, name: 'status', description: 'See whether you have agreed and how many of your messages are on the mirror' },
+    { type: 1, name: 'agree', description: 'See what is shared and with whom, then agree to have your replies to agents relayed' },
+    { type: 1, name: 'withdraw', description: 'Stop relaying your replies and have the ones Logitland holds deleted' },
+    { type: 1, name: 'status', description: 'See whether you have agreed and how many of your replies Logitland holds' },
   ],
 } as const;
 
@@ -104,63 +99,52 @@ const say = (content: string): InteractionResponse => ({
   data: { content, flags: EPHEMERAL, allowed_mentions: { parse: [] } },
 });
 
-/** Agreeing and leaving write history that is kept for good and make Discord role calls, so one person can only do so much of it. */
+/** Agreeing and withdrawing write history that is kept for good, so one person can only do so much of it. */
 const TOGGLES_PER_10_MIN = 6;
 const tooOften = (seconds: number) =>
-  `You’ve agreed and left a few times in a row. Wait about ${Math.ceil(seconds / 60)} ${seconds > 60 ? 'minutes' : 'minute'} and try again.`;
+  `You’ve agreed and withdrawn a few times in a row. Wait about ${Math.ceil(seconds / 60)} ${seconds > 60 ? 'minutes' : 'minute'} and try again.`;
 
 const WRONG_PLACE = 'This only works in the Logitland server. Run it there.';
-const UNKNOWN = 'I don’t know that command. Try /mirror agree, /mirror leave or /mirror status.';
+const UNKNOWN = 'I don’t know that command. Try /consent agree, /consent withdraw or /consent status.';
 const STUCK =
-  'Something went wrong while removing your messages. Your agreement has ended, so nothing you write is shown publicly now. Run /mirror leave again to finish.';
+  'Your agreement has ended, so none of your replies are relayed now, but deleting the ones held went wrong. Run /consent withdraw again to finish.';
+const WITHDRAW_NOTE = 'To stop, run `/consent withdraw`: it ends the relaying and deletes your replies Logitland holds.';
 
-const LEAVE_NOTE = 'To leave, run `/mirror leave`: it takes the role away and deletes your messages from the mirror.';
-
-const agreed = (dashboardUrl: string, changed: boolean, roleGranted: boolean) =>
+const agreed = (changed: boolean) =>
   [
-    changed ? 'You agreed to the Logitland public mirror.' : 'You had already agreed to the Logitland public mirror.',
-    `From now on, what you write in the relayed channels is copied as described in the notice, together with your Discord display name. Nothing from before you agreed is. What is shared and with whom: ${dashboardUrl}/privacy`,
-    roleGranted
-      ? 'You have the chat role.'
-      : 'I saved your agreement but couldn’t give you the chat role just now. Run `/mirror agree` and press the button again in a minute, and if it keeps failing, ask a moderator.',
-    LEAVE_NOTE,
+    changed ? 'You agreed: your replies to agents are relayed from now on.' : 'You had already agreed: your replies to agents are relayed.',
+    'Only replies to an agent’s message are passed on, with your Discord display name. Everything else you write stays in Discord.',
+    WITHDRAW_NOTE,
   ].join('\n\n');
 
-const VIA: Record<ConsentMethod, string> = { command: 'the /mirror command', button: 'the welcome button' };
-
-const left = (messages: number, roleRemoved: boolean) =>
+const withdrawn = (messages: number) =>
   [
-    'You left the Logitland public mirror.',
+    'You withdrew: your replies are no longer relayed to agents.',
     messages > 0
-      ? `I deleted ${messages === 1 ? '1 message' : `${messages} messages`} of yours from the mirror. Messages in Discord itself stay there unless you delete them in Discord.`
-      : 'I had no messages of yours to delete from the mirror.',
-    roleRemoved ? 'The chat role is gone.' : 'I couldn’t take the chat role away. Ask a moderator to remove it.',
+      ? `I deleted ${messages === 1 ? '1 reply' : `${messages} replies`} of yours that Logitland held. Messages in Discord itself stay there unless you delete them in Discord.`
+      : 'Logitland held no replies of yours.',
   ].join('\n\n');
 
 /* ---------- Handling ---------- */
 
-type Action = { kind: 'notice' | 'leave' | 'status' } | { kind: 'agree'; method: ConsentMethod };
+type Action = 'notice' | 'agree' | 'withdraw' | 'status';
 
 function actionOf(i: Interaction): Action | null {
   if (i.type === InteractionType.MESSAGE_COMPONENT) {
     const id = i.data?.custom_id;
-    if (id === AGREE_BUTTON) return { kind: 'agree', method: 'button' };
-    if (id === AGREE_COMMAND_BUTTON) return { kind: 'agree', method: 'command' };
-    // Ids from before the version was added, or from an older notice.
-    return id === 'mirror_agree' || id === 'mirror_agree_cmd' || id?.startsWith('mirror_agree:') || id?.startsWith('mirror_agree_cmd:')
-      ? { kind: 'notice' }
-      : null;
+    if (id === AGREE_BUTTON) return 'agree';
+    // A button shown under an older notice.
+    return id?.startsWith('consent_agree:') ? 'notice' : null;
   }
-  if (i.type !== InteractionType.APPLICATION_COMMAND || i.data?.name !== 'mirror') return null;
+  if (i.type !== InteractionType.APPLICATION_COMMAND || i.data?.name !== CONSENT_COMMAND.name) return null;
   const sub = i.data.options?.[0]?.name;
-  return sub === 'agree' ? { kind: 'notice' } : sub === 'leave' || sub === 'status' ? { kind: sub } : null;
+  return sub === 'agree' ? 'notice' : sub === 'withdraw' || sub === 'status' ? sub : null;
 }
 
 /**
- * Answers one verified interaction. `defer` takes work that finishes after the answer (a follow-up edit); the route
- * passes executionCtx.waitUntil. Everything is ephemeral: only the person who asked sees the reply. Discord wants an
- * answer within three seconds, so agreeing and leaving write to the database first and answer with a deferral; the
- * Discord role (a REST call that can be slow) is dealt with after, and so is the scrub.
+ * Answers one verified interaction. `defer` takes work that finishes after the answer (a follow-up edit); the route passes
+ * executionCtx.waitUntil. Everything is ephemeral: only the person who asked sees the reply. Discord wants an answer within
+ * three seconds, so withdrawing ends the agreement first and deletes the replies after, behind a deferral.
  */
 export async function handleInteraction(relay: Relay, raw: unknown, defer: (work: Promise<void>) => void): Promise<InteractionResponse> {
   const i = parse(Interaction, raw);
@@ -172,70 +156,45 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
   if (!guildId || i.guild_id !== guildId || !userId) return say(WRONG_PLACE);
   const actor: ConsentActor = { type: 'public', id: userId };
 
-  if (action.kind === 'notice') {
+  if (action === 'notice') {
     return {
       type: Callback.CHANNEL_MESSAGE_WITH_SOURCE,
-      data: {
-        content: consentNotice(relay.config.dashboardUrl),
-        flags: EPHEMERAL,
-        allowed_mentions: { parse: [] },
-        components: agreeButton(AGREE_COMMAND_BUTTON),
-      },
+      data: { content: consentNotice(), flags: EPHEMERAL, allowed_mentions: { parse: [] }, components: agreeButton(AGREE_BUTTON) },
     };
   }
 
-  if (action.kind === 'agree') {
-    const turn = await hit(relay, { key: `consent:${userId}:10m`, limit: TOGGLES_PER_10_MIN, windowSeconds: 600 }, 1, true);
-    if (!turn.ok) return say(tooOften(turn.retryAfterSeconds));
-    const { changed } = await grantConsent(relay, { discordUserId: userId, guildId, method: action.method, actor, interactionId: i.id });
-    defer(finishAgree(relay, i, userId, guildId, changed));
-    return { type: Callback.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: { flags: EPHEMERAL } };
-  }
-
-  if (action.kind === 'status') {
+  if (action === 'status') {
     const s = await consentStatus(relay, userId);
-    if (s.agreed) {
-      return say(
-        `You agreed to the public mirror on ${s.granted_at!.slice(0, 10)} with ${VIA[s.method!]}. Only what you wrote after that is shown. Logitland holds ${s.mirrored_messages} of your messages (agents can read them, and those in mirrored channels are on the public mirror).\n\n${LEAVE_NOTE}`,
-      );
-    }
-    const held = s.mirrored_messages;
+    if (s.agreed)
+      return say(`You agreed on ${s.granted_at!.slice(0, 10)}: your replies to agents are relayed. Logitland holds ${s.replies} of them.\n\n${WITHDRAW_NOTE}`);
     return say(
-      `You haven’t agreed to the public mirror, so what you write isn’t copied: Logitland keeps only that a message was sent, and when and where, not who wrote it or what it said. Run \`/mirror agree\` to see what you would agree to.${held > 0 ? `\n\nI still hold ${held} earlier ${held === 1 ? 'message' : 'messages'} of yours. \`/mirror leave\` deletes them.` : ''}`,
+      `You haven’t agreed, so nothing you write reaches agents. Run \`/consent agree\` to see what you would agree to.${s.replies > 0 ? `\n\nI still hold ${s.replies} earlier ${s.replies === 1 ? 'reply' : 'replies'} of yours. \`/consent withdraw\` deletes them.` : ''}`,
     );
   }
 
-  // The agreement ends before we answer, so readers lose this person at once even if the rest fails. Leaving always runs the
-  // whole clean-up, even for someone with no agreement and no live messages: tombstones and reply lines may still name them.
-  await revokeConsent(relay, userId, actor, { interactionId: i.id, method: 'command' });
-  // The agreement has ended either way. The clean-up (Discord calls and a scrub) is what's limited; the person can run it again.
-  const turn = await hit(relay, { key: `consent:${userId}:10m`, limit: TOGGLES_PER_10_MIN * 2, windowSeconds: 600 }, 1, true);
+  const turn = await hit(relay, { key: `consent:${userId}:10m`, limit: TOGGLES_PER_10_MIN, windowSeconds: 600 }, 1, true);
+  if (action === 'agree') {
+    if (!turn.ok) return say(tooOften(turn.retryAfterSeconds));
+    const { changed } = await grantConsent(relay, { discordUserId: userId, guildId, actor, interactionId: i.id });
+    return say(agreed(changed));
+  }
+
+  // The agreement ends before we answer, even when the clean-up is rate limited: nothing more is relayed either way.
+  await revokeConsent(relay, userId, actor, { interactionId: i.id });
   if (!turn.ok)
     return say(
-      `Your agreement has ended, so nothing you write is shown publicly now. You’ve run this a lot just now, so I haven’t repeated the clean-up. Wait about ${Math.ceil(turn.retryAfterSeconds / 60)} min and run /mirror leave again to finish.`,
+      `Your agreement has ended, so none of your replies are relayed now. You’ve run this a lot just now, so I haven’t deleted the held replies yet. Wait about ${Math.ceil(turn.retryAfterSeconds / 60)} min and run /consent withdraw again to finish.`,
     );
-  defer(finishLeave(relay, i, userId, guildId, actor));
+  defer(finishWithdraw(relay, i, userId, actor));
   return { type: Callback.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: { flags: EPHEMERAL } };
 }
 
-/** The chat role follows the agreement as it stands when this runs, so an agree and a leave that overlap end up consistent. */
-async function finishAgree(relay: Relay, i: Interaction, userId: string, guildId: string, changed: boolean): Promise<void> {
-  let roleGranted = false;
-  try {
-    roleGranted = await syncRole(relay, guildId, userId);
-  } catch (err) {
-    relay.log.error('interaction.agree_failed', { interaction: i.id, error: err });
-  }
-  await editOriginal(relay, i, agreed(relay.config.dashboardUrl, changed, roleGranted));
-}
-
-async function finishLeave(relay: Relay, i: Interaction, userId: string, guildId: string, actor: ConsentActor): Promise<void> {
+async function finishWithdraw(relay: Relay, i: Interaction, userId: string, actor: ConsentActor): Promise<void> {
   let content = STUCK;
   try {
-    const r = await removePerson(relay, { discordUserId: userId, guildId, actor });
-    content = left(r.messages, r.roleRemoved);
+    content = withdrawn(await removeReplies(relay, userId, actor));
   } catch (err) {
-    relay.log.error('interaction.leave_failed', { interaction: i.id, error: err });
+    relay.log.error('interaction.withdraw_failed', { interaction: i.id, error: err });
   }
   await editOriginal(relay, i, content);
 }

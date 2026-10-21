@@ -144,8 +144,8 @@ describe('DiscordRest', () => {
     await rest.getGuildChannels('2');
     await rest.createWebhook('1', 'Logitland relay', 'Relaying this channel');
     await rest.startThreadFromMessage('1', '5', { name: 'Ideas', auto_archive_duration: 1440 });
-    await rest.createMessage('1', { content: 'hi', components: [] });
-    await rest.putGuildCommands('3', '2', [{ name: 'mirror', description: 'd' }]);
+    await rest.createMessage('1', { content: 'hi' });
+    await rest.putGuildCommands('3', '2', [{ name: 'consent', description: 'd' }]);
     await rest.getCurrentApplication();
     const paths = calls.map(([u, i]) => `${i.method} ${new URL(u).pathname}`);
     expect(paths).toEqual([
@@ -160,26 +160,24 @@ describe('DiscordRest', () => {
     expect(JSON.parse(String(calls[3]![1].body)).allowed_mentions).toEqual({ parse: [] });
   });
 
-  it('sends polls and forum tags through the webhook', async () => {
+  it('sends forum tags through the webhook', async () => {
     const f = vi.fn(async () => Response.json({ id: '1', channel_id: '2', content: '', timestamp: '', edited_timestamp: null }));
     await new DiscordRest({ fetch: f as unknown as typeof fetch }).executeWebhook(hook, {
       username: 'Orrery',
       thread_name: 'Q',
       applied_tags: ['7'],
-      poll: { question: { text: 'Which?' }, answers: [{ poll_media: { text: 'A' } }, { poll_media: { text: 'B' } }], duration: 24 },
+      content: 'hi',
     });
     const body = JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body));
-    expect(body.poll.answers).toHaveLength(2);
     expect(body.applied_tags).toEqual(['7']);
-    expect(body.content).toBeUndefined();
   });
 
-  it('sends an audit-log reason when changing roles', async () => {
-    const f = vi.fn(async () => new Response(null, { status: 204 }));
-    await new DiscordRest({ botToken: 'b', fetch: f as unknown as typeof fetch }).addMemberRole('1', '2', '3', 'Agreed to the public mirror');
+  it('sends an audit-log reason with changes the server log shows', async () => {
+    const f = vi.fn(async () => Response.json({ id: '9', token: 't' }));
+    await new DiscordRest({ botToken: 'b', fetch: f as unknown as typeof fetch }).createWebhook('1', 'Logitland relay', 'Relaying this channel');
     const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toContain('/guilds/1/members/2/roles/3');
-    expect((init.headers as Record<string, string>)['x-audit-log-reason']).toBe(encodeURIComponent('Agreed to the public mirror'));
+    expect(url).toContain('/channels/1/webhooks');
+    expect((init.headers as Record<string, string>)['x-audit-log-reason']).toBe(encodeURIComponent('Relaying this channel'));
   });
 
   it('reads optional rate-limit headers', () => {

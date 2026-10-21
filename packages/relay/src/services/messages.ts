@@ -6,21 +6,13 @@ import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
 import { usableChannel, type ChannelRow } from './channels';
 import type { ConversationRow } from './conversation';
-import {
-  assertHoldRoom,
-  assertMayPost,
-  assertVerifiedFor,
-  countAttempt,
-  enforceRates,
-  findDuplicate,
-  holdCapError,
-  pendingHolds,
-} from './moderation/admission';
+import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds } from './moderation/admission';
 import { hit } from './limits';
 import { Trail, writeLog } from './moderation/log';
 import { checkLoop } from './moderation/loops';
 import { decide, settle } from './moderation/pipeline';
-import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PolicyError, UNVERIFIED_MAX_AUTO_ARCHIVE_MINUTES, isOnProbation, isVerified } from './moderation/policy';
+import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PROBATION_MAX_AUTO_ARCHIVE_MINUTES, PolicyError, isOnProbation } from './moderation/policy';
+import { standingOf } from './levels';
 import { contentHash, discordContent, getRow, normalise, toRelayMessage, type MessageRow } from './moderation/rows';
 import { evaluateRules, judge } from './moderation/rules';
 import { checkLive, checkShape, isForum, replyLine, type Target } from './moderation/target';
@@ -73,6 +65,8 @@ interface Draft {
   textHash: string;
   /** A failed message being tried again: it is already `moderating` (we won the compare-and-set). */
   existing: MessageRow | null;
+  /** The agent may post links in this channel (Embed Links, #9). */
+  links: boolean;
 }
 
 /** Stores the message in the given state. Null means another request got there first (or the sweeper did). */
@@ -80,23 +74,22 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
   const at = iso(relay.now());
   const content = to.redact ? null : d.target.text;
   const threadName = to.redact ? null : (d.req.thread_name ?? null);
-  const poll = to.redact || !d.req.poll ? null : JSON.stringify(d.req.poll);
   const heldKind = to.status === 'held' ? 'review' : null;
   if (d.existing) {
     if (to.status === 'moderating') return d.existing;
     const r = await relay.db
       .prepare(
-        "UPDATE relay_messages SET status = ?, verdict = ?, policy_code = ?, status_reason = ?, held_kind = ?, content = ?, thread_name = ?, poll = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
+        "UPDATE relay_messages SET status = ?, verdict = ?, policy_code = ?, status_reason = ?, held_kind = ?, content = ?, thread_name = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
       )
-      .bind(to.status, to.verdict, to.policy, to.reason, heldKind, content, threadName, poll, at, d.existing.id)
+      .bind(to.status, to.verdict, to.policy, to.reason, heldKind, content, threadName, at, d.existing.id)
       .run();
-    return r.meta.changes === 1 ? getRow(relay, d.existing.id) : null;
+    return r.meta.changes > 0 ? getRow(relay, d.existing.id) : null;
   }
   const id = newId('message');
   const r = await relay.db
     .prepare(
-      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, poll, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
+      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
     )
     .bind(
       id,
@@ -108,7 +101,6 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
       d.req.auto_archive_minutes ?? null,
       d.req.reply_to ?? null,
       d.target.replyPrefix,
-      poll,
       content,
       to.status,
       to.verdict,
@@ -123,7 +115,7 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
       at,
     )
     .run();
-  return r.meta.changes === 1 ? getRow(relay, id) : null;
+  return r.meta.changes > 0 ? getRow(relay, id) : null;
 }
 
 /** A concurrent request with the same key won the insert: whatever it made is the answer. */
@@ -147,11 +139,10 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
   const now = relay.now();
   assertMayPost(relay, agent, settings);
 
-  const channel = await usableChannel(relay, req.channel_id, 'send');
-  assertVerifiedFor(agent, channel);
-  const shape = checkShape(channel, req);
-  if ((req.auto_archive_minutes ?? 0) > UNVERIFIED_MAX_AUTO_ARCHIVE_MINUTES && !isVerified(agent.tier)) {
-    throw invalid('Unverified agents can keep a thread open for at most 1440 minutes (a day). Use 60 or 1440, or verify your agent for longer.');
+  const { row: channel, access } = await usableChannel(relay, agent, req.channel_id, 'send');
+  const shape = checkShape(channel, access, req);
+  if ((req.auto_archive_minutes ?? 0) > PROBATION_MAX_AUTO_ARCHIVE_MINUTES && isOnProbation(agent)) {
+    throw invalid(`Agents on probation can keep a thread open for at most ${PROBATION_MAX_AUTO_ARCHIVE_MINUTES} minutes (a day). Use 60 or 1440.`);
   }
 
   const digest = await sha256(
@@ -163,7 +154,6 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
       shape.tagIds,
       req.auto_archive_minutes ?? null,
       req.reply_to ?? null,
-      req.poll ?? null,
     ]),
   );
   const found = await relay.db
@@ -174,7 +164,7 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
   if (found && found.status !== 'failed') return outcome(found);
 
   // Past the lookup, so repeating a request that already worked never fails because a thread or the replied-to message changed.
-  await checkLive(relay, channel, req, shape.tagIds);
+  await checkLive(relay, channel, req, shape.tagIds, agent.id);
   const replyPrefix = found ? found.reply_prefix : req.reply_to ? await replyLine(relay, channel, req, shape.text) : null;
   const target: Target = { ...shape, replyPrefix };
   const draft: Draft = {
@@ -188,6 +178,7 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
     hash: await contentHash(discordContent({ reply_prefix: replyPrefix, content: shape.text })),
     textHash: await contentHash(shape.text ?? ''),
     existing: null,
+    links: access.embedLinks,
   };
   if (!found) return run(relay, principal, channel, settings, draft, null);
   // Only one of several concurrent retries gets to run the message again.
@@ -197,7 +188,7 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
     )
     .bind(iso(now), found.id)
     .run();
-  if (claimed.meta.changes !== 1) return outcome((await getRow(relay, found.id))!);
+  if (claimed.meta.changes === 0) return outcome((await getRow(relay, found.id))!);
   return run(relay, principal, channel, settings, { ...draft, existing: (await getRow(relay, found.id))! }, found);
 }
 
@@ -211,7 +202,8 @@ async function run(
 ): Promise<SendOutcome> {
   const { req } = draft;
   const trail = new Trail();
-  const probation = isOnProbation(agent, settings, relay.now());
+  const probation = isOnProbation(agent);
+  const { limits, checks } = await standingOf(relay, agent);
 
   // A refusal after we took over a failed message puts it back as it was, so a later retry is not shut out.
   const refusing = async <T>(step: () => Promise<T>): Promise<T> => {
@@ -248,10 +240,9 @@ async function run(
     return outcome((await getRow(relay, row.id))!);
   };
 
-  await refusing(() => countAttempt(relay, agent.id, agent.tier));
+  await refusing(() => countAttempt(relay, agent.id, limits));
 
-  const pollText = req.poll ? [req.poll.question, ...req.poll.answers].join('\n') : null;
-  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null, pollText }, { probation }));
+  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { links: draft.links, checks }));
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason, 'rules');
   if (ruling.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (ruling.verdict !== 'pass') {
@@ -264,24 +255,29 @@ async function run(
     });
   }
 
-  const dup = await findDuplicate(relay, {
-    agentId: agent.id,
-    channelId: channel.id,
-    textHash: draft.textHash,
-    excludeId: draft.existing?.id ?? null,
-    length: normalise(draft.target.text ?? '').length,
-    poll: req.poll ? JSON.stringify(req.poll) : null,
-  });
+  const dup = checks.has('duplicates')
+    ? await findDuplicate(relay, {
+        agentId: agent.id,
+        channelId: channel.id,
+        textHash: draft.textHash,
+        excludeId: draft.existing?.id ?? null,
+        length: normalise(draft.target.text ?? '').length,
+      })
+    : null;
   trail.add('limits', dup?.verdict ?? 'pass', dup?.policy ?? null, dup?.reason ?? null, 'limits');
   if (dup?.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (dup) return decided({ status: dup.verdict === 'block' ? 'blocked' : 'held', verdict: dup.verdict, policy: dup.policy, reason: dup.reason });
 
   const conversation: ConversationRow[] = await refusing(() =>
-    checkLoop(relay, { agentId: agent.id, channelId: channel.id, threadId: req.thread_id ?? null, startsThread: Boolean(req.thread_name) && isForum(channel) }),
+    checkLoop(relay, {
+      agentId: agent.id,
+      channelId: channel.id,
+      threadId: req.thread_id ?? null,
+      startsThread: Boolean(req.thread_name) && isForum(channel),
+      enabled: checks.has('loops'),
+    }),
   );
-  await refusing(() =>
-    enforceRates(relay, { agentId: agent.id, tier: agent.tier, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }),
-  );
+  await refusing(() => enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }));
   trail.add('admission', 'pass', null, null, 'limits');
 
   const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null });
@@ -340,7 +336,7 @@ async function outage(relay: Relay, row: MessageRow, agentId: string, d: { reaso
     )
     .bind(reason, next, at, row.id)
     .run();
-  if (r.meta.changes === 1) await log('hold', reason);
+  if (r.meta.changes > 0) await log('hold', reason);
 }
 
 /** The agent's own message, or 404. */
@@ -377,57 +373,4 @@ export async function listOwnerMessages(
     .bind(...args, q.limit)
     .all<OwnerRow>();
   return { messages: results.map(toOwnerMessage), next_before: results.length === q.limit ? results[results.length - 1]!.id : null };
-}
-
-/** Sends Discord never confirmed, from every agent, newest first: what an admin settles when an agent has no owner to do it. */
-export async function listUncertainMessages(
-  relay: Relay,
-  q: { before?: string; limit: number },
-): Promise<{ messages: OwnerMessage[]; next_before: string | null }> {
-  const { results } = await relay.db
-    .prepare(
-      `SELECT m.*, a.name AS agent_name FROM relay_messages m JOIN agents a ON a.id = m.agent_id WHERE m.status = 'uncertain' ${q.before ? 'AND m.id < ?' : ''} ORDER BY m.id DESC LIMIT ?`,
-    )
-    .bind(...(q.before ? [q.before, q.limit] : [q.limit]))
-    .all<OwnerRow>();
-  return { messages: results.map(toOwnerMessage), next_before: results.length === q.limit ? results[results.length - 1]!.id : null };
-}
-
-/**
- * A decision on a send Discord never confirmed: send it again (and really send it), or accept that it went out.
- * Owners decide for their own agents' messages; an admin can decide for any, which is how an unowned agent's message is settled.
- */
-export async function resolveUncertain(
-  relay: Relay,
-  by: { type: 'owner' | 'admin'; id: string },
-  messageId: string,
-  action: 'resend' | 'accept',
-): Promise<OwnerMessage> {
-  const owned = by.type === 'owner' ? ' AND a.owner_id = ?' : '';
-  const args = by.type === 'owner' ? [messageId, by.id] : [messageId];
-  const fetchRow = () =>
-    relay.db
-      .prepare(`SELECT m.*, a.name AS agent_name FROM relay_messages m JOIN agents a ON a.id = m.agent_id WHERE m.id = ?${owned}`)
-      .bind(...args)
-      .first<OwnerRow>();
-  const row = await fetchRow();
-  if (!row) throw notFound('No such message');
-  if (row.status !== 'uncertain') throw conflict('Only a message Discord didn’t confirm can be resolved, and this one isn’t waiting for that.');
-  const resend = action === 'resend';
-  const who = by.type === 'owner' ? 'the owner' : 'an admin';
-  const r = await relay.db
-    .prepare("UPDATE relay_messages SET status = ?, status_reason = ?, updated_at = ? WHERE id = ? AND status = 'uncertain'")
-    .bind(resend ? 'queued' : 'sent', resend ? `Sent again at ${who}’s request` : `Accepted by ${who} as sent`, iso(relay.now()), messageId)
-    .run();
-  if (r.meta.changes !== 1) throw conflict('Someone else already resolved this message.');
-  await audit(relay, {
-    actor_type: by.type,
-    actor_id: by.id,
-    action: resend ? 'message.resent' : 'message.accepted',
-    target_type: 'message',
-    target_id: messageId,
-    diff: { status: { from: 'uncertain', to: resend ? 'queued' : 'sent' } },
-  });
-  if (resend) await dispatch(relay, row);
-  return toOwnerMessage((await fetchRow())!);
 }

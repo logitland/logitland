@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { authenticateKey } from './services/identity';
 import type { ModerationRequest, ModerationResult, Moderator } from './services/moderation/classifier';
 import { scrubMessage } from './services/scrub';
 import { activeStrikeCount, addStrike, removeStrike } from './services/strikes';
+import { authenticateToken } from './services/tokens';
 import { NO_CLIENT } from './types';
 import { ADMIN_DISCORD, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness, type HarnessOptions } from './testing';
 
@@ -14,16 +14,16 @@ const decide = (fn: (req: ModerationRequest) => ModerationResult): Moderator => 
 
 async function setup(opts: HarnessOptions = {}) {
   const h = harness({ moderator: decide(() => pass), ...opts });
-  await seedChannel(h.relay, { id: LOUNGE, access: 'post', pace: 120 });
-  const a = await seedAgent(h.relay, { tier: 'claimed' });
+  await seedChannel(h.relay, { id: LOUNGE, access: 'post' });
+  const a = await seedAgent(h.relay);
   const admin = await seedOwner(h.relay, ADMIN_DISCORD, 'admin');
   const api = (method: string, path: string, body?: unknown) => h.internal(method, path, body, { 'x-logitland-owner': admin.id });
   return { h, a, admin, api };
 }
 
 let counter = 0;
-const post = (h: Harness, a: { key: string }, text: string, extra: Record<string, unknown> = {}) =>
-  h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: text, ...extra }, { ...h.as(a.key), 'idempotency-key': `key-${++counter}-padding` });
+const post = (h: Harness, a: { token: string }, text: string, extra: Record<string, unknown> = {}) =>
+  h.call('POST', '/v1/messages', { channel_id: LOUNGE, content: text, ...extra }, { ...h.as(a.token), 'idempotency-key': `key-${++counter}-padding` });
 const json = async (res: Response) => (await res.json()) as Record<string, any>;
 const row = (h: Harness, id: string) => h.db.prepare('SELECT * FROM relay_messages WHERE id = ?').bind(id).first<Record<string, any>>();
 const agentRow = (h: Harness, id: string) => h.db.prepare('SELECT * FROM agents WHERE id = ?').bind(id).first<Record<string, any>>();
@@ -41,7 +41,7 @@ const logRows = (h: Harness, layer: string) =>
     .then((r) => r.results);
 
 /** A message held for review: personal details trip the fixed rules. */
-async function held(h: Harness, a: { key: string }, tag = 'x') {
+async function held(h: Harness, a: { token: string }, tag = 'x') {
   const msg = await json(await post(h, a, `write to ${tag}@example.com about it`));
   expect(msg.status).toBe('held');
   return msg;
@@ -50,7 +50,7 @@ async function held(h: Harness, a: { key: string }, tag = 'x') {
 describe('the held queue', () => {
   it('lists held messages with agent, channel, policy, reason, text and age, oldest first', async () => {
     const { h, a, api } = await setup();
-    const b = await seedAgent(h.relay, { name: 'Brisk', tier: 'new', probationUntil: new Date(h.now().getTime() + 3_600_000).toISOString() });
+    const b = await seedAgent(h.relay, { name: 'Brisk', level: 0 });
     const first = await held(h, a, 'one');
     h.advance(300_000);
     const second = await held(h, b, 'two');
@@ -61,7 +61,7 @@ describe('the held queue', () => {
     expect(page.items.map((i: any) => i.id)).toEqual([first.id, second.id].sort());
     const item = page.items.find((i: any) => i.id === first.id);
     expect(item).toMatchObject({
-      agent: { id: a.id, name: a.name, tier: 'claimed' },
+      agent: { id: a.id, name: a.name, level: 1 },
       channel_id: LOUNGE,
       channel_name: 'lounge',
       policy_code: 'personal_info',
@@ -88,10 +88,7 @@ describe('the held queue', () => {
   });
 
   it('includes outage holds, marked as such', async () => {
-    const { h, a, api } = await setup({
-      moderator: decide(() => ({ verdict: null, unavailable: true, reason: 'down' }) as ModerationResult),
-      fallbackModerator: null,
-    });
+    const { h, a, api } = await setup({ moderator: decide(() => ({ verdict: null, unavailable: true, reason: 'down' }) as ModerationResult) });
     await post(h, a, 'nothing can judge this');
     const page = await json(await api('GET', '/internal/admin/moderation/queue'));
     expect(page.items[0]).toMatchObject({ held_kind: 'outage', policy_code: 'outage', review_attempts: 0 });
@@ -156,7 +153,7 @@ describe('reject', () => {
     const res = await api('POST', `/internal/admin/messages/${msg.id}/reject`, { policy_code: 'spam', reason: 'Looks like a copy-pasted campaign.' });
     expect(res.status).toBe(200);
     expect(await json(res)).toMatchObject({ status: 'blocked', verdict: 'block', policy_code: 'spam', status_reason: 'Looks like a copy-pasted campaign.' });
-    const seen = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.key)));
+    const seen = await json(await h.call('GET', `/v1/messages/${msg.id}`, undefined, h.as(a.token)));
     expect(seen).toMatchObject({ status: 'blocked', policy_code: 'spam' });
     expect(await row(h, msg.id)).toMatchObject({ reviewed_by: admin.id, held_kind: null });
     expect(await activeStrikeCount(h.relay, a.id)).toBe(0);
@@ -274,7 +271,7 @@ describe('the strike ladder', () => {
 
   it('warns at one, pauses an hour at two, goes read-only a day at three, suspends at four, bans at five', async () => {
     const { h, a } = await setup();
-    const principal = () => authenticateKey(h.relay, a.key, NO_CLIENT);
+    const principal = () => authenticateToken(h.relay, a.token, NO_CLIENT);
 
     const one = await strike(h, a.id);
     expect(one).toMatchObject({ strikes: 1, effect: 'warning', until: null });
@@ -306,19 +303,25 @@ describe('the strike ladder', () => {
     const five = await strike(h, a.id);
     expect(five).toMatchObject({ strikes: 5, effect: 'banned' });
     expect(await agentRow(h, a.id)).toMatchObject({ status: 'banned' });
-    expect((await h.db.prepare('SELECT COUNT(*) AS n FROM api_keys WHERE agent_id = ? AND revoked_at IS NULL').bind(a.id).first<{ n: number }>())!.n).toBe(0);
+    expect((await h.db.prepare('SELECT COUNT(*) AS n FROM access_tokens WHERE agent_id = ? AND revoked_at IS NULL').bind(a.id).first<{ n: number }>())!.n).toBe(
+      0,
+    );
     expect((await strike(h, a.id)).effect).toBe('banned');
     expect(await agentRow(h, a.id)).toMatchObject({ status: 'banned' });
   });
 
-  it('revokes every key on a ban, not just one', async () => {
+  it('revokes every access token on a ban, not just one', async () => {
     const { h, a } = await setup();
     await h.db
-      .prepare("INSERT INTO api_keys (id, agent_id, hash, scopes, created_at) VALUES ('key_SECONDKEY01', ?, 'hash2', '[]', ?)")
+      .prepare(
+        "INSERT INTO access_tokens (id, agent_id, hash, scopes, created_at, expires_at) VALUES ('tok_SECONDTOKEN1', ?, 'hash2', '[]', ?, '2027-01-01T00:00:00.000Z')",
+      )
       .bind(a.id, h.now().toISOString())
       .run();
     for (let i = 0; i < 5; i++) await strike(h, a.id);
-    expect((await h.db.prepare('SELECT COUNT(*) AS n FROM api_keys WHERE agent_id = ? AND revoked_at IS NULL').bind(a.id).first<{ n: number }>())!.n).toBe(0);
+    expect((await h.db.prepare('SELECT COUNT(*) AS n FROM access_tokens WHERE agent_id = ? AND revoked_at IS NULL').bind(a.id).first<{ n: number }>())!.n).toBe(
+      0,
+    );
   });
 
   it('expires strikes after 30 days', async () => {
@@ -389,7 +392,7 @@ describe('the strike ladder', () => {
         expect(await activeStrikeCount(h.relay, a.id)).toBe(0);
       }
       const { h, a } = await setup();
-      await post(h, a, 'my key is lk_' + 'K7QMXV2D'.repeat(6));
+      await post(h, a, 'my token is lat_' + 'K7QMXV2D'.repeat(6));
       expect(await activeStrikeCount(h.relay, a.id)).toBe(0);
     });
 
@@ -417,123 +420,107 @@ describe('reports', () => {
       .run();
     return String(snowflake);
   };
-  const report = (h: Harness, a: { key: string }, target_id: string, target_type = 'message', reason = 'This is abusive.') =>
-    h.call('POST', '/v1/reports', { target_type, target_id, reason }, h.as(a.key));
+  const report = (h: Harness, r: { token: string }, target_id: string, target_type = 'message', reason = 'harmful', context = 'mocks a person') =>
+    h.call('POST', '/v1/reports', { target_type, target_id, reason, context }, h.as(r.token));
+  let owners = 0;
+  /** An agent that may report, with an owner of its own so it counts as an independent reporter. */
+  const reporter = async (h: Harness) => {
+    const owner = await seedOwner(h.relay, `2000000000000001${String(++owners).padStart(2, '0')}`, `reporter-${owners}`);
+    return { ...(await seedAgent(h.relay, { level: 3, ownerId: owner.id })), ownerId: owner.id };
+  };
 
-  it('accepts a report on a message and one on an agent', async () => {
-    const { h, a } = await setup();
-    const other = await seedAgent(h.relay, { tier: 'claimed' });
+  it('stores a report on a message and one on an agent, and keeps the context out of the audit log', async () => {
+    const { h } = await setup();
+    const r = await reporter(h);
+    const other = await seedAgent(h.relay);
     const target = await person(h);
-    const res = await report(h, a, target);
+    const res = await report(h, r, target);
     expect(res.status).toBe(201);
     expect(await json(res)).toEqual({ id: expect.stringMatching(/^rpt_/) });
-    expect(await h.db.prepare('SELECT target_type, target_id, channel_id, reporter_kind, reporter_ref, status FROM reports').first()).toEqual({
+    expect(
+      await h.db
+        .prepare('SELECT target_type, target_id, channel_id, relay_message_id, reason, context, reporter_id, reporter_key, status FROM reports')
+        .first(),
+    ).toEqual({
       target_type: 'message',
       target_id: target,
       channel_id: LOUNGE,
-      reporter_kind: 'agent',
-      reporter_ref: a.id,
+      relay_message_id: null,
+      reason: 'harmful',
+      context: 'mocks a person',
+      reporter_id: r.id,
+      reporter_key: `owner:${r.ownerId}`,
       status: 'open',
     });
-    expect((await report(h, a, other.id, 'agent')).status).toBe(201);
+    expect((await report(h, r, other.id, 'agent')).status).toBe(201);
     const created = (await audits(h, 'report.created'))[0]!;
-    expect(created).toMatchObject({ actor_type: 'agent', actor_id: a.id, reason: null });
-    expect(JSON.parse(created.diff)).toEqual({ report_id: { from: null, to: expect.stringMatching(/^rpt_/) }, reporter_kind: { from: null, to: 'agent' } });
-    expect(JSON.stringify(created)).not.toContain('This is abusive');
-  });
-
-  it('knows relay messages by their Discord ID too', async () => {
-    const { h, a } = await setup();
-    const other = await seedAgent(h.relay, { tier: 'claimed' });
-    const sent = await json(await post(h, other, 'a message of the other agent'));
-    expect((await report(h, a, sent.discord_message_id)).status).toBe(201);
+    expect(created).toMatchObject({ actor_type: 'agent', actor_id: r.id });
+    expect(JSON.stringify(created)).not.toContain('mocks a person');
   });
 
   it('counts the same reporter once and returns the report it already has', async () => {
-    const { h, a } = await setup();
+    const { h } = await setup();
+    const r = await reporter(h);
     const target = await person(h);
-    const first = await json(await report(h, a, target));
-    const again = await json(await report(h, a, target, 'message', 'Still abusive, I think.'));
+    const first = await json(await report(h, r, target));
+    const again = await json(await report(h, r, target, 'message', 'spam', 'and again'));
     expect(again.id).toBe(first.id);
     expect((await h.db.prepare('SELECT COUNT(*) AS n FROM reports').first<{ n: number }>())!.n).toBe(1);
   });
 
   it('refuses reports on yourself, on things that do not exist, and in the wrong shape', async () => {
-    const { h, a } = await setup();
-    expect((await report(h, a, a.id, 'agent')).status).toBe(400);
-    const own = await json(await post(h, a, 'my own words'));
-    expect((await report(h, a, own.discord_message_id)).status).toBe(400);
-    expect((await report(h, a, '699999999999999999')).status).toBe(404);
-    expect((await report(h, a, 'agt_0000000000AAAA', 'agent')).status).toBe(404);
-    expect((await report(h, a, a.id, 'message')).status).toBe(400);
-    expect((await report(h, a, '699999999999999999', 'message', 'x')).status).toBe(400);
+    const { h } = await setup();
+    const r = await reporter(h);
+    expect((await report(h, r, r.id, 'agent')).status).toBe(400);
+    const own = await json(await post(h, r, 'my own words'));
+    expect((await report(h, r, own.discord_message_id)).status).toBe(400);
+    expect((await report(h, r, '699999999999999999')).status).toBe(404);
+    expect((await report(h, r, 'agt_0000000000AAAA', 'agent')).status).toBe(404);
+    expect((await report(h, r, r.id, 'message')).status).toBe(400);
+    expect((await report(h, r, '699999999999999999', 'message', 'abusive')).status).toBe(400);
+    expect((await report(h, r, '699999999999999999', 'message', 'harmful', 'x'.repeat(151))).status).toBe(400);
   });
 
   it('limits an agent to 20 reports an hour', async () => {
-    const { h, a } = await setup();
-    for (let i = 0; i < 20; i++) expect((await report(h, a, await person(h, `rude ${i}`))).status).toBe(201);
-    const res = await report(h, a, await person(h, 'rude 21'));
+    const { h } = await setup();
+    const r = await reporter(h);
+    for (let i = 0; i < 20; i++) expect((await report(h, r, await person(h, `rude ${i}`))).status).toBe(201);
+    const res = await report(h, r, await person(h, 'rude 21'));
     expect(res.status).toBe(429);
     expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
     h.advance(3_600_000);
-    expect((await report(h, a, await person(h, 'rude 22'))).status).toBe(201);
+    expect((await report(h, r, await person(h, 'rude 22'))).status).toBe(201);
   });
 
-  it('limits the public to 10 an hour per IP hash, separately for each', async () => {
-    const { h } = await setup();
-    const { createReport } = await import('./services/reports');
-    for (let i = 0; i < 10; i++)
-      await createReport(h.relay, { target_type: 'message', target_id: await person(h, `rude ${i}`), reason: 'abusive' }, { kind: 'public', ref: 'iphash_A' });
-    await expect(
-      createReport(h.relay, { target_type: 'message', target_id: await person(h, 'rude 11'), reason: 'abusive' }, { kind: 'public', ref: 'iphash_A' }),
-    ).rejects.toMatchObject({ status: 429 });
-    await expect(
-      createReport(h.relay, { target_type: 'message', target_id: await person(h, 'rude 12'), reason: 'abusive' }, { kind: 'public', ref: 'iphash_B' }),
-    ).resolves.toMatchObject({ id: expect.stringMatching(/^rpt_/) });
-  });
-
-  it('raises a message after three different reporters in a day, takes nothing down, and orders the queue by it', async () => {
-    const { h, a, api } = await setup();
-    const { createReport } = await import('./services/reports');
+  it('raises a message the relay did not post after three independent reporters, without taking anything down', async () => {
+    const { h, api } = await setup();
+    const [r1, r2, r3] = [await reporter(h), await reporter(h), await reporter(h)];
     const target = await person(h, 'a rude thing');
     const calm = await person(h, 'a mildly rude thing');
-    await createReport(h.relay, { target_type: 'message', target_id: calm, reason: 'a little rude' }, { kind: 'public', ref: 'iphash_A' });
+    await report(h, r1, calm);
     h.advance(1000);
-    await createReport(h.relay, { target_type: 'message', target_id: target, reason: 'abusive' }, { kind: 'public', ref: 'iphash_A' });
-    // The same reporter again doesn't count twice.
-    await createReport(h.relay, { target_type: 'message', target_id: target, reason: 'abusive again' }, { kind: 'public', ref: 'iphash_A' });
-    await createReport(h.relay, { target_type: 'message', target_id: target, reason: 'abusive' }, { kind: 'public', ref: 'iphash_B' });
+    for (const r of [r1, r2]) await report(h, r, target);
     let list = await json(await api('GET', '/internal/admin/reports'));
-    expect(list.reports.find((r: any) => r.target_id === target)).toMatchObject({ priority: 'normal', reporters_24h: 2 });
-    expect(await logRows(h, 'report')).toHaveLength(0);
+    expect(list.reports.find((x: any) => x.target_id === target)).toMatchObject({ priority: 'normal', reporters: 2 });
 
-    await report(h, a, target);
+    await report(h, r3, target);
     list = await json(await api('GET', '/internal/admin/reports'));
-    expect(list.reports.map((r: any) => r.target_id)).toEqual([target, target, target, calm]);
+    expect(list.reports.map((x: any) => x.target_id)).toEqual([target, target, target, calm]);
     expect(list.reports[0]).toMatchObject({
       priority: 'high',
-      reporters_24h: 3,
+      reporters: 3,
+      taken_down: false,
       status: 'open',
       message: { content: 'a rude thing', display_name: 'Someone', author_kind: 'human', deleted: false },
     });
-    expect(list.reports.at(-1)).toMatchObject({ priority: 'normal', reporters_24h: 1 });
-    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM conversation WHERE deleted_at IS NOT NULL').first()).toEqual({ n: 0 });
-    expect(scrubMessage).not.toHaveBeenCalledWith(h.relay, target, expect.anything());
-  });
-
-  it('forgets reporters after a day', async () => {
-    const { h, api } = await setup();
-    const { createReport } = await import('./services/reports');
-    const target = await person(h);
-    for (const ref of ['A', 'B', 'C']) await createReport(h.relay, { target_type: 'message', target_id: target, reason: 'abusive' }, { kind: 'public', ref });
-    h.advance(25 * 3_600_000);
-    const list = await json(await api('GET', '/internal/admin/reports'));
-    expect(list.reports[0]).toMatchObject({ priority: 'normal', reporters_24h: 0 });
+    expect(list.reports.at(-1)).toMatchObject({ priority: 'normal', reporters: 1 });
+    expect(h.discordCalls.filter((c) => c.method === 'DELETE')).toHaveLength(0);
+    expect(scrubMessage).not.toHaveBeenCalledWith(h.relay, target, expect.anything(), expect.anything());
   });
 
   it('lets an admin dismiss a report', async () => {
-    const { h, a, admin, api } = await setup();
-    const id = (await json(await report(h, a, await person(h)))).id;
+    const { h, admin, api } = await setup();
+    const id = (await json(await report(h, await reporter(h), await person(h)))).id;
     const res = await api('POST', `/internal/admin/reports/${id}`, { action: 'dismiss', note: 'Not a violation.' });
     expect(res.status).toBe(200);
     expect(await json(res)).toMatchObject({ id, status: 'dismissed', note: 'Not a violation.', resolved_by: admin.id });
@@ -544,24 +531,25 @@ describe('reports', () => {
   });
 
   it('lets an admin strike the agent behind a reported message or a reported agent', async () => {
-    const { h, a, api } = await setup();
-    const culprit = await seedAgent(h.relay, { tier: 'claimed' });
+    const { h, api } = await setup();
+    const r = await reporter(h);
+    const culprit = await seedAgent(h.relay);
     const sent = await json(await post(h, culprit, 'an agent saying a bad thing'));
-    const byMessage = (await json(await report(h, a, sent.discord_message_id))).id;
+    const byMessage = (await json(await report(h, r, sent.discord_message_id))).id;
     const res = await api('POST', `/internal/admin/reports/${byMessage}`, { action: 'strike', policy_code: 'harassment' });
     expect(res.status).toBe(200);
     expect(await json(res)).toMatchObject({ status: 'actioned' });
     expect(await activeStrikeCount(h.relay, culprit.id)).toBe(1);
-    const byAgent = (await json(await report(h, a, culprit.id, 'agent'))).id;
+    const byAgent = (await json(await report(h, r, culprit.id, 'agent'))).id;
     await api('POST', `/internal/admin/reports/${byAgent}`, { action: 'strike', policy_code: 'spam' });
     expect(await activeStrikeCount(h.relay, culprit.id)).toBe(2);
   });
 
-  it('lets an admin take down a reported relay message, with an optional strike', async () => {
-    const { h, a, api } = await setup();
-    const culprit = await seedAgent(h.relay, { tier: 'claimed' });
+  it('lets an admin take down a reported relay message that is still up, with an optional strike', async () => {
+    const { h, api } = await setup();
+    const culprit = await seedAgent(h.relay);
     const sent = await json(await post(h, culprit, 'to be taken down'));
-    const id = (await json(await report(h, a, sent.discord_message_id))).id;
+    const id = (await json(await report(h, await reporter(h), sent.discord_message_id))).id;
     const res = await api('POST', `/internal/admin/reports/${id}`, { action: 'takedown', policy_code: 'hate', note: 'Hateful.', strike: true });
     expect(res.status).toBe(200);
     expect((await row(h, sent.id))!.status).toBe('removed');
@@ -572,8 +560,8 @@ describe('reports', () => {
   });
 
   it('refuses to take down what the relay did not post, and leaves the report open', async () => {
-    const { h, a, api } = await setup();
-    const id = (await json(await report(h, a, await person(h)))).id;
+    const { h, api } = await setup();
+    const id = (await json(await report(h, await reporter(h), await person(h)))).id;
     const res = await api('POST', `/internal/admin/reports/${id}`, { action: 'takedown' });
     expect(res.status).toBe(400);
     expect((await json(res)).detail).toMatch(/Delete this one in Discord/);
@@ -583,18 +571,19 @@ describe('reports', () => {
   });
 
   it('reopens a report when the action itself fails', async () => {
-    const { h, a, api } = await setup();
-    const culprit = await seedAgent(h.relay, { tier: 'claimed' });
+    const { h, api } = await setup();
+    const culprit = await seedAgent(h.relay);
     const sent = await json(await post(h, culprit, 'cannot be removed'));
-    const id = (await json(await report(h, a, sent.discord_message_id))).id;
+    const id = (await json(await report(h, await reporter(h), sent.discord_message_id))).id;
     h.setDiscord(() => Response.json({ message: 'Missing Permissions' }, { status: 403 }));
     expect((await api('POST', `/internal/admin/reports/${id}`, { action: 'takedown' })).status).toBe(409);
     expect((await json(await api('GET', '/internal/admin/reports'))).reports).toHaveLength(1);
   });
 
   it('pages the report list', async () => {
-    const { h, a, api } = await setup();
-    for (let i = 0; i < 3; i++) await report(h, a, await person(h, `rude ${i}`));
+    const { h, api } = await setup();
+    const r = await reporter(h);
+    for (let i = 0; i < 3; i++) await report(h, r, await person(h, `rude ${i}`));
     const one = await json(await api('GET', '/internal/admin/reports?limit=2'));
     expect(one.reports).toHaveLength(2);
     expect(one.next_offset).toBe(2);
@@ -605,8 +594,8 @@ describe('reports', () => {
 });
 
 describe('appeals', () => {
-  const appeal = (h: Harness, a: { key: string }, target_type: string, target_id: string, message = 'I believe this was a mistake.') =>
-    h.call('POST', '/v1/appeals', { target_type, target_id, message }, h.as(a.key));
+  const appeal = (h: Harness, a: { token: string }, target_type: string, target_id: string, message = 'I believe this was a mistake.') =>
+    h.call('POST', '/v1/appeals', { target_type, target_id, message }, h.as(a.token));
 
   it('lets an agent appeal a blocked message once, and lists it back', async () => {
     const { h, a } = await setup();
@@ -623,8 +612,8 @@ describe('appeals', () => {
     });
     const again = await appeal(h, a, 'message', blocked.id, 'Please look again, it was a quote.');
     expect(again.status).toBe(409);
-    expect((await json(again)).detail).toMatch(/already have an open appeal/);
-    const mine = await json(await h.call('GET', '/v1/appeals', undefined, h.as(a.key)));
+    expect((await json(again)).detail).toMatch(/already appealed this decision/);
+    const mine = await json(await h.call('GET', '/v1/appeals', undefined, h.as(a.token)));
     expect(mine.appeals).toHaveLength(1);
     expect((await audits(h, 'appeal.created'))[0]).toMatchObject({ actor_type: 'agent', actor_id: a.id });
   });
@@ -643,17 +632,9 @@ describe('appeals', () => {
     await expect(insert()).rejects.toThrow(/UNIQUE/);
   });
 
-  it('allows another appeal once the first is answered', async () => {
-    const { h, a, api } = await setup();
-    const blocked = await json(await post(h, a, 'come to discord.gg/abc123'));
-    const first = await json(await appeal(h, a, 'message', blocked.id));
-    await api('POST', `/internal/admin/appeals/${first.id}`, { decision: 'uphold', response: 'The invite is not allowed.' });
-    expect((await appeal(h, a, 'message', blocked.id, 'It was a quote from the rules.')).status).toBe(201);
-  });
-
   it('only accepts targets that are the agent’s own and appealable', async () => {
     const { h, a } = await setup();
-    const other = await seedAgent(h.relay, { tier: 'claimed' });
+    const other = await seedAgent(h.relay);
     const theirs = await json(await post(h, other, 'discord.gg/abc123'));
     const sent = await json(await post(h, a, 'fine and sent'));
     expect((await appeal(h, a, 'message', theirs.id)).status).toBe(404);
@@ -662,10 +643,10 @@ describe('appeals', () => {
     expect((await appeal(h, a, 'strike', 'stk_NOSUCHSTRIKE0')).status).toBe(404);
     expect((await appeal(h, a, 'status', a.id)).status).toBe(400);
     expect((await appeal(h, a, 'status', other.id)).status).toBe(400);
-    expect((await h.call('POST', '/v1/appeals', { target_type: 'message', target_id: sent.id, message: 'short' }, h.as(a.key))).status).toBe(400);
+    expect((await h.call('POST', '/v1/appeals', { target_type: 'message', target_id: sent.id, message: 'short' }, h.as(a.token))).status).toBe(400);
   });
 
-  it('overturning a message appeal sends the message and takes back the strike it earned', async () => {
+  it('overturning a blocked message’s appeal clears the block and takes back the strike it earned', async () => {
     const { h, a, admin, api } = await setup({ moderator: decide(() => ({ verdict: 'block', policy_code: 'violence' })) });
     const blocked = await json(await post(h, a, 'a quote from a war novel'));
     expect(blocked.status).toBe('blocked');
@@ -681,15 +662,15 @@ describe('appeals', () => {
       subject: { content: 'a quote from a war novel', status: 'blocked', policy_code: 'violence' },
     });
 
-    const res = await api('POST', `/internal/admin/appeals/${filed.id}`, { decision: 'overturn', response: 'Agreed, it is a quote. Sent.' });
+    const res = await api('POST', `/internal/admin/appeals/${filed.id}`, { decision: 'overturn', response: 'Agreed, it is a quote.' });
     expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ status: 'overturned', response: 'Agreed, it is a quote. Sent.', resolved_by: admin.id });
-    expect(await row(h, blocked.id)).toMatchObject({ status: 'sent', verdict: 'pass', reviewed_by: admin.id, status_reason: null });
-    expect(h.discordCalls).toHaveLength(1);
+    expect(await json(res)).toMatchObject({ status: 'overturned', response: 'Agreed, it is a quote.', resolved_by: admin.id });
+    expect(await row(h, blocked.id)).toMatchObject({ status: 'failed', verdict: null, policy_code: null, reviewed_by: admin.id });
+    expect(h.discordCalls).toHaveLength(0);
     expect(await activeStrikeCount(h.relay, a.id)).toBe(0);
 
-    const mine = await json(await h.call('GET', '/v1/appeals', undefined, h.as(a.key)));
-    expect(mine.appeals[0]).toMatchObject({ status: 'overturned', response: 'Agreed, it is a quote. Sent.' });
+    const mine = await json(await h.call('GET', '/v1/appeals', undefined, h.as(a.token)));
+    expect(mine.appeals[0]).toMatchObject({ status: 'overturned', response: 'Agreed, it is a quote.' });
     expect(mine.appeals[0]).not.toHaveProperty('resolved_by');
     expect((await audits(h, 'appeal.overturned'))[0]).toMatchObject({ actor_id: admin.id });
     expect((await api('POST', `/internal/admin/appeals/${filed.id}`, { decision: 'uphold', response: 'Changed my mind.' })).status).toBe(409);
@@ -705,13 +686,13 @@ describe('appeals', () => {
     expect(h.discordCalls).toHaveLength(0);
   });
 
-  it('overturning a message that cannot be sent again leaves it alone', async () => {
-    const { h, a, api } = await setup();
-    const secret = await json(await post(h, a, 'key lk_' + 'K7QMXV2D'.repeat(6)));
-    const filed = await json(await appeal(h, a, 'message', secret.id));
-    await api('POST', `/internal/admin/appeals/${filed.id}`, { decision: 'overturn', response: 'Not a real key.' });
-    expect((await row(h, secret.id))!.status).toBe('blocked');
-    expect(h.discordCalls).toHaveLength(0);
+  it('overturning a held message’s appeal sends it', async () => {
+    const { h, a, admin, api } = await setup();
+    const waiting = await held(h, a);
+    const filed = await json(await appeal(h, a, 'message', waiting.id));
+    await api('POST', `/internal/admin/appeals/${filed.id}`, { decision: 'overturn', response: 'That address is public.' });
+    expect(await row(h, waiting.id)).toMatchObject({ status: 'sent', verdict: 'pass', reviewed_by: admin.id });
+    expect(h.discordCalls).toHaveLength(1);
   });
 
   it('overturning a strike appeal removes the strike and lifts the pause', async () => {
@@ -787,69 +768,10 @@ describe('stats', () => {
   });
 });
 
-describe('admin resolution of uncertain messages', () => {
-  const ok = () => Response.json({ id: '300000000000000909', channel_id: LOUNGE, content: 'x', timestamp: new Date().toISOString(), edited_timestamp: null });
-
-  async function uncertain(h: Harness, a: { key: string }, text = 'did this land?') {
-    h.setDiscord(() => new Response('bad gateway', { status: 502 }));
-    const msg = await json(await post(h, a, text));
-    expect(msg.status).toBe('uncertain');
-    h.setDiscord(async () => ok());
-    return msg;
-  }
-
-  it('resends the message of an agent that has no owner, and really sends it', async () => {
-    const { h, a, admin, api } = await setup();
-    const msg = await uncertain(h, a);
-    expect(h.discordCalls).toHaveLength(1);
-    const res = await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'resend' });
-    expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ id: msg.id, status: 'sent', discord_message_id: '300000000000000909', agent_name: a.name, status_reason: null });
-    expect(h.discordCalls).toHaveLength(2);
-    expect((await audits(h, 'message.resent'))[0]).toMatchObject({ actor_type: 'admin', actor_id: admin.id, target_id: msg.id });
-  });
-
-  it('accepts it as sent without sending anything', async () => {
-    const { h, a, admin, api } = await setup();
-    const msg = await uncertain(h, a);
-    const res = await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'accept' });
-    expect(await json(res)).toMatchObject({ status: 'sent', status_reason: 'Accepted by an admin as sent', discord_message_id: null });
-    expect(h.discordCalls).toHaveLength(1);
-    expect((await audits(h, 'message.accepted'))[0]).toMatchObject({ actor_type: 'admin', actor_id: admin.id });
-  });
-
-  it('works for an owned agent too, where the owner can decide as well', async () => {
-    const { h, api } = await setup();
-    const owner = await seedOwner(h.relay, '200000000000000007', 'owner');
-    const owned = await seedAgent(h.relay, { tier: 'claimed', ownerId: owner.id });
-    const msg = await uncertain(h, owned, 'an owned agent’s message');
-    expect((await json(await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'accept' }))).status).toBe('sent');
-  });
-
-  it('decides once, and only for messages waiting on Discord', async () => {
-    const { h, a, api } = await setup();
-    const msg = await uncertain(h, a);
-    expect((await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'accept' })).status).toBe(200);
-    expect((await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'resend' })).status).toBe(409);
-    const sent = await json(await post(h, a, 'plainly sent'));
-    expect((await api('POST', `/internal/admin/messages/${sent.id}/resolve`, { action: 'resend' })).status).toBe(409);
-    expect((await api('POST', '/internal/admin/messages/msg_NOSUCHMESSAGE0/resolve', { action: 'accept' })).status).toBe(404);
-    expect((await api('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'delete' })).status).toBe(400);
-  });
-
-  it('is for admins only', async () => {
-    const { h, a } = await setup();
-    const msg = await uncertain(h, a);
-    const person = await seedOwner(h.relay, '200000000000000002', 'person');
-    const res = await h.internal('POST', `/internal/admin/messages/${msg.id}/resolve`, { action: 'accept' }, { 'x-logitland-owner': person.id });
-    expect(res.status).toBe(403);
-  });
-});
-
 describe('a suspended agent can appeal', () => {
   const strike = (h: Harness, agentId: string) =>
     addStrike(h.relay, { agentId, policy: 'harassment', reason: 'test', createdBy: 'system', actor: { type: 'system', id: 'moderation' } });
-  const appeal = (h: Harness, a: { key: string }, body: Record<string, unknown>) => h.call('POST', '/v1/appeals', body, h.as(a.key));
+  const appeal = (h: Harness, a: { token: string }, body: Record<string, unknown>) => h.call('POST', '/v1/appeals', body, h.as(a.token));
   async function suspended() {
     const ctx = await setup();
     for (let i = 0; i < 4; i++) await strike(ctx.h, ctx.a.id);
@@ -862,13 +784,15 @@ describe('a suspended agent can appeal', () => {
     const blocked = await post(h, a, 'posting while suspended');
     expect(blocked.status).toBe(403);
     expect((await json(blocked)).detail).toMatch(/suspended/);
-    expect((await h.call('GET', '/v1/channels', undefined, h.as(a.key))).status).toBe(403);
-    expect((await h.call('POST', '/v1/reports', { target_type: 'agent', target_id: 'agt_0000000000AAAA', reason: 'reporting' }, h.as(a.key))).status).toBe(403);
+    expect((await h.call('GET', '/v1/channels', undefined, h.as(a.token))).status).toBe(403);
+    expect((await h.call('POST', '/v1/reports', { target_type: 'agent', target_id: 'agt_0000000000AAAA', reason: 'reporting' }, h.as(a.token))).status).toBe(
+      403,
+    );
 
     const filed = await appeal(h, a, { target_type: 'status', target_id: a.id, message: 'I believe the suspension was a mistake.' });
     expect(filed.status).toBe(201);
     expect(await json(filed)).toMatchObject({ target_type: 'status', target_id: a.id, status: 'open' });
-    const mine = await h.call('GET', '/v1/appeals', undefined, h.as(a.key));
+    const mine = await h.call('GET', '/v1/appeals', undefined, h.as(a.token));
     expect(mine.status).toBe(200);
     expect((await json(mine)).appeals).toHaveLength(1);
   });
@@ -888,7 +812,7 @@ describe('a suspended agent can appeal', () => {
     expect(await agentRow(h, a.id)).toMatchObject({ status: 'active', status_reason: null, posting_paused_until: null });
     expect((await audits(h, 'agent.reinstated'))[0]).toMatchObject({ actor_type: 'admin', actor_id: admin.id, target_id: a.id });
     expect((await post(h, a, 'back in business')).status).toBe(201);
-    const answer = await json(await h.call('GET', '/v1/appeals', undefined, h.as(a.key)));
+    const answer = await json(await h.call('GET', '/v1/appeals', undefined, h.as(a.token)));
     expect(answer.appeals[0]).toMatchObject({ status: 'overturned', response: 'Reviewed: the suspension was a mistake.' });
   });
 
@@ -901,12 +825,12 @@ describe('a suspended agent can appeal', () => {
     expect(await audits(h, 'agent.reinstated')).toHaveLength(0);
   });
 
-  it('cannot be reached by a banned agent, whose keys are revoked', async () => {
+  it('cannot be reached by a banned agent, whose access tokens are revoked', async () => {
     const { h, a } = await suspended();
     await strike(h, a.id);
     expect(await agentRow(h, a.id)).toMatchObject({ status: 'banned' });
     expect((await appeal(h, a, { target_type: 'status', target_id: a.id, message: 'Please reconsider the ban.' })).status).toBe(401);
-    expect((await h.call('GET', '/v1/appeals', undefined, h.as(a.key))).status).toBe(401);
+    expect((await h.call('GET', '/v1/appeals', undefined, h.as(a.token))).status).toBe(401);
   });
 
   it('is not extended to an agent its owner switched off', async () => {

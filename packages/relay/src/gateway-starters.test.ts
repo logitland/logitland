@@ -2,15 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { backfill, normalizeDispatch, seedHistory } from './gateway';
 import { MEDIA, NEWS, all, at, moreChannels, msg, push, world } from './intake-fixtures';
 import { recordAgentPost } from './services/intake';
-import { FORUM, GUILD, LOUNGE } from './testing';
+import { FORUM, GUILD, LOUNGE, setAccess } from './testing';
 
-// Mirror pages rely on where a thread’s starter message is filed:
+// Reads rely on where a thread’s starter message is filed:
 //  - forum and media posts: the starter is in the thread (thread_id is its own ID)
 //  - a thread started from a message in a text or announcement channel: the starter stays in the channel (thread_id null)
 // Whichever way a message reaches the relay.
 
 type World = Awaited<ReturnType<typeof world>>;
-const AUTHOR = { id: '200000000000000001', username: 'luna' };
+// A bot: intake keeps what bots write as it is, so every starter is stored.
+const AUTHOR = { id: '200000000000000001', username: 'luna', bot: true };
 const rest = (n: number, channel: string, over: Record<string, unknown> = {}) => ({
   id: msg(n),
   channel_id: channel,
@@ -96,7 +97,7 @@ describe('where a thread’s starter message is filed', () => {
     );
     // Without the thread known the message names the thread as its channel, which no open channel owns: the relay drops it (the service looks the thread up first).
     await push(w2.h, ...early);
-    expect(await all(w2.h, 'SELECT 1 FROM conversation')).toHaveLength(0);
+    expect(await all(w2.h, 'SELECT 1 FROM conversation WHERE message_id = ?', msg(30))).toHaveLength(0);
   });
 
   it('through REST backfill', async () => {
@@ -122,7 +123,7 @@ describe('where a thread’s starter message is filed', () => {
   it('through the first look at a new channel', async () => {
     const { h } = await world();
     await moreChannels(h);
-    await h.db.prepare("UPDATE channels SET agent_access = 'read_only' WHERE id = ?").bind(LOUNGE).run();
+    await setAccess(h.db, LOUNGE, 'read_only');
     await push(h, ...PLACES.map((p) => ({ kind: 'thread_upsert' as const, thread_id: msg(p.n), parent_id: p.channel, name: 'a thread' })));
     h.setDiscord(async (req) => {
       const channel = /\/channels\/(\d+)\/messages$/.exec(new URL(req.url).pathname)![1]!;

@@ -80,13 +80,6 @@ export function redactWebhook(ref: WebhookRef): string {
   return `wh_…${ref.id.slice(-4)}`;
 }
 
-export interface PollCreate {
-  question: { text: string };
-  answers: { poll_media: { text: string } }[];
-  duration?: number;
-  allow_multiselect?: boolean;
-}
-
 export interface ExecuteWebhookBody {
   content?: string;
   username: string;
@@ -95,7 +88,6 @@ export interface ExecuteWebhookBody {
   thread_name?: string;
   /** Forum and media channels only: tag IDs for the new post. */
   applied_tags?: string[];
-  poll?: PollCreate;
 }
 
 export interface DiscordUser {
@@ -161,6 +153,21 @@ export interface CurrentApplication {
   /** GATEWAY_MESSAGE_CONTENT is 1 << 18 (100+ servers), GATEWAY_MESSAGE_CONTENT_LIMITED is 1 << 19 (under 100). */
   flags?: number;
   interactions_endpoint_url?: string | null;
+  /** The person who owns the application; for a team-owned one, a stand-in user for the team. */
+  owner?: DiscordUser;
+  /** The Developer Portal team that owns the application, if one does. */
+  team?: Team | null;
+}
+
+/** 1 invited, 2 accepted. Only accepted members are on the team. */
+export const TEAM_MEMBER_ACCEPTED = 2;
+
+/** https://docs.discord.com/developers/topics/teams */
+export interface Team {
+  id: string;
+  name: string;
+  owner_user_id: string;
+  members: { user: DiscordUser; membership_state: number; role: string }[];
 }
 
 export interface CreatedWebhook {
@@ -235,14 +242,6 @@ export class DiscordRest {
     return this.send<DiscordMessage[]>('GET', `/channels/${channelId}/messages?${q}`, undefined, true);
   }
 
-  addMemberRole(guildId: string, userId: string, roleId: string, reason: string): Promise<void> {
-    return this.send<void>('PUT', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
-  }
-
-  removeMemberRole(guildId: string, userId: string, roleId: string, reason: string): Promise<void> {
-    return this.send<void>('DELETE', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
-  }
-
   /** The Gateway URL and how many sessions the bot may still start today. */
   getGatewayBot(): Promise<GatewayBot> {
     return this.send<GatewayBot>('GET', '/gateway/bot', undefined, true);
@@ -252,6 +251,7 @@ export class DiscordRest {
     return this.send<DiscordUser>('GET', '/users/@me', undefined, true);
   }
 
+  /** The bot's application: its flags, interactions URL, and who owns it (a team, or one person). */
   getCurrentApplication(): Promise<CurrentApplication> {
     return this.send<CurrentApplication>('GET', '/applications/@me', undefined, true);
   }
@@ -265,6 +265,16 @@ export class DiscordRest {
     return this.send<CreatedWebhook>('POST', `/channels/${channelId}/webhooks`, { name }, true, false, reason);
   }
 
+  /** Deletes a webhook with its own token. One that is already gone counts as deleted. */
+  async deleteWebhook(hook: WebhookRef): Promise<void> {
+    try {
+      await this.send<void>('DELETE', `/webhooks/${hook.id}/${hook.token}`, undefined, false);
+    } catch (err) {
+      if (err instanceof DiscordError && err.status === 404) return;
+      throw err;
+    }
+  }
+
   /** Text and announcement channels only; a message can have one thread. Needs Create Public Threads. */
   startThreadFromMessage(
     channelId: string,
@@ -274,8 +284,31 @@ export class DiscordRest {
     return this.send<GuildChannel>('POST', `/channels/${channelId}/messages/${messageId}/threads`, thread, true);
   }
 
-  /** A message from the bot itself, for example the mirror's consent prompt with its button. */
-  createMessage(channelId: string, body: { content: string; components?: unknown[] }): Promise<DiscordMessage> {
+  /**
+   * A private thread (type 12) in a text channel, with no starter message. Needs Create Private Threads. The bot is its first
+   * member; only members and moderators see it, and `invitable: false` keeps members from adding others.
+   */
+  createPrivateThread(channelId: string, thread: { name: string; auto_archive_duration?: 60 | 1440 | 4320 | 10080 }): Promise<GuildChannel> {
+    return this.send<GuildChannel>('POST', `/channels/${channelId}/threads`, { ...thread, type: 12, invitable: false }, true);
+  }
+
+  /** Adds someone to a thread. Fails on an archived thread, so unarchive it first. */
+  addThreadMember(threadId: string, userId: string): Promise<void> {
+    return this.send<void>('PUT', `/channels/${threadId}/thread-members/${userId}`, undefined, true);
+  }
+
+  /** Removes someone from a thread. Fails on an archived thread, so unarchive it first. */
+  removeThreadMember(threadId: string, userId: string): Promise<void> {
+    return this.send<void>('DELETE', `/channels/${threadId}/thread-members/${userId}`, undefined, true);
+  }
+
+  /** Archives or unarchives a thread the bot made. */
+  setThreadArchived(threadId: string, archived: boolean): Promise<GuildChannel> {
+    return this.send<GuildChannel>('PATCH', `/channels/${threadId}`, { archived }, true);
+  }
+
+  /** A message from the bot itself, for example an alert in the staff channel. Mentions are off. */
+  createMessage(channelId: string, body: { content: string }): Promise<DiscordMessage> {
     return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions: { parse: [] } }, true);
   }
 

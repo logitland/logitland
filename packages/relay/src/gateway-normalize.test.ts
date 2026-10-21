@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { channelChanges, messageChannelId, messageCreated, normalizeDispatch, pollFromDiscord, type NormalizeContext } from './gateway';
+import { channelChanges, messageChannelId, messageCreated, normalizeDispatch, type NormalizeContext } from './gateway';
 import { snowflakeTime } from './services/events';
 import { IntakeEvent } from './services/intake';
 
@@ -180,10 +180,10 @@ describe('threads', () => {
     expect(normalizeDispatch('GUILD_CREATE', { id: GUILD, unavailable: true }, ctx())).toEqual([]);
   });
 
-  it('cover announcement and public threads but not private ones or plain channels', () => {
+  it('cover announcement and public threads, mark private ones without placing their messages, and skip plain channels', () => {
     expect(normalizeDispatch('THREAD_CREATE', thread({ type: 10 }), ctx())).toHaveLength(1);
     const c = ctx();
-    expect(normalizeDispatch('THREAD_CREATE', thread({ type: 12 }), c)).toEqual([]);
+    expect(normalizeDispatch('THREAD_CREATE', thread({ type: 12 }), c)).toEqual([expect.objectContaining({ kind: 'thread_upsert', private: true })]);
     expect(c.threads.size).toBe(0);
     expect(normalizeDispatch('THREAD_CREATE', thread({ type: 0 }), ctx())).toEqual([]);
   });
@@ -232,99 +232,55 @@ describe('replies', () => {
   });
 });
 
-describe('polls', () => {
-  const discordPoll = {
-    question: { text: 'Lunch?' },
-    answers: [
-      { answer_id: 1, poll_media: { text: 'Soup' } },
-      { answer_id: 2, poll_media: { text: 'Noodles', emoji: { name: 'noodle' } } },
-      { answer_id: 3, poll_media: { emoji: { name: 'pizza' } } },
-    ],
-    expiry: '2026-10-20T03:00:00.000000+00:00',
-    allow_multiselect: true,
-    layout_type: 1,
-  };
-
-  it('are stored in the relay’s shape, whether or not the message has text', () => {
-    const [e] = normalizeDispatch('MESSAGE_CREATE', message({ content: '', poll: discordPoll }), ctx());
-    expect(IntakeEvent.parse(e)).toMatchObject({
-      content: '',
-      poll: {
-        question: 'Lunch?',
-        answers: [
-          { id: 1, text: 'Soup', emoji: null },
-          { id: 2, text: 'Noodles', emoji: 'noodle' },
-          { id: 3, text: 'pizza', emoji: 'pizza' },
-        ],
-        expires_at: '2026-10-20T03:00:00.000Z',
-        allow_multiselect: true,
-      },
-    });
-  });
-
-  it('turn a webhook’s answer or a plain create object into the same shape', () => {
-    expect(pollFromDiscord({ question: { text: 'Q' }, answers: [{ poll_media: { text: 'a' } }, { poll_media: { text: 'b' } }] })).toEqual({
-      question: 'Q',
-      answers: [
-        { id: 1, text: 'a', emoji: null },
-        { id: 2, text: 'b', emoji: null },
-      ],
-      expires_at: null,
-      allow_multiselect: false,
-    });
-    expect(pollFromDiscord(undefined)).toBeNull();
-    expect(pollFromDiscord({ question: { text: 'no answers' }, answers: [] })).toBeNull();
-  });
-
-  it('report results from MESSAGE_UPDATE even though nothing was edited', () => {
-    const results = {
-      is_finalized: true,
-      answer_counts: [
-        { id: 1, count: 4, me_voted: false },
-        { id: 2, count: 1, me_voted: false },
-      ],
-    };
-    const out = normalizeDispatch(
-      'MESSAGE_UPDATE',
-      { id: '300000000000000001', channel_id: LOUNGE, guild_id: GUILD, poll: { ...discordPoll, results }, edited_timestamp: null },
-      ctx(),
-    );
-    expect(out).toEqual([
-      {
-        kind: 'message_poll',
-        channel_id: LOUNGE,
-        thread_id: null,
-        message_id: '300000000000000001',
-        results: {
-          finalized: true,
-          counts: [
-            { id: 1, count: 4 },
-            { id: 2, count: 1 },
-          ],
-        },
-      },
-    ]);
-    expect(IntakeEvent.parse(out[0])).toMatchObject({ kind: 'message_poll' });
-    // No results, no edit: nothing to record.
-    expect(normalizeDispatch('MESSAGE_UPDATE', { id: '300000000000000001', channel_id: LOUNGE, guild_id: GUILD, poll: discordPoll }, ctx())).toEqual([]);
-  });
-});
-
 describe('channel updates', () => {
   const channel = (over: Record<string, unknown> = {}) => ({ id: LOUNGE, guild_id: GUILD, name: 'lounge', type: 0, ...over });
 
-  it('carry the name and type of the channels the relay can use', () => {
+  it('carry the name, type, category, overwrites and slowmode of the channels the relay can use', () => {
+    const overwrites = [{ id: GUILD, type: 0, allow: '0', deny: '1024' }];
     for (const [type, name] of [
       [0, 'text'],
       [5, 'announcement'],
       [15, 'forum'],
       [16, 'media'],
     ] as const)
-      expect(normalizeDispatch('CHANNEL_UPDATE', channel({ type }), ctx())).toEqual([
-        { kind: 'channel_update', channel_id: LOUNGE, name: 'lounge', type: name },
+      expect(
+        normalizeDispatch(
+          'CHANNEL_UPDATE',
+          channel({ type, parent_id: '110000000000000030', permission_overwrites: overwrites, rate_limit_per_user: 30 }),
+          ctx(),
+        ),
+      ).toEqual([
+        {
+          kind: 'channel_update',
+          channel_id: LOUNGE,
+          guild_id: GUILD,
+          parent_id: '110000000000000030',
+          name: 'lounge',
+          type: name,
+          overwrites,
+          slowmode_seconds: 30,
+        },
       ]);
     expect(normalizeDispatch('CHANNEL_UPDATE', channel({ type: 2 }), ctx())).toEqual([]);
     expect(normalizeDispatch('CHANNEL_UPDATE', channel({ guild_id: '199999999999999999' }), ctx())).toEqual([]);
+  });
+
+  it('mark a channel Discord obfuscates as hidden, without taking its stand-in name, until an update without the flag', () => {
+    const OBFUSCATED = 1 << 17;
+    expect(normalizeDispatch('CHANNEL_UPDATE', channel({ name: 'xxxxxxx', flags: OBFUSCATED }), ctx())).toEqual([
+      { kind: 'channel_hidden', channel_id: LOUNGE, guild_id: GUILD, type: 'text' },
+    ]);
+    expect(normalizeDispatch('CHANNEL_UPDATE', channel({ flags: 0 }), ctx())).toMatchObject([{ kind: 'channel_update', name: 'lounge' }]);
+  });
+
+  it('turn deletions and role changes into events', () => {
+    const role = { id: '130000000000000001', name: 'agents', permissions: '1024', position: 2 };
+    const roleEvent = { kind: 'role_update', role_id: role.id, guild_id: GUILD, name: 'agents', permissions: '1024', position: 2 };
+    expect(normalizeDispatch('CHANNEL_DELETE', channel(), ctx())).toEqual([{ kind: 'channel_delete', channel_id: LOUNGE }]);
+    expect(normalizeDispatch('GUILD_ROLE_UPDATE', { guild_id: GUILD, role }, ctx())).toEqual([roleEvent]);
+    expect(normalizeDispatch('GUILD_ROLE_DELETE', { guild_id: GUILD, role_id: role.id }, ctx())).toEqual([{ kind: 'role_delete', role_id: role.id }]);
+    expect(normalizeDispatch('GUILD_CREATE', { id: GUILD, roles: [role], channels: [], threads: [] }, ctx())[0]).toEqual(roleEvent);
+    expect(normalizeDispatch('GUILD_ROLE_UPDATE', { guild_id: '199999999999999999', role }, ctx())).toEqual([]);
   });
 
   it('carry a forum’s tags', () => {

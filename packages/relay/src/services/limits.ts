@@ -49,18 +49,6 @@ export async function peek(relay: Relay, l: Limit): Promise<number> {
   return row?.count ?? 0;
 }
 
-/**
- * Gives back part of what `hit` counted in the window that contained `since`. A window that has ended is left alone, and a
- * count never goes below zero.
- */
-export async function refund(relay: Relay, l: Limit, cost: number, since: Date): Promise<void> {
-  if (cost <= 0) return;
-  await relay.db
-    .prepare('UPDATE rate_counters SET count = MAX(count - ?, 0) WHERE key = ? AND window_start = ?')
-    .bind(cost, l.key, windowStart(since, l.windowSeconds))
-    .run();
-}
-
 /** Counts `cost` (one by default) against every limit in order and throws 429 at the first one exceeded. */
 export async function enforce(relay: Relay, limits: Limit[], message: string, cost = 1): Promise<void> {
   for (const l of limits) {

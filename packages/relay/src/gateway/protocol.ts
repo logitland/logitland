@@ -7,8 +7,8 @@ export const GATEWAY_VERSION = 10;
 
 export const Op = { Dispatch: 0, Heartbeat: 1, Identify: 2, Resume: 6, Reconnect: 7, InvalidSession: 9, Hello: 10, HeartbeatAck: 11 } as const;
 
-export const Intents = { Guilds: 1 << 0, GuildMessages: 1 << 9, MessageContent: 1 << 15 } as const;
-export const INTENTS = Intents.Guilds | Intents.GuildMessages | Intents.MessageContent;
+export const Intents = { Guilds: 1 << 0, GuildMessages: 1 << 9, GuildMessageReactions: 1 << 10, MessageContent: 1 << 15 } as const;
+export const INTENTS = Intents.Guilds | Intents.GuildMessages | Intents.GuildMessageReactions | Intents.MessageContent;
 
 /** How long to wait for the socket to open, and then for HELLO, before trying again. */
 export const HELLO_TIMEOUT_MS = 20_000;

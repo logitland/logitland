@@ -390,10 +390,66 @@ export function routes(): Route[] {
     return { status: 201, json: thread };
   });
 
+  add('channel.threads.create', 'POST', '/channels/:channel/threads', 'bot', 'channel', ({ fake, params, body }) => {
+    const channel = fake.world.channel(params.channel!);
+    const o = objectBody(body);
+    // Discord's default since API v9 is a private thread.
+    const type = o.type ?? ChannelType.privateThread;
+    if (![ChannelType.announcementThread, ChannelType.publicThread, ChannelType.privateThread].includes(type as 10 | 11 | 12))
+      throw formBody(['type'], 'BASE_TYPE_CHOICES', 'Must be one of 10, 11, 12.');
+    botCan(fake, channel, type === ChannelType.privateThread ? Permission.createPrivateThreads : Permission.createPublicThreads);
+    const name = text(o, 'name', { max: 100, min: 1, required: true })!;
+    const autoArchive = o.auto_archive_duration;
+    if (autoArchive !== undefined && !fake.world.validArchiveDuration(autoArchive))
+      throw formBody(['auto_archive_duration'], 'BASE_TYPE_CHOICES', 'Must be one of 60, 1440, 4320, 10080.');
+    const thread = fake.world.createThread(channel.id, {
+      name,
+      type: type as number,
+      ownerId: fake.world.botUser.id,
+      autoArchive: autoArchive as number | undefined,
+      invitable: typeof o.invitable === 'boolean' ? o.invitable : undefined,
+    });
+    return { status: 201, json: thread };
+  });
+
+  const threadMember =
+    (on: boolean): Route['handler'] =>
+    ({ fake, params }) => {
+      const thread = fake.world.channel(params.channel!);
+      if (!isThread(thread.type)) throw errors.wrongChannelType();
+      botCan(fake, thread, Permission.sendMessagesInThreads);
+      fake.world.setThreadMember(thread.id, params.user!, on);
+      return noContent;
+    };
+  add('channel.thread_members.add', 'PUT', '/channels/:channel/thread-members/:user', 'bot', 'channel', threadMember(true));
+  add('channel.thread_members.remove', 'DELETE', '/channels/:channel/thread-members/:user', 'bot', 'channel', threadMember(false));
+
+  // Only threads are modified here (name, archived, locked): the relay changes no other channel. A thread's creator may
+  // archive it; anything else needs Manage Threads.
+  add('channel.modify', 'PATCH', '/channels/:channel', 'bot', 'channel', ({ fake, params, body }) => {
+    const thread = fake.world.channel(params.channel!);
+    if (!isThread(thread.type)) throw errors.wrongChannelType();
+    const o = objectBody(body);
+    const name = text(o, 'name', { max: 100, min: 1 });
+    const flag = (key: string) => {
+      if (o[key] !== undefined && typeof o[key] !== 'boolean') throw formBody([key], 'BASE_TYPE_BOOLEAN', 'Must be either true or false.');
+      return o[key] as boolean | undefined;
+    };
+    const archived = flag('archived');
+    const locked = flag('locked');
+    if (thread.owner_id !== fake.world.botUser.id || locked !== undefined || name !== undefined) botCan(fake, thread, Permission.manageThreads);
+    return ok(fake.world.updateThread(thread.id, { name, archived, locked }));
+  });
+
   /* ----- Webhooks ----- */
 
   add('webhook.get', 'GET', '/webhooks/:id/:token', 'none', 'webhook', ({ fake, params }) => {
     return ok(webhookFor(fake, params.id!, params.token!));
+  });
+
+  add('webhook.delete', 'DELETE', '/webhooks/:id/:token', 'none', 'webhook', ({ fake, params }) => {
+    fake.world.webhooks.delete(webhookFor(fake, params.id!, params.token!).id);
+    return noContent;
   });
 
   add('webhook.execute', 'POST', '/webhooks/:id/:token', 'none', 'webhook', ({ fake, params, query, body }) => {

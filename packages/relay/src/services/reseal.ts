@@ -14,14 +14,16 @@ interface SealedColumn {
   key: string;
   /** The row id is an integer (compared as one, bound as text). */
   numeric?: boolean;
+  /** The primary key column, when it isn't `id`. */
+  id?: string;
   aad: (row: { k: string; id: string }) => string;
 }
 
 const COLUMNS: SealedColumn[] = [
   { table: 'channels', column: 'webhook_ciphertext', key: 'id', aad: (r) => `channels.webhook:${r.k}` },
-  { table: 'subscriptions', column: 'url_ciphertext', key: 'id', aad: (r) => `subscriptions.url:${r.k}` },
-  { table: 'subscriptions', column: 'secret_ciphertext', key: 'id', aad: (r) => `subscriptions.secret:${r.k}` },
-  { table: 'subscriptions', column: 'secret_previous_ciphertext', key: 'id', aad: (r) => `subscriptions.secret_previous:${r.k}` },
+  { table: 'agent_webhooks', column: 'url_ciphertext', key: 'agent_id', id: 'agent_id', aad: (r) => `webhook.url:${r.k}` },
+  { table: 'agent_webhooks', column: 'secret_ciphertext', key: 'agent_id', id: 'agent_id', aad: (r) => `webhook.secret:${r.k}` },
+  { table: 'agent_webhooks', column: 'secret_previous_ciphertext', key: 'agent_id', id: 'agent_id', aad: (r) => `webhook.secret_previous:${r.k}` },
   { table: 'agent_origins', column: 'ip_sealed', key: 'agent_id', numeric: true, aad: (r) => `agent_origins.ip:${r.k}` },
 ];
 
@@ -66,13 +68,14 @@ export async function resealJob(relay: Relay, ctx: { deadline?: number } = {}): 
     if (state.finished) continue;
 
     // Not aliased as "id", which ORDER BY would then read instead of the column.
-    const rowId = col.numeric ? 'CAST(id AS TEXT)' : 'id';
+    const id = col.id ?? 'id';
+    const rowId = col.numeric ? `CAST(${id} AS TEXT)` : id;
     while (!state.finished) {
       if (statements >= MAX_STATEMENTS || Date.now() >= deadline) break;
       const { results } = await relay.db
         .prepare(
           `SELECT ${rowId} AS rid, ${col.key} AS k, ${col.column} AS v FROM ${col.table}
-           WHERE id > ? AND ${col.column} IS NOT NULL AND substr(${col.column}, 1, ?) != ? ORDER BY id LIMIT ?`,
+           WHERE ${id} > ? AND ${col.column} IS NOT NULL AND substr(${col.column}, 1, ?) != ? ORDER BY ${id} LIMIT ?`,
         )
         .bind(state.after, current.length, current, PAGE)
         .all<{ rid: string; k: string; v: string }>();
@@ -84,7 +87,7 @@ export async function resealJob(relay: Relay, ctx: { deadline?: number } = {}): 
           const plain = await relay.secrets.open(row.v, aad);
           const sealed = await relay.secrets.seal(plain, aad);
           // Compare-and-set: a value rewritten meanwhile (a new webhook, a rotated secret) is left alone.
-          updates.push(relay.db.prepare(`UPDATE ${col.table} SET ${col.column} = ? WHERE id = ? AND ${col.column} = ?`).bind(sealed, row.rid, row.v));
+          updates.push(relay.db.prepare(`UPDATE ${col.table} SET ${col.column} = ? WHERE ${id} = ? AND ${col.column} = ?`).bind(sealed, row.rid, row.v));
         } catch (error) {
           state.unreadable++;
           relay.log.error('reseal.failed', { table: col.table, column: col.column, id: row.rid, error });

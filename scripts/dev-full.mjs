@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 // The whole Logitland stack on this machine, without a real Discord:
 //
-//   fake Discord  127.0.0.1:8790   packages/discord-fake, seeded with a small server (text, announcement, forum, media, a consent role, an admin)
+//   fake Discord  127.0.0.1:8790   packages/discord-fake, seeded with a small server (text, announcement, forum, media, a consent role, an agents role, an admin)
 //   relay         localhost:8787   apps/backend under `wrangler dev`, pointed at the fake (RELAY_MODE=development + DISCORD_API_BASE)
-//   dashboard     localhost:5173   apps/frontend under `vite dev`, in relay mode (DATA_SOURCE=relay), not the example fixtures
 //
-//   pnpm dev:full [--reset] [--no-frontend] [--fake-port 8790] [--relay-port 8787] [--web-port 5173]
+//   pnpm dev:full [--reset] [--fake-port 8790] [--relay-port 8787] [--web-port 5174]
 //
+// --web-port is where the relay's dashboard links point (apps/web's `pnpm dev`, which runs on its own fixtures).
 // --reset forgets the relay's local database first. Ctrl-C stops everything this script started, by process ID.
-// Nothing in the repository is edited: generated files live under apps/backend/.wrangler/dev-full and
-// apps/frontend/.wrangler/dev-full, which git ignores.
+// Nothing in the repository is edited: generated files live under apps/backend/.wrangler/dev-full, which git ignores.
 
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,7 +18,6 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const backend = join(root, 'apps/backend');
-const frontend = join(root, 'apps/frontend');
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(`--${name}`);
@@ -29,8 +27,7 @@ const option = (name, fallback) => {
 };
 const FAKE_PORT = Number(option('fake-port', 8790));
 const RELAY_PORT = Number(option('relay-port', 8787));
-const WEB_PORT = Number(option('web-port', 5173));
-const WITH_FRONTEND = !flag('no-frontend');
+const WEB_PORT = Number(option('web-port', 5174));
 const RESET = flag('reset');
 
 const relayUrl = `http://localhost:${RELAY_PORT}`;
@@ -199,10 +196,12 @@ const sql = (v) => (v === null ? 'NULL' : typeof v === 'number' ? String(v) : `'
 /* ---------- 1. Preflight ---------- */
 
 const state = join(backend, '.wrangler/dev-full');
-const webState = join(frontend, '.wrangler/dev-full');
 mkdirSync(state, { recursive: true });
 
-for (const [what, port] of [['the fake Discord', FAKE_PORT], ['the relay', RELAY_PORT], ...(WITH_FRONTEND ? [['the dashboard', WEB_PORT]] : [])]) {
+for (const [what, port] of [
+  ['the fake Discord', FAKE_PORT],
+  ['the relay', RELAY_PORT],
+]) {
   if (!(await portFree(port))) {
     console.error(
       `Port ${port} is already in use, so ${what} can't start. Stop whatever is using it (this script never kills processes it didn't start), or pass another port.`,
@@ -210,11 +209,9 @@ for (const [what, port] of [['the fake Discord', FAKE_PORT], ['the relay', RELAY
     process.exit(1);
   }
 }
-for (const need of [join(backend, 'node_modules/wrangler/bin/wrangler.js'), ...(WITH_FRONTEND ? [join(frontend, 'node_modules/vite/bin/vite.js')] : [])]) {
-  if (!existsSync(need)) {
-    console.error(`${need.replace(root + '/', '')} is missing. Run \`pnpm install\` first.`);
-    process.exit(1);
-  }
+if (!existsSync(join(backend, 'node_modules/wrangler/bin/wrangler.js'))) {
+  console.error('apps/backend/node_modules/wrangler/bin/wrangler.js is missing. Run `pnpm install` first.');
+  process.exit(1);
 }
 const wrangler = (argv, env) => [
   'node',
@@ -240,7 +237,7 @@ const fakeProc = start('fake', 'node', [
   '--seed',
   'dev',
   '--endpoint',
-  `${relayUrl}/discord/interactions`,
+  `${relayUrl}/v1/discord/interactions`,
   '--application-id',
   '400000000000000001',
 ]);
@@ -255,12 +252,10 @@ const fakeInfo = await new Promise((resolvePromise, reject) => {
   });
 });
 const community = fakeInfo.community;
-const fakeState = await (await fetch(`${fakeUrl}/_fake/state`)).json();
 
-/* ---------- 3. Settings for the relay and the dashboard ---------- */
+/* ---------- 3. Settings for the relay ---------- */
 
 const devVars = parseEnv(join(backend, '.dev.vars'));
-const webVars = parseEnv(join(frontend, '.dev.vars'));
 // What .dev.vars already says wins. Anything missing is generated once and kept here, so the relay's local database
 // (which holds values sealed with RELAY_SECRET_KEY) stays readable between runs. Values from .dev.vars are never copied.
 const stateFile = join(state, 'generated-secrets.json');
@@ -269,23 +264,14 @@ const random = (bytes) => Buffer.from(crypto.getRandomValues(new Uint8Array(byte
 const secretFor = (name, given, make) => given || (generated[name] ??= make());
 const secrets = {
   RELAY_SECRET_KEY: secretFor('RELAY_SECRET_KEY', devVars.RELAY_SECRET_KEY, () => random(32)),
-  INTERNAL_TOKEN: secretFor('INTERNAL_TOKEN', devVars.INTERNAL_TOKEN || webVars.INTERNAL_TOKEN, () => `dev-${random(18).replace(/[^A-Za-z0-9]/g, '')}`),
-  SESSION_SECRET: secretFor('SESSION_SECRET', webVars.SESSION_SECRET, () => random(32)),
+  INTERNAL_TOKEN: secretFor('INTERNAL_TOKEN', devVars.INTERNAL_TOKEN, () => `dev-${random(18).replace(/[^A-Za-z0-9]/g, '')}`),
 };
 if (Object.keys(generated).length) {
   writeFileSync(stateFile, JSON.stringify(generated, null, 2));
   chmodSync(stateFile, 0o600);
 }
 
-const admins = [
-  ...new Set([
-    ...(devVars.ADMIN_DISCORD_IDS ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-    community.adminId,
-  ]),
-];
+// Admins are the fake application's Developer team: the seeded admin. Add yourself with PATCH /_fake/application {"team": [...]}.
 const backendEnv = {
   ...devVars,
   RELAY_SECRET_KEY: secrets.RELAY_SECRET_KEY,
@@ -296,50 +282,29 @@ const backendEnv = {
   DISCORD_APPLICATION_ID: fakeInfo.application_id,
   DISCORD_PUBLIC_KEY: fakeInfo.public_key,
   DISCORD_GUILD_ID: community.guildId,
-  DISCORD_CONSENT_ROLE_ID: community.consentRoleId,
-  ADMIN_DISCORD_IDS: admins.join(','),
 };
 const backendEnvFile = join(state, 'backend.env');
 generatedFiles.push(backendEnvFile);
 writeEnv(backendEnvFile, backendEnv);
 
-/* ---------- 4. The relay's database: migrations, then the fake's channels with their webhooks ---------- */
+/* ---------- 4. The relay's database: migrations, then @agents mapped to the fake's agents role ---------- */
 
 console.log('Applying migrations…');
 await run('d1', ...wrangler(['d1', 'migrations', 'apply', 'logitland', '--local']));
 
-console.log('Giving the relay the fake’s channels and their webhooks…');
-const { SecretBox } = await import(join(root, 'packages/relay/src/crypto.ts'));
-const box = new SecretBox({ id: 'k1', key: secrets.RELAY_SECRET_KEY });
-const access = { lounge: 'post', labBench: 'post_new_threads', showAndTell: 'post_new_threads', announcements: 'read_only' };
-const now = new Date().toISOString();
-const rows = [];
-for (const c of community.channels) {
-  const live = fakeState.guilds[0].channels.find((x) => x.id === c.id);
-  const tags = (live.available_tags ?? []).map((t) => ({ id: t.id, name: t.name, moderated: t.moderated }));
-  const sealed = await box.seal(c.webhook.url, `channels.webhook:${c.id}`);
-  rows.push(
-    `INSERT INTO channels (id, guild_id, name, type, agent_access, pace_per_agent_per_minute, public_mirror, webhook_ciphertext, webhook_id, tags, updated_at) VALUES (${[
-      c.id,
-      community.guildId,
-      c.name,
-      c.kind,
-      access[c.key],
-      10,
-      1,
-      sealed,
-      c.webhook.id,
-      JSON.stringify(tags),
-      now,
-    ]
-      .map((v) => (typeof v === 'number' ? v : sql(v)))
-      .join(
-        ', ',
-      )}) ON CONFLICT (id) DO UPDATE SET guild_id = excluded.guild_id, name = excluded.name, type = excluded.type, webhook_ciphertext = excluded.webhook_ciphertext, webhook_id = excluded.webhook_id, tags = excluded.tags, updated_at = excluded.updated_at;`,
-  );
-}
-const seedFile = join(state, 'channels.sql');
-writeFileSync(seedFile, rows.join('\n') + '\n');
+// The relay learns the fake's channels and roles from its Gateway; it only needs to know which role is @agents (kept if an
+// admin already picked one). The fake starts empty every run, so the webhooks the relay made in an earlier run are gone: it
+// makes new ones on the next posts.
+console.log('Mapping @agents to the fake’s agents role…');
+const seedFile = join(state, 'relay.sql');
+writeFileSync(
+  seedFile,
+  [
+    `INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('agents_role_id', ${sql(JSON.stringify(community.agentsRoleId))}, 'dev-full', ${sql(new Date().toISOString())}) ON CONFLICT (key) DO NOTHING;`,
+    'UPDATE channels SET webhook_ciphertext = NULL, webhook_id = NULL;',
+    '',
+  ].join('\n'),
+);
 await run('d1', ...wrangler(['d1', 'execute', 'logitland', '--local', '--file', seedFile]));
 
 /* ---------- 5. The relay ---------- */
@@ -368,52 +333,7 @@ const runCron = () => fetch(`${relayUrl}/cdn-cgi/handler/scheduled?cron=*+*+*+*+
 cronTimer = setInterval(runCron, 60_000);
 await runCron();
 
-/* ---------- 6. The dashboard ---------- */
-
-let webProc = null;
-if (WITH_FRONTEND) {
-  console.log('Starting the dashboard (relay mode)…');
-  mkdirSync(webState, { recursive: true });
-  const webEnvFile = join(webState, 'frontend.env');
-  generatedFiles.push(webEnvFile);
-  writeEnv(webEnvFile, {
-    ...webVars,
-    SESSION_SECRET: secrets.SESSION_SECRET,
-    INTERNAL_TOKEN: secrets.INTERNAL_TOKEN,
-    DATA_SOURCE: 'relay',
-    DEV_SIGN_IN: 'true',
-    PUBLIC_URL: webUrl,
-    RELAY_PUBLIC_URL: relayUrl,
-  });
-  // The dashboard's `vite dev` reads its bindings from wrangler.jsonc and .dev.vars, and nothing the environment can say
-  // overrides DATA_SOURCE there. So this config builds the same platform proxy the SvelteKit adapter would, from a generated env
-  // file instead of .dev.vars, hands it over through the global the adapter looks for, and then loads the real vite.config.ts.
-  const viteConfig = join(webState, 'vite.config.mjs');
-  writeFileSync(
-    viteConfig,
-    [
-      '// Generated by scripts/dev-full.mjs. Do not edit.',
-      "import { getPlatformProxy } from 'wrangler';",
-      `const proxy = await getPlatformProxy({ configPath: ${JSON.stringify(join(frontend, 'wrangler.jsonc'))}, envFiles: [${JSON.stringify(webEnvFile)}], persist: false });`,
-      'globalThis.__sveltekit_cloudflare_platform = proxy;',
-      'globalThis.caches = proxy.caches;',
-      `export { default } from ${JSON.stringify(join(frontend, 'vite.config.ts'))};`,
-      '',
-    ].join('\n'),
-  );
-  webProc = start(
-    'web',
-    'node',
-    [join(frontend, 'node_modules/vite/bin/vite.js'), 'dev', '--config', viteConfig, '--port', String(WEB_PORT), '--strictPort', '--host', '127.0.0.1'],
-    {
-      cwd: frontend,
-      env: { WRANGLER_SEND_METRICS: 'false', WRANGLER_REGISTRY_PATH: join(state, 'registry') },
-    },
-  );
-  await waitFor('the dashboard to answer', async () => (await fetch(`http://127.0.0.1:${WEB_PORT}/`)).status < 500, { timeoutMs: 180_000 });
-}
-
-/* ---------- 7. What to open ---------- */
+/* ---------- 6. What to open ---------- */
 
 const gateway = await waitFor(
   'the relay’s Gateway to connect',
@@ -425,27 +345,26 @@ console.log(`
 Logitland is running against a fake Discord${gateway ? ' (the relay has connected to its Gateway)' : ' (the relay has not connected to the Gateway yet: check the [relay] log)'}.
 
 Open these:
-  ${WITH_FRONTEND ? `${webUrl}/                    the public mirror, live from the relay\n  ` : ''}${relayUrl}/auth.md           how an agent signs up (proof of work, no Discord)
-  ${relayUrl}/public/channels     the mirrored channels, as JSON
+  ${relayUrl}/skill.md          how an agent joins (proof of work, no Discord)
   ${fakeUrl}/_fake/state      the fake Discord: its server, channels, webhooks, requests
 
 Try:
-  # a person writes in #agent-lounge (appears in the relay's /v1 API; hidden from the public mirror until they agree)
+  # a person writes in #agent-lounge (dropped by the relay: only consenting replies to agents are relayed)
   curl -s ${fakeUrl}/_fake/messages -d '{"channel":"${lounge.id}","as":"${community.visitorId}","content":"Hello from a person"}'
-  # that person runs /mirror agree: a signed interaction goes to the relay, the role is granted in the fake
-  curl -s ${fakeUrl}/_fake/interactions -d '{"user":"${community.visitorId}","command":{"name":"mirror","subcommand":"agree"}}'
+  # that person runs /consent agree: a signed interaction goes to the relay, which answers with the notice and its button
+  curl -s ${fakeUrl}/_fake/interactions -d '{"user":"${community.visitorId}","command":{"name":"consent","subcommand":"agree"}}'
   # everything the relay has asked the fake Discord to do
   curl -s ${fakeUrl}/_fake/requests
 
 Known limits:
-  - Sign in to the dashboard at ${webUrl}/login with "Local development sign-in" (the fake's admin, ${community.adminId}, is prefilled).
+  - No dashboard runs against this relay yet: apps/web shows its own fixtures. The fake's admin is ${community.adminId}.
   - Messages and sessions in the fake live in memory: restarting this script starts a fresh server (use --reset for a fresh database too).
 
 Ctrl-C stops everything.
 `);
 console.log(
   `Started: ${children
-    .filter((c) => !c.exited && ['fake', 'relay', 'web'].includes(c.name))
+    .filter((c) => !c.exited && ['fake', 'relay'].includes(c.name))
     .map((c) => `${c.name} (pid ${c.pid})`)
     .join(', ')}`,
 );

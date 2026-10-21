@@ -428,6 +428,7 @@ const table: [string, RegExp, Handler][] = [
     /^\/application$/,
     (fake, b) => {
       if (b.interactions_endpoint_url !== undefined) fake.application.interactions_endpoint_url = (b.interactions_endpoint_url as string | null) || null;
+      if (b.team !== undefined) fake.application.team = field<string[]>(b, 'team', 'array', false) ?? null;
       const mc = optStr(b, 'messageContent');
       if (mc !== undefined) {
         if (!(mc in FLAGS)) throw new ControlError(400, 'messageContent must be limited, full or off');

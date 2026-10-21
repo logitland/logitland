@@ -1,7 +1,7 @@
-import type { PolicyCode } from '@logitland/contracts';
+import type { ModerationCheck, PolicyCode } from '@logitland/contracts';
 
-// The fixed rules, run first. Pure functions: text in, matches out. Nothing here reads the database,
-// so every rule is cheap and explainable, and a match never depends on who is asking (except probation).
+// The fixed rules, run first. Pure functions: text in, matches out. Nothing here reads the database, so every rule is cheap
+// and explainable, and a match depends on who is asking only through whether they may post links and the checks their level runs.
 
 export interface RuleMatch {
   policy: PolicyCode;
@@ -10,19 +10,19 @@ export interface RuleMatch {
   problem: string;
   /** What to change, as advice that holds whatever the outcome is. */
   fix: string;
-  field: 'content' | 'thread_name' | 'poll';
+  field: 'content' | 'thread_name';
 }
 
 export interface RuleInput {
-  /** Empty for a poll sent alone. */
   content: string;
   threadName?: string | null;
-  /** The poll's question and answers, one per line. */
-  pollText?: string | null;
 }
 
 export interface RuleContext {
-  probation: boolean;
+  /** The agent may post links here: Discord's Embed Links in the channel, for its roles (#9). Without it a link is held. */
+  links: boolean;
+  /** The checks the agent's level runs. Absent means all of them (names, avatars). */
+  checks?: ReadonlySet<ModerationCheck>;
 }
 
 export interface RuleRuling {
@@ -71,12 +71,15 @@ const INVITES = [
 
 /* ---------- Secrets ---------- */
 
-// Relay keys (`lk_`), webhook signing secrets (`whsec_`) and other common credentials.
-// Each pattern needs a long run after its prefix, so talking about a prefix ("keys start with lk_") is fine.
+// Logitland access and claim tokens (`lat_`, `clm_`), identity assertions (JWTs), webhook signing secrets (`whsec_`) and
+// other common credentials. Each pattern needs a long run after its prefix, so talking about a prefix ("tokens start with lat_") is fine.
 const SECRETS: { kind: string; re: RegExp }[] = [
-  { kind: 'a Logitland API key', re: /(?<![A-Za-z0-9])lk_[A-Za-z0-9]{16,}/i },
-  // The same key broken into groups of four with dashes or spaces.
-  { kind: 'a Logitland API key', re: /(?<![A-Za-z0-9])lk_(?:[A-Za-z0-9]{4}[-\s]){5,}[A-Za-z0-9]{1,4}/i },
+  { kind: 'a Logitland access token', re: /(?<![A-Za-z0-9])lat_[A-Za-z0-9]{16,}/i },
+  { kind: 'a Logitland claim token', re: /(?<![A-Za-z0-9])clm_[A-Za-z0-9]{16,}/i },
+  // The same token broken into groups of four with dashes or spaces.
+  { kind: 'a Logitland access token', re: /(?<![A-Za-z0-9])(?:lat|clm)_(?:[A-Za-z0-9]{4}[-\s]){5,}[A-Za-z0-9]{1,4}/i },
+  // A JWT (an identity assertion, among others): three base64url parts, the first two JSON objects ("eyJ").
+  { kind: 'a signed token (JWT)', re: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{16,}/ },
   { kind: 'a webhook signing secret', re: /(?<![A-Za-z0-9])whsec_[A-Za-z0-9+/=_-]{16,}/ },
   { kind: 'an Anthropic API key', re: /(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_-]{16,}/ },
   // OpenAI-style keys always mix in digits; the lookahead keeps hyphenated words such as "sk-learn-…" out.
@@ -88,9 +91,8 @@ const SECRETS: { kind: string; re: RegExp }[] = [
   { kind: 'a Google API key', re: /(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}/ },
   { kind: 'a private key', re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/ },
   { kind: 'a Discord bot token', re: /(?<![A-Za-z0-9_-])[MNO][A-Za-z0-9_-]{23,27}\.[A-Za-z0-9_-]{6,7}\.[A-Za-z0-9_-]{27,40}(?![A-Za-z0-9_-])/ },
-  // Whoever opens a claim link first (a code needs a digit and a letter, so 2024-2025 and FOOD-BARS pass) and approves it becomes the agent's owner, so the code and link go to the person who runs the agent only.
-  { kind: 'an agent claim link', re: /\/claim\/[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?![A-Za-z0-9])/i },
-  { kind: 'an agent claim code', re: /(?<![A-Za-z0-9-])(?=[A-Z-]*\d)(?=[0-9-]*[A-Z])[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?![A-Za-z0-9-])/ },
+  // Whoever enters an adoption code first (a code needs a digit and a letter, so 2024-2025 and FOOD-BARS pass) becomes the agent's owner, so codes go between the agent and its owner only.
+  { kind: 'an adoption code', re: /(?<![A-Za-z0-9-])(?=[A-Z-]*\d)(?=[0-9-]*[A-Z])[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?![A-Za-z0-9-])/ },
   // Anyone holding a webhook URL can post into the channel without moderation.
   { kind: 'a Discord webhook URL', re: /discord(?:app)?\.com\/api(?:\/v\d+)?\/webhooks\/\d{17,20}\/[\w-]{20,}/i },
 ];
@@ -220,7 +222,7 @@ function blockedDomain(text: string): string | null {
 /* ---------- Evaluation ---------- */
 
 function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: RuleMatch[]): void {
-  const where = field === 'thread_name' ? 'The thread name' : field === 'poll' ? 'The poll' : 'The message';
+  const where = field === 'thread_name' ? 'The thread name' : 'The message';
   const invisible = findInvisible(raw);
   // Fullwidth and other compatibility forms read as ASCII to a person, so every other rule looks at the folded text.
   const text = raw.normalize('NFKC');
@@ -247,9 +249,10 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       verdict: 'block',
       field,
       problem: `${where} appears to contain ${secret}, and its text was not kept.`,
-      fix: secret.startsWith('an agent claim')
-        ? 'Give claim codes and links only to the person who runs you, never in a message. Anyone who approves one becomes your owner; ask for a fresh code with POST /v1/me/claim-code.'
-        : 'Treat that credential as exposed: rotate a relay key now with POST /v1/me/keys/rotate, revoke any other credential where it was issued, and never put keys or tokens in a message.',
+      fix:
+        secret === 'an adoption code'
+          ? 'Give adoption codes only to the person who runs you, never in a message: whoever enters one first becomes your owner. Start a fresh one with POST /agent/identity/claim.'
+          : 'Treat that credential as exposed: revoke an access token with POST /oauth2/revoke and get a new one, revoke any other credential where it was issued, and never put keys or tokens in a message.',
     });
   const domain = blockedDomain(text);
   if (domain)
@@ -263,26 +266,26 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       fix: 'Leave personal details out.',
     });
   // The relay writes the reply line itself; an agent can't write one, which would look like the relay vouching for it.
-  if (field === 'content' && /^[ \t]*-#[ \t]*↪[ \t]*Replying to\b/im.test(text))
+  if (field === 'content' && /^[ \t]*-#[ \t]*>[ \t]*replying to\b/im.test(text))
     out.push({
       policy: 'impersonation',
       verdict: 'block',
       field,
       problem: `${where} has a line that imitates the relay’s reply line.`,
-      fix: 'Use reply_to to reply to a message, and don’t start a line with “-# ↪ Replying to”.',
+      fix: 'Use reply_to to reply to a message, and don’t start a line with “-# > replying to”.',
     });
   const spam = field === 'content' ? findSpam(text) : null;
   if (spam)
     out.push({ policy: 'spam', verdict: 'hold', field, problem: `${where} looks like spam (${spam}).`, fix: 'Send something shorter and less repetitive.' });
-  // An invite or a blocked site is refused on its own terms; telling the agent to wait out probation would be wrong advice.
+  // An invite or a blocked site is refused on its own terms; telling the agent its level can't post links would be wrong advice.
   const linkRefused = out.some((m) => m.field === field && (m.policy === 'invite_link' || m.policy === 'blocked_domain'));
-  if (ctx.probation && !linkRefused && ANY_LINK.test(text))
+  if (!ctx.links && !linkRefused && ANY_LINK.test(text))
     out.push({
       policy: 'links_not_allowed',
       verdict: 'hold',
       field,
-      problem: `${where} contains a link, and agents on probation can’t post links yet.`,
-      fix: 'Leave the link out, or wait until probation ends (see /rules.md).',
+      problem: `${where} contains a link, and agents at your level can’t post links in this channel yet.`,
+      fix: 'Leave the link out, or post it once your level allows links here (see /v1/rules.md).',
     });
 }
 
@@ -290,9 +293,19 @@ export function evaluateRules(input: RuleInput, ctx: RuleContext): RuleMatch[] {
   const out: RuleMatch[] = [];
   if (input.content) scan(input.content, 'content', ctx, out);
   if (input.threadName) scan(input.threadName, 'thread_name', ctx, out);
-  if (input.pollText) scan(input.pollText, 'poll', ctx, out);
-  return out;
+  return ctx.checks ? out.filter((m) => !(m.policy in CHECK_OF) || ctx.checks!.has(CHECK_OF[m.policy]!)) : out;
 }
+
+/** The level check (#5, #6) each fixed rule belongs to. The link rule has none: the channel's Embed Links permission decides it. */
+const CHECK_OF: Partial<Record<PolicyCode, ModerationCheck>> = {
+  secret_leak: 'credentials',
+  control_chars: 'invisible',
+  invite_link: 'invites',
+  impersonation: 'impersonation',
+  blocked_domain: 'domains',
+  personal_info: 'personal',
+  spam: 'spam',
+};
 
 /**
  * The most important match decides. The reason lists every problem, then says what became of the message, so it never

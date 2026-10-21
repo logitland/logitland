@@ -140,7 +140,8 @@ export class DiscordFake {
   readonly interactions: Interactions;
   readonly requests: RecordedRequest[] = [];
   readonly botToken: string;
-  readonly application: { id: string; name: string; flags: number; interactions_endpoint_url: string | null };
+  /** `team`: the user IDs on the Developer Portal team that owns the application, or null when one person (`owner_id`) does. */
+  readonly application: { id: string; name: string; flags: number; interactions_endpoint_url: string | null; owner_id: string; team: string[] | null };
   /** Read it freely; change it with setRateLimits so buckets restart. */
   readonly rate: RateLimitConfig = { enforce: false, webhook: { limit: 5, windowMs: 2000 }, default: { limit: 50, windowMs: 1000 } };
   strictUsernames: boolean;
@@ -150,6 +151,7 @@ export class DiscordFake {
   private readonly buckets = new Map<string, { count: number; resetAt: number }>();
   private readonly table: CompiledRoute[] = routes().map(compile);
   private readonly clock: () => number;
+  private readonly teamId: string;
   private readonly server: Server;
   private origin = '';
 
@@ -160,7 +162,15 @@ export class DiscordFake {
     const applicationId = options.applicationId ?? ids();
     this.botToken = options.botToken ?? `fake.${randomBytes(24).toString('base64url')}`;
     const flags = options.messageContent === 'off' ? 0 : options.messageContent === 'full' ? AppFlag.messageContentFull : AppFlag.messageContentLimited;
-    this.application = { id: applicationId, name: options.botUsername ?? 'Logitland Relay', flags, interactions_endpoint_url: null };
+    this.application = {
+      id: applicationId,
+      name: options.botUsername ?? 'Logitland Relay',
+      flags,
+      interactions_endpoint_url: null,
+      owner_id: ids(),
+      team: null,
+    };
+    this.teamId = ids();
     const botUser: User = {
       id: applicationId,
       username: options.botUsername ?? 'Logitland Relay',
@@ -236,7 +246,10 @@ export class DiscordFake {
   }
 
   applicationObject(): Record<string, unknown> {
-    const { id, name, flags, interactions_endpoint_url } = this.application;
+    const { id, name, flags, interactions_endpoint_url, owner_id, team } = this.application;
+    const user = (userId: string) => this.world.users.get(userId) ?? { id: userId, username: 'developer', discriminator: '0', global_name: null, avatar: null };
+    // A team-owned application's owner is a stand-in user for the team, with the team's ID.
+    const teamId = this.teamId;
     return {
       id,
       name,
@@ -246,7 +259,14 @@ export class DiscordFake {
       bot_require_code_grant: false,
       bot: this.world.botUser,
       verify_key: this.publicKey,
-      team: null,
+      owner: team ? { id: teamId, username: `team${teamId}`, discriminator: '0000', avatar: null, flags: 1024 } : user(owner_id),
+      team: team && {
+        id: teamId,
+        name: `${name} team`,
+        icon: null,
+        owner_user_id: team[0] ?? owner_id,
+        members: team.map((userId) => ({ user: user(userId), team_id: teamId, membership_state: 2, role: 'admin' })),
+      },
       flags,
       flags_new: String(flags),
       interactions_endpoint_url,

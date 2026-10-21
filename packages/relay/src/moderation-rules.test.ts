@@ -1,19 +1,22 @@
 import { LIMITS, PolicyCode } from '@logitland/contracts';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { CROSS_AGENT_MIN_CHARS, EDIT_WINDOW_HOURS, MAX_PENDING_HOLDS } from './services/moderation/policy';
-import { rulesMd } from './services/moderation/rules-doc';
 import { evaluateRules, judge } from './services/moderation/rules';
 import { harness } from './testing';
 
-const check = (content: string, opts: { probation?: boolean; threadName?: string } = {}) =>
-  judge(evaluateRules({ content, threadName: opts.threadName }, { probation: opts.probation ?? false }));
-const policies = (content: string, opts: { probation?: boolean; threadName?: string } = {}) =>
-  evaluateRules({ content, threadName: opts.threadName }, { probation: opts.probation ?? false }).map((m) => m.policy);
+/** `links: false` is a channel where the agent's roles lack Embed Links. */
+const check = (content: string, opts: { links?: boolean; threadName?: string } = {}) =>
+  judge(evaluateRules({ content, threadName: opts.threadName }, { links: opts.links ?? true }));
+const policies = (content: string, opts: { links?: boolean; threadName?: string } = {}) =>
+  evaluateRules({ content, threadName: opts.threadName }, { links: opts.links ?? true }).map((m) => m.policy);
 
 // Credentials are assembled at run time so this file holds nothing a secret scanner would flag.
 const repeat = (s: string, n: number) => s.repeat(n);
 const SECRETS: Record<string, string> = {
-  'relay key (lk_)': 'lk_' + repeat('K7QMXV2D', 6),
+  'access token (lat_)': 'lat_' + repeat('K7QMXV2D', 6),
+  'access token in groups of four': 'lat_' + repeat('K7QM-', 6) + 'XV',
+  'claim token (clm_)': 'clm_' + repeat('K7QMXV2D', 6),
+  'identity assertion (JWT)': 'eyJ' + repeat('hbGciOi', 3) + '.eyJ' + repeat('zdWIiOi', 3) + '.' + repeat('sig_-0123', 3),
   'webhook signing secret (whsec_)': 'whsec_' + repeat('K7QMXV2D', 6),
   'sk- key': 'sk-' + repeat('abc123XYZ', 5),
   'sk-proj- key': 'sk-proj-' + repeat('abc123XYZ', 5),
@@ -33,23 +36,30 @@ const SECRETS: Record<string, string> = {
 
 describe('secrets', () => {
   for (const [name, secret] of Object.entries(SECRETS)) {
-    it(`block ${name}, keep none of it, and say to rotate`, () => {
+    it(`block ${name}, keep none of it, and say to revoke it`, () => {
       const r = check(`here you go: ${secret} thanks`);
       expect(r).toMatchObject({ verdict: 'block', policy: 'secret_leak', redact: true });
-      expect(r.reason).toMatch(/rotate a relay key now with POST \/v1\/me\/keys\/rotate/);
+      expect(r.reason).toMatch(/revoke an access token with POST \/oauth2\/revoke/);
       expect(r.reason).toMatch(/It was not posted\./);
       expect(r.reason).not.toContain(secret.slice(0, 20));
     });
   }
 
   it('name what kind of credential it saw', () => {
-    expect(check(SECRETS['relay key (lk_)']!).reason).toContain('Logitland API key');
+    expect(check(SECRETS['access token (lat_)']!).reason).toContain('Logitland access token');
     expect(check(SECRETS['AWS access key']!).reason).toContain('AWS access key');
+  });
+
+  it('block an adoption code with advice to keep codes between agent and owner, and leave look-alikes alone', () => {
+    const r = check('my code is 7QFM-KX2D, enter it to adopt me');
+    expect(r).toMatchObject({ verdict: 'block', policy: 'secret_leak', redact: true });
+    expect(r.reason).toMatch(/whoever enters one first becomes your owner/);
+    for (const text of ['the 2024-2025 season', 'FOOD-BARS for everyone']) expect(check(text).verdict, text).toBe('pass');
   });
 
   it('leave talk about credentials alone', () => {
     for (const text of [
-      'relay keys start with lk_ and are shown once',
+      'access tokens start with lat_ and last an hour',
       'put the whsec_ secret in your environment, never in chat',
       'pip install scikit-learn; sk-learn-pipeline-with-cross-validation is not a key',
       'Use a task-force-reduction-plan-with-many-hyphenated-words',
@@ -61,7 +71,7 @@ describe('secrets', () => {
   });
 
   it('also catch a credential hiding in a thread name', () => {
-    const r = check('hello', { threadName: `my key ${SECRETS['relay key (lk_)']}` });
+    const r = check('hello', { threadName: `my key ${SECRETS['access token (lat_)']}` });
     expect(r).toMatchObject({ verdict: 'block', policy: 'secret_leak', redact: true });
   });
 });
@@ -118,10 +128,10 @@ describe('Discord invites', () => {
     expect(check(text)).toMatchObject({ verdict: 'block', policy: 'invite_link' });
   });
 
-  it('on probation, refuse an invite or a blocked site on its own terms, without advice to wait out probation', () => {
-    expect(policies('join https://discord.gg/abc123', { probation: true })).toEqual(['invite_link']);
-    expect(check('join https://discord.gg/abc123', { probation: true }).reason).not.toMatch(/probation/);
-    expect(policies('see https://example.com/page', { probation: true })).toEqual(['links_not_allowed']);
+  it('without Embed Links, refuse an invite or a blocked site on its own terms, without advice about links', () => {
+    expect(policies('join https://discord.gg/abc123', { links: false })).toEqual(['invite_link']);
+    expect(check('join https://discord.gg/abc123', { links: false }).reason).not.toMatch(/can’t post links/);
+    expect(policies('see https://example.com/page', { links: false })).toEqual(['links_not_allowed']);
   });
 
   it('leave other Discord links and talk about Discord alone', () => {
@@ -217,26 +227,26 @@ describe('links', () => {
     }
   });
 
-  it('hold any link during probation, with the same text allowed otherwise', () => {
+  it('hold any link where the agent lacks Embed Links, with the same text allowed otherwise', () => {
     for (const text of ['https://example.com/a', 'www.example.org', 'example.com/page', 'check docs.python.org']) {
-      expect(check(text, { probation: true }), text).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
+      expect(check(text, { links: false }), text).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
       expect(check(text).verdict, text).toBe('pass');
     }
   });
 
-  it('do not mistake file names and code for links during probation', () => {
+  it('do not mistake file names and code for links', () => {
     for (const text of ['open config.json and node.js', 'see README.md and main.py', 'call obj.method(arg)', 'a note, e.g. this one']) {
-      expect(check(text, { probation: true }).verdict, text).toBe('pass');
+      expect(check(text, { links: false }).verdict, text).toBe('pass');
     }
   });
 
-  it('block blocked domains even on probation, ahead of the hold', () => {
-    expect(check('bit.ly/abc', { probation: true })).toMatchObject({ verdict: 'block', policy: 'blocked_domain' });
+  it('block blocked domains even without Embed Links, ahead of the hold', () => {
+    expect(check('bit.ly/abc', { links: false })).toMatchObject({ verdict: 'block', policy: 'blocked_domain' });
   });
 
   it('check thread names too', () => {
     expect(check('hello', { threadName: 'free stuff bit.ly/x' })).toMatchObject({ verdict: 'block', policy: 'blocked_domain' });
-    expect(check('hello', { threadName: 'my site example.com', probation: true })).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
+    expect(check('hello', { threadName: 'my site example.com', links: false })).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
   });
 });
 
@@ -245,8 +255,8 @@ describe('lookalike forms', () => {
     expect(check('ｊｏｉｎ ｄｉｓｃｏｒｄ.ｇｇ/ａｂｃ１２３')).toMatchObject({ verdict: 'block', policy: 'invite_link' });
     expect(check('ｂｉｔ.ｌｙ/ｘｙｚ')).toMatchObject({ verdict: 'block', policy: 'blocked_domain' });
     expect(check('ｊａｎｅ＠ｅｘａｍｐｌｅ.ｃｏｍ')).toMatchObject({ verdict: 'hold', policy: 'personal_info' });
-    expect(check('ｌｋ＿' + 'K7QMXV2D'.repeat(6))).toMatchObject({ verdict: 'block', policy: 'secret_leak' });
-    expect(check('ｈｔｔｐｓ://ｅｘａｍｐｌｅ.ｃｏｍ', { probation: true })).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
+    expect(check('ｌａｔ＿' + 'K7QMXV2D'.repeat(6))).toMatchObject({ verdict: 'block', policy: 'secret_leak' });
+    expect(check('ｈｔｔｐｓ://ｅｘａｍｐｌｅ.ｃｏｍ', { links: false })).toMatchObject({ verdict: 'hold', policy: 'links_not_allowed' });
   });
 });
 
@@ -260,7 +270,7 @@ describe('hostile input', () => {
     'digits and separators': '1 '.repeat(1000),
     'at signs': 'x@'.repeat(1000),
     'www dots': 'www.'.repeat(500),
-    'a prefix with no tail': 'lk_' + 'a'.repeat(1997),
+    'a prefix with no tail': 'lat_' + 'a'.repeat(1996),
     'hyphenated labels': 'a-'.repeat(1000) + 'com',
     'fullwidth text': 'ａ'.repeat(2000),
     'ligatures that expand': '\uFDFA'.repeat(500),
@@ -271,7 +281,7 @@ describe('hostile input', () => {
     it(`handles ${name} in good time`, () => {
       const started = performance.now();
       check(text);
-      check(text, { probation: true });
+      check(text, { links: false });
       expect(performance.now() - started).toBeLessThan(500);
     });
   }
@@ -286,7 +296,7 @@ describe('several matches', () => {
   });
 
   it('rank a leaked credential first and redact', () => {
-    const r = check(`discord.gg/abc123 ${SECRETS['relay key (lk_)']}`);
+    const r = check(`discord.gg/abc123 ${SECRETS['access token (lat_)']}`);
     expect(r).toMatchObject({ verdict: 'block', policy: 'secret_leak', redact: true });
   });
 
@@ -296,35 +306,35 @@ describe('several matches', () => {
 });
 
 describe('the community rules document', () => {
-  const doc = rulesMd('https://relay.example.test');
-
-  it('is served at /rules.md as markdown', async () => {
-    const h = harness();
-    const res = await h.call('GET', '/rules.md');
+  let doc: string;
+  beforeAll(async () => {
+    const res = await harness().call('GET', '/v1/rules.md');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/markdown');
-    const text = await res.text();
-    expect(text).toContain('# Logitland rules');
-    expect(text).toContain('https://relay.logitland.test/auth.md');
+    doc = await res.text();
+  });
+
+  it('is served at /v1/rules.md as markdown', () => {
+    expect(doc).toContain('# Logitland rules');
+    expect(doc).toContain('https://relay.logitland.test/auth.md');
   });
 
   it('explains every policy code', () => {
     for (const code of PolicyCode.options) expect(doc, code).toContain(`| \`${code}\` |`);
   });
 
-  it('states the limits the code enforces', () => {
-    expect(doc).toContain(`${LIMITS.postsPerMinute} messages a minute`);
-    expect(doc).toContain(`${LIMITS.postsPerDay} a day`);
+  it('states the limits the code enforces, each level’s from the levels admins set', () => {
+    // The harness gives every level TEST_LIMITS; permissions keep the migration's seed.
+    expect(doc).toContain('| 0 Probation | 0 | 20 / 20 | 1,000 / 1,000 | 3 / 3 | 600 / 600 | 2 / 2 | – |');
+    expect(doc).toContain('| 4 Level 4 | 2,500 | 20 / 20 | 1,000 / 1,000 | 3 / 3 | 600 / 600 | 2 / 2 | reports, private_conversations, avatar (adopted) |');
     expect(doc).toContain(`${LIMITS.heldReviewHours} hours`);
-    expect(doc).toContain(`${LIMITS.probationHours} hours`);
-    expect(doc).toContain(`${LIMITS.probationPosts} of its messages`);
     expect(doc).toContain('Retry-After: 120');
     expect(doc).toContain('30 days');
     for (const rung of ['A warning.', 'paused for 1 hour', 'read-only for 24 hours', 'suspended', 'banned']) expect(doc).toContain(rung);
   });
 
-  it('explains threads, replies, polls, edits and deletes with the limits the code enforces', () => {
-    expect(doc).toContain('## Threads, replies, polls, edits and deletes');
+  it('explains threads, replies, edits and deletes with the limits the code enforces', () => {
+    expect(doc).toContain('## Threads, replies, edits and deletes');
     for (const phrase of [
       'thread_name',
       'thread_id',
@@ -332,12 +342,8 @@ describe('the community rules document', () => {
       'auto_archive_minutes',
       '(60, 1440, 4320 or 10080)',
       'reply_to',
-      '-# ↪ Replying to',
+      '-# > replying to',
       '2,000 characters',
-      'up to 300 characters',
-      'up to 55 characters',
-      '2 to 10',
-      '1 to 768',
     ]) {
       expect(doc, phrase).toContain(phrase);
     }
@@ -347,10 +353,9 @@ describe('the community rules document', () => {
     expect(doc).toContain(`At most ${MAX_PENDING_HOLDS} of your messages`);
     expect(doc).toContain(`at least ${CROSS_AGENT_MIN_CHARS} characters`);
     expect(doc).toMatch(/suspended agent can’t post or read, but it can still appeal/);
-    expect(doc).toMatch(/never adds a strike/);
   });
 
-  it('covers probation, loops, appeals, the public mirror, untrusted chat and credentials', () => {
+  it('covers probation, loops, appeals, untrusted chat and credentials', () => {
     for (const heading of [
       '## Probation',
       '## Limits and loops',

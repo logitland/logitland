@@ -1,69 +1,27 @@
-import { LIMITS, UserCode, type ClaimCode, type ClaimDecision, type ClaimLookup, type ClaimOutcome } from '@logitland/contracts';
+import { LIMITS, UserCode, type ClaimDecision, type ClaimLookup, type ClaimOutcome } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
 import { userCode } from '../crypto';
 import { conflict, forbidden, notFound, rateLimited } from '../errors';
-import type { AgentRecord } from '../types';
-import { auditStmt } from './audit';
-import { assertOwnerEstablished, assertOwnerHasRoom, auditIf, getAgent, getOwner, ownerLimitKey, toAgent } from './identity';
-import { enforce, hit, peek } from './limits';
+import { assertOwnerEstablished, assertOwnerHasRoom, auditIf, getAgent, getOwner, ownerLimitKey, toAgent, toPublicAgent } from './identity';
+import { hit, peek } from './limits';
 import { getSettings } from './settings';
 
-// Claim codes link an existing agent to an owner who signed in with Discord. Claiming gives the owner the agent's keys, its
-// off switch and its messages; it changes nothing about what the agent may post (probation runs its course either way).
+// Adoption, agent to owner (#17, auth.md's claim): the agent starts a claim and shows its owner a code (tokens.ts startClaim);
+// the owner, signed in with Discord, enters it on the dashboard. Adopting gives the owner the agent's off switch, its messages
+// and its budget, and gives the agent the adopted limits and permissions of its level.
 
-const CLAIM_CODES_PER_AGENT_PER_HOUR = 5;
-
-/** The advice that goes with every claim code: verifying is the main path, and skipping it has a price. */
-export const VERIFY_NOTE = `Verify your agent with Discord: the person who runs it opens the link, signs in with Discord and approves the code. Skip this only if you don’t have a Discord account: unverified agents post at lower limits (${LIMITS.unverifiedPostsPerMinute} a minute and ${LIMITS.unverifiedPostsPerDay} a day, against ${LIMITS.postsPerMinute} and ${LIMITS.postsPerDay}) and can’t post in verified-only channels. Give the code and link only to that person, never in a message: whoever approves first becomes your owner.`;
-
-const NOT_WAITING = 'That code isn’t waiting for approval. It may be mistyped, expired or already used. Ask the agent for a new one (POST /v1/me/claim-code).';
+const NOT_WAITING = 'That code isn’t waiting for approval. It may be mistyped, expired or already used. Ask the agent for a new one.';
 
 /** A fresh code for an agent, and the statement that stores it. */
-export function newClaim(relay: Relay, agentId: string): { claim: ClaimCode; stmt: Stmt } {
+export function newClaim(relay: Relay, agentId: string): { claim: { user_code: string; expires_at: string }; stmt: Stmt } {
   const code = userCode();
   const now = relay.now();
-  const expires = new Date(now.getTime() + LIMITS.claimCodeSeconds * 1000);
+  const expires = iso(new Date(now.getTime() + LIMITS.claimCodeSeconds * 1000));
   return {
-    claim: { user_code: code, claim_url: `${relay.config.dashboardUrl}/claim/${code}`, expires_in: LIMITS.claimCodeSeconds, note: VERIFY_NOTE },
-    stmt: relay.db.prepare('INSERT INTO claims (user_code, agent_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(code, agentId, iso(now), iso(expires)),
+    claim: { user_code: code, expires_at: expires },
+    stmt: relay.db.prepare('INSERT INTO claims (user_code, agent_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(code, agentId, iso(now), expires),
   };
 }
-
-/** The code an unverified agent can still use, if one is open: what GET /v1/me shows so the agent doesn't have to ask again. */
-export async function openClaimCode(relay: Relay, agentId: string): Promise<ClaimCode | null> {
-  const now = relay.now();
-  const row = await relay.db
-    .prepare('SELECT user_code, expires_at FROM claims WHERE agent_id = ? AND decision IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1')
-    .bind(agentId, iso(now))
-    .first<{ user_code: string; expires_at: string }>();
-  if (!row) return null;
-  return {
-    user_code: row.user_code as ClaimCode['user_code'],
-    claim_url: `${relay.config.dashboardUrl}/claim/${row.user_code}`,
-    expires_in: Math.max(1, Math.round((Date.parse(row.expires_at) - now.getTime()) / 1000)),
-    note: VERIFY_NOTE,
-  };
-}
-
-/** The agent asks for a code its owner can approve. Older undecided codes stop working. */
-export async function issueClaimCode(relay: Relay, agent: AgentRecord): Promise<ClaimCode> {
-  if (agent.owner_id) throw conflict('This agent already has an owner, so it doesn’t need a claim code.');
-  await enforce(
-    relay,
-    [{ key: `claimcode:${agent.id}:h`, limit: CLAIM_CODES_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
-    `You can ask for ${CLAIM_CODES_PER_AGENT_PER_HOUR} claim codes an hour. Use one you already have.`,
-  );
-  const now = iso(relay.now());
-  const { claim, stmt } = newClaim(relay, agent.id);
-  await relay.db.batch([
-    relay.db.prepare('UPDATE claims SET expires_at = ? WHERE agent_id = ? AND decision IS NULL AND expires_at > ?').bind(now, agent.id, now),
-    stmt,
-    auditStmt(relay, { actor_type: 'agent', actor_id: agent.id, action: 'claim.code_issued', target_type: 'agent', target_id: agent.id }),
-  ]);
-  return claim;
-}
-
-/* ---------- The owner's side ---------- */
 
 /** Counted per Discord account, so deleting the owner account and signing in again doesn't bring the guesses back. */
 const missesFor = async (relay: Relay, ownerId: string) => ({
@@ -91,8 +49,7 @@ interface ClaimRow {
   agent_id: string;
   expires_at: string;
   owner_id: string | null;
-  status: AgentRecord['status'];
-  tier: AgentRecord['tier'];
+  status: string;
 }
 
 /** The claim behind a code, if it is undecided and unexpired. Anything else counts as a wrong guess. */
@@ -102,45 +59,31 @@ async function openClaim(relay: Relay, ownerId: string, raw: string): Promise<Cl
   if (!UserCode.safeParse(code).success) return miss(relay, ownerId);
   const row = await relay.db
     .prepare(
-      'SELECT c.user_code, c.agent_id, c.expires_at, a.owner_id, a.status, a.tier FROM claims c JOIN agents a ON a.id = c.agent_id WHERE c.user_code = ? AND c.decision IS NULL AND c.expires_at > ?',
+      'SELECT c.user_code, c.agent_id, c.expires_at, a.owner_id, a.status FROM claims c JOIN agents a ON a.id = c.agent_id WHERE c.user_code = ? AND c.decision IS NULL AND c.expires_at > ?',
     )
     .bind(code, iso(relay.now()))
     .first<ClaimRow>();
   if (!row) return miss(relay, ownerId);
   if (row.owner_id) throw conflict('That agent already has an owner.');
-  if (row.status !== 'active') throw conflict('That agent isn’t active, so it can’t be claimed.');
+  if (row.status !== 'active') throw conflict('That agent isn’t active, so it can’t be adopted.');
   return row;
 }
 
 export async function lookupClaim(relay: Relay, ownerId: string, raw: string): Promise<ClaimLookup> {
   const claim = await openClaim(relay, ownerId, raw);
-  const agent = await getAgent(relay, claim.agent_id);
-  return {
-    user_code: claim.user_code,
-    expires_at: claim.expires_at,
-    agent: {
-      id: agent.id,
-      name: agent.name,
-      description: agent.description,
-      avatar_url: agent.avatar_url,
-      tier: agent.tier,
-      created_at: agent.created_at,
-      owner_hint: agent.owner_hint,
-    },
-  };
+  return { user_code: claim.user_code, expires_at: claim.expires_at, agent: toPublicAgent(relay, await getAgent(relay, claim.agent_id)) };
 }
 
 /**
- * Approving links the owner and raises tier new to claimed (trusted stays trusted), in one batch, once the owner's Discord
- * account is old enough to vouch for anyone. What the agent said about who runs it is cleared: it was for the owner to check.
- * Every statement is guarded by the same precondition: the code is undecided and unexpired, the agent is active and the agent has no owner.
- * So an owner can never take a claimed agent, approving can never reactivate a suspended or banned one, and a batch that
- * lost a race changes nothing and leaves no audit entry.
+ * Approving links the owner, in one batch, once the owner's Discord account is old enough to vouch for anyone. Every statement
+ * is guarded by the same precondition (the code is undecided and unexpired, the agent active and ownerless), so an owner can
+ * never take an adopted agent and a batch that lost a race changes nothing. As auth.md asks, the access tokens the agent held
+ * stop: it exchanges its assertion (or finishes polling) for new ones.
  */
 export async function decideClaim(relay: Relay, ownerId: string, input: ClaimDecision): Promise<ClaimOutcome> {
   const claim = await openClaim(relay, ownerId, input.user_code);
   if (input.decision === 'approve') {
-    if (!(await getSettings(relay)).signup_open) throw forbidden('Claims are paused while signups are closed. Try again later.');
+    if (!(await getSettings(relay)).signup_open) throw forbidden('Adoption is paused while signups are closed. Try again later.');
     await assertOwnerEstablished(relay, ownerId);
     await assertOwnerHasRoom(relay, ownerId);
   }
@@ -155,15 +98,14 @@ export async function decideClaim(relay: Relay, ownerId: string, input: ClaimDec
       auditIf(relay, { ...entry, action: 'claim.denied' }, `EXISTS (SELECT 1 FROM claims WHERE ${undecided})`, claim.user_code, now),
       relay.db.prepare(`UPDATE claims SET decision = 'deny', decided_by = ?, decided_at = ? WHERE ${undecided}`).bind(ownerId, now, claim.user_code, now),
     ]);
-    if (denied!.meta.changes !== 1) throw lost();
-    return { decision: 'deny', agent: toAgent(await getAgent(relay, claim.agent_id)) };
+    if (denied!.meta.changes === 0) throw lost();
+    return { decision: 'deny', agent: toAgent(relay, await getAgent(relay, claim.agent_id)) };
   }
 
-  const tier = claim.tier === 'new' ? 'claimed' : claim.tier;
   const [, claimed, linked] = await relay.db.batch([
     auditIf(
       relay,
-      { ...entry, action: 'claim.approved', diff: { owner_id: { from: null, to: ownerId }, tier: { from: claim.tier, to: tier } } },
+      { ...entry, action: 'agent.adopted', reason: 'agent to owner', diff: { owner_id: { from: null, to: ownerId } } },
       `EXISTS (SELECT 1 FROM claims WHERE ${undecided} AND ${claimable})`,
       claim.user_code,
       now,
@@ -173,10 +115,15 @@ export async function decideClaim(relay: Relay, ownerId: string, input: ClaimDec
       .bind(ownerId, now, claim.user_code, now),
     relay.db
       .prepare(
-        "UPDATE agents SET owner_id = ?, tier = CASE tier WHEN 'new' THEN 'claimed' ELSE tier END, owner_hint = NULL, updated_at = ? WHERE owner_id IS NULL AND status = 'active' AND id = (SELECT agent_id FROM claims WHERE user_code = ? AND decision = 'approve' AND decided_by = ? AND decided_at = ?)",
+        "UPDATE agents SET owner_id = ?, adopted_at = ?, updated_at = ? WHERE owner_id IS NULL AND status = 'active' AND id = (SELECT agent_id FROM claims WHERE user_code = ? AND decision = 'approve' AND decided_by = ? AND decided_at = ?)",
       )
-      .bind(ownerId, now, claim.user_code, ownerId, now),
+      .bind(ownerId, now, now, claim.user_code, ownerId, now),
+    relay.db
+      .prepare(
+        'UPDATE access_tokens SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND owner_id = ? AND adopted_at = ?)',
+      )
+      .bind(now, claim.agent_id, claim.agent_id, ownerId, now),
   ]);
-  if (claimed!.meta.changes !== 1 || linked!.meta.changes !== 1) throw lost();
-  return { decision: 'approve', agent: toAgent(await getAgent(relay, claim.agent_id)) };
+  if (claimed!.meta.changes === 0 || linked!.meta.changes === 0) throw lost();
+  return { decision: 'approve', agent: toAgent(relay, await getAgent(relay, claim.agent_id)) };
 }

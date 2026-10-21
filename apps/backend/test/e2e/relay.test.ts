@@ -4,30 +4,29 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEV } from '../../../../packages/discord-fake/src/index.ts';
-import { E2E, eventually, sleep, startStack, type Reply, type Stack } from './harness.ts';
+import { verify } from '../../../../packages/webhooks/src/index.ts';
+import { E2E, JWT_BEARER, eventually, sleep, solve, startStack, type Agent, type Reply, type Stack } from './harness.ts';
 
 const MESSAGE_CONTENT = 1 << 15;
-
-interface Agent {
-  agent_id: string;
-  key: string;
-  name: string;
-}
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 
 describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   let s: Stack;
   let atlas: Agent;
+  /** Atlas's avatar as the relay reports it: its sigil, which Discord is told to show with every post. */
+  let atlasSigil: string;
   let vesper: Agent;
   let orrery: Agent;
+  /** Vesper's live subscription to the lounge, from the long-poll scenario on. */
+  let vesperLounge: string;
   let counter = 0;
   const visitor = DEV.visitor;
 
   const unique = (what: string) => `${what} (${Date.now().toString(36)}-${counter++})`;
   const idem = () => `e2e-${Date.now().toString(36)}-${counter++}`;
-  const post = (who: Agent, body: Record<string, unknown>) => s.call('POST', '/v1/messages', { key: who.key, body, headers: { 'idempotency-key': idem() } });
-  const channelPage = (who: Agent, channel: string, query = '') => s.call('GET', `/v1/channels/${channel}/messages${query}`, { key: who.key });
-  /** The public mirror may be cached at the edge, so every read asks for a page nobody has asked for before (the mirror takes no other parameters, so the page size varies). */
-  const publicPage = (channel: string, query = '') => s.call('GET', `/public/channels/${channel}/messages?limit=${100 - (counter++ % 50)}${query}`);
+  const post = (who: Agent, body: Record<string, unknown>) =>
+    s.call('POST', '/v1/messages', { token: who.token, body, headers: { 'idempotency-key': idem() } });
+  const channelPage = (who: Agent, channel: string, query = '') => s.call('GET', `/v1/channels/${channel}/messages${query}`, { token: who.token });
   const find = (res: Reply, messageId: string) => res.body.messages.find((m: { message_id: string }) => m.message_id === messageId);
   const seen = (who: Agent, channel: string, messageId: string) => async () => find(await channelPage(who, channel), messageId);
   const executions = () => s.fake.requestsTo('webhook.execute');
@@ -42,49 +41,67 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(blocked).toEqual([]);
   });
 
-  /* ---------- (b) Signup ---------- */
+  /* ---------- (b) Registration ---------- */
 
-  it('(b) signs an agent up with a real proof of work and reads it back', async () => {
+  it('(b) registers an agent with a real proof of work, trades its identity assertion for an access token, and reads it back', async () => {
     const headers = { 'cf-connecting-ip': '203.0.113.10' };
-    const challenge = await s.call('GET', '/v1/signup/challenge', { headers });
+    const challenge = await s.call('GET', '/agent/identity/challenge', { headers });
     expect(challenge.status).toBe(200);
     expect(challenge.body).toMatchObject({ algorithm: 'sha256-leading-zero-bits', difficulty: 20, challenge: expect.stringMatching(/^pow_/) });
 
-    const { solve } = await import('./harness.ts');
-    const nonce = solve(challenge.body.challenge, challenge.body.difficulty);
-    const signup = await s.call('POST', '/v1/agents', {
+    const pow = { challenge: challenge.body.challenge, nonce: solve(challenge.body.challenge, challenge.body.difficulty) };
+    const registered = await s.call('POST', '/agent/identity', { headers, body: { type: 'anonymous', name: 'Atlas-7', pow } });
+    expect(registered.status).toBe(200);
+    expect(registered.body).toMatchObject({
+      registration_id: expect.stringMatching(/^agt_/),
+      registration_type: 'anonymous',
+      identity_assertion: expect.any(String),
+      claim_token: expect.stringMatching(/^clm_/),
+      name: 'Atlas-7',
+    });
+
+    const exchanged = await s.call('POST', '/oauth2/token', {
       headers,
-      body: { name: 'Atlas-7', description: 'Charts the quiet corners.', challenge: challenge.body.challenge, nonce },
+      form: { grant_type: JWT_BEARER, assertion: registered.body.identity_assertion },
     });
-    expect(signup.status).toBe(201);
-    expect(signup.body).toMatchObject({
-      agent_id: expect.stringMatching(/^agt_/),
-      tier: 'new',
-      key: { secret: expect.stringMatching(/^lk_/), scopes: expect.arrayContaining(['messages:read', 'messages:write']) },
+    expect(exchanged.status).toBe(200);
+    expect(exchanged.body).toMatchObject({
+      access_token: expect.stringMatching(/^lat_/),
+      token_type: 'Bearer',
+      expires_in: 3600,
+      identity_assertion: expect.any(String),
     });
-    atlas = { agent_id: signup.body.agent_id, key: signup.body.key.secret, name: 'Atlas-7' };
+    atlas = { agent_id: registered.body.registration_id, token: exchanged.body.access_token, name: 'Atlas-7' };
 
-    const me = await s.call('GET', '/v1/me', { key: atlas.key });
+    // Every agent starts on probation, unadopted, with its sigil as its avatar.
+    const me = await s.call('GET', '/v1/me', { token: atlas.token });
     expect(me.status).toBe(200);
-    expect(me.body.agent).toMatchObject({ id: atlas.agent_id, name: 'Atlas-7', tier: 'new', status: 'active', claimed: false });
-    expect(me.body.probation).not.toBeNull();
+    expect(me.body.agent).toMatchObject({ id: atlas.agent_id, name: 'Atlas-7', status: 'active', adopted: false, custom_avatar: false });
+    expect(me.body.level).toMatchObject({ level: 0, xp: 0 });
+    atlasSigil = me.body.agent.avatar_url;
+    expect(new URL(atlasSigil).pathname).toBe(`/v1/avatars/${atlas.agent_id}.png`);
+    const sigil = await fetch(`${s.base}/v1/avatars/${atlas.agent_id}.png`);
+    expect(sigil.status).toBe(200);
+    expect(sigil.headers.get('content-type')).toBe('image/png');
+    expect([...new Uint8Array(await sigil.arrayBuffer()).slice(0, 4)]).toEqual(PNG_SIGNATURE);
 
-    // The key is stored as a hash, the proof of work can't be used twice, and none of this touched Discord.
-    const [stored] = await s.sql<{ hash: string }>('SELECT hash FROM api_keys WHERE agent_id = ?', atlas.agent_id);
+    // The token is stored as a hash, the proof of work can't be used twice, and none of this touched Discord.
+    const [stored] = await s.sql<{ hash: string }>('SELECT hash FROM access_tokens WHERE agent_id = ?', atlas.agent_id);
     expect(stored!.hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(stored!.hash).not.toContain(atlas.key);
-    const again = await s.call('POST', '/v1/agents', { headers, body: { name: 'Atlas-8', challenge: challenge.body.challenge, nonce } });
+    expect(stored!.hash).not.toContain(atlas.token);
+    const again = await s.call('POST', '/agent/identity', { headers, body: { type: 'anonymous', name: 'Atlas-8', pow } });
     expect(again.status).toBe(409);
+    expect(again.body).toMatchObject({ error: 'invalid_request', error_description: expect.stringContaining('already used') });
     expect(s.fake.requests).toHaveLength(0);
     expect((await s.call('GET', '/v1/me')).status).toBe(401);
 
-    // The other agents in this file sign up with a cheap proof of work, which an admin can ask for.
+    // The other agents in this file register with a cheap proof of work, which an admin can ask for.
     await s.db
       .prepare("INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('pow_difficulty', '8', 'e2e', ?)")
       .bind(new Date().toISOString())
       .run();
-    vesper = { ...(await s.signup('Vesper', '198.51.100.20')), name: 'Vesper' };
-    orrery = { ...(await s.signup('Orrery', '192.0.2.30')), name: 'Orrery' };
+    vesper = await s.register('Vesper', '198.51.100.20');
+    orrery = await s.register('Orrery', '192.0.2.30');
   });
 
   /* ---------- (c) Cron wakes the Gateway ---------- */
@@ -134,12 +151,12 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       });
       const did: string = sent.body.discord_message_id;
 
-      // The fake Discord: one webhook post as the agent, never parsing mentions.
+      // The fake Discord: one webhook post as the agent, wearing its sigil, never parsing mentions.
       const requests = executions().filter((r) => (r.body as { content: string }).content === content);
       expect(requests).toHaveLength(1);
-      expect(requests[0]!.body).toEqual({ content, username: 'Atlas-7', allowed_mentions: { parse: [] } });
+      expect(requests[0]!.body).toEqual({ content, username: 'Atlas-7', avatar_url: atlasSigil, allowed_mentions: { parse: [] } });
       expect(requests[0]!.query).toEqual({ wait: 'true' });
-      expect(requests[0]!.params.id).toBe(s.community.channels.find((c) => c.key === 'lounge')!.webhook.id);
+      expect(requests[0]!.params.id).toBe((await s.relayWebhook(s.channels.lounge))!.id);
       expect(requests[0]!.headers['user-agent']).toMatch(/^DiscordBot \(/);
       expect(s.fake.messages(s.channels.lounge).find((m) => m.id === did)).toMatchObject({
         content,
@@ -155,41 +172,43 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       expect((await s.sql('SELECT 1 FROM conversation WHERE message_id = ?', did)).length).toBe(1);
       expect((await s.sql('SELECT 1 FROM events WHERE source_key = ?', `create:${did}`)).length).toBe(1);
 
-      // The public mirror shows it for a mirrored channel, and only for one.
-      const pub = await publicPage(s.channels.lounge);
-      expect(pub.status).toBe(200);
-      expect(find(pub, did)).toMatchObject({ content, author: { kind: 'agent', display_name: 'Atlas-7' } });
-      expect(JSON.stringify(pub.body)).not.toMatch(/discord\.com|webhook/i);
-      expect((await publicPage(s.channels.media)).status).toBe(404);
-      const channels = await s.call('GET', '/public/channels');
-      expect(channels.body.channels.map((c: { id: string }) => c.id).sort()).toEqual([s.channels.lounge, s.channels.forum, s.channels.announcements].sort());
+      // There is no public view of the channels.
+      expect((await s.call('GET', '/public/channels')).status).toBe(404);
 
       // And in the agent's own record of the send.
-      const record = await s.call('GET', `/v1/messages/${sent.body.id}`, { key: atlas.key });
+      const record = await s.call('GET', `/v1/messages/${sent.body.id}`, { token: atlas.token });
       expect(record.body).toMatchObject({ status: 'sent', discord_message_id: did });
     });
 
-    it('lets a long poll on /v1/events return the moment a post lands', async () => {
-      const tail = (await s.call('GET', '/v1/events', { key: vesper.key })).body.next_cursor;
+    it('lets a long poll on /v1/events return a digest the moment a message lands in a subscribed channel', async () => {
+      const subscribed = await s.call('POST', '/v1/subscriptions', {
+        token: vesper.token,
+        body: { kind: 'channel', channel_id: s.channels.lounge, frequency: 'live' },
+      });
+      expect(subscribed.status).toBe(201);
+      vesperLounge = subscribed.body.id;
+      // Take whatever is already waiting, so the poll below has nothing until the message arrives.
+      expect((await s.call('GET', '/v1/events', { token: vesper.token })).status).toBe(200);
+
       const started = Date.now();
-      const poll = s.call('GET', `/v1/events?after=${tail}&wait=20`, { key: vesper.key });
+      const poll = s.call('GET', '/v1/events?wait=20', { token: vesper.token });
       await sleep(400);
-      const content = unique('Vesper wakes the poll');
-      const sent = await post(vesper, { channel_id: s.channels.lounge, content });
-      expect(sent.status).toBe(201);
+      const said = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('Newsbot wakes the poll') });
 
       const page = (await poll).body;
       expect(Date.now() - started).toBeLessThan(10_000);
-      expect(page.events.length).toBeGreaterThanOrEqual(1);
-      const created = page.events.find((e: { type: string; data: { content: string } }) => e.type === 'message.created' && e.data.content === content);
+      const digest = page.digests.find((d: { subscription_id: string }) => d.subscription_id === vesperLounge);
+      expect(digest).toMatchObject({ type: 'digest', more: false, cursor: expect.stringMatching(/^\d+$/) });
+      const created = digest.events.find((e: { type: string; data: { message_id: string } }) => e.type === 'message.created' && e.data.message_id === said.id);
       expect(created).toMatchObject({
         schema_version: 1,
         channel_id: s.channels.lounge,
         guild_id: s.community.guildId,
-        cursor: expect.stringMatching(/^\d+$/),
-        data: { message_id: sent.body.discord_message_id, author: { kind: 'agent', agent_id: vesper.agent_id, display_name: 'Vesper' } },
+        data: { content: said.content, author: { kind: 'bot', display_name: 'newsbot' } },
       });
-      expect(Number(page.next_cursor)).toBeGreaterThanOrEqual(Number(created.cursor));
+      // Taking it moved the subscription on: it isn't given again.
+      const again = (await s.call('GET', '/v1/events', { token: vesper.token })).body.digests as { events: { data: { message_id?: string } }[] }[];
+      expect(again.flatMap((d) => d.events).some((e) => e.data.message_id === said.id)).toBe(false);
     });
 
     it('the Gateway can beat the HTTP answer: the post is attributed to the agent anyway', async () => {
@@ -217,7 +236,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     });
 
     it('treats a message posted straight to the webhook, outside the relay, as a webhook and not as any agent', async () => {
-      const hook = s.community.channels.find((c) => c.key === 'lounge')!.webhook;
+      const hook = (await s.relayWebhook(s.channels.lounge))!;
       const content = unique('Posted around the relay');
       const res = await fetch(`${s.fake.apiBase}/webhooks/${hook.id}/${hook.token}?wait=true`, {
         method: 'POST',
@@ -235,131 +254,105 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       expect(refused.status).toBe(403);
       expect(executions()).toHaveLength(before);
 
-      const news = s.fake.say(s.channels.announcements, { as: DEV.admin, content: unique('Release day') });
+      // Agents can still read here, through bots and webhooks; a person's own message is never relayed unless it's a consenting reply.
+      const news = s.fake.say(s.channels.announcements, { as: DEV.newsbot, content: unique('Release day') });
       const row = await eventually(seen(atlas, s.channels.announcements, news.id), { what: 'the announcement' });
-      expect(row).toMatchObject({ author: { kind: 'human' } });
+      expect(row).toMatchObject({ author: { kind: 'bot', display_name: 'newsbot' } });
     });
   });
 
-  /* ---------- (e) People, consent and the public mirror ---------- */
+  /* ---------- (e) People and consent ---------- */
 
-  it('(e) withholds a person’s text from agents and the public until they agree, agrees only on the button, and scrubs everything on /mirror leave', async () => {
-    // Before agreeing: the relay keeps a marker, nothing else, and says the same to agents and to the public.
+  it('(e) relays only a consenting person’s replies to agents, agrees only on the button, and deletes them on /consent withdraw', async () => {
+    const agentPost = await post(atlas, { channel_id: s.channels.lounge, content: unique('Anyone know where the lanterns are?') });
+    expect(agentPost.status).toBe(201);
+    const target: string = agentPost.body.discord_message_id;
+    const notStored = async (id: string) => (await s.sql('SELECT 1 FROM conversation WHERE message_id = ?', id)).length === 0;
+
+    // Before agreeing: neither a plain message nor a reply to an agent is kept, not even as a marker.
     const before = unique('A person says hello before agreeing');
     const early = s.fake.say(s.channels.lounge, { as: visitor, content: before });
-    const marker = await eventually(seen(atlas, s.channels.lounge, early.id), { what: 'the marker for the first message' });
-    expect(marker).toMatchObject({ content: null, author: { kind: 'human', display_name: 'A person in Discord', author_id: 'p_withheld', agent_id: null } });
-    expect(find(await publicPage(s.channels.lounge), early.id)).toMatchObject({
-      content: null,
-      author: { kind: 'human', display_name: 'A person in Discord', author_id: 'p_withheld' },
+    const earlyReply = s.fake.say(s.channels.lounge, { as: visitor, content: unique('An early reply'), replyTo: target });
+    const marker = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('The admin says something after them') });
+    // The admin agreed before the suite but isn't replying to an agent, so this is dropped too; waiting for intake to pass it
+    // means the visitor's messages, sent before it, have been looked at.
+    await eventually(async () => (await s.sql('SELECT 1 FROM channel_cursors WHERE last_message_id >= CAST(? AS INTEGER)', marker.id)).length > 0, {
+      what: 'intake to pass the messages',
     });
-    expect(
-      (
-        await s.sql<{ content: string | null; discord_user_id: string | null; display_name: string; withheld: number }>(
-          'SELECT content, discord_user_id, display_name, withheld FROM conversation WHERE message_id = ?',
-          early.id,
-        )
-      )[0],
-    ).toEqual({ content: null, discord_user_id: null, display_name: 'A person in Discord', withheld: 1 });
-    expect(await s.sql('SELECT 1 FROM events WHERE message_id = ?', early.id)).toEqual([]);
+    for (const m of [early, earlyReply, marker]) expect(await notStored(m.id)).toBe(true);
+    expect(await s.sql('SELECT 1 FROM events WHERE message_id IN (?, ?, ?)', early.id, earlyReply.id, marker.id)).toEqual([]);
 
-    // /mirror agree shows the notice and a button, and agrees to nothing.
-    const notice = await s.fake.interact({ user: visitor, command: { name: 'mirror', subcommand: 'agree' }, channelId: s.channels.lounge });
+    // /consent agree shows the notice and a button, and agrees to nothing.
+    const notice = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'agree' }, channelId: s.channels.lounge });
     expect(notice.status).toBe(200);
     expect(notice.body).toMatchObject({
       type: 4,
       data: {
         flags: 64,
-        content: expect.stringContaining('The Logitland public mirror'),
-        components: [{ type: 1, components: [{ type: 2, style: 1, custom_id: expect.stringMatching(/^mirror_agree_cmd:\d{4}-\d{2}-\d{2}$/) }] }],
+        content: expect.stringContaining('Replying to agents in Logitland'),
+        components: [{ type: 1, components: [{ type: 2, style: 1, custom_id: expect.stringMatching(/^consent_agree:\d{4}-\d{2}-\d{2}$/) }] }],
       },
     });
     expect((notice.body as { data: { content: string } }).data.content.length).toBeLessThanOrEqual(2000);
-    expect(s.fake.requestsTo('guild.member.role.add')).toHaveLength(0);
     expect(await s.sql('SELECT 1 FROM consents WHERE discord_user_id = ?', visitor)).toEqual([]);
 
-    // Pressing the button agrees. The answer is a deferral; the role follows.
+    // Pressing the button agrees, at once. No Discord role is involved.
     const press = await s.fake.interact({
       user: visitor,
       button: { customId: (notice.body as { data: { components: { components: { custom_id: string }[] }[] } }).data.components[0]!.components[0]!.custom_id },
       channelId: s.channels.lounge,
     });
     expect(press.status).toBe(200);
-    expect(press.body).toEqual({ type: 5, data: { flags: 64 } });
-    await eventually(() => s.fake.requestsTo('guild.member.role.add').length === 1, { what: 'the role to be given' });
-    const grant = s.fake.requestsTo('guild.member.role.add');
-    expect(grant[0]!.params).toMatchObject({ guild: s.community.guildId, user: visitor, role: s.community.consentRoleId });
-    expect(grant[0]!.status).toBe(204);
-    expect(decodeURIComponent(grant[0]!.headers['x-audit-log-reason']!)).toBe('Agreed to the Logitland public mirror');
-    expect(grant[0]!.headers.authorization).toBe(`Bot ${s.fake.botToken}`);
-    expect(s.fake.world.guild(s.community.guildId).members.get(visitor)!.roles).toEqual([s.community.consentRoleId]);
-    await eventually(() => press.interaction.followUps.length > 0, { what: 'the follow-up to the button' });
-    expect(press.interaction.followUps[0]).toMatchObject({
-      kind: 'original',
-      content: expect.stringContaining('You agreed to the Logitland public mirror'),
-      flags: 64,
-    });
+    expect(press.body).toMatchObject({ type: 4, data: { flags: 64, content: expect.stringContaining('You agreed') } });
+    expect(s.fake.requestsTo('guild.member.role.add')).toHaveLength(0);
     expect(
       (
-        await s.sql<{ method: string; revoked_at: string | null; notice_version: string; interaction_id: string }>(
-          'SELECT method, revoked_at, notice_version, interaction_id FROM consents WHERE discord_user_id = ?',
+        await s.sql<{ method: string; revoked_at: string | null; interaction_id: string }>(
+          'SELECT method, revoked_at, interaction_id FROM consents WHERE discord_user_id = ?',
           visitor,
         )
       )[0],
-    ).toEqual({ method: 'command', revoked_at: null, notice_version: '2026-10-19', interaction_id: press.interaction.id });
-    expect(await s.sql('SELECT action, method FROM consent_history WHERE discord_user_id = ?', visitor)).toEqual([{ action: 'granted', method: 'command' }]);
+    ).toEqual({ method: 'command', revoked_at: null, interaction_id: press.interaction.id });
 
-    // What they write from now on is kept and shown, to agents and the public alike; what they wrote before is not.
-    const text = unique('A person says hello after agreeing');
-    const said = s.fake.say(s.channels.lounge, { as: visitor, content: text });
-    const agentRow = await eventually(
+    // Now a reply to an agent is relayed; anything else they write still isn't.
+    const text = unique('In the cellar, I think');
+    const reply = s.fake.say(s.channels.lounge, { as: visitor, content: text, replyTo: target });
+    const chatter = s.fake.say(s.channels.lounge, { as: visitor, content: unique('Just chatting') });
+    const row = await eventually(
       async () => {
-        const row = find(await channelPage(atlas, s.channels.lounge), said.id);
-        return row?.content ? row : null;
+        const r = find(await channelPage(orrery, s.channels.lounge), reply.id);
+        return r?.content ? r : null;
       },
-      { what: 'the person’s message' },
+      { what: 'the person’s reply' },
     );
-    expect(agentRow).toMatchObject({ content: text, author: { kind: 'human', display_name: 'A visitor', agent_id: null } });
-    expect(agentRow.author.author_id).toMatch(/^p_(?!withheld)/);
-    expect(JSON.stringify(agentRow)).not.toContain(visitor);
-    expect(find(await publicPage(s.channels.lounge), said.id)).toMatchObject({ content: text, author: { display_name: 'A visitor' } });
-    expect(find(await channelPage(atlas, s.channels.lounge), early.id)).toMatchObject({ content: null, author: { display_name: 'A person in Discord' } });
-    expect(find(await publicPage(s.channels.lounge), early.id)).toMatchObject({ content: null, author: { display_name: 'A person in Discord' } });
+    expect(row).toMatchObject({ content: text, reply_to: target, author: { kind: 'human', display_name: 'A visitor', agent_id: null } });
+    expect(row.author.author_id).toMatch(/^p_/);
+    expect(JSON.stringify(row)).not.toContain(visitor);
+    expect(await notStored(chatter.id)).toBe(true);
 
-    // /mirror leave: the agreement ends at once, the role goes, the words go.
-    const leave = await s.fake.interact({ user: visitor, command: { name: 'mirror', subcommand: 'leave' }, channelId: s.channels.lounge });
-    expect(leave.status).toBe(200);
-    expect(leave.body).toMatchObject({ type: 5, data: { flags: 64 } });
-    await eventually(() => s.fake.requestsTo('guild.member.role.remove').length === 1, { what: 'the role to be taken away' });
-    expect(s.fake.requestsTo('guild.member.role.remove')[0]!.params).toMatchObject({ user: visitor, role: s.community.consentRoleId });
-    expect(s.fake.world.guild(s.community.guildId).members.get(visitor)!.roles).toEqual([]);
-
+    // /consent withdraw: the agreement ends at once and the held replies go.
+    const withdraw = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'withdraw' }, channelId: s.channels.lounge });
+    expect(withdraw.status).toBe(200);
+    expect(withdraw.body).toMatchObject({ type: 5, data: { flags: 64 } });
     const gone = await eventually(
       async () => {
-        const row = find(await channelPage(atlas, s.channels.lounge), said.id);
-        return row?.deleted ? row : null;
+        const r = find(await channelPage(orrery, s.channels.lounge), reply.id);
+        return r?.deleted ? r : null;
       },
-      { what: 'the message to be scrubbed' },
+      { what: 'the reply to be deleted' },
     );
     expect(gone).toMatchObject({ content: null, deleted: true });
-    expect(find(await publicPage(s.channels.lounge), said.id)).toMatchObject({ content: null, deleted: true });
-    expect((await s.sql<{ content: string | null }>('SELECT content FROM conversation WHERE message_id = ?', said.id))[0]!.content).toBeNull();
     const created = await s.sql<{ text: string | null }>(
       "SELECT json_extract(payload, '$.data.content') AS text FROM events WHERE message_id = ? AND type = 'message.created'",
-      said.id,
+      reply.id,
     );
     expect(created.map((r) => r.text)).toEqual(['']);
-    expect((await s.sql<{ revoked_at: string | null }>('SELECT revoked_at FROM consents WHERE discord_user_id = ?', visitor))[0]!.revoked_at).not.toBeNull();
     expect(
       (await s.sql('SELECT action FROM consent_history WHERE discord_user_id = ? ORDER BY id', visitor)).map((r) => (r as { action: string }).action),
     ).toEqual(['granted', 'revoked']);
-
-    // The relay answers the deferred reply through Discord's follow-up call, which the suite sent to the fake.
-    const record = s.fake.interactions.all().find((i) => i.id === leave.interaction.id)!;
-    await eventually(() => record.followUps.length > 0, { what: 'the follow-up to /mirror leave' });
-    expect(record.followUps[0]).toMatchObject({ kind: 'original', content: expect.stringContaining('You left the Logitland public mirror'), flags: 64 });
-    // The message itself stays in Discord: the relay only holds what it stores.
-    expect(s.fake.messages(s.channels.lounge).some((m) => m.id === said.id && m.content === text)).toBe(true);
+    const record = s.fake.interactions.all().find((i) => i.id === withdraw.interaction.id)!;
+    await eventually(() => record.followUps.length > 0, { what: 'the follow-up to /consent withdraw' });
+    expect(record.followUps[0]).toMatchObject({ kind: 'original', content: expect.stringContaining('You withdrew'), flags: 64 });
     // Nothing the person wrote is anywhere in the relay's stores, before or after.
     for (const word of [before, text]) {
       expect(JSON.stringify(await s.sql('SELECT payload FROM events'))).not.toContain(word);
@@ -367,7 +360,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     }
   });
 
-  // Interaction follow-ups use DISCORD_API_BASE in development, so /mirror leave never reaches the real Discord.
+  // Interaction follow-ups use DISCORD_API_BASE in development, so /consent withdraw never reaches the real Discord.
   it('(e) sends interaction follow-ups to DISCORD_API_BASE, never to the real discord.com', () => {
     expect(s.outbound.redirected.filter((r) => r.includes('/messages/@original'))).toEqual([]);
   });
@@ -416,7 +409,6 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       { what: 'the thread to be recorded' },
     );
     expect(thread).toEqual({ parent_id: s.channels.forum, name: title });
-    expect(find(await publicPage(s.channels.forum, `&thread_id=${threadId}`), threadId)).toMatchObject({ content: opening, thread_id: threadId });
 
     // A forum post needs a thread, and the relay checks tags before Discord does.
     const before = executions().length;
@@ -448,7 +440,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       name: 'Side conversation',
       thread_metadata: { auto_archive_duration: 60 },
     });
-    const record = await eventually(async () => (await s.call('GET', `/v1/messages/${started.body.id}`, { key: atlas.key })).body.thread_id === did, {
+    const record = await eventually(async () => (await s.call('GET', `/v1/messages/${started.body.id}`, { token: atlas.token })).body.thread_id === did, {
       what: 'the relay to note the thread',
     });
     expect(record).toBe(true);
@@ -461,7 +453,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
 
     const threads = await eventually(
       async () => {
-        const res = await s.call('GET', `/v1/channels/${s.channels.lounge}/threads`, { key: orrery.key });
+        const res = await s.call('GET', `/v1/channels/${s.channels.lounge}/threads`, { token: orrery.token });
         return res.body.threads?.find((t: { id: string }) => t.id === did) ? res : null;
       },
       { what: 'the thread in the channel’s thread list' },
@@ -479,47 +471,31 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
 
     // The starter message lives in the channel: editing it must not name the thread.
     const edited = await s.call('PATCH', `/v1/messages/${started.body.id}`, {
-      key: atlas.key,
+      token: atlas.token,
       body: { content: unique('Let us take this to a thread, edited') },
     });
     expect(edited.status).toBe(200);
     expect(s.fake.requestsTo('webhook.message.edit').at(-1)!.query).toEqual({});
   });
 
-  it('(f) sends a poll, and a reply that points at the message it answers', async () => {
-    const poll = { question: 'Which lantern should we light first?', answers: ['Brass', 'Paper'], duration_hours: 2 };
-    const asked = await post(vesper, { channel_id: s.channels.lounge, poll });
-    expect(asked.status).toBe(201);
-    expect(asked.body.poll).toMatchObject({ question: poll.question, answers: ['Brass', 'Paper'] });
-    const execute = executions().find((r) => (r.body as { poll?: unknown }).poll !== undefined)!;
-    expect(execute.body).toMatchObject({
-      poll: {
-        question: { text: poll.question },
-        answers: [{ poll_media: { text: 'Brass' } }, { poll_media: { text: 'Paper' } }],
-        duration: 2,
-        allow_multiselect: false,
-      },
-    });
-    const stored = s.fake.messages(s.channels.lounge).find((m) => m.id === asked.body.discord_message_id)!;
-    expect(stored.poll).toMatchObject({ question: { text: poll.question }, layout_type: 1 });
-    const row = await eventually(seen(atlas, s.channels.lounge, asked.body.discord_message_id), { what: 'the poll message' });
-    expect(row.poll).toMatchObject({ question: poll.question, allow_multiselect: false });
-    expect(row.poll.answers).toHaveLength(2);
-
-    // A person's message to reply to. The visitor has not agreed to the mirror, so the reply line doesn't name them.
-    const question = s.fake.say(s.channels.lounge, { as: visitor, content: unique('Does anyone know where the lanterns are kept?') });
-    await eventually(seen(atlas, s.channels.lounge, question.id), { what: 'the question' });
+  it('(f) sends a reply that points at the message it answers', async () => {
+    const question = await post(vesper, { channel_id: s.channels.lounge, content: unique('Does anyone know where the lanterns are kept?') });
+    expect(question.status).toBe(201);
+    const qid: string = question.body.discord_message_id;
+    await eventually(seen(atlas, s.channels.lounge, qid), { what: 'the question' });
     const answer = unique('In the cellar, I believe');
-    const replied = await post(orrery, { channel_id: s.channels.lounge, content: answer, reply_to: question.id });
+    const replied = await post(orrery, { channel_id: s.channels.lounge, content: answer, reply_to: qid });
     expect(replied.status).toBe(201);
-    expect(replied.body.reply_to).toBe(question.id);
+    expect(replied.body.reply_to).toBe(qid);
     const shown = s.fake.messages(s.channels.lounge).find((m) => m.id === replied.body.discord_message_id)!;
-    expect(shown.content).toBe(
-      `-# ↪ Replying to **a person** · https://discord.com/channels/${s.community.guildId}/${s.channels.lounge}/${question.id}\n${answer}`,
-    );
+    const [line, ...text] = shown.content.split('\n');
+    expect(line).toMatch(/^-# > replying to \[Vesper: "Does anyone know where the lanterns are kept\? [^"\]]+"\]\(/);
+    expect(line!.endsWith(`](https://discord.com/channels/${s.community.guildId}/${s.channels.lounge}/${qid})`)).toBe(true);
+    expect(text.join('\n')).toBe(answer);
     expect((await post(orrery, { channel_id: s.channels.lounge, content: unique('Reply to nothing'), reply_to: '100000000000000000' })).status).toBe(400);
+    // Agents read the text and reply_to, never the line.
     const row2 = await eventually(seen(atlas, s.channels.lounge, shown.id), { what: 'the reply' });
-    expect(row2.reply_to ?? null).toBeTruthy();
+    expect(row2).toMatchObject({ content: answer, reply_to: qid });
   });
 
   it('(f) lets an agent edit and delete what it posted, through the webhook', async () => {
@@ -529,7 +505,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     await eventually(seen(vesper, s.channels.lounge, did), { what: 'the message' });
 
     const next = unique('Final wording');
-    const edited = await s.call('PATCH', `/v1/messages/${sent.body.id}`, { key: atlas.key, body: { content: next } });
+    const edited = await s.call('PATCH', `/v1/messages/${sent.body.id}`, { token: atlas.token, body: { content: next } });
     expect(edited.status).toBe(200);
     expect(edited.body).toMatchObject({ id: sent.body.id, content: next, status: 'sent' });
     const request = s.fake.requestsTo('webhook.message.edit').at(-1)!;
@@ -545,12 +521,12 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(row.content).toBe(next);
 
     // Someone else's message can't be touched, and a blocked edit leaves the text alone.
-    expect((await s.call('PATCH', `/v1/messages/${sent.body.id}`, { key: vesper.key, body: { content: unique('Hijack') } })).status).toBe(404);
-    const refused = await s.call('PATCH', `/v1/messages/${sent.body.id}`, { key: atlas.key, body: { content: 'now [block] this' } });
+    expect((await s.call('PATCH', `/v1/messages/${sent.body.id}`, { token: vesper.token, body: { content: unique('Hijack') } })).status).toBe(404);
+    const refused = await s.call('PATCH', `/v1/messages/${sent.body.id}`, { token: atlas.token, body: { content: 'now [block] this' } });
     expect(refused.status).toBe(422);
     expect(s.fake.messages(s.channels.lounge).find((m) => m.id === did)!.content).toBe(next);
 
-    const deleted = await s.call('DELETE', `/v1/messages/${sent.body.id}`, { key: atlas.key });
+    const deleted = await s.call('DELETE', `/v1/messages/${sent.body.id}`, { token: atlas.token });
     expect(deleted.status).toBe(200);
     expect(s.fake.requestsTo('webhook.message.delete').at(-1)).toMatchObject({ params: { message: did }, status: 204 });
     expect(s.fake.messages(s.channels.lounge).some((m) => m.id === did)).toBe(false);
@@ -562,7 +538,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       { what: 'the deletion in the channel' },
     );
     expect(gone.content).toBeNull();
-    expect((await s.call('GET', `/v1/messages/${sent.body.id}`, { key: atlas.key })).body.status).toBe('removed');
+    expect((await s.call('GET', `/v1/messages/${sent.body.id}`, { token: atlas.token })).body.status).toBe('removed');
   });
 
   /* ---------- (g) Deletion ---------- */
@@ -572,7 +548,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     const sent = await post(atlas, { channel_id: s.channels.lounge, content });
     const did: string = sent.body.discord_message_id;
     await eventually(seen(vesper, s.channels.lounge, did), { what: 'the message' });
-    const tail = (await s.call('GET', '/v1/events', { key: vesper.key })).body.next_cursor;
+    const feed = `/v1/subscriptions/${vesperLounge}/events`;
+    const tail = (await s.call('GET', feed, { token: vesper.token })).body.cursor;
 
     s.fake.remove(s.channels.lounge, did);
 
@@ -584,7 +561,6 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       { what: 'the deletion' },
     );
     expect(row).toMatchObject({ content: null, deleted: true, removed_by: 'discord', author: { kind: 'agent' } });
-    expect(find(await publicPage(s.channels.lounge), did)).toMatchObject({ content: null, deleted: true, removed_by: 'discord' });
     expect((await s.sql<{ content: string | null }>('SELECT content FROM conversation WHERE message_id = ?', did))[0]!.content).toBeNull();
     expect(
       (
@@ -596,10 +572,10 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     ).toBe('');
     expect(JSON.stringify(await s.sql('SELECT payload FROM events WHERE message_id = ?', did))).not.toContain(content);
 
-    const events = (await s.call('GET', `/v1/events?after=${tail}`, { key: vesper.key })).body.events;
+    const events = (await s.call('GET', `${feed}?after=${tail}`, { token: vesper.token })).body.events;
     expect(events).toContainEqual(expect.objectContaining({ type: 'message.deleted', data: { message_id: did, removed_by: 'discord' } }));
     // The relay's own record of the send is unchanged: it did send it.
-    expect((await s.call('GET', `/v1/messages/${sent.body.id}`, { key: atlas.key })).body.status).toBe('sent');
+    expect((await s.call('GET', `/v1/messages/${sent.body.id}`, { token: atlas.token })).body.status).toBe('sent');
   });
 
   /* ---------- (h) Moderation ---------- */
@@ -617,7 +593,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     await sleep(500);
     expect(executions()).toHaveLength(before);
     expect(s.fake.messages(s.channels.lounge).some((m) => /\[(block|hold)\]|\[block\]ed|\[hold\]ing/.test(m.content))).toBe(false);
-    expect((await s.call('GET', `/v1/messages/${held.body.id}`, { key: orrery.key })).body.status).toBe('held');
+    expect((await s.call('GET', `/v1/messages/${held.body.id}`, { token: orrery.token })).body.status).toBe('held');
     expect(
       (
         await s.sql<{ verdict: string; layer: string }>(
@@ -645,7 +621,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
 
     const done = await eventually(
       async () => {
-        const r = await s.call('GET', `/v1/messages/${queued.body.id}`, { key: atlas.key });
+        const r = await s.call('GET', `/v1/messages/${queued.body.id}`, { token: atlas.token });
         return r.body.status === 'sent' ? r : null;
       },
       { what: 'the queued post to be sent', timeoutMs: 20_000 },
@@ -668,7 +644,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       // The first answer said "0 remaining, 1.5 s to reset": the second waits its turn instead of being refused.
       expect(second.status).toBe(202);
       expect(second.body.status).toBe('queued');
-      await eventually(async () => (await s.call('GET', `/v1/messages/${second.body.id}`, { key: vesper.key })).body.status === 'sent', {
+      await eventually(async () => (await s.call('GET', `/v1/messages/${second.body.id}`, { token: vesper.token })).body.status === 'sent', {
         what: 'the second post',
         timeoutMs: 20_000,
       });
@@ -693,7 +669,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     ).id;
     const settled = await eventually(
       async () => {
-        const r = await s.call('GET', `/v1/messages/${sent.body.id}`, { key: orrery.key });
+        const r = await s.call('GET', `/v1/messages/${sent.body.id}`, { token: orrery.token });
         return r.body.status === 'sent' ? r : null;
       },
       { what: 'the Gateway to settle the send', timeoutMs: 20_000 },
@@ -706,8 +682,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   /* ---------- Edits and system messages ---------- */
 
   it('shows edits, and ignores system messages', async () => {
-    // The admin agreed before the suite started, so their words are kept.
-    const said = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('First draft') });
+    const said = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('First draft') });
     await eventually(seen(atlas, s.channels.lounge, said.id), { what: 'the message' });
     const edited = s.fake.edit(s.channels.lounge, said.id, unique('Second draft'));
     const row = await eventually(
@@ -721,7 +696,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
 
     const join = s.fake.say(s.channels.lounge, { as: visitor, content: '', type: 7 });
     const starter = s.fake.say(s.channels.lounge, { as: visitor, content: '', type: 21 });
-    const reply = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('A reply'), replyTo: said.id });
+    const reply = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('A reply'), replyTo: said.id });
     await eventually(seen(atlas, s.channels.lounge, reply.id), { what: 'the reply' });
     const page = await channelPage(atlas, s.channels.lounge);
     expect(find(page, join.id)).toBeUndefined();
@@ -731,7 +706,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   /* ---------- (j) Gateway close and resume ---------- */
 
   it('(j) a Gateway close and resume backfills nothing twice, and a lost session recovers the gap over REST without duplicates', async () => {
-    const say = (content: string) => s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique(content) });
+    const say = (content: string) => s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique(content) });
     const count = async (id: string) => ({
       conversation: (await s.sql('SELECT 1 FROM conversation WHERE message_id = ?', id)).length,
       events: (await s.sql('SELECT 1 FROM events WHERE source_key = ?', `create:${id}`)).length,
@@ -786,7 +761,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(stale.status).toBe(401);
 
     // A body signed for another body doesn't pass: the signature covers the raw text.
-    const status = await s.fake.interact({ user: visitor, command: { name: 'mirror', subcommand: 'status' } });
+    const status = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'status' } });
     expect(status.status).toBe(200);
     expect(status.body).toMatchObject({ type: 4, data: { flags: 64, content: expect.stringContaining('haven’t agreed') } });
     const unknown = await s.fake.interact({ user: visitor, command: { name: 'nonsense' } });
@@ -798,12 +773,12 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
   it('(l) UPDATE … RETURNING with .first() works on D1: the rate limiter really counts and refuses', async () => {
     const headers = { 'cf-connecting-ip': '198.18.0.77' };
     const statuses: number[] = [];
-    for (let i = 0; i < 61; i++) statuses.push((await s.call('GET', '/v1/signup/challenge', { headers })).status);
+    for (let i = 0; i < 61; i++) statuses.push((await s.call('GET', '/agent/identity/challenge', { headers })).status);
     expect(statuses.slice(0, 60).every((x) => x === 200)).toBe(true);
     expect(statuses[60]).toBe(429);
-    const limited = await s.call('GET', '/v1/signup/challenge', { headers });
+    const limited = await s.call('GET', '/agent/identity/challenge', { headers });
     expect(limited.headers.get('retry-after')).toMatch(/^\d+$/);
-    expect(limited.body).toMatchObject({ code: 'rate_limited' });
+    expect(limited.body).toMatchObject({ error: 'rate_limited' });
 
     const rows = await s.sql<{ key: string; count: number }>("SELECT key, count FROM rate_counters WHERE key LIKE 'pow:net:%' ORDER BY count DESC LIMIT 1");
     // A full window is left alone, so refused requests cost no writes: the count stops at the limit.
@@ -843,23 +818,122 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     // No route on the public side hands out a webhook.
     expect(JSON.stringify(channels)).not.toMatch(/discord\.com\/api\/webhooks/);
     expect(
-      (await s.call('GET', '/v1/channels', { key: atlas.key })).body.channels.every(
+      (await s.call('GET', '/v1/channels', { token: atlas.token })).body.channels.every(
         (c: Record<string, unknown>) => !('webhook' in c) && !('webhook_ciphertext' in c),
       ),
     ).toBe(true);
   });
 
+  /* ---------- (o) Webhook delivery ---------- */
+
+  it('(o) refuses a webhook that fails its challenge, and posts a live subscription’s digest, signed, to one that passes', async () => {
+    const received: { headers: Headers; body: string }[] = [];
+    s.outbound.receive('hooks.orrery.example.net', async (request) => {
+      const body = await request.text();
+      // The request comes from miniflare's own fetch implementation; verify() expects this realm's Headers.
+      received.push({ headers: new Headers([...request.headers]), body });
+      const sent = JSON.parse(body) as { type: string; challenge?: string };
+      return Response.json(sent.type === 'delivery.challenge' ? { challenge: sent.challenge } : {});
+    });
+    s.outbound.receive('hooks.forgetful.example.net', () => Response.json({ challenge: 'not the one it was sent' }));
+
+    const refused = await s.call('PUT', '/v1/delivery', { token: orrery.token, body: { url: 'https://hooks.forgetful.example.net/logitland' } });
+    expect(refused.status).toBe(422);
+    expect(refused.body).toMatchObject({ code: 'destination_refused', detail: expect.stringContaining('didn’t echo the challenge') });
+    expect((await s.call('GET', '/v1/delivery', { token: orrery.token })).body).toEqual({ kind: 'none' });
+
+    const set = await s.call('PUT', '/v1/delivery', { token: orrery.token, body: { url: 'https://hooks.orrery.example.net/logitland' } });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({
+      delivery: { kind: 'webhook', url_host: 'hooks.orrery.example.net', status: 'active' },
+      secret: expect.stringMatching(/^whsec_/),
+    });
+    const secret: string = set.body.secret;
+    // The receiver proved it holds the URL before any conversation reached it, and the challenge was signed with the new secret.
+    expect(received).toHaveLength(1);
+    expect(JSON.parse(received[0]!.body)).toMatchObject({ type: 'delivery.challenge', agent_id: orrery.agent_id });
+    await verify(received[0]!.headers, received[0]!.body, secret);
+
+    const subscribed = await s.call('POST', '/v1/subscriptions', {
+      token: orrery.token,
+      body: { kind: 'channel', channel_id: s.channels.lounge, frequency: 'live' },
+    });
+    expect(subscribed.status).toBe(201);
+    const said = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('Straight to the webhook') });
+
+    type Digest = { type: string; subscription_id: string; more: boolean; events: { type: string; data: { message_id?: string; content?: string } }[] };
+    const carries = (r: { body: string }) => {
+      const d = JSON.parse(r.body) as Digest;
+      return d.subscription_id === subscribed.body.id && d.events.some((e) => e.data.message_id === said.id);
+    };
+    const delivered = await eventually(() => received.find(carries), { what: 'the digest at the webhook' });
+    await verify(delivered.headers, delivered.body, secret);
+    const digest = JSON.parse(delivered.body) as Digest;
+    expect(digest).toMatchObject({ type: 'digest', subscription_id: subscribed.body.id, more: false });
+    expect(digest.events).toContainEqual(
+      expect.objectContaining({
+        type: 'message.created',
+        channel_id: s.channels.lounge,
+        data: expect.objectContaining({ message_id: said.id, content: said.content }),
+      }),
+    );
+    expect(received.filter(carries)).toHaveLength(1);
+
+    // The agent's own record of it, under the id the receiver dedupes on.
+    const ledger = await eventually(
+      async () => {
+        const page = await s.call('GET', '/v1/delivery/deliveries', { token: orrery.token });
+        const row = page.body.deliveries.find((d: { id: string }) => d.id === delivered.headers.get('webhook-id'));
+        return row?.status === 'delivered' ? row : null;
+      },
+      { what: 'the delivery in the ledger' },
+    );
+    expect(ledger).toMatchObject({ subscription_id: subscribed.body.id, last_status_code: 200, delivered_at: expect.any(String) });
+  });
+
+  it('(p) streams a live subscription’s digest over a hibernating WebSocket, and answers ping', async () => {
+    const lumen = await s.register('Lumen', '192.0.2.40');
+    const subscribed = await s.call('POST', '/v1/subscriptions', {
+      token: lumen.token,
+      body: { kind: 'channel', channel_id: s.channels.lounge, frequency: 'live' },
+    });
+    expect(subscribed.status).toBe(201);
+
+    // Node's WebSocket (undici) takes headers, so the token goes where every other call sends it.
+    const Socket = WebSocket as unknown as new (url: string, init: { headers: Record<string, string> }) => WebSocket;
+    const ws = new Socket(`${s.base.replace(/^http/, 'ws')}/v1/stream`, { headers: { authorization: `Bearer ${lumen.token}` } });
+    const frames: string[] = [];
+    ws.addEventListener('message', (e) => frames.push(String(e.data)));
+    await new Promise((resolve, reject) => {
+      ws.addEventListener('open', resolve);
+      ws.addEventListener('error', reject);
+    });
+    try {
+      await eventually(async () => (await s.sql('SELECT 1 FROM agent_streams WHERE agent_id = ?', lumen.agent_id)).length > 0 || null, {
+        what: 'the stream recorded',
+      });
+      const said = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: unique('Down the stream') });
+      const digest = await eventually(
+        () =>
+          frames
+            .map((f) => JSON.parse(f))
+            .find((d) => d.type === 'digest' && d.events.some((e: { data: { message_id?: string } }) => e.data.message_id === said.id)),
+        { what: 'the digest on the stream' },
+      );
+      expect(digest).toMatchObject({ subscription_id: subscribed.body.id, more: false });
+
+      ws.send('ping');
+      await eventually(() => frames.includes('pong') || null, { what: 'pong' });
+    } finally {
+      ws.close();
+    }
+  });
+
   /* ---------- Built but not tested here yet ---------- */
 
   it.todo(
-    'subscriptions: fan-out and signed delivery to a receiver. Needs a development resolver or allow-list so a loopback receiver passes the SSRF checks (services/destinations.ts resolves through cloudflare-dns.com)',
-  );
-  it.todo('a delivery claim (UPDATE … RETURNING … .first() in services/deliveries.ts) on D1, once a loopback subscription receiver is possible');
-  it.todo(
     'classifier outage: hold, automatic re-check and release. Needs JEV_LAYA_URL pointed at a fake classifier on loopback (allowed by the suite’s outbound bridge) and a controllable clock for the re-check backoff',
   );
-  it.todo('the consent welcome message and its button (mirror_agree) posted by the admin console, then clicked through the fake');
   it.todo('quarter-hour cron jobs (retention, raw-IP purge, counter sweep): cron only fires them at minute 0/15/30/45 of the Worker’s real clock');
-  it.todo('Workers AI fallback classifier: the AI binding only runs remotely');
   it.todo('owner claim by Discord sign-in: the dashboard’s OAuth talks to the real discord.com');
 });

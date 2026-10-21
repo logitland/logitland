@@ -17,6 +17,7 @@ function env(over: Partial<Bindings> = {}): Bindings {
     RELAY_MODE: 'development',
     GATEWAY: ns,
     CHANNEL_SENDER: ns as unknown as Bindings['CHANNEL_SENDER'],
+    AGENT_STREAM: ns as unknown as Bindings['AGENT_STREAM'],
     ...over,
   };
 }
@@ -27,7 +28,7 @@ describe('backend worker', () => {
   it('serves auth.md on the public entrypoint', async () => {
     const md = await worker.fetch(new Request('https://relay.logitland.test/auth.md'), env(), ctx);
     expect(md.status).toBe(200);
-    expect(await md.text()).toContain('# Joining Logitland');
+    expect(await md.text()).toContain('# auth.md');
   });
 
   it('never serves the dashboard API on the public entrypoint', async () => {
@@ -72,7 +73,7 @@ describe('backend worker', () => {
 
   it('runs the cron jobs and isolates failures', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await worker.scheduled({} as ScheduledController, env(), ctx);
+    await worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() } as ScheduledController, env(), ctx);
     expect(spy.mock.calls.some((c) => String(c[0]).includes('cron.done'))).toBe(true);
     spy.mockRestore();
   });

@@ -1,7 +1,7 @@
 import { LIMITS, type SignupChallenge } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { randomToken, sha256 } from '../crypto';
-import { RelayError, conflict, forbidden, invalid } from '../errors';
+import { OAuthError, RelayError, conflict, forbidden, invalid } from '../errors';
 import type { ClientInfo } from '../types';
 import { enforce } from './limits';
 import { clientHashes } from './origins';
@@ -13,7 +13,8 @@ const CHALLENGES_PER_NETWORK_PER_HOUR = 60;
 /** Signups from one network in the last hour that cost the base difficulty; each one after adds a bit. */
 const FREE_SIGNUPS_PER_HOUR = 2;
 
-const WRONG_NETWORK = 'That challenge was issued to a different network. Get a new one from GET /v1/signup/challenge, from the network you sign up from.';
+const WRONG_NETWORK = 'That challenge was issued to a different network. Get a new one from GET /agent/identity/challenge, from the network you register from.';
+const NEW_ONE = 'Get a new one from GET /agent/identity/challenge.';
 
 interface ChallengeRow {
   id: string;
@@ -35,7 +36,7 @@ export function leadingZeroBits(hex: string): number {
 
 export async function issueChallenge(relay: Relay, client: ClientInfo): Promise<SignupChallenge> {
   const settings = await getSettings(relay);
-  if (!settings.signup_open) throw forbidden('Signups are closed right now. Try again later.');
+  if (!settings.signup_open) throw new OAuthError(403, 'anonymous_not_enabled', 'Signups are closed right now. Try again later.');
   const { net } = await clientHashes(relay, client);
   await enforce(
     relay,
@@ -68,10 +69,10 @@ export async function checkSolution(relay: Relay, challenge: string, nonce: stri
     .prepare('SELECT id, difficulty, net_hmac, expires_at, used_at FROM pow_challenges WHERE id = ?')
     .bind(challenge)
     .first<ChallengeRow>();
-  if (!row) throw invalid('That challenge isn’t one we issued. Get a new one from GET /v1/signup/challenge.');
+  if (!row) throw invalid(`That challenge isn’t one we issued. ${NEW_ONE}`);
   if (row.net_hmac !== (net ?? 'unknown')) throw forbidden(WRONG_NETWORK);
-  if (row.used_at) throw conflict('That challenge was already used. Get a new one from GET /v1/signup/challenge.');
-  if (row.expires_at <= iso(relay.now())) throw new RelayError(410, 'expired', 'That challenge has expired. Get a new one from GET /v1/signup/challenge.');
+  if (row.used_at) throw conflict(`That challenge was already used. ${NEW_ONE}`);
+  if (row.expires_at <= iso(relay.now())) throw new RelayError(410, 'expired', `That challenge has expired. ${NEW_ONE}`);
   if (leadingZeroBits(await sha256(`${challenge}:${nonce}`)) < row.difficulty) {
     throw invalid(`That nonce doesn’t solve the challenge: sha256 of "${challenge}:<nonce>" must start with ${row.difficulty} zero bits.`);
   }
@@ -84,8 +85,8 @@ export async function consumeChallenge(relay: Relay, challenge: string, net: str
     .prepare('UPDATE pow_challenges SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ? AND net_hmac = ?')
     .bind(now, challenge, now, net ?? 'unknown')
     .run();
-  if (r.meta.changes === 1) return;
+  if (r.meta.changes > 0) return;
   const row = await relay.db.prepare('SELECT net_hmac FROM pow_challenges WHERE id = ?').bind(challenge).first<{ net_hmac: string }>();
   if (row && row.net_hmac !== (net ?? 'unknown')) throw forbidden(WRONG_NETWORK);
-  throw conflict('That challenge was already used or has expired. Get a new one from GET /v1/signup/challenge.');
+  throw conflict(`That challenge was already used or has expired. ${NEW_ONE}`);
 }

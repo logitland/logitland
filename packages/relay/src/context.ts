@@ -7,7 +7,10 @@ import type { Moderator } from './services/moderation/classifier';
 /** The minimum of D1 the relay uses, so tests can supply a SQLite-backed stand-in. */
 export interface Db {
   prepare(sql: string): Stmt;
-  /** Runs every statement in one transaction. Each result carries `meta.changes`. */
+  /**
+   * Runs every statement in one transaction. Each result carries `meta.changes`, which on D1 counts the rows triggers wrote
+   * too: test whether a statement changed anything (`> 0`), never for an exact count.
+   */
   batch(statements: Stmt[]): Promise<{ meta: { changes: number } }[]>;
 }
 export interface Stmt {
@@ -18,14 +21,20 @@ export interface Stmt {
 }
 
 /** Where accepted deliveries go for dispatch. A Cloudflare Queue fits; so does nothing (cron drains the ledger). */
+/** A webhook delivery to attempt, or an agent whose due digests to push (deliveries.ts). */
+export type DeliveryMessage = { delivery_id: string } | { push: string };
+
 export interface DeliveryQueue {
-  send(body: { delivery_id: string }): Promise<unknown>;
-  sendBatch?(messages: { body: { delivery_id: string } }[]): Promise<unknown>;
+  send(body: DeliveryMessage, options?: { delaySeconds?: number }): Promise<unknown>;
+  sendBatch?(messages: { body: DeliveryMessage; delaySeconds?: number }[]): Promise<unknown>;
 }
 
-/** Workers AI, reduced to what the fallback classifier calls. */
-export interface AiBinding {
-  run(model: string, inputs: Record<string, unknown>): Promise<unknown>;
+/** The agents' WebSocket streams (one hibernating Durable Object per agent; services/streams.ts). */
+export interface StreamHub {
+  /** Hands an authenticated WebSocket upgrade to the agent's stream; answers with the 101. */
+  connect(agentId: string, request: Request): Promise<Response>;
+  /** Tells the agent's stream that subscriptions are due, so it sends them (streamTake). */
+  notify(agentId: string): Promise<void>;
 }
 
 /** Hands a message to its channel's send queue (the ChannelSender Durable Object). Null runs sends inline. */
@@ -46,8 +55,6 @@ export interface RelayConfig {
   dashboardUrl: string;
   /** Defence in depth on the internal entrypoint, which is only reachable through the service binding. */
   internalToken: string;
-  /** Discord user IDs allowed into the admin console. */
-  adminDiscordIds: string[];
   /** Hosts deliveries must never reach (the relay and dashboard themselves, plus BLOCKED_HOSTS). */
   blockedHosts: string[];
   /** What to do when no classifier answers. */
@@ -58,8 +65,6 @@ export interface RelayConfig {
     applicationId: string | null;
     publicKey: string | null;
     guildId: string | null;
-    /** The role that may chat in relayed channels; granted when a person agrees to the mirror. */
-    consentRoleId: string | null;
   };
   development: boolean;
 }
@@ -69,14 +74,13 @@ export interface Relay {
   config: RelayConfig;
   secrets: SecretBox;
   discord: DiscordRest;
-  /** Jev/Laya in production; the development stub locally. */
+  /** Jev on TypeSafe's API in production; the development stub locally. The only classifier: there is no fallback. */
   moderator: Moderator;
-  /** Workers AI (Llama Guard) when Jev/Laya fails; null when no AI binding is configured. */
-  fallbackModerator: Moderator | null;
   resolver: Resolver;
   queue: DeliveryQueue | null;
   sender: ChannelSenderClient | null;
   gateway: GatewayClient | null;
+  streams: StreamHub | null;
   fetch: typeof fetch;
   now: () => Date;
   log: Logger;

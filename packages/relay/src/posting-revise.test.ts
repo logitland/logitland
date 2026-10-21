@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { agree } from './consent.testkit';
 import { sha256 } from './crypto';
 import { scrubMessage } from './services/scrub';
 import { activeStrikeCount } from './services/strikes';
@@ -24,7 +23,8 @@ import {
   say,
   world,
 } from './posting-fixtures';
-import { ADMIN_DISCORD, LOUNGE, seedAgent, seedOwner, type Harness } from './testing';
+import { Permission } from '@logitland/discord';
+import { ADMIN_DISCORD, GUILD, LOUNGE, seedAgent, seedOwner, type Harness } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 vi.mock('./services/scrub', async (original) => ({ ...(await original<typeof import('./services/scrub')>()), scrubMessage: vi.fn(async () => {}) }));
@@ -89,17 +89,13 @@ describe('editing a message', () => {
     expect((await audits(w.h, 'message.edited'))[0]).toMatchObject({ actor_type: 'agent', actor_id: w.a.id, target_id: msg.id });
   });
 
-  it('gives the classifier the conversation as context, leaving out people who had not agreed to the mirror', async () => {
+  it('gives the classifier the conversation as context', async () => {
     const moderator = mod();
     const w = await world({ moderator });
     const msg = await sent(w);
-    await agree(w.h, '700000000000000007', { at: '2026-10-19T00:00:00.000Z' });
-    await converse(w.h, { name: 'Ann', userId: '700000000000000007', content: 'someone said this before' });
-    await converse(w.h, { name: 'Bob', userId: '700000000000000008', content: 'a stranger said this' });
+    await converse(w.h, { author: 'bot', name: 'Ann', content: 'someone said this before' });
     await patch(w.h, w.a, msg.id, { content: 'A better version of this message' });
-    const context = moderator.calls[1]!.context!;
-    expect(context.some((c) => c.content === 'someone said this before')).toBe(true);
-    expect(JSON.stringify(context)).not.toMatch(/stranger|Bob/);
+    expect(moderator.calls[1]!.context).toContainEqual({ author: 'Ann', content: 'someone said this before' });
   });
 
   it('keeps a reply line above the new text', async () => {
@@ -158,7 +154,7 @@ describe('editing a message', () => {
     it.each([
       ['an invite', 'come to discord.gg/abc123', 'invite_link'],
       ['personal details, which are held for a new message but never for an edit', 'write to me@example.com', 'personal_info'],
-      ['a credential', `my key lk_${'K7QMXV2D'.repeat(6)}`, 'secret_leak'],
+      ['a credential', `my token lat_${'K7QMXV2D'.repeat(6)}`, 'secret_leak'],
       ['spam', 'a'.repeat(50), 'spam'],
       ['a blocked link', 'see bit.ly/abc', 'blocked_domain'],
     ])('answers 422 with the policy code and leaves the message alone: %s', async (_name, content, policy) => {
@@ -178,18 +174,19 @@ describe('editing a message', () => {
     it('does not keep the text of a credential anywhere', async () => {
       const w = await world();
       const msg = await sent(w);
-      const secret = `lk_${'K7QMXV2D'.repeat(6)}`;
-      await patch(w.h, w.a, msg.id, { content: `my key ${secret}` });
+      const secret = `lat_${'K7QMXV2D'.repeat(6)}`;
+      await patch(w.h, w.a, msg.id, { content: `my token ${secret}` });
       expect(JSON.stringify(await w.h.db.prepare('SELECT * FROM relay_messages').all())).not.toContain(secret);
       expect(JSON.stringify(await w.h.db.prepare('SELECT * FROM moderation_log').all())).not.toContain(secret);
     });
 
-    it('holds a probation agent’s new link to the rules, too', async () => {
+    it('refuses a new link where the agent’s roles lack Embed Links, too', async () => {
       const w = await world();
-      const fresh = await seedAgent(w.h.relay, { tier: 'new', probationUntil: new Date(w.h.now().getTime() + hours(1)).toISOString() });
-      const msg = await json(await post(w.h, fresh, say('Plain words, no link')));
+      const msg = await json(await post(w.h, w.a, say('Plain words, no link')));
       expect(msg.status).toBe('sent');
-      const res = await patch(w.h, fresh, msg.id, { content: 'Now with a link https://example.com/page' });
+      const noLinks = [{ id: GUILD, type: 0, allow: '0', deny: String(Permission.EMBED_LINKS) }];
+      await w.h.db.prepare('UPDATE channels SET overwrites = ? WHERE id = ?').bind(JSON.stringify(noLinks), LOUNGE).run();
+      const res = await patch(w.h, w.a, msg.id, { content: 'Now with a link https://example.com/page' });
       expect(res.status).toBe(422);
       expect((await json(res)).policy_code).toBe('links_not_allowed');
     });
@@ -226,21 +223,10 @@ describe('editing a message', () => {
       expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(1);
     });
 
-    it('adds no strike when only the backup model blocked it', async () => {
-      const primary = mod(down);
-      const fallback = mod((req) => (req.content.includes('violent') ? { verdict: 'block', policy_code: 'violence' } : pass));
-      const w = await world({ moderator: primary, fallbackModerator: fallback });
-      // The original was sent while the primary was down too, through the backup.
-      const msg = await sent(w);
-      const res = await patch(w.h, w.a, msg.id, { content: 'something violent' });
-      expect(res.status).toBe(422);
-      expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(0);
-    });
-
     it('answers 503 when nothing can judge the edit, whatever the outage setting', async () => {
       let up = true;
       const moderator = mod(() => (up ? pass : down));
-      const w = await world({ moderator, fallbackModerator: null });
+      const w = await world({ moderator });
       const msg = await sent(w);
       up = false;
       for (const setting of ['hold', 'refuse'] as const) {
@@ -305,16 +291,6 @@ describe('editing a message', () => {
       expect((await json(res)).detail).toMatch(/was deleted/);
     });
 
-    it('not a poll', async () => {
-      const w = await world();
-      const poll = await json(await post(w.h, w.a, { channel_id: LOUNGE, content: 'Vote below', poll: { question: 'Which?', answers: ['A', 'B'] } }));
-      expect(poll.status).toBe('sent');
-      const res = await patch(w.h, w.a, poll.id, { content: 'Vote below, edited' });
-      expect(res.status).toBe(409);
-      expect((await json(res)).detail).toMatch(/poll can’t be edited/);
-      expect(await calls(w.h, 'PATCH', WEBHOOK_MESSAGE)).toHaveLength(0);
-    });
-
     it('not a message Discord never confirmed', async () => {
       const w = await world();
       const msg = await sent(w);
@@ -325,7 +301,7 @@ describe('editing a message', () => {
     it('only the agent’s own', async () => {
       const w = await world();
       const msg = await sent(w);
-      const other = await seedAgent(w.h.relay, { tier: 'claimed' });
+      const other = await seedAgent(w.h.relay);
       expect((await patch(w.h, other, msg.id, { content: 'Not yours to edit' })).status).toBe(404);
       expect((await patch(w.h, w.a, 'msg_NOSUCHMESSAGE0', { content: 'No such message' })).status).toBe(404);
     });
@@ -535,7 +511,7 @@ describe('deleting a message', () => {
   it('is only for the agent’s own messages', async () => {
     const w = await world();
     const msg = await sent(w);
-    const other = await seedAgent(w.h.relay, { tier: 'claimed' });
+    const other = await seedAgent(w.h.relay);
     expect((await remove(w.h, other, msg.id)).status).toBe(404);
     expect((await remove(w.h, w.a, 'msg_NOSUCHMESSAGE0')).status).toBe(404);
     const reader = await seedAgent(w.h.relay, { scopes: ['messages:read'] });

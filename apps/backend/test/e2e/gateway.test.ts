@@ -50,7 +50,8 @@ describe.skipIf(!E2E)('the Gateway Durable Object on workerd', () => {
   });
 
   it('stops when Discord rejects the bot token, without ever opening a socket', async () => {
-    const s = await start({ env: { DISCORD_BOT_TOKEN: 'not-the-token' } });
+    // Not ready: with the token refused, Discord can't say who the admins are, so nobody can do an admin's setup.
+    const s = await start({ env: { DISCORD_BOT_TOKEN: 'not-the-token' }, ready: false });
     await s.cron();
     const row = await eventually(status(s, /^stopped/), { what: 'the Gateway to stop' });
     expect(row.status).toBe('stopped: Discord rejected the bot token. Check DISCORD_BOT_TOKEN');
@@ -87,12 +88,12 @@ describe.skipIf(!E2E)('the Gateway Durable Object on workerd', () => {
       await eventually(() => s.fake.gateway.info()[0]!.connected && s.fake.gateway.info()[0]!.resumes === 1, { what: 'the session to be back' });
       expect(s.fake.gateway.received('IDENTIFY')).toHaveLength(1);
       expect(s.fake.gateway.received('RESUME')[0]!.d).toMatchObject({ token: s.fake.botToken, session_id: s.fake.gateway.info()[0]!.id });
-      const sent = s.fake.say(s.channels.lounge, { as: DEV.admin, content: 'after the reconnect' });
+      const sent = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: 'after the reconnect' });
       await eventually(messages(sent.id), { what: 'the message after the reconnect' });
     });
 
     it('sends heartbeats on the interval Discord asked for, with the last sequence number', async () => {
-      const sent = s.fake.say(s.channels.lounge, { as: DEV.admin, content: 'to move the sequence' });
+      const sent = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: 'to move the sequence' });
       await eventually(messages(sent.id), { what: 'the message' });
       const mark = s.fake.gateway.received('HEARTBEAT').length;
       await eventually(() => s.fake.gateway.received('HEARTBEAT').length >= mark + 3, { what: 'three more heartbeats' });
@@ -119,13 +120,13 @@ describe.skipIf(!E2E)('the Gateway Durable Object on workerd', () => {
     it('picks the session up again from storage after a restart, when the Durable Object has lost its memory', async () => {
       const [session] = s.fake.gateway.info();
       const before = s.fake.gateway.received('RESUME').length;
-      const live = s.fake.say(s.channels.lounge, { as: DEV.admin, content: 'before the restart' });
+      const live = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: 'before the restart' });
       await eventually(messages(live.id), { what: 'the message before the restart' });
 
       await s.restart();
       // The runtime dropped the socket and the object forgot everything it held in memory.
       await eventually(() => !s.fake.gateway.info()[0]!.connected, { what: 'the socket to close' });
-      const missed = s.fake.say(s.channels.lounge, { as: DEV.admin, content: 'while the object was gone' });
+      const missed = s.fake.say(s.channels.lounge, { as: DEV.newsbot, content: 'while the object was gone' });
 
       // Cron (or the alarm) wakes it; it reads the stored session and resumes it, replaying the message it missed.
       await s.cron();

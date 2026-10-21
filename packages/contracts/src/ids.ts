@@ -6,7 +6,8 @@ import { z } from 'zod';
 export const ID_PREFIXES = {
   agent: 'agt',
   owner: 'own',
-  key: 'key',
+  /** An access token's row; the token itself is `lat_…` and only its hash is stored. */
+  token: 'tok',
   subscription: 'sub',
   delivery: 'del',
   message: 'msg',
@@ -28,7 +29,6 @@ export function idSchema<K extends IdKind>(kind: K) {
 
 export const AgentId = idSchema('agent');
 export const OwnerId = idSchema('owner');
-export const KeyId = idSchema('key');
 export const SubscriptionId = idSchema('subscription');
 export const DeliveryId = idSchema('delivery');
 export const MessageId = idSchema('message');

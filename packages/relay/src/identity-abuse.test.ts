@@ -1,8 +1,8 @@
 import { LIMITS } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { checkAvatarUrl, checkDescription, checkName } from './services/names';
+import { checkAvatarUrl, checkName } from './services/names';
 import { clientHashes, purgeRawIpsJob, pruneOriginsJob, recordOrigin } from './services/origins';
-import { asOwner, count, easyChallenges, ipHeader, signUp, signedUp } from './signup.helpers';
+import { asOwner, count, easyChallenges, getChallenge, ipHeader, signUp, signedUp, solve } from './signup.helpers';
 import { NO_CLIENT, type ClientInfo } from './types';
 import { ADMIN_DISCORD, harness, seedAgent, seedOwner, type Harness } from './testing';
 
@@ -47,56 +47,41 @@ describe('bans stick', () => {
     const { h, act } = await withAdmin();
     await easyChallenges(h);
     const bad = await signedUp(h, 'Bad Actor', { headers: ipHeader('203.0.113.7') });
-    await act(bad.agent_id, { action: 'ban', reason: 'spam' });
-    expect((await bans(h, bad.agent_id)).results).toHaveLength(2);
+    await act(bad.registration_id, { action: 'ban', reason: 'spam' });
+    expect((await bans(h, bad.registration_id)).results).toHaveLength(2);
 
     for (const ip of ['203.0.113.7', '203.0.113.99']) {
       const res = await signUp(h, `Back Again ${ip.slice(-2)}`, { headers: ipHeader(ip) });
       expect(res.status, ip).toBe(403);
-      expect((await res.json()).code).toBe('forbidden');
     }
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(1);
-    expect((await signUp(h, 'Somewhere Else', { headers: ipHeader('198.51.100.9') })).status).toBe(201);
+    expect((await signUp(h, 'Somewhere Else', { headers: ipHeader('198.51.100.9') })).status).toBe(200);
 
     h.advance(LIMITS.bannedOriginDays * DAY + 1000);
-    expect((await signUp(h, 'Much Later', { headers: ipHeader('203.0.113.7') })).status).toBe(201);
+    expect((await signUp(h, 'Much Later', { headers: ipHeader('203.0.113.7') })).status).toBe(200);
   });
 
   it('leaves a challenge unspent when the origin is banned', async () => {
     const { h, act } = await withAdmin();
     await easyChallenges(h);
     const bad = await signedUp(h, 'Bad Actor', { headers: ipHeader('203.0.113.7') });
-    const { getChallenge, solve } = await import('./signup.helpers');
     const c = await getChallenge(h, ipHeader('203.0.113.7'));
-    await act(bad.agent_id, { action: 'ban', reason: 'spam' });
+    await act(bad.registration_id, { action: 'ban', reason: 'spam' });
     const res = await h.call(
       'POST',
-      '/v1/agents',
-      { name: 'Back Again', challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) },
+      '/agent/identity',
+      { type: 'anonymous', name: 'Back Again', pow: { challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) } },
       ipHeader('203.0.113.7'),
     );
     expect(res.status).toBe(403);
     expect(await h.db.prepare('SELECT used_at FROM pow_challenges WHERE id = ?').bind(c.challenge).first()).toEqual({ used_at: null });
   });
 
-  it('refuses dashboard registrations that arrive from a banned address, when the dashboard says where they come from', async () => {
-    const { h, act } = await withAdmin();
-    await easyChallenges(h);
-    const bad = await signedUp(h, 'Bad Actor', { headers: ipHeader('203.0.113.7') });
-    await act(bad.agent_id, { action: 'ban', reason: 'spam' });
-    const owner = await seedOwner(h.relay);
-    const create = (headers: Record<string, string>) =>
-      h.internal('POST', `/internal/owners/${owner.id}/agents`, { name: 'Dashboard Bot', scopes: ['messages:read'] }, { ...asOwner(owner.id), ...headers });
-    expect((await create(ipHeader('203.0.113.50'))).status).toBe(403);
-    expect(await count(h, 'SELECT COUNT(*) AS n FROM agents WHERE created_via = ?', 'dashboard')).toBe(0);
-    expect((await create(ipHeader('198.51.100.50'))).status).toBe(201);
-  });
-
   it('keeps the banned agent’s name out of reach, lookalikes included', async () => {
     const { h, act } = await withAdmin();
     await easyChallenges(h);
     const bad = await signedUp(h, 'Bad Actor', { headers: ipHeader('203.0.113.7') });
-    await act(bad.agent_id, { action: 'ban', reason: 'spam' });
+    await act(bad.registration_id, { action: 'ban', reason: 'spam' });
     for (const name of ['Bad Actor', 'bad-actor']) expect((await signUp(h, name, { headers: ipHeader('198.51.100.9') })).status, name).toBe(409);
     expect((await signUp(h, 'Вad Actor', { headers: ipHeader('198.51.100.9') })).status).toBe(422);
   });
@@ -111,7 +96,7 @@ describe('bans stick', () => {
     expect((await act(a.id, { action: 'reinstate', reason: 'mistake' })).status).toBe(200);
     expect((await bans(h, a.id)).results).toEqual([]);
     await easyChallenges(h);
-    expect((await signUp(h, 'Fresh Start', { headers: ipHeader('203.0.113.7') })).status).toBe(201);
+    expect((await signUp(h, 'Fresh Start', { headers: ipHeader('203.0.113.7') })).status).toBe(200);
   });
 });
 
@@ -194,20 +179,6 @@ describe('origin retention', () => {
   });
 });
 
-describe('avatars and the tier', () => {
-  it('losing the trusted tier takes the avatar with it; gaining it adds nothing', async () => {
-    const { h, act } = await withAdmin();
-    const a = await seedAgent(h.relay, { tier: 'trusted' });
-    await h.db.prepare("UPDATE agents SET avatar_url = 'https://cdn.example.com/a.png' WHERE id = ?").bind(a.id).run();
-    expect((await act(a.id, { action: 'set_tier', tier: 'claimed', reason: 'demoted' })).status).toBe(200);
-    expect(await h.db.prepare('SELECT avatar_url FROM agents WHERE id = ?').bind(a.id).first()).toEqual({ avatar_url: null });
-    const entry = await h.db.prepare("SELECT diff FROM audit_log WHERE action = 'agent.tier_changed'").first<{ diff: string }>();
-    expect(JSON.parse(entry!.diff)).toEqual({ tier: { from: 'trusted', to: 'claimed' }, avatar_url: { from: 'https://cdn.example.com/a.png', to: null } });
-    expect((await act(a.id, { action: 'set_tier', tier: 'trusted', reason: 'back' })).status).toBe(200);
-    expect(await h.db.prepare('SELECT avatar_url FROM agents WHERE id = ?').bind(a.id).first()).toEqual({ avatar_url: null });
-  });
-});
-
 describe('searching the registry', () => {
   it('refuses a search too long for D1’s 50-byte LIKE pattern, and accepts one that fits', async () => {
     const { h, admin } = await withAdmin();
@@ -227,27 +198,6 @@ describe('searching the registry', () => {
 });
 
 describe('the fixed message rules on profile text', () => {
-  it.each([
-    ['Join discord.gg/abcdef', 'invite_link'],
-    ['Docs at bit.ly/x', 'blocked_domain'],
-    ['key lk_abcdefghijklmnopqrstuvwxyz1234', 'secret_leak'],
-    ['write to ada@orrery.dev', 'personal_info'],
-    ['call +44 20 7946 0958', 'personal_info'],
-    ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'spam'],
-  ])('refuse a description like %j with %s, without repeating it', (text, code) => {
-    const r = checkDescription(text);
-    expect(r).toMatchObject({ ok: false, code });
-    expect(JSON.stringify(r)).not.toContain('lk_abcdef');
-    // A profile isn't posted anywhere: the sentence says it wasn't saved.
-    const reason = (r as { reason: string }).reason;
-    expect(reason).toContain('wasn’t saved');
-    expect(reason).not.toMatch(/posted/);
-  });
-
-  it('accept plain descriptions with an ordinary link', () => {
-    expect(checkDescription('Summarises threads. Source: https://github.com/example/moth')).toEqual({ ok: true });
-  });
-
   it('refuse names that are blocked sites, and still allow ordinary ones', () => {
     expect(checkName('bit.ly')).toMatchObject({ ok: false, code: 'blocked_domain' });
     expect(checkName('Moth-9')).toEqual({ ok: true });

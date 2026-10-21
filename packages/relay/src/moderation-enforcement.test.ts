@@ -1,15 +1,13 @@
-import { APPEAL_MESSAGE_CHARS, LIMITS, POLL_LIMITS, newId } from '@logitland/contracts';
-import { describe, expect, it, vi } from 'vitest';
+import { APPEAL_MESSAGE_CHARS, LIMITS, newId } from '@logitland/contracts';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { decideAppeal } from './services/moderation/admin';
-import { OUTAGE_BACKOFF_MINUTES, RULE_BLOCKS_PER_STRIKE, explain, isOnProbation, outageGiveUpMinutes, outageRecheckDue } from './services/moderation/policy';
+import { OUTAGE_BACKOFF_MINUTES, RULE_BLOCKS_PER_STRIKE, explain, outageGiveUpMinutes, outageRecheckDue } from './services/moderation/policy';
 import { evaluateRules, judge } from './services/moderation/rules';
-import { rulesMd } from './services/moderation/rules-doc';
-import { createReport } from './services/reports';
 import { RECHECK_BUDGET_MS, reviewHeldJob } from './services/review';
 import { sweepStuckJob } from './services/sending';
 import { activeStrikeCount, addStrike } from './services/strikes';
 import { converse, down, json, mod, patch, pass, post, row, say, world } from './posting-fixtures';
-import { ADMIN_DISCORD, LOUNGE, seedOwner, type Harness } from './testing';
+import { ADMIN_DISCORD, LOUNGE, harness, seedAgent, seedOwner, type Harness } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -82,7 +80,7 @@ describe('repeated fixed-rule blocks earn a strike', () => {
 
   it('counts invites, blocked domains, hidden characters and credentials together, but not spam holds or classifier blocks', async () => {
     const w = await world({ moderator: mod({ verdict: 'block', policy_code: 'hate' }) });
-    const mixed = [say('discord.gg/abc123'), say('see https://bit.ly/x'), say(`hidden​ character`), say(`key ${'lk_'}${'K7QMXV2D'.repeat(4)}`)];
+    const mixed = [say('discord.gg/abc123'), say('see https://bit.ly/x'), say(`hidden​ character`), say(`key ${'lat_'}${'K7QMXV2D'.repeat(4)}`)];
     for (const body of mixed) expect((await json(await post(w.h, w.a, body))).status).toBe('blocked');
     expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(0);
     expect((await json(await post(w.h, w.a, say('discord.gg/abc999')))).status_reason).toMatch(/earn a strike/);
@@ -91,17 +89,8 @@ describe('repeated fixed-rule blocks earn a strike', () => {
     const calm = await world();
     for (let i = 0; i < 8; i++) expect((await json(await post(calm.h, calm.a, say(`${'x'.repeat(40)} ${i}`)))).status).toBe('held');
     expect(await activeStrikeCount(calm.h.relay, calm.a.id)).toBe(0);
-    for (let i = 0; i < RULE_BLOCKS_PER_STRIKE; i++) await post(calm.h, calm.a, say(`mark ${i} here: lk_${'K7QMXV2D'.repeat(4)}`));
+    for (let i = 0; i < RULE_BLOCKS_PER_STRIKE; i++) await post(calm.h, calm.a, say(`mark ${i} here: lat_${'K7QMXV2D'.repeat(4)}`));
     expect(await activeStrikeCount(calm.h.relay, calm.a.id)).toBe(1);
-  });
-
-  it('does not strike for answers only the backup model gave', async () => {
-    const w = await world({
-      moderator: mod({ verdict: null, unavailable: true, reason: 'down' }),
-      fallbackModerator: mod({ verdict: 'block', policy_code: 'violence' }),
-    });
-    for (let i = 0; i < 6; i++) await post(w.h, w.a, say(`a message the backup model dislikes ${i}`));
-    expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(0);
   });
 
   it('counts refused edits too', async () => {
@@ -119,7 +108,7 @@ describe('repeated fixed-rule blocks earn a strike', () => {
 });
 
 describe('refusal sentences match what happened to the message', () => {
-  const mixed = { probation: true };
+  const mixed = { links: false };
 
   it('says a blocked message was not posted and what to change, even when a hold rule also matched', () => {
     const r = judge(evaluateRules({ content: 'join discord.gg/abc123 or write me@example.com, see https://example.com' }, mixed));
@@ -138,7 +127,7 @@ describe('refusal sentences match what happened to the message', () => {
     expect(r.reason).toMatch(/It is held for a reviewer, so you don’t need to send it again\.$/);
     expect(r.reason).not.toMatch(/not posted|Leave personal details out|send it again\.\s/);
     const link = judge(evaluateRules({ content: 'see https://example.com/a' }, mixed));
-    expect(link.reason).toMatch(/agents on probation can’t post links yet/);
+    expect(link.reason).toMatch(/agents at your level can’t post links in this channel yet/);
     expect(link.reason).toMatch(/held for a reviewer/);
   });
 
@@ -168,23 +157,6 @@ describe('refusal sentences match what happened to the message', () => {
     expect(policy_code).toBe('privacy');
     expect(detail).toMatch(/Your edit was not applied/);
     expect(detail).not.toMatch(/held|not posted|internal remark|Moderator note/);
-  });
-});
-
-describe('probation does not depend on the tier', () => {
-  const settings = { probation_posts: 20 };
-  const now = new Date('2026-10-19T12:00:00Z');
-  const agent = (tier: 'new' | 'claimed' | 'trusted', until: string | null, posts: number) => ({ tier, probation_until: until, probation_posts: posts });
-
-  it('ends only when both the hours and the posts are done, and for a trusted agent at once', () => {
-    const later = '2026-10-20T00:00:00.000Z';
-    const earlier = '2026-10-19T00:00:00.000Z';
-    for (const tier of ['new', 'claimed'] as const) {
-      expect(isOnProbation(agent(tier, later, 20), settings, now), `${tier}: hours left`).toBe(true);
-      expect(isOnProbation(agent(tier, earlier, 5), settings, now), `${tier}: posts left`).toBe(true);
-      expect(isOnProbation(agent(tier, earlier, 20), settings, now), `${tier}: done`).toBe(false);
-    }
-    expect(isOnProbation(agent('trusted', later, 0), settings, now)).toBe(false);
   });
 });
 
@@ -272,29 +244,32 @@ describe('the stuck-message sweep', () => {
 });
 
 describe('reports', () => {
-  const report = (h: Harness, target: string, ref: string) =>
-    createReport(h.relay, { target_type: 'message', target_id: target, reason: 'not welcome here' }, { kind: 'public', ref });
+  const report = (h: Harness, target: string, from: { token: string }) =>
+    h.call('POST', '/v1/reports', { target_type: 'message', target_id: target, reason: 'disruptive' }, h.as(from.token));
 
   it('lists the busy targets first, with the exact count worked out for the rows on the page', async () => {
     const w = await world();
     const api = await admin(w.h);
     const quiet = await converse(w.h, { content: 'a quiet one' });
     const busy = await converse(w.h, { content: 'a busy one' });
-    await report(w.h, quiet, 'r0');
+    // Each with its own owner, so each counts as an independent reporter.
+    const owners = await Promise.all([1, 2, 3, 4].map((i) => seedOwner(w.h.relay, `20000000000000010${i}`, `reporter-${i}`)));
+    const [r0, r1, r2, r3] = await Promise.all(owners.map((o) => seedAgent(w.h.relay, { level: 3, ownerId: o.id })));
+    await report(w.h, quiet, r0!);
     w.h.advance(1000);
-    for (const ref of ['r1', 'r2', 'r3', 'r3']) {
-      await report(w.h, busy, ref);
+    for (const r of [r1!, r2!, r3!, r3!]) {
+      await report(w.h, busy, r);
       w.h.advance(1000);
     }
     const page = await json(await w.h.internal('GET', '/internal/admin/reports', undefined, api));
-    expect(page.reports.map((r: any) => [r.target_id, r.priority, r.reporters_24h])).toEqual([
+    expect(page.reports.map((r: any) => [r.target_id, r.priority, r.reporters])).toEqual([
       [busy, 'high', 3],
       [busy, 'high', 3],
       [busy, 'high', 3],
       [quiet, 'normal', 1],
     ]);
     const second = await json(await w.h.internal('GET', '/internal/admin/reports?limit=2&offset=2', undefined, api));
-    expect(second.reports.map((r: any) => [r.priority, r.reporters_24h])).toEqual([
+    expect(second.reports.map((r: any) => [r.priority, r.reporters])).toEqual([
       ['high', 3],
       ['normal', 1],
     ]);
@@ -302,7 +277,7 @@ describe('reports', () => {
     expect((await json(await w.h.internal('GET', '/internal/admin/reports?limit=2', undefined, api))).next_offset).toBe(2);
   });
 
-  it('uses the target index for the per-target counts and the last day’s reports', async () => {
+  it('uses an index for the same-reporter check and the per-target count', async () => {
     const w = await world();
     const plan = async (sql: string, ...args: unknown[]) =>
       (
@@ -313,75 +288,14 @@ describe('reports', () => {
       ).results
         .map((r) => r.detail)
         .join('\n');
-    const same = await plan(
-      "SELECT id FROM reports WHERE target_type = ? AND target_id = ? AND reporter_kind = ? AND COALESCE(reporter_ref, '') = ? AND status = 'open'",
-      'message',
-      '1',
-      'public',
-      'x',
-    );
-    expect(same).toContain('reports_target');
+    const same = await plan("SELECT id FROM reports WHERE target_type = ? AND target_id = ? AND reporter_id = ? AND status = 'open'", 'message', '1', 'agt_x');
+    expect(same).toMatch(/USING INDEX reports_(open_reporter|target)/);
     const counted = await plan(
-      "SELECT COUNT(DISTINCT reporter_kind || ':' || COALESCE(reporter_ref, '')) AS n FROM reports WHERE target_type = ? AND target_id = ? AND created_at >= ?",
+      "SELECT COUNT(DISTINCT reporter_key) AS n FROM reports WHERE target_type = ? AND target_id = ? AND status = 'open'",
       'message',
       '1',
-      'a',
     );
     expect(counted).toContain('reports_target');
-    const recent = await plan(
-      "SELECT target_type, target_id FROM reports INDEXED BY reports_created WHERE created_at >= ? GROUP BY target_type, target_id HAVING COUNT(DISTINCT reporter_kind || ':' || COALESCE(reporter_ref, '')) >= 3",
-      'a',
-    );
-    expect(recent).toContain('reports_created');
-  });
-});
-
-describe('hiding a message someone else wrote', () => {
-  it('hides a reported person’s message from the mirror and agents, closes the report, and audits it', async () => {
-    const w = await world();
-    const api = await admin(w.h);
-    const message = await converse(w.h, { content: 'something unkind', name: 'Ann' });
-    const { id } = await createReport(w.h.relay, { target_type: 'message', target_id: message, reason: 'unkind' }, { kind: 'public', ref: 'r1' });
-    const res = await w.h.internal('POST', `/internal/admin/reports/${id}`, { action: 'hide', note: 'Targets a person' }, api);
-    expect(res.status).toBe(200);
-    expect(await json(res)).toMatchObject({ status: 'actioned', message: { deleted: true, content: null } });
-    expect(await w.h.db.prepare('SELECT content, deleted_at, removed_by FROM conversation WHERE message_id = ?').bind(message).first()).toMatchObject({
-      content: null,
-      removed_by: 'moderator',
-    });
-    const audits = (await w.h.db.prepare("SELECT actor_type, target_id, reason FROM audit_log WHERE action = 'message.hidden'").all()).results;
-    expect(audits).toEqual([{ actor_type: 'admin', target_id: message, reason: 'Targets a person' }]);
-    expect(await count(w.h, "SELECT COUNT(*) AS n FROM events WHERE type = 'message.deleted' AND message_id = ?", message)).toBe(1);
-  });
-
-  it('works without a report too, is safe to repeat, and refuses what it cannot hide', async () => {
-    const w = await world();
-    const api = await admin(w.h);
-    const hide = (id: string, body: unknown = {}) => w.h.internal('POST', `/internal/admin/mirror/messages/${id}/hide`, body, api);
-    const bot = await converse(w.h, { author: 'bot', name: 'Helper' });
-    const webhook = await converse(w.h, { author: 'webhook', name: 'Bridge' });
-    expect(await json(await hide(bot))).toEqual({ message_id: bot, hidden: true });
-    expect(await json(await hide(bot))).toEqual({ message_id: bot, hidden: false });
-    expect(await json(await hide(webhook, { note: 'Spam relay' }))).toEqual({ message_id: webhook, hidden: true });
-    expect(await count(w.h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'message.hidden'")).toBe(2);
-
-    const agentMessage = await converse(w.h, { author: 'agent', name: 'Some agent' });
-    expect((await hide(agentMessage)).status).toBe(400);
-    expect((await hide('999999999999999999')).status).toBe(404);
-    expect((await hide('not-a-snowflake')).status).toBe(400);
-    const notAdmin = await seedOwner(w.h.relay, '200000000000000008', 'not-admin');
-    expect((await w.h.internal('POST', `/internal/admin/mirror/messages/${bot}/hide`, {}, { 'x-logitland-owner': notAdmin.id })).status).toBe(403);
-  });
-
-  it('keeps a report open when the message cannot be hidden', async () => {
-    const w = await world();
-    const api = await admin(w.h);
-    const agentMessage = await converse(w.h, { author: 'agent', name: 'Some agent' });
-    const { id } = await createReport(w.h.relay, { target_type: 'message', target_id: agentMessage, reason: 'meh' }, { kind: 'public', ref: 'r1' });
-    expect((await w.h.internal('POST', `/internal/admin/reports/${id}`, { action: 'hide' }, api)).status).toBe(400);
-    expect((await w.h.db.prepare('SELECT status FROM reports WHERE id = ?').bind(id).first<{ status: string }>())!.status).toBe('open');
-    const agentReport = await createReport(w.h.relay, { target_type: 'agent', target_id: w.a.id, reason: 'meh' }, { kind: 'public', ref: 'r2' });
-    expect((await w.h.internal('POST', `/internal/admin/reports/${agentReport.id}`, { action: 'hide' }, api)).status).toBe(400);
   });
 });
 
@@ -397,7 +311,7 @@ describe('deciding an appeal', () => {
       actor: { type: 'admin', id: adminId },
     });
     const filed = await json(
-      await w.h.call('POST', '/v1/appeals', { target_type: 'strike', target_id: strike.id, message: 'That was not spam at all.' }, w.h.as(w.a.key)),
+      await w.h.call('POST', '/v1/appeals', { target_type: 'strike', target_id: strike.id, message: 'That was not spam at all.' }, w.h.as(w.a.token)),
     );
     const real = w.h.relay.db;
     let fail = true;
@@ -438,7 +352,7 @@ describe('deciding an appeal', () => {
       actor: { type: 'admin', id: adminId },
     });
     const filed = await json(
-      await w.h.call('POST', '/v1/appeals', { target_type: 'strike', target_id: strike.id, message: 'That was not spam at all.' }, w.h.as(w.a.key)),
+      await w.h.call('POST', '/v1/appeals', { target_type: 'strike', target_id: strike.id, message: 'That was not spam at all.' }, w.h.as(w.a.token)),
     );
     await decideAppeal(w.h.relay, adminId, filed.id, { decision: 'uphold', response: 'It was spam.' });
     expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(1);
@@ -448,7 +362,10 @@ describe('deciding an appeal', () => {
 });
 
 describe('the community rules document', () => {
-  const doc = rulesMd('https://relay.example.test');
+  let doc: string;
+  beforeAll(async () => {
+    doc = await (await harness().call('GET', '/v1/rules.md')).text();
+  });
 
   it('has a valid policy table, and no rows for codes that are never sent', () => {
     expect(doc).toContain('| Code | Meaning |\n|---|---|\n| `control_chars` |');
@@ -458,23 +375,20 @@ describe('the community rules document', () => {
     expect(doc).toMatch(/refused with a 400 `invalid_request`[^.]*carries no policy code/);
   });
 
-  it('describes probation as applying to every agent until the hours and the posts are done', () => {
-    expect(doc).toContain('Every agent starts on probation, whether or not an owner has claimed it.');
-    expect(doc).toContain(`${LIMITS.probationHours} hours have passed **and** ${LIMITS.probationPosts} of its messages`);
-    expect(doc).toContain('does not end probation');
-    expect(doc).toContain('Only an admin making the agent trusted ends it early');
-    expect(doc).not.toMatch(/stops being new|one nobody has claimed/);
+  it('describes probation as level 0, ended by XP and not by adoption', () => {
+    expect(doc).toContain('Level 0 is probation.');
+    expect(doc).toContain("Probation ends when your XP reaches level 1; adoption raises your limits but doesn't end it.");
   });
 
   it('gives agents plain duties about people’s messages and their own key', () => {
     for (const phrase of [
       '## People and their messages',
-      "Not store or quote people who haven't agreed",
+      'Not go looking for people',
       '`message.deleted` or `message.bulk_deleted`',
       "Not train models on people's messages",
-      'Not bulk-export the mirror',
+      'Not bulk-export the server',
       'Not fetch links from chat blindly',
-      'POST /v1/me/keys/rotate',
+      'POST /oauth2/revoke',
     ]) {
       expect(doc, phrase).toContain(phrase);
     }
@@ -485,7 +399,6 @@ describe('the community rules document', () => {
     expect(doc).toContain('checks again after 1 minute, then after a further 1, 2, 5, 10 and 30 minutes, and then every 60 minutes');
     expect(doc).toContain('after about 7 hours');
     expect(doc).toContain(`message\` is ${APPEAL_MESSAGE_CHARS.min} to ${APPEAL_MESSAGE_CHARS.max} characters`);
-    expect(doc).toContain(`up to ${POLL_LIMITS.questionChars} characters`);
     expect(doc).toContain(`${LIMITS.messageChars.toLocaleString('en-US')} characters`);
     expect(doc).toContain(`stay \`queued\``);
   });

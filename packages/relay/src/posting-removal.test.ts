@@ -1,30 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FORUM_ID, converse, json, mod, post, remove, row, say, world } from './posting-fixtures';
+import { FORUM_ID, converse, json, post, remove, row, say, world } from './posting-fixtures';
 import { UNCERTAIN_REASON } from './services/moderation/rows';
 import { ADMIN_DISCORD, seedOwner } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
-const TEXT_COLUMNS = ['content', 'thread_name', 'poll', 'reply_prefix'] as const;
+const TEXT_COLUMNS = ['content', 'thread_name', 'reply_prefix'] as const;
 const blanks = (r: Record<string, any> | null) => Object.fromEntries(TEXT_COLUMNS.map((c) => [c, r?.[c] ?? null]));
-const ALL_NULL = { content: null, thread_name: null, poll: null, reply_prefix: null };
+const ALL_NULL = { content: null, thread_name: null, reply_prefix: null };
 
-/** A forum post with a poll, and a reply: between them every text column is filled. */
+/** A forum post and a reply: between them every text column is filled. */
 async function filledPosts(w: Awaited<ReturnType<typeof world>>) {
   const target = await converse(w.h, { content: 'what do you all think?' });
   const reply = await json(await post(w.h, w.a, say('I think so too', { reply_to: target })));
-  const thread = await json(
-    await post(w.h, w.a, {
-      channel_id: FORUM_ID,
-      thread_name: 'Plans for the week',
-      content: 'forum text',
-      poll: { question: 'Which day?', answers: ['Mon', 'Tue'] },
-    }),
-  );
+  const thread = await json(await post(w.h, w.a, { channel_id: FORUM_ID, thread_name: 'Plans for the week', content: 'forum text' }));
   expect(await row(w.h, reply.id)).toMatchObject({ status: 'sent', content: 'I think so too' });
-  expect((await row(w.h, reply.id))!.reply_prefix).toMatch(/Replying to/);
+  expect((await row(w.h, reply.id))!.reply_prefix).toMatch(/replying to/);
   expect(await row(w.h, thread.id)).toMatchObject({ status: 'sent', content: 'forum text', thread_name: 'Plans for the week' });
-  expect((await row(w.h, thread.id))!.poll).toContain('Which day?');
   return { reply: reply.id as string, thread: thread.id as string };
 }
 
@@ -35,7 +27,7 @@ describe('removing a message blanks its text in the relay’s own record', () =>
     for (const id of [reply, thread]) {
       const res = await remove(w.h, w.a, id);
       expect(res.status).toBe(200);
-      expect(await json(res)).toMatchObject({ status: 'removed', content: null, poll: null });
+      expect(await json(res)).toMatchObject({ status: 'removed', content: null });
       expect(blanks(await row(w.h, id))).toEqual(ALL_NULL);
       expect(await row(w.h, id)).toMatchObject({ status: 'removed', status_reason: 'Deleted by its author.' });
     }
@@ -57,7 +49,7 @@ describe('removing a message blanks its text in the relay’s own record', () =>
     }
   });
 
-  it('when a moderator takes it down, and the agent, its owner and an appeal all cope with the missing text', async () => {
+  it('except when a moderator takes it down: the record keeps it for the appeal, where the agent, its owner and the reviewer see it', async () => {
     const w = await world();
     const admin = await seedOwner(w.h.relay, ADMIN_DISCORD, 'admin');
     const owner = await seedOwner(w.h.relay, '200000000000000007', 'owner');
@@ -70,24 +62,24 @@ describe('removing a message blanks its text in the relay’s own record', () =>
       { 'x-logitland-owner': admin.id },
     );
     expect(take.status).toBe(200);
-    expect(blanks(await row(w.h, thread))).toEqual(ALL_NULL);
-    expect(await row(w.h, thread)).toMatchObject({ status: 'removed', policy_code: 'spam' });
+    // A moderator's removal is kept a year, for the appeal (#30 Q7).
+    expect(await row(w.h, thread)).toMatchObject({ status: 'removed', policy_code: 'spam', content: 'forum text' });
 
-    const mine = await w.h.call('GET', `/v1/messages/${thread}`, undefined, w.h.as(w.a.key));
-    expect(await json(mine)).toMatchObject({ id: thread, status: 'removed', content: null, poll: null });
+    const mine = await w.h.call('GET', `/v1/messages/${thread}`, undefined, w.h.as(w.a.token));
+    expect(await json(mine)).toMatchObject({ id: thread, status: 'removed', content: 'forum text' });
 
     const list = await json(await w.h.internal('GET', `/internal/owners/${owner.id}/messages`, undefined, { 'x-logitland-owner': owner.id }));
-    expect(list.messages.find((m: any) => m.id === thread)).toMatchObject({ status: 'removed', content: null, thread_name: null, poll: null });
+    expect(list.messages.find((m: any) => m.id === thread)).toMatchObject({ status: 'removed', content: 'forum text' });
 
     const appeal = await w.h.call(
       'POST',
       '/v1/appeals',
       { target_type: 'message', target_id: thread, message: 'This was on topic for the forum.' },
-      w.h.as(w.a.key),
+      w.h.as(w.a.token),
     );
     expect(appeal.status).toBe(201);
     const queue = await json(await w.h.internal('GET', '/internal/admin/appeals', undefined, { 'x-logitland-owner': admin.id }));
-    expect(queue.appeals[0].subject).toMatchObject({ status: 'removed', content: null, poll: null });
+    expect(queue.appeals[0].subject).toMatchObject({ status: 'removed', content: 'forum text' });
     const decided = await w.h.internal(
       'POST',
       `/internal/admin/appeals/${queue.appeals[0].id}`,
@@ -95,7 +87,6 @@ describe('removing a message blanks its text in the relay’s own record', () =>
       { 'x-logitland-owner': admin.id },
     );
     expect(decided.status).toBe(200);
-    expect(await row(w.h, thread)).toMatchObject({ status: 'removed', content: null });
   });
 });
 
@@ -104,34 +95,12 @@ describe('an unconfirmed send', () => {
     const w = await world();
     const sent = await json(await post(w.h, w.a, say('it did go out')));
     await w.h.db.prepare('UPDATE relay_messages SET status_reason = ? WHERE id = ?').bind(UNCERTAIN_REASON, sent.id).run();
-    const mine = await json(await w.h.call('GET', `/v1/messages/${sent.id}`, undefined, w.h.as(w.a.key)));
+    const mine = await json(await w.h.call('GET', `/v1/messages/${sent.id}`, undefined, w.h.as(w.a.token)));
     expect(mine).toMatchObject({ status: 'sent', status_reason: null });
     await w.h.db.prepare("UPDATE relay_messages SET status = 'uncertain' WHERE id = ?").bind(sent.id).run();
-    expect((await json(await w.h.call('GET', `/v1/messages/${sent.id}`, undefined, w.h.as(w.a.key)))).status_reason).toBe(UNCERTAIN_REASON);
+    expect((await json(await w.h.call('GET', `/v1/messages/${sent.id}`, undefined, w.h.as(w.a.token)))).status_reason).toBe(UNCERTAIN_REASON);
     expect(UNCERTAIN_REASON).not.toMatch(/in time/);
     expect(UNCERTAIN_REASON).toMatch(/answered with an error/);
-  });
-
-  it('is listed for an admin across agents, newest first, and can be resolved there', async () => {
-    const w = await world({ moderator: mod() });
-    const admin = await seedOwner(w.h.relay, ADMIN_DISCORD, 'admin');
-    const asAdmin = { 'x-logitland-owner': admin.id };
-    const first = await json(await post(w.h, w.a, say('first of two')));
-    const second = await json(await post(w.h, w.a, say('second of two')));
-    const fine = await json(await post(w.h, w.a, say('sent normally')));
-    for (const m of [first, second]) await w.h.db.prepare("UPDATE relay_messages SET status = 'uncertain' WHERE id = ?").bind(m.id).run();
-
-    const list = await json(await w.h.internal('GET', '/internal/admin/messages/uncertain', undefined, asAdmin));
-    expect(list.messages.map((m: any) => m.id)).toEqual([first.id, second.id].sort().reverse());
-    expect(list.messages[0]).toMatchObject({ status: 'uncertain', agent_name: w.a.name });
-    expect(list.messages.some((m: any) => m.id === fine.id)).toBe(false);
-    expect((await json(await w.h.internal('GET', '/internal/admin/messages/uncertain?limit=1', undefined, asAdmin))).next_before).toBe(list.messages[0].id);
-
-    const accepted = await w.h.internal('POST', `/internal/admin/messages/${first.id}/resolve`, { action: 'accept' }, asAdmin);
-    expect(await json(accepted)).toMatchObject({ status: 'sent' });
-    expect((await json(await w.h.internal('GET', '/internal/admin/messages/uncertain', undefined, asAdmin))).messages).toHaveLength(1);
-    const notAdmin = await seedOwner(w.h.relay, '200000000000000008', 'not-admin');
-    expect((await w.h.internal('GET', '/internal/admin/messages/uncertain', undefined, { 'x-logitland-owner': notAdmin.id })).status).toBe(403);
   });
 });
 
@@ -156,7 +125,7 @@ describe('validation messages say what to send', () => {
 
   it('says how long an appeal message must be', async () => {
     const w = await world();
-    const res = await w.h.call('POST', '/v1/appeals', { target_type: 'message', target_id: 'msg_x', message: 'short' }, w.h.as(w.a.key));
+    const res = await w.h.call('POST', '/v1/appeals', { target_type: 'message', target_id: 'msg_x', message: 'short' }, w.h.as(w.a.token));
     expect(res.status).toBe(400);
     expect(JSON.stringify(await json(res))).toContain('at least 10 characters');
   });

@@ -1,13 +1,17 @@
-import type { AgentStatus, Owner, Scope } from '@logitland/contracts';
+import type { AdminPermission, AdminStanding, AgentStatus, Owner, Scope } from '@logitland/contracts';
 import type { Context, Hono, MiddlewareHandler } from 'hono';
 import type { Relay } from '../context';
 import { timingSafeEqual } from '../crypto';
 import { RelayError, forbidden, unauthorized } from '../errors';
-import { authenticateKey, getOwner, isAdmin } from '../services/identity';
+import { adminStanding } from '../services/admins';
+import { getOwner } from '../services/identity';
+import { standingOf } from '../services/levels';
+import { enforce } from '../services/limits';
 import { isWorkerAddress } from '../services/origins';
+import { authenticateToken } from '../services/tokens';
 import type { AgentPrincipal, ClientInfo } from '../types';
 
-export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; client: ClientInfo } };
+export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; standing: AdminStanding; client: ClientInfo } };
 export type AppContext = Context<Env>;
 export type App = Hono<Env>;
 
@@ -24,7 +28,7 @@ export async function body(c: AppContext): Promise<unknown> {
 }
 
 export function requireScope(c: AppContext, scope: Scope): void {
-  if (!c.get('principal').scopes.includes(scope)) throw forbidden(`This key doesn’t have ${scope}`);
+  if (!c.get('principal').scopes.includes(scope)) throw forbidden(`This access token doesn’t have ${scope}`);
 }
 
 /** Cloudflare's view of the caller. Set for every request by the app. */
@@ -40,16 +44,27 @@ export function clientInfo(c: Context): ClientInfo {
   };
 }
 
-/** Bearer `lk_…` key → principal. Use on every /v1 route except signup. Only active agents pass unless `allowStatuses` says otherwise. */
+/** The request's Bearer token, if it has one. */
+export function bearer(c: Context): string | null {
+  const [kind, token] = (c.req.header('authorization') ?? '').split(' ');
+  return kind === 'Bearer' && token ? token : null;
+}
+
+/**
+ * Bearer access token → principal. Use on every /v1 route. Only active agents pass unless `allowStatuses` says otherwise. A
+ * 401 points at the protected-resource metadata, where auth.md's discovery starts.
+ */
 export function agentAuth(relay: Relay, opts: { allowStatuses?: AgentStatus[] } = {}): MiddlewareHandler<Env> {
   return async (c, next) => {
-    const auth = c.req.header('authorization') ?? '';
-    const [kind, token] = auth.split(' ');
-    if (kind !== 'Bearer' || !token) {
-      c.header('www-authenticate', 'Bearer realm="logitland"');
-      throw unauthorized('Send your relay key as a Bearer token');
+    try {
+      const token = bearer(c);
+      if (!token) throw unauthorized(`Send an access token as a Bearer token. To get one, read ${relay.config.publicUrl}/auth.md.`);
+      c.set('principal', await authenticateToken(relay, token, c.get('client'), opts));
+    } catch (err) {
+      if (err instanceof RelayError && err.status === 401)
+        c.header('www-authenticate', `Bearer resource_metadata="${relay.config.publicUrl}/.well-known/oauth-protected-resource"`);
+      throw err;
     }
-    c.set('principal', await authenticateKey(relay, token, c.get('client'), opts));
     await next();
   };
 }
@@ -76,17 +91,32 @@ export function ownerBinding(): MiddlewareHandler<Env> {
   };
 }
 
-/** Admin routes re-check admin rights here, not only in the UI. */
+/**
+ * Admin routes re-check admin standing here, not only in the UI: anyone holding an admin permission passes, and each route
+ * then asks for its own with `adminCan`.
+ */
 export function adminGuard(relay: Relay): MiddlewareHandler<Env> {
   return async (c, next) => {
     const ownerId = c.req.header('x-logitland-owner');
     if (!ownerId) throw unauthorized('Admin routes need the signed-in owner');
     const owner = await getOwner(relay, ownerId);
-    if (!isAdmin(relay, owner)) throw forbidden('This person isn’t a relay admin');
+    const standing = await adminStanding(relay, owner.discord_user_id);
+    if (!standing.permissions.length) throw forbidden('This person isn’t a relay admin');
     c.set('admin', owner);
+    c.set('standing', standing);
     await next();
   };
 }
+
+/** One admin route's requirement: a permission, or `full` for what only the bot's Developer team may do. */
+export const adminCan =
+  (need: AdminPermission | 'full'): MiddlewareHandler<Env> =>
+  async (c, next) => {
+    const { full, permissions } = c.get('standing');
+    if (need === 'full' ? !full : !permissions.includes(need))
+      throw forbidden(need === 'full' ? 'Only full admins, the bot’s Developer team, can do that' : `That needs the ${need} admin permission`);
+    await next();
+  };
 
 /** Parses a page-size query parameter as an integer within bounds. */
 export function intQuery(c: AppContext, name: string, fallback: number, min: number, max: number): number {
@@ -103,4 +133,25 @@ export function snowflakeQuery(c: AppContext, name: string): string | undefined 
   if (raw === undefined || raw === '') return undefined;
   if (!/^\d{17,20}$/.test(raw)) throw new RelayError(400, 'invalid_request', `${name} must be a Discord message ID`);
   return raw;
+}
+
+/**
+ * Per agent, not per token: an agent can hold several tokens, and each one would otherwise bring its own allowance. The number
+ * is its level's. Readers (the web app, admin-made) have no read limit, so `null`.
+ */
+async function readLimit(relay: Relay, c: AppContext) {
+  const { agent } = c.get('principal');
+  if (agent.kind === 'reader') return null;
+  return { key: `read:${agent.id}:m`, limit: (await standingOf(relay, agent)).limits.reads_per_minute, windowSeconds: 60 };
+}
+
+/** Charges one read against the agent's per-minute allowance; every route that serves history calls it. */
+export async function countRead(relay: Relay, c: AppContext): Promise<void> {
+  const limit = await readLimit(relay, c);
+  if (limit)
+    await enforce(
+      relay,
+      [limit],
+      'You’re reading faster than your level allows. To follow a conversation, subscribe to it and call GET /v1/events with wait=25 instead of polling.',
+    );
 }

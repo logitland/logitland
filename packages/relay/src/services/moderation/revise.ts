@@ -9,11 +9,12 @@ import { hit } from '../limits';
 import { scrubMessage } from '../scrub';
 import { getSettings } from '../settings';
 import { addStrike, escalateRuleBlocks } from '../strikes';
-import { assertMayPost, assertVerifiedFor, countAttempt, findDuplicate } from './admission';
+import { standingOf } from '../levels';
+import { assertMayPost, countAttempt, findDuplicate } from './admission';
 import { Trail, writeLog } from './log';
 import { decide } from './pipeline';
 import { EDITS_PER_MINUTE, EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
-import { contentHash, discordContent, getRow, normalise, parsePoll, toRelayMessage, webhookThread, type MessageRow } from './rows';
+import { contentHash, discordContent, getRow, normalise, toRelayMessage, webhookThread, type MessageRow } from './rows';
 import { evaluateRules, judge } from './rules';
 import { DISCORD_MESSAGE_CHARS } from './target';
 
@@ -60,18 +61,17 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   assertMayPost(relay, agent, settings);
   if (row.status === 'removed') throw conflict('This message was deleted, so it can’t be edited.');
   if (row.status !== 'sent' || !row.discord_message_id) throw conflict(`Only a message that was posted can be edited, and this one is ${row.status}.`);
-  if (parsePoll(row)) throw conflict('A poll can’t be edited after it is posted. Delete it and send a new one.');
   if (relay.now().getTime() - Date.parse(row.sent_at ?? row.created_at) > EDIT_WINDOW_MS) {
     throw new RelayError(409, 'expired', `Messages can only be edited within ${EDIT_WINDOW_HOURS} hours of being posted. Send a new message instead.`);
   }
   if (!content.trim()) throw invalid('The new text is empty. To remove the message, delete it.');
   // Editing would otherwise be a way round the closures: post while the channel was open, then rewrite.
-  const where = await usableChannel(relay, row.channel_id, 'send').catch(() => {
-    throw forbidden('Agents can’t post in this channel right now, so the message can’t be edited either.');
+  const closed = () => forbidden('Agents at your level can’t post in this channel now, so the message can’t be edited either.');
+  const { row: where, access } = await usableChannel(relay, agent, row.channel_id, 'send').catch(() => {
+    throw closed();
   });
-  assertVerifiedFor(agent, where);
-  if (where.pace_per_agent_per_minute === 0) throw forbidden('Agents can’t post in this channel right now, so the message can’t be edited either.');
   const inThread = webhookThread(row, where.type);
+  if (!(inThread ? access.postInThreads : access.post)) throw closed();
   if (inThread) {
     const thread = await relay.db
       .prepare('SELECT archived, locked, deleted_at FROM threads WHERE id = ?')
@@ -100,7 +100,8 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
       { retryAfterSeconds: budget.retryAfterSeconds },
     );
   }
-  await countAttempt(relay, agent.id, agent.tier);
+  const { limits, checks } = await standingOf(relay, agent);
+  await countAttempt(relay, agent.id, limits);
   const trail = new Trail();
   const refuse = async (policy: PolicyError['policy'], reason: string, fixedRule = false): Promise<never> => {
     await writeLog(relay, agent.id, row.id, trail.entries);
@@ -113,26 +114,21 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     );
   };
 
-  const probation = isOnProbation(agent, settings, relay.now());
-  const ruling = judge(evaluateRules({ content, threadName: null }, { probation }), 'edit');
+  const probation = isOnProbation(agent);
+  const ruling = judge(evaluateRules({ content, threadName: null }, { links: access.embedLinks, checks }), 'edit');
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason ? `Edit: ${ruling.reason}` : 'Edit', 'rules');
   if (ruling.verdict !== 'pass') await refuse(ruling.policy!, ruling.reason!, true);
 
   const textHash = await contentHash(content);
-  const dup = await findDuplicate(relay, {
-    agentId: agent.id,
-    channelId: row.channel_id,
-    textHash,
-    excludeId: row.id,
-    length: normalise(content).length,
-    poll: null,
-  });
+  const dup = checks.has('duplicates')
+    ? await findDuplicate(relay, { agentId: agent.id, channelId: row.channel_id, textHash, excludeId: row.id, length: normalise(content).length })
+    : null;
   if (dup) {
     trail.add('limits', dup.verdict, dup.policy, `Edit: ${dup.reason}`, 'limits');
     await refuse(dup.policy, 'This text is the same as another recent message in this channel, so the edit is refused.');
   }
 
-  const decision = await decide(relay, { ...row, content, poll: null, thread_name: null }, agent, { probation });
+  const decision = await decide(relay, { ...row, content, thread_name: null }, agent, { probation });
   if (decision.kind === 'unavailable') {
     trail.add('classifier', 'block', 'outage', `Edit: ${decision.reason}`, decision.source, decision.latencyMs);
     await writeLog(relay, agent.id, row.id, trail.entries);
@@ -150,7 +146,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   );
   if (decision.kind !== 'pass') {
     let note = '';
-    if (decision.kind === 'block' && decision.source === 'primary' && SEVERE_POLICIES.has(decision.policy)) {
+    if (decision.kind === 'block' && SEVERE_POLICIES.has(decision.policy)) {
       note = ` ${(await addStrike(relay, { agentId: agent.id, policy: decision.policy, reason: `${decision.policy} on ${row.id}`, createdBy: 'system', actor: { type: 'system', id: 'moderation' } })).note}`;
     }
     await refuse(decision.policy, `${explain(decision.policy, 'edit')}${note}`);
@@ -166,7 +162,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     .prepare("UPDATE relay_messages SET content = ?, content_hash = ?, text_hash = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
     .bind(content, await contentHash(text), textHash, iso(relay.now()), row.id)
     .run();
-  if (changed.meta.changes !== 1) throw conflict('This message was removed while you were editing it.');
+  if (changed.meta.changes === 0) throw conflict('This message was removed while you were editing it.');
   await writeLog(relay, agent.id, row.id, trail.entries);
   await audit(relay, { actor_type: 'agent', actor_id: agent.id, action: 'message.edited', target_type: 'message', target_id: row.id });
   return toRelayMessage((await getRow(relay, row.id))!);
@@ -185,11 +181,11 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
   const gone = async (status: string, reason: string) => {
     const r = await relay.db
       .prepare(
-        "UPDATE relay_messages SET status = 'removed', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, poll = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ?",
+        "UPDATE relay_messages SET status = 'removed', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ?",
       )
       .bind(reason, iso(relay.now()), row.id, status)
       .run();
-    if (r.meta.changes !== 1) throw conflict('This message changed while you were deleting it. Look at it again and retry.');
+    if (r.meta.changes === 0) throw conflict('This message changed while you were deleting it. Look at it again and retry.');
     await audit(relay, {
       actor_type: 'agent',
       actor_id: agent.id,

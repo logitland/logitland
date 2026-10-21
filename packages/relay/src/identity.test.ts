@@ -2,10 +2,10 @@ import { LIMITS } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import type { Relay } from './context';
 import { hmac } from './crypto';
-import { authenticateKey } from './services/identity';
-import { checkDescription, checkName, nameKey } from './services/names';
+import { checkName, nameKey } from './services/names';
 import { clientHashes, purgeRawIpsJob, recordOrigin, revealRawIps } from './services/origins';
-import { signup } from './services/signup';
+import { register } from './services/signup';
+import { authenticateToken } from './services/tokens';
 import { count, easyChallenges, getChallenge, solve } from './signup.helpers';
 import { NO_CLIENT, type ClientInfo } from './types';
 import { harness, seedAgent } from './testing';
@@ -134,13 +134,6 @@ describe('name rules', () => {
 
   it('names the reserved word it matched', () => {
     expect(checkName('Logitland Support')).toMatchObject({ ok: false, reason: expect.stringContaining('logitland') });
-  });
-
-  it('accepts plain descriptions and refuses control and direction characters', () => {
-    expect(checkDescription('Tracks planets.\nLikes tea.\tA lot. 👩\u200d💻')).toEqual({ ok: true });
-    for (const bad of ['bell\u0007', 'nul\u0000', 'rtl\u202etext', 'isolate\u2067x', 'sep\u2028arator', 'c1\u0085control']) {
-      expect(checkDescription(bad)).toMatchObject({ ok: false, code: 'control_chars' });
-    }
   });
 });
 
@@ -306,72 +299,39 @@ describe('the purge job', () => {
   });
 });
 
-describe('authenticating a key', () => {
-  /** The relay with every SQL statement recorded, so tests can see which writes a request made. */
-  function spy(relay: Relay) {
-    const sql: string[] = [];
-    return { sql, relay: { ...relay, db: { prepare: (s: string) => (sql.push(s), relay.db.prepare(s)), batch: relay.db.batch.bind(relay.db) } } as Relay };
-  }
-  const writes = (sql: string[], what: string) => sql.filter((s) => s.startsWith('UPDATE api_keys SET last_used_at') && s.includes(what)).length;
-  const lastUsed = async (h: ReturnType<typeof harness>, keyId: string) =>
-    (await h.db.prepare('SELECT last_used_at FROM api_keys WHERE id = ?').bind(keyId).first<{ last_used_at: string | null }>())!.last_used_at;
-
-  it('moves last_used_at at most every five minutes, and only writes when it will', async () => {
-    const h = harness();
-    const a = await seedAgent(h.relay);
-    const { relay, sql } = spy(h.relay);
-    expect(await lastUsed(h, a.keyId)).toBeNull();
-
-    await authenticateKey(relay, a.key, NO_CLIENT);
-    const first = h.now().toISOString();
-    expect(await lastUsed(h, a.keyId)).toBe(first);
-    expect(writes(sql, 'WHERE id')).toBe(1);
-
-    h.advance(4 * 60_000 + 59_000);
-    await authenticateKey(relay, a.key, NO_CLIENT);
-    await authenticateKey(relay, a.key, NO_CLIENT);
-    expect(await lastUsed(h, a.keyId)).toBe(first);
-    expect(writes(sql, 'WHERE id')).toBe(1);
-
-    h.advance(2000);
-    await authenticateKey(relay, a.key, NO_CLIENT);
-    expect(await lastUsed(h, a.keyId)).toBe(h.now().toISOString());
-    expect(writes(sql, 'WHERE id')).toBe(2);
-  });
-
-  it('does not touch a key that is refused', async () => {
+describe('authenticating an access token', () => {
+  it('records nothing for a token that is refused', async () => {
     const h = harness();
     const revoked = await seedAgent(h.relay);
-    await h.db.prepare('UPDATE api_keys SET revoked_at = ? WHERE id = ?').bind(h.now().toISOString(), revoked.keyId).run();
+    await h.db.prepare('UPDATE access_tokens SET revoked_at = ? WHERE id = ?').bind(h.now().toISOString(), revoked.tokenId).run();
     const suspended = await seedAgent(h.relay, { status: 'suspended' });
-    await expect(authenticateKey(h.relay, revoked.key, at('203.0.113.7'))).rejects.toMatchObject({ status: 401 });
-    await expect(authenticateKey(h.relay, suspended.key, at('203.0.113.7'))).rejects.toMatchObject({ status: 403 });
-    expect(await lastUsed(h, revoked.keyId)).toBeNull();
-    expect(await lastUsed(h, suspended.keyId)).toBeNull();
+    await expect(authenticateToken(h.relay, revoked.token, at('203.0.113.7'))).rejects.toMatchObject({ status: 401 });
+    await expect(authenticateToken(h.relay, suspended.token, at('203.0.113.7'))).rejects.toMatchObject({ status: 403 });
+    await expect(authenticateToken(h.relay, 'lk_an_old_api_key', at('203.0.113.7'))).rejects.toMatchObject({ status: 401 });
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agent_origins')).toBe(0);
   });
 
-  it('records where a key is used from at most once a day per agent and network', async () => {
+  it('records where a token is used from at most once a day per agent and network', async () => {
     const h = harness();
     const a = await seedAgent(h.relay);
     const other = await seedAgent(h.relay);
     const origins = (agentId: string) => count(h, "SELECT COUNT(*) AS n FROM agent_origins WHERE agent_id = ? AND kind = 'use'", agentId);
 
-    for (let i = 0; i < 3; i++) await authenticateKey(h.relay, a.key, at('203.0.113.7', { asn: 64496, asOrganization: 'Example Net', country: 'NL' }));
+    for (let i = 0; i < 3; i++) await authenticateToken(h.relay, a.token, at('203.0.113.7', { asn: 64496, asOrganization: 'Example Net', country: 'NL' }));
     expect(await origins(a.id)).toBe(1);
     expect(await h.db.prepare('SELECT asn, country FROM agent_origins WHERE agent_id = ?').bind(a.id).first()).toEqual({ asn: 64496, country: 'NL' });
 
-    await authenticateKey(h.relay, a.key, at('203.0.113.99'));
+    await authenticateToken(h.relay, a.token, at('203.0.113.99'));
     expect(await origins(a.id)).toBe(1);
-    await authenticateKey(h.relay, a.key, at('198.51.100.4'));
+    await authenticateToken(h.relay, a.token, at('198.51.100.4'));
     expect(await origins(a.id)).toBe(2);
-    await authenticateKey(h.relay, other.key, at('203.0.113.7'));
+    await authenticateToken(h.relay, other.token, at('203.0.113.7'));
     expect(await origins(other.id)).toBe(1);
-    await authenticateKey(h.relay, a.key, NO_CLIENT);
+    await authenticateToken(h.relay, a.token, NO_CLIENT);
     expect(await origins(a.id)).toBe(2);
 
     h.advance(22 * 3_600_000);
-    await authenticateKey(h.relay, a.key, at('203.0.113.7'));
+    await authenticateToken(h.relay, a.token, at('203.0.113.7'));
     expect(await origins(a.id)).toBe(3);
     const { results } = await h.db.prepare('SELECT ip_sealed FROM agent_origins WHERE agent_id = ?').bind(a.id).all<{ ip_sealed: string }>();
     expect(await h.relay.secrets.open(results[0]!.ip_sealed, `agent_origins.ip:${a.id}`)).toBe('203.0.113.7');
@@ -380,29 +340,29 @@ describe('authenticating a key', () => {
   it('records the origin of requests that reach the API', async () => {
     const h = harness();
     const a = await seedAgent(h.relay);
-    await h.call('GET', '/v1/me', undefined, h.as(a.key));
-    await h.call('GET', '/v1/me', undefined, h.as(a.key));
+    await h.call('GET', '/v1/me', undefined, h.as(a.token));
+    await h.call('GET', '/v1/me', undefined, h.as(a.token));
     const { results } = await h.db.prepare('SELECT kind, ip_hmac FROM agent_origins WHERE agent_id = ?').bind(a.id).all<{ kind: string; ip_hmac: string }>();
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ kind: 'use', ip_hmac: (await clientHashes(h.relay, at('203.0.113.7'))).ip });
   });
 
-  it('refuses a key that expires exactly now, accepts one a moment before', async () => {
+  it('refuses a token that expires exactly now, accepts one a moment before', async () => {
     const h = harness();
     const a = await seedAgent(h.relay);
     const expiry = new Date(h.now().getTime() + 60_000).toISOString();
-    await h.db.prepare('UPDATE api_keys SET expires_at = ? WHERE id = ?').bind(expiry, a.keyId).run();
+    await h.db.prepare('UPDATE access_tokens SET expires_at = ? WHERE id = ?').bind(expiry, a.tokenId).run();
     h.advance(59_999);
-    await expect(authenticateKey(h.relay, a.key, NO_CLIENT)).resolves.toMatchObject({ keyId: a.keyId });
+    await expect(authenticateToken(h.relay, a.token, NO_CLIENT)).resolves.toMatchObject({ tokenId: a.tokenId });
     h.advance(1);
-    await expect(authenticateKey(h.relay, a.key, NO_CLIENT)).rejects.toMatchObject({ status: 401 });
+    await expect(authenticateToken(h.relay, a.token, NO_CLIENT)).rejects.toMatchObject({ status: 401 });
   });
 
-  it('never gives a key more scopes than its agent has', async () => {
+  it('never gives a token more scopes than its agent has', async () => {
     const h = harness();
     const a = await seedAgent(h.relay);
     await h.db.prepare('UPDATE agents SET scopes = ? WHERE id = ?').bind('["messages:read"]', a.id).run();
-    expect((await authenticateKey(h.relay, a.key, NO_CLIENT)).scopes).toEqual(['messages:read']);
+    expect((await authenticateToken(h.relay, a.token, NO_CLIENT)).scopes).toEqual(['messages:read']);
   });
 });
 
@@ -425,12 +385,10 @@ describe('names taken at the same moment', () => {
         },
       },
     };
-    await expect(signup(relay, { name: 'Racer', challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) }, at('203.0.113.7'))).rejects.toMatchObject({
-      status: 409,
-    });
+    const request = { type: 'anonymous', name: 'Racer', pow: { challenge: c.challenge, nonce: solve(c.challenge, c.difficulty) } };
+    await expect(register(relay, request, at('203.0.113.7'))).rejects.toMatchObject({ status: 409 });
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agents')).toBe(1);
-    expect(await count(h, 'SELECT COUNT(*) AS n FROM api_keys')).toBe(1);
-    expect(await count(h, 'SELECT COUNT(*) AS n FROM claims')).toBe(0);
+    expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.registered'")).toBe(0);
     expect(await count(h, 'SELECT COUNT(*) AS n FROM agent_origins')).toBe(0);
   });
 });

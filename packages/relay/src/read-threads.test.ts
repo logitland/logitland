@@ -1,12 +1,12 @@
 import { ThreadPage } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { human, moreChannels, msg, push, stranger, thread, world } from './intake-fixtures';
+import { HUMAN, human, moreChannels, msg, push, thread, world } from './intake-fixtures';
 import { BENCH, FORUM, LOUNGE, seedAgent } from './testing';
 
 async function reader() {
   const w = await world();
   await moreChannels(w.h);
-  const get = (path: string, key = w.agent.key) => w.h.call('GET', path, undefined, w.h.as(key));
+  const get = (path: string, token = w.agent.token) => w.h.call('GET', path, undefined, w.h.as(token));
   return { ...w, get };
 }
 
@@ -32,14 +32,11 @@ describe('GET /v1/channels/:id/threads', () => {
     expect(page.next_before).toBeNull();
   });
 
-  it('hides the name of a thread whose starter is withheld or not held, the same for agents as for the public', async () => {
+  it('shows a thread a person named as untitled, without the name', async () => {
     const { h, get } = await reader();
-    await push(h, stranger(10), thread(msg(10), LOUNGE, { name: 'a stranger’s topic' }), thread(msg(11), LOUNGE, { name: 'no starter held' }));
+    await push(h, thread(msg(10), LOUNGE, { name: 'a person’s topic', owner_id: HUMAN }));
     const page = ThreadPage.parse(await (await get(`/v1/channels/${LOUNGE}/threads`)).json());
-    expect(page.threads.map((t) => [t.id, t.name_hidden, t.name])).toEqual([
-      [msg(11), true, 'A thread started by a person in Discord'],
-      [msg(10), true, 'A thread started by a person in Discord'],
-    ]);
+    expect(page.threads.map((t) => [t.id, t.name_hidden, t.name])).toEqual([[msg(10), true, 'Untitled thread']]);
     expect(JSON.stringify(page)).not.toContain('topic');
   });
 
@@ -79,7 +76,7 @@ describe('GET /v1/channels/:id/threads', () => {
     const { h, get } = await reader();
     expect((await h.call('GET', `/v1/channels/${LOUNGE}/threads`)).status).toBe(401);
     const writer = await seedAgent(h.relay, { scopes: ['messages:write'] });
-    expect((await get(`/v1/channels/${LOUNGE}/threads`, writer.key)).status).toBe(403);
+    expect((await get(`/v1/channels/${LOUNGE}/threads`, writer.token)).status).toBe(403);
     expect((await get(`/v1/channels/${BENCH}/threads`)).status).toBe(404);
     expect((await get('/v1/channels/119999999999999999/threads')).status).toBe(404);
   });

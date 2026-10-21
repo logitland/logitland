@@ -1,10 +1,9 @@
-import type { AiBinding, Db, DeliveryQueue, RelayConfig } from './context';
+import type { Db, DeliveryQueue, RelayConfig } from './context';
 
 /** Plain values a Worker provides. Secrets come from `wrangler secret put` (or .dev.vars locally). */
 export interface RelayBindings {
   DB: Db;
   DELIVERIES?: DeliveryQueue;
-  AI?: AiBinding;
   RELAY_SECRET_KEY: string;
   /** Defaults to k1. Change it together with RELAY_SECRET_KEY when rotating. */
   RELAY_SECRET_KEY_ID?: string;
@@ -18,10 +17,10 @@ export interface RelayBindings {
   DISCORD_APPLICATION_ID?: string;
   DISCORD_PUBLIC_KEY?: string;
   DISCORD_GUILD_ID?: string;
-  DISCORD_CONSENT_ROLE_ID?: string;
-  JEV_LAYA_URL?: string;
-  JEV_LAYA_TOKEN?: string;
-  ADMIN_DISCORD_IDS?: string;
+  /** TypeSafe's API key, for Jev. */
+  TYPESAFE_API_KEY?: string;
+  /** The pinned Jev version; defaults to the one the thresholds were tuned on. */
+  JEV_MODEL?: string;
   BLOCKED_HOSTS?: string;
   MODERATION_OUTAGE?: string;
   /** "development" switches to the stub moderator and relaxed checks. Only accepted on a local PUBLIC_URL. */
@@ -119,16 +118,8 @@ export function checkConfig(env: RelayBindings): string[] {
     problems.push('INTERNAL_TOKEN is still an example value; generate a new one');
   if (!env.IP_HASH_KEY || env.IP_HASH_KEY.length < 32) problems.push('IP_HASH_KEY must be at least 32 random characters');
   if (!env.DISCORD_BOT_TOKEN) problems.push('DISCORD_BOT_TOKEN is missing');
-  for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID', 'DISCORD_CONSENT_ROLE_ID'] as const)
-    if (!env[name]) problems.push(`${name} is missing`);
-  if (!(env.JEV_LAYA_URL && env.JEV_LAYA_TOKEN) && !env.AI) problems.push('No classifier: set JEV_LAYA_URL and JEV_LAYA_TOKEN, or bind AI');
-  // Every message the classifier checks, with its context, goes there along with the bearer token.
-  if (env.JEV_LAYA_URL) {
-    const h = host(env.JEV_LAYA_URL);
-    if (!h || !env.JEV_LAYA_URL.startsWith('https://') || LOCAL_HOST.test(h) || PLACEHOLDER_HOST.test(h))
-      problems.push('JEV_LAYA_URL must be an https URL on a public host');
-  }
-  if (!list(env.ADMIN_DISCORD_IDS).length) problems.push('ADMIN_DISCORD_IDS is empty');
+  for (const name of ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_GUILD_ID'] as const) if (!env[name]) problems.push(`${name} is missing`);
+  if (!env.TYPESAFE_API_KEY) problems.push('No classifier: set TYPESAFE_API_KEY');
   // Without the queue the cron scan would attempt every delivery itself, inside its own query budget.
   if (!env.DELIVERIES) problems.push('The DELIVERIES queue binding is missing');
   if (env.MODERATION_OUTAGE && !['hold', 'refuse'].includes(env.MODERATION_OUTAGE)) problems.push('MODERATION_OUTAGE must be hold or refuse');
@@ -143,7 +134,6 @@ export function buildConfig(env: RelayBindings): RelayConfig {
     publicUrl,
     dashboardUrl,
     internalToken: env.INTERNAL_TOKEN,
-    adminDiscordIds: list(env.ADMIN_DISCORD_IDS),
     blockedHosts: [...list(env.BLOCKED_HOSTS).map((h) => h.toLowerCase()), host(publicUrl)!, host(dashboardUrl)!, 'workers.dev'],
     moderationOutage: env.MODERATION_OUTAGE === 'refuse' ? 'refuse' : 'hold',
     hashKey: env.IP_HASH_KEY ?? (dev ? 'development-only-hash-key-not-secret' : ''),
@@ -151,7 +141,6 @@ export function buildConfig(env: RelayBindings): RelayConfig {
       applicationId: env.DISCORD_APPLICATION_ID ?? null,
       publicKey: env.DISCORD_PUBLIC_KEY ?? null,
       guildId: env.DISCORD_GUILD_ID ?? null,
-      consentRoleId: env.DISCORD_CONSENT_ROLE_ID ?? null,
     },
     development: dev,
   };
