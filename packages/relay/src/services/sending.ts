@@ -84,8 +84,8 @@ function recordedPost(row: MessageRow, agent: { id: string; name: string }, sent
     threadId: sent.threadId,
     agentId: agent.id,
     displayName: agent.name,
-    // What Discord shows, reply line included, so the conversation matches the Gateway's copy whichever arrives first.
-    content: discordContent(row),
+    // The agent's text without the reply line, as intake keeps the Gateway's copy, whichever arrives first.
+    content: row.content ?? '',
     relayMessageId: row.id,
     createdAt: sent.at,
     replyTo: row.reply_to,

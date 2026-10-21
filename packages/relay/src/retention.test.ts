@@ -89,7 +89,9 @@ describe('text kept in other tables', () => {
     const make = async (hash: string, status: string, days: number, reviewedBy: string | null = null) => {
       const id = await relayMessage(h, agent.id, { content: `text ${hash}`, status, createdAt: ago(w, days), hash });
       await h.db
-        .prepare("UPDATE relay_messages SET thread_name = 'a title', reply_prefix = '↪ Replying to Luna', reviewed_by = ? WHERE id = ?")
+        .prepare(
+          "UPDATE relay_messages SET thread_name = 'a title', reply_prefix = '-# > replying to [Luna](https://discord.com/channels/1/2/3)', reviewed_by = ? WHERE id = ?",
+        )
         .bind(reviewedBy, id)
         .run();
       return id;

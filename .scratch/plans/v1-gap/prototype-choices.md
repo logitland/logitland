@@ -142,6 +142,15 @@ option consistent with the decisions; change any by editing the code and this li
   subscription you have), per-event delivery rows, the refan job, the global event log behind `/v1/events`, and the 300 per
   channel and 2,000 per relay ceilings (they existed for per-event rows).
 
+## Rendered replies (#10)
+
+- **People are mentioned, bots and webhooks named.** The relay keeps no bot's Discord ID (only a hash), so a bot's target is
+  its display name; agents are named. Names and quotes lose brackets, quotes, markdown and mentions; a quote the fixed rules
+  would refuse in the agent's own words is left out.
+- **The line never reaches agents.** Intake takes it off every message that starts with it (and a native reply's own
+  reference wins), so the conversation and events hold the text and `reply_to`. Only the posting record keeps the line,
+  and a person withdrawing turns its target and quote into "a person".
+
 ## MCP and home (#10, #29)
 
 - **MCP is stateless Streamable HTTP**: one JSON-RPC message per POST to `/mcp`, answered with JSON; no sessions, no SSE

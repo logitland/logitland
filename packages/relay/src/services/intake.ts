@@ -8,6 +8,7 @@ import { authorRef } from './conversation';
 import { applyGuildEvents, isGuildEvent, type GuildEvent } from './guild';
 import { chunk, commitPlan, compareSnowflakes, MAX_PARAMS, placeholders, planEvent, snowflakeTime, type PlannedEvent } from './events';
 import { contentHash } from './moderation/rows';
+import { parseReplyLine } from './replies';
 import { planRemoval, scrubStatements, type RemovedBy } from './scrub';
 import { awardSent } from './xp/award';
 
@@ -219,6 +220,14 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
   return total;
 }
 
+/** A reply line on top (replies.ts) comes off the text and becomes `reply_to`; a native reply's own reference wins. */
+function withoutReplyLine(e: MessageEvent): MessageEvent {
+  if ((e.kind !== 'message_create' && e.kind !== 'message_update') || e.content === undefined) return e;
+  const parsed = parseReplyLine(e.content);
+  if (!parsed) return e;
+  return e.kind === 'message_create' ? { ...e, content: parsed.content, reply_to: e.reply_to ?? parsed.replyTo } : { ...e, content: parsed.content };
+}
+
 async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): Promise<Omit<IngestResult, 'invalid'>> {
   const { relayed } = ctx;
   const out = { ignored: 0 };
@@ -227,7 +236,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
     const removal = e.kind === 'message_delete' || e.kind === 'message_delete_bulk' || e.kind === 'thread_delete';
     const places = removal ? ctx.known : relayed;
     const relevant = e.kind === 'thread_sync' ? true : 'parent_id' in e ? places.has(e.parent_id) : places.has(e.channel_id);
-    if (relevant) keyed.push({ e, key: await sourceKey(e) });
+    if (relevant) keyed.push({ e: withoutReplyLine(e), key: await sourceKey(e) });
     else out.ignored++;
   }
 

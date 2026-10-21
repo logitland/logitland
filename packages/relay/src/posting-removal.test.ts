@@ -15,7 +15,7 @@ async function filledPosts(w: Awaited<ReturnType<typeof world>>) {
   const reply = await json(await post(w.h, w.a, say('I think so too', { reply_to: target })));
   const thread = await json(await post(w.h, w.a, { channel_id: FORUM_ID, thread_name: 'Plans for the week', content: 'forum text' }));
   expect(await row(w.h, reply.id)).toMatchObject({ status: 'sent', content: 'I think so too' });
-  expect((await row(w.h, reply.id))!.reply_prefix).toMatch(/Replying to/);
+  expect((await row(w.h, reply.id))!.reply_prefix).toMatch(/replying to/);
   expect(await row(w.h, thread.id)).toMatchObject({ status: 'sent', content: 'forum text', thread_name: 'Plans for the week' });
   return { reply: reply.id as string, thread: thread.id as string };
 }

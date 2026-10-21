@@ -1,6 +1,7 @@
 import { iso, type Relay, type Stmt } from '../context';
 import { sha256 } from '../crypto';
 import { chunk, commitPlan, compareSnowflakes, placeholders, planEvent, type PlannedEvent } from './events';
+import { isReplyLine, unnamedReplyLine } from './replies';
 
 // Removing text everywhere the relay keeps it (conversation, event payloads, queued deliveries, and the relay's own
 // record of a message an agent posted), for Discord deletes, moderator takedowns and people withdrawing their consent. What
@@ -178,41 +179,18 @@ export async function scrubMessage(relay: Relay, discordMessageId: string, remov
 /** At most this many messages per call; a person with more can call again. */
 const PERSON_LIMIT = 5000;
 
-// An agent's reply starts with a line naming the person it answers (see the posting pipeline's reply line). A name never
-// contains '*', so the first '** · ' ends it.
-const REPLY_OPEN = '-# ↪ Replying to **';
-const REPLY_CLOSE = '** · ';
-const isReplyLine = (col: string) => `instr(${col}, '${REPLY_OPEN}') = 1 AND instr(${col}, '${REPLY_CLOSE}') > 0`;
-const unnamed = (col: string) => `'${REPLY_OPEN}a person' || substr(${col}, instr(${col}, '${REPLY_CLOSE}'))`;
-/** Agent messages that reply to a message the person wrote and the relay still knows as theirs; one placeholder, the person's Discord ID. */
-const REPLIES_TO_PERSON = `SELECT r.message_id, r.relay_message_id FROM conversation r WHERE r.author_kind = 'agent' AND r.reply_to IN (SELECT CAST(p.message_id AS TEXT) FROM conversation p WHERE p.discord_user_id = ?)`;
-
 /**
- * What still names a person after their messages are gone: the reply lines agents wrote to them (in the conversation, the
- * posting records and event payloads) become "a person". Run before the messages are anonymised, while they can still be
- * found by the person's ID. Safe to repeat.
+ * What still names a person after their messages are gone: the reply lines agents' posts carry to them (mention and quote)
+ * become "a person" in the posting records. The conversation and events hold agents' text without the line (`reply_to`
+ * instead), so nothing else names them. Run before the messages are anonymised, while they can still be found by the
+ * person's ID. Safe to repeat.
  */
 function unnameStatements(relay: Relay, discordUserId: string): Stmt[] {
-  const text = "json_extract(payload, '$.data.content')";
   return [
     relay.db
       .prepare(
-        `UPDATE conversation SET content = ${unnamed('content')} WHERE author_kind = 'agent' AND ${isReplyLine('content')}
+        `UPDATE relay_messages SET reply_prefix = ${unnamedReplyLine('reply_prefix')} WHERE reply_prefix IS NOT NULL AND ${isReplyLine('reply_prefix')}
            AND reply_to IN (SELECT CAST(p.message_id AS TEXT) FROM conversation p WHERE p.discord_user_id = ?)`,
-      )
-      .bind(discordUserId),
-    // Sends not yet in the conversation (still being moderated or sent) carry the line too.
-    relay.db
-      .prepare(
-        `UPDATE relay_messages SET reply_prefix = ${unnamed('reply_prefix')} WHERE reply_prefix IS NOT NULL AND ${isReplyLine('reply_prefix')}
-           AND (id IN (SELECT relay_message_id FROM (${REPLIES_TO_PERSON}) WHERE relay_message_id IS NOT NULL)
-             OR (status IN ('moderating', 'held', 'queued', 'sending', 'uncertain', 'blocked', 'failed') AND reply_to IN (SELECT CAST(p.message_id AS TEXT) FROM conversation p WHERE p.discord_user_id = ?)))`,
-      )
-      .bind(discordUserId, discordUserId),
-    relay.db
-      .prepare(
-        `UPDATE events SET payload = json_set(payload, '$.data.content', ${unnamed(text)}) WHERE type IN ('message.created', 'message.updated')
-           AND json_type(payload, '$.data.content') = 'text' AND ${isReplyLine(text)} AND message_id IN (SELECT message_id FROM (${REPLIES_TO_PERSON}))`,
       )
       .bind(discordUserId),
   ];

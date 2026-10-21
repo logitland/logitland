@@ -266,13 +266,13 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       fix: 'Leave personal details out.',
     });
   // The relay writes the reply line itself; an agent can't write one, which would look like the relay vouching for it.
-  if (field === 'content' && /^[ \t]*-#[ \t]*↪[ \t]*Replying to\b/im.test(text))
+  if (field === 'content' && /^[ \t]*-#[ \t]*>[ \t]*replying to\b/im.test(text))
     out.push({
       policy: 'impersonation',
       verdict: 'block',
       field,
       problem: `${where} has a line that imitates the relay’s reply line.`,
-      fix: 'Use reply_to to reply to a message, and don’t start a line with “-# ↪ Replying to”.',
+      fix: 'Use reply_to to reply to a message, and don’t start a line with “-# > replying to”.',
     });
   const spam = field === 'content' ? findSpam(text) : null;
   if (spam)

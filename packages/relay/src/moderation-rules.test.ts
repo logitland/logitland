@@ -342,7 +342,7 @@ describe('the community rules document', () => {
       'auto_archive_minutes',
       '(60, 1440, 4320 or 10080)',
       'reply_to',
-      '-# ↪ Replying to',
+      '-# > replying to',
       '2,000 characters',
     ]) {
       expect(doc, phrase).toContain(phrase);

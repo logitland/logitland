@@ -87,7 +87,7 @@ describe('the relay’s own copy of a post an agent made', () => {
     const other = await relayMessage(h, agent.id, { content: 'someone else’s post', status: 'sent', discordMessageId: msg(2), hash: 'other' });
     await h.db
       .prepare('UPDATE relay_messages SET thread_name = ?, reply_prefix = ? WHERE id IN (?, ?)')
-      .bind('a title', '-# ↪ Replying to **Tess** · https://discord.com/channels/1/2/3', mine, other)
+      .bind('a title', '-# > replying to [Tess: "hi"](https://discord.com/channels/1/2/3)', mine, other)
       .run();
     await recordAgentPost(h.relay, {
       discordMessageId: msg(1),
@@ -114,7 +114,7 @@ describe('the relay’s own copy of a post an agent made', () => {
     expect(await copy(h, mine)).toMatchObject({
       content: 'my private-ish words',
       thread_name: 'a title',
-      reply_prefix: expect.stringContaining('Replying to'),
+      reply_prefix: expect.stringContaining('replying to'),
     });
   });
 
@@ -310,69 +310,60 @@ describe('a person withdrawing stops being identifiable', () => {
 
 describe('a person withdrawing stops being named in what agents wrote to them', () => {
   const TESS = { id: '200000000000000002', username: 'tess', global_name: 'Tess' };
-  const line = (name: string, target: number) => `-# ↪ Replying to **${name}** · https://discord.com/channels/${GUILD}/${LOUNGE}/${msg(target)}`;
+  const link = (target: number) => `https://discord.com/channels/${GUILD}/${LOUNGE}/${msg(target)}`;
+  const line = (who: string, target: number, quote: string) => `-# > replying to [${who}: "${quote}"](${link(target)})`;
+  const unnamed = (target: number) => `-# > replying to [a person](${link(target)})`;
 
   async function replies() {
     const w = await world();
     const { h, agent } = w;
     await agree(h, TESS.id);
     await push(h, human(1, { content: 'luna one' }), human(2, { content: 'tess one', author: TESS }));
-    const post = (n: number, replyTo: number, text: string, name = 'Luna') =>
-      recordAgentPost(h.relay, {
-        discordMessageId: msg(n),
-        channelId: LOUNGE,
-        threadId: null,
-        agentId: agent.id,
-        displayName: 'Moth-9',
-        content: text.startsWith('Look') ? text : `${line(name, replyTo)}\n${text}`,
-        relayMessageId: 'msg_01JB7Q2M8R',
-        createdAt: at(0, n),
-        replyTo: msg(replyTo),
-      });
-    await post(3, 1, 'good point');
-    await post(4, 2, 'good point too', 'Tess');
-    await post(5, 1, `Look: ${line('Luna', 1)}`);
-    await push(h, edit(3, `${line('Luna', 1)}\ngood point, revised`, 5));
-    // The posting records: one sent, one still on its way (no conversation row yet).
+    // The posting records: one sent to each person, and one to Luna still on its way.
     const sent = await relayMessage(h, agent.id, { content: 'good point', status: 'sent', discordMessageId: msg(3), hash: 'sent' });
     const flying = await relayMessage(h, agent.id, { content: 'on its way', status: 'queued', hash: 'flying' });
     const other = await relayMessage(h, agent.id, { content: 'to Tess', status: 'sent', discordMessageId: msg(4), hash: 'other' });
-    for (const [id, to, name] of [
-      [sent, 1, 'Luna'],
-      [flying, 1, 'Luna'],
-      [other, 2, 'Tess'],
+    for (const [id, to, who, quote] of [
+      [sent, 1, `<@${HUMAN}>`, 'luna one'],
+      [flying, 1, `<@${HUMAN}>`, 'luna one'],
+      [other, 2, `<@${TESS.id}>`, 'tess one'],
     ] as const)
-      await h.db.prepare('UPDATE relay_messages SET reply_to = ?, reply_prefix = ? WHERE id = ?').bind(msg(to), line(name, to), id).run();
-    await h.db.prepare('UPDATE conversation SET relay_message_id = ? WHERE message_id = ?').bind(sent, msg(3)).run();
+      await h.db
+        .prepare('UPDATE relay_messages SET reply_to = ?, reply_prefix = ? WHERE id = ?')
+        .bind(msg(to), line(who, to, quote), id)
+        .run();
     return { ...w, sent, flying, other };
   }
   const prefix = (h: Awaited<ReturnType<typeof world>>['h'], id: string) =>
     one<{ reply_prefix: string }>(h, 'SELECT reply_prefix FROM relay_messages WHERE id = ?', id).then((r) => r!.reply_prefix);
 
-  it('rewrites the reply lines in the conversation, the posting records and the event log, for that person only', async () => {
+  it('takes their mention and quote out of the reply lines in the posting records, for that person only', async () => {
     const { h, sent, flying, other } = await replies();
     await scrubPerson(h.relay, HUMAN);
+    expect(await prefix(h, sent)).toBe(unnamed(1));
+    expect(await prefix(h, flying)).toBe(unnamed(1));
+    expect(await prefix(h, other)).toBe(line(`<@${TESS.id}>`, 2, 'tess one'));
+  });
 
-    expect((await conversation(h, 3))!.content).toBe(`${line('a person', 1)}\ngood point, revised`);
-    // Not a reply line to this person, not at the start of the message, and not about anyone else.
-    expect((await conversation(h, 4))!.content).toBe(`${line('Tess', 2)}\ngood point too`);
-    expect((await conversation(h, 5))!.content).toBe(`Look: ${line('Luna', 1)}`);
-    expect(await prefix(h, sent)).toBe(line('a person', 1));
-    expect(await prefix(h, flying)).toBe(line('a person', 1));
-    expect(await prefix(h, other)).toBe(line('Tess', 2));
-
-    const events = await all<{ type: string; message_id: string; payload: string }>(
-      h,
-      "SELECT type, CAST(message_id AS TEXT) AS message_id, payload FROM events WHERE type IN ('message.created', 'message.updated') AND message_id IN (?, ?, ?) ORDER BY seq",
-      msg(3),
-      msg(4),
-      msg(5),
-    );
-    const text = (type: string, n: number) => JSON.parse(events.find((e) => e.type === type && e.message_id === msg(n))!.payload).data.content;
-    expect(text('message.created', 3)).toBe(`${line('a person', 1)}\ngood point`);
-    expect(text('message.updated', 3)).toBe(`${line('a person', 1)}\ngood point, revised`);
-    expect(text('message.created', 4)).toBe(`${line('Tess', 2)}\ngood point too`);
-    expect(text('message.created', 5)).toBe(`Look: ${line('Luna', 1)}`);
+  it('never stored the line where agents read: the conversation and events carry reply_to instead', async () => {
+    const { h, agent } = await replies();
+    await recordAgentPost(h.relay, {
+      discordMessageId: msg(3),
+      channelId: LOUNGE,
+      threadId: null,
+      agentId: agent.id,
+      displayName: 'Moth-9',
+      content: 'good point',
+      relayMessageId: 'msg_01JB7Q2M8R',
+      createdAt: at(0, 3),
+      replyTo: msg(1),
+    });
+    // The Gateway's copy of an edit carries the line Discord shows; it comes off again.
+    await push(h, edit(3, `${line(`<@${HUMAN}>`, 1, 'luna one')}\ngood point, revised`, 5));
+    expect(await conversation(h, 3)).toMatchObject({ content: 'good point, revised', reply_to: msg(1) });
+    const updated = (await payloads(h, 'message.updated')).find((p) => p.data.message_id === msg(3));
+    expect(updated.data.content).toBe('good point, revised');
+    expect(JSON.stringify(await all(h, 'SELECT payload FROM events'))).not.toContain('replying to');
   });
 
   it('can be repeated, and finds nothing more to change', async () => {

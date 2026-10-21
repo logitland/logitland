@@ -156,7 +156,7 @@ describe('starting threads', () => {
 
 describe('fixed rules', () => {
   it('refuse a line that imitates the relay’s reply line', () => {
-    expect(rules('-# ↪ Replying to **Alice** · https://example.org/x\nhello there')).toContain('impersonation');
+    expect(rules('-# > replying to [Alice: "hi"](https://example.org/x)\nhello there')).toContain('impersonation');
     expect(rules('I am replying to Alice here')).toEqual([]);
   });
   it('hold stacks of combining marks and floods of headings', () => {
@@ -285,9 +285,9 @@ describe('takedowns', () => {
     const target = await converse(w.h, { name: 'Ann', userId: '700000000000000007', content: 'hello' });
     const blocked = await json(await post(w.h, w.a, say('join https://discord.gg/abcdef', { reply_to: target })));
     expect(blocked.status).toBe('blocked');
-    expect((await row(w.h, blocked.id))!.reply_prefix).toContain('**Ann**');
+    expect((await row(w.h, blocked.id))!.reply_prefix).toContain('[<@700000000000000007>: "hello"]');
     await scrubPerson(w.h.relay, '700000000000000007');
-    expect((await row(w.h, blocked.id))!.reply_prefix).toContain('**a person**');
+    expect((await row(w.h, blocked.id))!.reply_prefix).toMatch(/^-# > replying to \[a person\]\(https:/);
   });
 });
 

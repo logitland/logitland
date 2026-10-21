@@ -3,6 +3,7 @@ import type { Relay } from '../../context';
 import { forbidden, invalid } from '../../errors';
 import type { Access } from '../access';
 import type { ChannelRow } from '../channels';
+import { renderReplyLine, type ReplyTarget } from '../replies';
 import { parseTags } from '../setup';
 import { evaluateRules } from './rules';
 
@@ -24,38 +25,23 @@ export const isForum = (channel: Pick<ChannelRow, 'type'>) => channel.type === '
 /** What Discord allows in one message. */
 export const DISCORD_MESSAGE_CHARS = 2000;
 
-/**
- * A name that is safe inside bold text in someone else's message, and in an agent's own words: letters, digits, spaces and - _ . '
- * only, and nothing the fixed rules would refuse in an agent's text (an invite, a link, a contact detail). Anything else is
- * 'a person'. The name is a stranger's display name, so it is checked the way the agent's own text is.
- */
-function replyName(name: string): string {
-  const plain = [
-    ...name
-      .replace(/\s+/g, ' ')
-      .replace(/[^\p{L}\p{N} _.'-]/gu, '')
-      .trim(),
-  ]
-    .slice(0, 32)
-    .join('')
-    .trim();
-  const unsafe = (text: string) => evaluateRules({ content: text }, { links: false }).length > 0;
-  return !plain || unsafe(name) || unsafe(plain) ? 'a person' : plain;
-}
+/** A quote is someone else's words posted as the agent's, so it is shown only if the agent could have written it. */
+const quotable = (quote: string) => evaluateRules({ content: quote }, { links: false }).length === 0;
 
 async function pointer(relay: Relay, channel: ChannelRow, req: SendMessageRequest): Promise<string> {
   if (req.thread_name && isForum(channel))
     throw invalid('A new forum or media post can’t be a reply. Reply inside an existing post with thread_id, or leave reply_to out.');
   const target = await relay.db
-    .prepare('SELECT c.display_name, c.thread_id, c.deleted_at FROM conversation c WHERE c.message_id = ? AND c.channel_id = ?')
+    .prepare(
+      'SELECT c.author_kind, c.discord_user_id, c.display_name, c.content, c.thread_id, c.deleted_at FROM conversation c WHERE c.message_id = ? AND c.channel_id = ?',
+    )
     .bind(req.reply_to!, channel.id)
-    .first<{ display_name: string; thread_id: string | null; deleted_at: string | null }>();
+    .first<ReplyTarget & { thread_id: string | null; deleted_at: string | null }>();
   const where = req.thread_id ? 'in that thread' : 'in that channel (not inside a thread)';
   if (!target || target.deleted_at || (target.thread_id ?? null) !== (req.thread_id ?? null)) {
     throw invalid(`reply_to must be a message that still exists ${where}. Read the conversation again for a message ID to reply to.`);
   }
-  const name = replyName(target.display_name);
-  return `-# ↪ Replying to **${name}** · https://discord.com/channels/${channel.guild_id}/${req.thread_id ?? channel.id}/${req.reply_to}`;
+  return renderReplyLine(target, `https://discord.com/channels/${channel.guild_id}/${req.thread_id ?? channel.id}/${req.reply_to}`, quotable);
 }
 
 export interface Shape {

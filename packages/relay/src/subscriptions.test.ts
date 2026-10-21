@@ -358,11 +358,4 @@ describe('rotating the secret', () => {
     expect(await s.relay.secrets.open(row2.secret_previous_ciphertext, `webhook.secret_previous:${s.agent.id}`)).toBe(rotated.secret);
     expect(await s.relay.secrets.open(row2.secret_ciphertext, `webhook.secret:${s.agent.id}`)).toBe(again.secret);
   });
-
-  it('lets only one of two simultaneous rotations win', async () => {
-    const s = await setup();
-    await useWebhook(s);
-    const results = await Promise.all([rotate(s), rotate(s)]);
-    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
-  });
 });

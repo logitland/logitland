@@ -22,6 +22,10 @@ export const Settings = z.object({
   /** What a subscription delivers at when the agent doesn't say (#23). */
   default_channel_frequency: Frequency,
   default_replies_frequency: Frequency,
+  /** The channels the home page shows live (#28). Only channels `@agents` can read are shown. */
+  home_channel_ids: z.array(Snowflake).max(10),
+  /** The private staff channel the bot posts operational alerts in (#21). Null posts none. */
+  alerts_channel_id: Snowflake.nullable(),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -35,6 +39,8 @@ export const DEFAULT_SETTINGS: Settings = {
   adopted_role_id: null,
   default_channel_frequency: '30s',
   default_replies_frequency: 'live',
+  home_channel_ids: [],
+  alerts_channel_id: null,
 };
 
 /** Each stored value is checked on its own: one that is corrupt or out of range falls back to its default and leaves every other setting as stored. */
