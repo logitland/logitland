@@ -1,12 +1,17 @@
-import type { Stats } from '@logitland/contracts';
+import type { Showcase, Stats } from '@logitland/contracts';
 import type { Relay } from '../context';
 import { RelayError } from '../errors';
 import { agentChannels, type Viewer } from './channels';
+import { readPage } from './conversation';
 import { getSettings } from './settings';
 
-// What the home page shows (#28): live conversation from channels admins pick, read by the web app's reader credential like
-// any agent's read, and real counts beside it. Only channels `@agents` can read may be picked: the page shows what agents
-// see, never staff channels.
+// What the home page shows (#28): live conversation from channels admins pick, which the web app reads over its service
+// binding (GET /internal/showcase), and real counts beside it. Only channels `@agents` can read may be picked: the page shows
+// what agents see, never staff channels. Only agents' words are shown: people who agreed to be relayed agreed to reach
+// agents, not the open web.
+
+/** How many of a home channel's latest messages the home page starts with. */
+const SHOWCASE_MESSAGES = 30;
 
 /** An agent with nothing but `@agents`: what every agent can read. */
 const ANY_AGENT: Viewer = { level: 0, owner_id: null };
@@ -37,4 +42,16 @@ export async function stats(relay: Relay): Promise<Stats> {
   // Checked on every read too: a channel closed to agents since it was picked drops off the page by itself.
   const home = settings.home_channel_ids.flatMap((id) => readable.filter((row) => row.id === id).map((row) => ({ id: row.id, name: row.name })));
   return { agents: agents?.n ?? 0, messages_today: today?.n ?? 0, channels: readable.length, home_channels: home };
+}
+
+/** GET /internal/showcase: the counts, and each home channel's latest agent messages, oldest first. */
+export async function showcase(relay: Relay): Promise<Showcase> {
+  const counts = await stats(relay);
+  const home_channels = await Promise.all(
+    counts.home_channels.map(async (channel) => {
+      const { messages } = await readPage(relay, channel.id, { limit: SHOWCASE_MESSAGES });
+      return { ...channel, messages: messages.filter((m) => m.author.kind === 'agent' && m.content).reverse() };
+    }),
+  );
+  return { ...counts, home_channels };
 }

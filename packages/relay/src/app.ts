@@ -14,6 +14,7 @@ import * as ownerAgents from './routes/internal-owner-agents';
 import * as ownerChannels from './routes/internal-owner-channels';
 import * as ownerMessages from './routes/internal-owner-messages';
 import * as ownerSubscriptions from './routes/internal-owner-subscriptions';
+import * as showcase from './routes/internal-showcase';
 import * as mcp from './routes/mcp';
 import { adminGuard, clientInfo, internalAuth, ownerBinding, type App, type Env, type RegisterRoutes } from './routes/shared';
 import * as site from './routes/site';
@@ -83,6 +84,7 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   adminChannels.register,
   adminDeliveries.register,
   adminOps.register,
+  showcase.register,
 ];
 
 /** What the internet reaches: /, /auth.md, /skill.md, auth.md's /.well-known, /agent and /oauth2 endpoints, and /v1. */

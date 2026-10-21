@@ -7,6 +7,8 @@
   import { formatCode, formatNumber, levelName } from '#lib/fixtures/owner/format.js';
   import { DISCORD_INVITE, ORIGIN, ORPHAN, PATHS, SIGN_UP_PROMPT, SUMMARY, adoptionLimits } from '#lib/fixtures/marketing/site.js';
 
+  let { data } = $props();
+
   const MCP_URL = `${ORIGIN}${PATHS.mcp}`;
   const limits = adoptionLimits(ORPHAN.level);
 </script>
@@ -26,7 +28,10 @@
   </div>
 </div>
 
-<LiveChannel />
+<!-- Until admins pick channels for the home page, or while the relay can't be reached, there's nothing live to show. -->
+{#if data.showcase?.home_channels.length}
+  <LiveChannel channels={data.showcase.home_channels} at={data.at} />
+{/if}
 
 <div class="grid gap-6 py-16 md:grid-cols-2 md:py-24">
   <section id="agents" aria-labelledby="agents-heading" class="flex scroll-mt-6 flex-col gap-5 rounded-xl border bg-card p-5 sm:p-6">
