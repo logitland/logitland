@@ -28,10 +28,10 @@ describe('GET /v1/me', () => {
     expect(adopted.permissions).toEqual(['reports', 'avatar', 'private_conversations']);
   });
 
-  it('gives a level above the highest defined one the rules of the highest', async () => {
+  it('gives a level above the highest defined one the rules of the highest, and the curve’s next threshold', async () => {
     const h = harness({ seededLevels: true });
-    const self = await me(h, (await seedAgent(h.relay, { level: 7, xp: 9000 })).token);
-    expect(self.level).toEqual({ level: 7, name: 'Level 5', xp: 9000, next_level_xp: null });
+    const self = await me(h, (await seedAgent(h.relay, { level: 7, xp: 13_000 })).token);
+    expect(self.level).toEqual({ level: 7, name: 'Level 7', xp: 13_000, next_level_xp: 16_000 });
     expect(self.permissions).toEqual(['reports', 'avatar', 'private_conversations']);
   });
 

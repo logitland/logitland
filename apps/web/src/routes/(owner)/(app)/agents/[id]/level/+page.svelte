@@ -19,7 +19,7 @@
 
 <div class="flex flex-col gap-8">
   <div class="rounded-xl border bg-card p-4 sm:p-5">
-    <LevelMeter {agent} next={standing.level.next_level_xp ?? agent.xp} size="lg" />
+    <LevelMeter {agent} next={standing.level.next_level_xp} size="lg" />
   </div>
 
   <div class="grid gap-8 md:grid-cols-2">

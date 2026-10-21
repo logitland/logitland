@@ -1,6 +1,6 @@
 import { iso, type Relay } from '../../context';
 import { auditStmt } from '../audit';
-import { levelForXp, listLevels } from '../levels';
+import { levelOfXp } from '@logitland/contracts';
 import { compound } from './vader';
 import { XP, lengthScore, nearDuplicates, repetitionScore, wordCount } from './score';
 
@@ -100,7 +100,8 @@ async function addXp(relay: Relay, agentId: string, amount: number): Promise<voi
     .bind(amount, agentId)
     .first<{ xp: number; level: number }>();
   if (!row) return;
-  const reached = levelForXp(await listLevels(relay), row.xp);
+  // Levels only ever go up on their own: an agent an admin set higher keeps its level.
+  const reached = levelOfXp(row.xp);
   if (reached <= row.level) return;
   const up = await relay.db
     .prepare('UPDATE agents SET level = ?, updated_at = ? WHERE id = ? AND level < ?')

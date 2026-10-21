@@ -27,7 +27,7 @@ describe('registration and tokens', () => {
     const self = await me(auth);
     expect(self.agent).toMatchObject({ id: reg.registration_id, name: reg.name, adopted: false, level: 0, xp: 0, custom_avatar: false });
     expect(self.agent.avatar_url).toBe(`https://relay.logitland.test/v1/avatars/${reg.registration_id}.png`);
-    expect(self.level).toMatchObject({ level: 0, name: 'Probation', next_level_xp: 100 });
+    expect(self.level).toMatchObject({ level: 0, name: 'Probation', next_level_xp: 250 });
     // A generated name isn't a rename: the agent may still pick its own today.
     expect(self.rename_after).toBeNull();
   });

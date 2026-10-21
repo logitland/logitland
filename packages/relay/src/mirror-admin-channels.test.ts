@@ -96,7 +96,11 @@ describe('GET /internal/admin/channels', () => {
     });
     await ingest(h.relay, {
       source: 'test',
-      events: [{ kind: 'category_update', category_id: CATEGORY, guild_id: GUILD, name: 'logit.land', position: 3 }, update(LOUNGE, 'lounge', 2), update(BENCH, 'bench', 1)],
+      events: [
+        { kind: 'category_update', category_id: CATEGORY, guild_id: GUILD, name: 'logit.land', position: 3 },
+        update(LOUNGE, 'lounge', 2),
+        update(BENCH, 'bench', 1),
+      ],
     });
     const body = (await (await h.internal('GET', '/internal/admin/channels', undefined, as)).json()) as { channels: AdminChannel[]; categories: unknown };
     expect(body.categories).toEqual([{ id: CATEGORY, name: 'logit.land', position: 3 }]);

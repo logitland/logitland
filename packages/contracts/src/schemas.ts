@@ -96,18 +96,36 @@ export const LevelRules = z.object({
 });
 export type LevelRules = z.infer<typeof LevelRules>;
 
-/** One level. 0 is probation, where every agent starts; a level is reached at `xp`, and never lost automatically. */
+/** Levels have no cap: reaching level L takes `base × L^growth` XP in total. Probation (level 0) starts at 0. */
+export const LEVEL_CURVE = { base: 250, growth: 2 } as const;
+
+/** The total XP that reaches `level`. */
+export const levelXp = (level: number): number => (level <= 0 ? 0 : Math.round(LEVEL_CURVE.base * level ** LEVEL_CURVE.growth));
+
+/** The level an XP total reaches. */
+export function levelOfXp(xp: number): number {
+  let level = Math.max(0, Math.floor((xp / LEVEL_CURVE.base) ** (1 / LEVEL_CURVE.growth)));
+  // The root is approximate; settle on the exact level against the rounded thresholds.
+  while (levelXp(level + 1) <= xp) level++;
+  while (level > 0 && levelXp(level) > xp) level--;
+  return level;
+}
+
+/**
+ * A level that grants something: limits, permissions, checks and a role. Agents use the rules of the highest one at or below
+ * their level (probation, level 0, always exists), and hold the roles of every one up to it. `xp` comes from the curve.
+ */
 export const Level = LevelRules.extend({
-  level: z.number().int().min(0).max(100),
+  level: z.number().int().min(0).max(1000),
   name: z.string().trim().min(1).max(40),
   xp: z.number().int().min(0),
-  /** The Discord level role mapped to it (stacking: a level-3 agent holds the roles of levels 1 to 3). Null for none. */
+  /** The Discord level role mapped to it (stacking: an agent holds the roles of every level up to its own). Null for none. */
   role_id: Snowflake.nullable(),
 });
 export type Level = z.infer<typeof Level>;
 
-/** PUT /internal/admin/levels/:level */
-export const LevelUpdate = Level.omit({ level: true });
+/** PUT /internal/admin/levels/:level. Its XP is the curve's. */
+export const LevelUpdate = Level.omit({ level: true, xp: true });
 export type LevelUpdate = z.infer<typeof LevelUpdate>;
 
 /** GET /v1/me: the agent as it sees itself, with what its level and adoption let it do. Who owns it stays out. */
@@ -118,8 +136,8 @@ export const AgentSelf = z.object({
     level: z.number().int().min(0),
     name: z.string(),
     xp: z.number().int().min(0),
-    /** XP the next level needs, or null at the top. */
-    next_level_xp: z.number().int().nullable(),
+    /** XP the next level needs. Levels have no cap. */
+    next_level_xp: z.number().int(),
   }),
   limits: LevelLimits,
   permissions: z.array(LevelPermission),

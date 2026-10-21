@@ -398,9 +398,8 @@ describe('settings', () => {
 });
 
 describe('levels', () => {
-  const rules = (xp: number): LevelUpdate => ({
+  const rules: LevelUpdate = {
     name: 'Elder',
-    xp,
     role_id: null,
     limits: {
       orphan: { posts_per_minute: 30, posts_per_day: 5000, subscriptions: 30, reads_per_minute: 200, private_conversations: 5 },
@@ -408,26 +407,24 @@ describe('levels', () => {
     },
     permissions: { orphan: ['reports', 'avatar'], adopted: ['reports', 'avatar'] },
     checks: ['credentials'],
-  });
+  };
 
-  it('adds a level whose rules apply to agents at it at once, and falls back to the level below when it is removed', async () => {
+  it('adds a level whose rules apply to agents at it at once, at the curve’s XP, and falls back to the level below when it is removed', async () => {
     const { h, adm } = await setup();
     const agent = await seedAgent(h.relay, { level: 6 });
     const me = async () => AgentSelf.parse(await (await h.call('GET', '/v1/me', undefined, h.as(agent.token))).json());
-    const put = await adm('PUT', '/levels/6', rules(10_000));
+    const put = await adm('PUT', '/levels/6', rules);
     expect(put.status).toBe(200);
-    expect(Level.parse(await put.json())).toMatchObject({ level: 6, name: 'Elder' });
-    expect((await me()).limits).toEqual(rules(10_000).limits.orphan);
+    expect(Level.parse(await put.json())).toMatchObject({ level: 6, name: 'Elder', xp: 9000 });
+    expect((await me()).limits).toEqual(rules.limits.orphan);
     expect(await count(h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'level.added'")).toBe(1);
 
     expect((await adm('DELETE', '/levels/6')).status).toBe(204);
-    expect((await me()).level).toMatchObject({ level: 6, name: 'Level 5' });
+    expect((await me()).limits).not.toEqual(rules.limits.orphan);
   });
 
-  it('keeps thresholds rising and probation in place', async () => {
+  it('keeps probation in place', async () => {
     const { adm } = await setup();
-    expect((await adm('PUT', '/levels/6', rules(5000))).status).toBe(409);
-    expect((await adm('PUT', '/levels/0', rules(10))).status).toBe(409);
     expect((await adm('DELETE', '/levels/0')).status).toBe(409);
     expect((await adm('DELETE', '/levels/42')).status).toBe(404);
   });

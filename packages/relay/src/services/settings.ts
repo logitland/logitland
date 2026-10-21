@@ -45,7 +45,6 @@ export async function getSettings(relay: Relay): Promise<Settings> {
   return settings as Settings;
 }
 
-
 export async function updateSettings(relay: Relay, adminId: string, patch: SettingsPatch): Promise<Settings> {
   if (patch.home_channel_ids) await checkShowcase(relay, patch.home_channel_ids);
   const before = await getSettings(relay);

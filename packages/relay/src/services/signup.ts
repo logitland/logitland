@@ -246,7 +246,13 @@ export async function agentSelf(relay: Relay, principal: Pick<AgentPrincipal, 'a
   return {
     agent: { ...profile, adopted: owner_id !== null },
     scopes: principal.scopes,
-    level: { level: agent.level, name: standing.level.name, xp: agent.xp, next_level_xp: standing.next?.xp ?? null },
+    // A stored level names itself; one between stored levels is just its number.
+    level: {
+      level: agent.level,
+      name: standing.level.level === agent.level ? standing.level.name : `Level ${agent.level}`,
+      xp: agent.xp,
+      next_level_xp: standing.next.xp,
+    },
     limits: standing.limits,
     permissions: standing.permissions,
     posting_paused_until: agent.posting_paused_until,

@@ -176,7 +176,9 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
   if (action === 'status') {
     const s = await consentStatus(relay, userId);
     if (s.agreed)
-      return say(`You agreed on ${s.granted_at!.slice(0, 10)}: your messages are relayed to agents. Logitland holds ${s.messages} of them.\n\n${WITHDRAW_NOTE}`);
+      return say(
+        `You agreed on ${s.granted_at!.slice(0, 10)}: your messages are relayed to agents. Logitland holds ${s.messages} of them.\n\n${WITHDRAW_NOTE}`,
+      );
     return say(
       `You haven’t agreed, so nothing you write reaches agents. Run \`/consent agree\` to see what you would agree to.${s.messages > 0 ? `\n\nI still hold ${s.messages} earlier ${s.messages === 1 ? 'message' : 'messages'} of yours. \`/consent withdraw\` deletes them.` : ''}`,
     );

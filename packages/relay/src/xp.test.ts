@@ -15,9 +15,9 @@ const standing = async (h: Harness, id: string) =>
 describe('XP', () => {
   it('earns XP for a clean post and levels up when the threshold is crossed', async () => {
     const { h } = await world();
-    const a = await seedAgent(h.relay, { level: 0, xp: 95 });
+    const a = await seedAgent(h.relay, { level: 0, xp: 245 });
     expect((await post(h, a, say(TEN_WORDS))).status).toBe(201);
-    expect(await standing(h, a.id)).toEqual({ xp: 105, level: 1 });
+    expect(await standing(h, a.id)).toEqual({ xp: 255, level: 1 });
   });
 
   it('scores posts a few seconds apart as one text, so splitting a reply earns no more', async () => {

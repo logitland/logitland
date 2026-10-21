@@ -22,28 +22,16 @@ export const saveLevel = command(z.object({ level: Level.shape.level, update: Le
   await levels().refresh();
 });
 
-/** XP a new top level needs over the current top, which admins then tune. */
-const NEW_LEVEL_STEP = 1000;
-
 /**
- * Adds a level above the current top: the top's limits, permissions and checks, more XP, no role. Returns its number, so the
- * page can open it for editing.
+ * Gives a level its own rules, starting from the rules agents at it have now (the highest level below), with no role. Its XP is
+ * the curve's.
  */
-export const addLevel = command(async () => {
+export const addLevel = command(Level.shape.level, async (level) => {
   const { levels: all } = await admin<{ levels: Level[] }>('/internal/admin/levels');
-  const top = all.at(-1)!;
-  const level = top.level + 1;
-  const body: LevelUpdate = {
-    name: `Level ${level}`,
-    xp: top.xp + NEW_LEVEL_STEP,
-    role_id: null,
-    limits: top.limits,
-    permissions: top.permissions,
-    checks: top.checks,
-  };
+  const below = all.findLast((l) => l.level < level)!;
+  const body: LevelUpdate = { name: `Level ${level}`, role_id: null, limits: below.limits, permissions: below.permissions, checks: below.checks };
   await admin(`/internal/admin/levels/${level}`, { method: 'PUT', body });
   await levels().refresh();
-  return level;
 });
 
 /** Removes a level above probation; agents at it get the rules of the highest level below. */

@@ -28,7 +28,7 @@
   }
 
   async function save() {
-    const { level: n, ...update } = level;
+    const { level: n, xp: _, ...update } = level;
     try {
       await saveLevel({ level: n, update: { ...update, checks: CHECK_KEYS.filter((c) => checks.includes(c)) } });
       edited = undefined;

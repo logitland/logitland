@@ -10,7 +10,15 @@ export type GuildEvent = Extract<
   IntakeEvent,
   { kind: 'channel_update' | 'channel_hidden' | 'channel_delete' | 'category_update' | 'category_delete' | 'role_update' | 'role_delete' }
 >;
-const GUILD_KINDS = new Set<IntakeEvent['kind']>(['channel_update', 'channel_hidden', 'channel_delete', 'category_update', 'category_delete', 'role_update', 'role_delete']);
+const GUILD_KINDS = new Set<IntakeEvent['kind']>([
+  'channel_update',
+  'channel_hidden',
+  'channel_delete',
+  'category_update',
+  'category_delete',
+  'role_update',
+  'role_delete',
+]);
 
 /** A hidden channel's real name isn't known; this stands in until Discord sends it. */
 const HIDDEN_NAME = 'hidden channel';
@@ -35,7 +43,19 @@ function statement(relay: Relay, e: GuildEvent, now: string): Stmt {
            ON CONFLICT (id) DO UPDATE SET guild_id = excluded.guild_id, parent_id = excluded.parent_id, name = excluded.name, type = excluded.type,
              overwrites = excluded.overwrites, slowmode_seconds = excluded.slowmode_seconds, position = excluded.position, hidden = 0, tags = COALESCE(?, channels.tags), deleted_at = NULL, updated_at = excluded.updated_at`,
         )
-        .bind(e.channel_id, e.guild_id, e.parent_id ?? null, e.name, e.type, JSON.stringify(e.overwrites), e.slowmode_seconds, e.position ?? 0, tags, now, tags);
+        .bind(
+          e.channel_id,
+          e.guild_id,
+          e.parent_id ?? null,
+          e.name,
+          e.type,
+          JSON.stringify(e.overwrites),
+          e.slowmode_seconds,
+          e.position ?? 0,
+          tags,
+          now,
+          tags,
+        );
     }
     case 'category_update':
       return relay.db

@@ -66,7 +66,7 @@
   async function save() {
     if (!validate()) return;
     const limits = Object.fromEntries(ADOPTIONS.map((a) => [a, Object.fromEntries(LIMIT_KEYS.map((k) => [k, Number(draft[a][k])]))])) as Level['limits'];
-    const { level: n, ...update } = level;
+    const { level: n, xp: _, ...update } = level;
     try {
       await saveLevel({ level: n, update: { ...update, limits, permissions } });
       edited = undefined;
