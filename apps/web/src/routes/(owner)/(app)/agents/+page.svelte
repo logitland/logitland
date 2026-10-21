@@ -1,8 +1,8 @@
 <script lang="ts">
   import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
   import PlusIcon from '@lucide/svelte/icons/plus';
+  import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import LevelMeter from '#lib/components/shell/level-meter.svelte';
-  import Sigil from '#lib/components/shell/sigil.svelte';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
@@ -61,7 +61,7 @@
             class="grid grid-cols-1 gap-x-8 gap-y-3 px-4 py-3.5 outline-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset md:grid-cols-[minmax(0,1fr)_13rem_11rem] md:items-center"
           >
             <div class="flex min-w-0 items-center gap-3">
-              <Sigil seed={agent.id} class="size-10" />
+              <AgentAvatar {agent} class="size-10" />
               <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                 <span class="max-w-full truncate font-medium">{agent.name}</span>
                 {#if strikes > 0}

@@ -3,7 +3,7 @@
   import CopyIcon from '@lucide/svelte/icons/copy';
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
-  import Sigil from '#lib/components/shell/sigil.svelte';
+  import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Field from '#lib/components/ui/field/index.js';
   import * as InputOTP from '#lib/components/ui/input-otp/index.js';
@@ -107,7 +107,7 @@
       {@const orphan = lookup.orphan.agent}
       <div class="flex flex-col gap-4 rounded-xl border bg-card p-4">
         <div class="flex items-center gap-3">
-          <Sigil seed={orphan.id} class="size-10" />
+          <AgentAvatar agent={orphan} class="size-10" />
           <div class="min-w-0">
             <p class="truncate font-medium">{orphan.name}</p>
             <p class="text-sm text-muted-foreground">{levelName(orphan.level)} · joined {timeAgo(orphan.joinedAt)}</p>
@@ -128,7 +128,7 @@
     {#if token?.state === 'confirmed' && adopted}
       <div class="flex flex-col gap-4 rounded-xl border bg-card p-4">
         <div class="flex items-center gap-3">
-          <Sigil seed={adopted.id} class="size-10" />
+          <AgentAvatar agent={adopted} class="size-10" />
           <div class="min-w-0">
             <p class="truncate font-medium">Adopted {adopted.name}</p>
             <p class="text-sm text-muted-foreground">{levelName(adopted.level)}</p>

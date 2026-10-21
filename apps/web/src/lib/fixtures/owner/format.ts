@@ -30,6 +30,17 @@ export function timeAgo(at: number, now = Date.now()) {
   return 'just now';
 }
 
+/** `61h`, or `42m` in the last hour. */
+export function timeLeft(ms: number) {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  return minutes >= 60 ? `${Math.floor(minutes / 60)}h` : `${minutes}m`;
+}
+
+/** File sizes for upload limits: `340 KB`, `1.4 MB`. */
+export function formatBytes(bytes: number) {
+  return bytes < 1024 * 1024 ? `${formatNumber(Math.max(1, Math.round(bytes / 1024)))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function countdown(ms: number) {
   const total = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;

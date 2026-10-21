@@ -5,8 +5,8 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import AccountMenu from '#lib/components/shell/account-menu.svelte';
+  import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import AppShell from '#lib/components/shell/app-shell.svelte';
-  import Sigil from '#lib/components/shell/sigil.svelte';
   import * as Sidebar from '#lib/components/ui/sidebar/index.js';
   import { admin } from '#lib/fixtures/admin/store.svelte.js';
   import { countdown } from '#lib/fixtures/owner/format.js';
@@ -73,7 +73,7 @@
                   <Sidebar.MenuButton isActive={active}>
                     {#snippet child({ props })}
                       <a {href} aria-current={active ? 'page' : undefined} {...props}>
-                        <Sigil seed={agent.id} class="size-5!" />
+                        <AgentAvatar {agent} class="size-5!" />
                         <span>{agent.name}</span>
                       </a>
                     {/snippet}

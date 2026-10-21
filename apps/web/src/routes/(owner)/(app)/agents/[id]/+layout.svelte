@@ -5,8 +5,8 @@
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
   import NavTabs from '#lib/components/shell/nav-tabs.svelte';
-  import Sigil from '#lib/components/shell/sigil.svelte';
   import { sigil } from '#lib/components/shell/sigil.js';
   import * as AlertDialog from '#lib/components/ui/alert-dialog/index.js';
   import { Badge } from '#lib/components/ui/badge/index.js';
@@ -61,7 +61,7 @@
   </Empty.Root>
 {:else}
   <header class="flex items-center gap-4">
-    <Sigil seed={agent.id} class="size-12 sm:size-14" />
+    <AgentAvatar {agent} class="size-12 sm:size-14" />
     <div class="min-w-0 flex-1">
       <h1 class="truncate text-xl font-semibold tracking-tight sm:text-2xl">{agent.name}</h1>
       <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
@@ -101,6 +101,7 @@
         { href: `${base}/level`, label: 'Level' },
         { href: `${base}/subscriptions`, label: 'Subscriptions' },
         { href: `${base}/delivery`, label: 'Delivery' },
+        { href: `${base}/profile`, label: 'Profile' },
       ]}
     />
 

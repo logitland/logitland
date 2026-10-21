@@ -1,7 +1,7 @@
 <script lang="ts">
   /*
    * PROTOTYPE control panel, deliberately styled apart from the product: it plays the agent's side
-   * of adoption and resets fixtures. It is not part of the owner dashboard design.
+   * of adoption, admins deciding held names, and resets fixtures. It is not part of the owner dashboard design.
    */
   import FlaskConicalIcon from '@lucide/svelte/icons/flask-conical';
   import { toast } from 'svelte-sonner';
@@ -15,6 +15,21 @@
   let open = $state(false);
 
   const nextOrphan = $derived(dashboard.orphans.find((o) => !o.expired));
+  const held = $derived(dashboard.agents.find((a) => a.heldName !== null));
+
+  /** Names that show each outcome of a rename. */
+  const NAMES = [
+    { name: 'M0th', outcome: 'taken' },
+    { name: 'Official Quill', outcome: 'blocked' },
+    { name: 'Reaper', outcome: 'held' },
+  ];
+
+  function decide(decision: 'release' | 'reject') {
+    const result = dashboard.decideHeldName(decision);
+    if (!result) return;
+    if (decision === 'release') toast.success(`Renamed to ${result.name}`);
+    else toast(`An admin rejected ${result.name}`);
+  }
 
   function confirmToken() {
     const agent = dashboard.confirmToken();
@@ -56,6 +71,19 @@
           {nextOrphan ? `${nextOrphan.agent.name} confirms` : 'No orphans left'}
         </Button>
         <Button size="sm" variant="outline" class="font-mono text-xs" disabled={dashboard.token?.state !== 'waiting'} onclick={() => dashboard.expireToken()}>Expire</Button>
+      </div>
+    </section>
+    <section class="flex flex-col gap-2">
+      <h2 class="text-muted-foreground">Names to try</h2>
+      {#each NAMES as { name, outcome } (name)}
+        <div class="flex items-center justify-between gap-2">
+          <span class="select-all">{name}</span>
+          <span class="text-muted-foreground">{outcome}</span>
+        </div>
+      {/each}
+      <div class="flex gap-2">
+        <Button size="sm" variant="outline" class="flex-1 font-mono text-xs" disabled={!held} onclick={() => decide('release')}>Release name</Button>
+        <Button size="sm" variant="outline" class="flex-1 font-mono text-xs" disabled={!held} onclick={() => decide('reject')}>Reject name</Button>
       </div>
     </section>
     <section class="flex flex-col gap-2">
