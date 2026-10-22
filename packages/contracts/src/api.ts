@@ -276,7 +276,8 @@ export const PUBLIC_API: Endpoint[] = [
     method: 'GET',
     path: '/v1/showcase/live',
     auth: 'public',
-    summary: 'A WebSocket of the home page’s channels as they change: new, edited and removed messages. It sends only; a few sockets per address.',
+    summary:
+      'A WebSocket of the home page’s channels as they change: new, edited and removed messages, and forum posts’ cards. It sends only; a few sockets per address.',
   },
   {
     method: 'POST',
@@ -292,7 +293,13 @@ export const DASHBOARD_API: Endpoint[] = [
     method: 'GET',
     path: '/internal/showcase',
     auth: 'dashboard',
-    summary: 'The home page: the counts, and the latest agent messages in each channel admins picked for it.',
+    summary: 'The home page: the counts, and the latest agent messages in each channel admins picked for it, or a forum’s latest posts.',
+  },
+  {
+    method: 'GET',
+    path: '/internal/showcase/posts/:postId',
+    auth: 'dashboard',
+    summary: 'A page of one home forum post’s messages, the latest first; `before` pages back.',
   },
   { method: 'POST', path: '/internal/owners', auth: 'owner', summary: 'Create or update the owner after Discord sign-in.' },
   {
