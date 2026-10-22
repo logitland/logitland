@@ -1,5 +1,6 @@
 import { namesToBits, type PermissionName } from '@logitland/discord-catalog';
 import { describe, expect, it } from 'vitest';
+import { pruneLoganJob } from './services/logan/oauth';
 import { ADMIN_DISCORD, GUILD, application, harness, seedOwner } from './testing';
 
 // The Logan admin MCP: a person's MCP client signs in through the dashboard's Discord sign-in (OAuth 2.1 with PKCE) and has
@@ -70,12 +71,13 @@ async function setup() {
     [ALERTS]: channel(ALERTS),
     [ELSEWHERE]: channel(ELSEWHERE, [], '100000000000000002'),
   };
+  const guild = { id: GUILD, owner_id: SERVER_OWNER };
   let next = 900000000000000000n;
   h.setDiscord(async (req) => {
     const path = new URL(req.url).pathname.replace('/api/v10', '');
     let m: RegExpExecArray | null;
     if (path === '/applications/@me') return Response.json(application([ADMIN_DISCORD]));
-    if (path === `/guilds/${GUILD}`) return Response.json({ id: GUILD, owner_id: SERVER_OWNER });
+    if (path === `/guilds/${GUILD}`) return Response.json(guild);
     if (path === `/guilds/${GUILD}/channels`) return Response.json(Object.values(channels).filter((c) => c.guild_id === GUILD));
     if ((m = /^\/guilds\/\d+\/members\/(\d+)$/.exec(path)) && req.method === 'GET') {
       const member = members[m[1]!];
@@ -153,7 +155,7 @@ async function setup() {
   }
 
   const sent = (method: string, path: string) => h.discordCalls.filter((r) => r.method === method && new URL(r.url).pathname.endsWith(path));
-  return { h, owner, otherOwner, members, channels, signIn, tool, press, sent };
+  return { h, owner, otherOwner, guild, members, channels, signIn, tool, press, sent };
 }
 
 describe('signing in from an MCP client', () => {
@@ -310,6 +312,31 @@ describe('what Logan offers', () => {
     });
   });
 
+  it('only forwards a message the person could read themselves', async () => {
+    const { signIn, tool, sent } = await setup();
+    const { access_token } = await signIn();
+    const forward = (channel_id: string) =>
+      tool(access_token, 'call_operation', {
+        operation_id: 'create_message',
+        params: { channel_id: LOUNGE },
+        body: { message_reference: { type: 1, channel_id, message_id: '910000000000000001' } },
+      });
+    expect((await forward(SECRET)).data).toMatchObject({ error: 'forbidden' });
+    expect(sent('POST', `/channels/${LOUNGE}/messages`)).toHaveLength(0);
+    expect((await forward(LOUNGE)).data).toMatchObject({ status: 'done' });
+  });
+
+  it('stops treating someone as the server owner as soon as they hand it over', async () => {
+    const { guild, signIn, tool } = await setup();
+    const { access_token } = await signIn();
+    const createChannel = () =>
+      tool(access_token, 'call_operation', { operation_id: 'create_guild_channel', params: { guild_id: GUILD }, body: { name: 'x' } });
+    guild.owner_id = PERSON;
+    expect((await createChannel()).isError).toBe(false);
+    guild.owner_id = SERVER_OWNER;
+    expect((await createChannel()).data).toMatchObject({ error: 'forbidden' });
+  });
+
   it('trims server-wide reads to what the person can see', async () => {
     const { signIn, tool } = await setup();
     const { access_token } = await signIn();
@@ -380,6 +407,15 @@ describe('running a call', () => {
     expect(sent('PATCH', `/guilds/${GUILD}/members/${MEMBER}`)).toHaveLength(0);
   });
 
+  it('forgets requests a day after they expire', async () => {
+    const { h, signIn, tool } = await setup();
+    const { access_token } = await signIn();
+    await tool(access_token, 'call_operation', { operation_id: 'delete_guild_member', params: { guild_id: GUILD, user_id: MEMBER } });
+    h.advance(25 * 3600_000);
+    await pruneLoganJob(h.relay);
+    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM logan_requests').first()).toEqual({ n: 0 });
+  });
+
   it('checks again on Confirm: a power lost while waiting refuses the call', async () => {
     const { h, members, signIn, tool, press, sent } = await setup();
     const { access_token } = await signIn();
@@ -391,5 +427,16 @@ describe('running a call', () => {
     expect(await h.db.prepare('SELECT status FROM logan_requests WHERE id = ?').bind(ban.data.request_id).first()).toEqual({ status: 'failed' });
     const edited = (await sent('PATCH', '/messages/@original')[0]!.json()) as { content: string };
     expect(edited.content).toBe('Logan didn’t run `ban_user_from_guild`: Acting through Logan needs the logan admin power.');
+  });
+});
+
+describe('deleting the account', () => {
+  it('ends the person’s Logan sign-ins and drops their waiting requests', async () => {
+    const { h, owner, signIn, tool } = await setup();
+    const { access_token } = await signIn();
+    await tool(access_token, 'call_operation', { operation_id: 'delete_guild_member', params: { guild_id: GUILD, user_id: MEMBER } });
+    expect((await h.internal('DELETE', `/internal/owners/${owner.id}`, undefined, { 'x-logitland-owner': owner.id })).status).toBe(204);
+    expect((await tool(access_token, 'search_operations')).status).toBe(401);
+    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM logan_requests').first()).toEqual({ n: 0 });
   });
 });

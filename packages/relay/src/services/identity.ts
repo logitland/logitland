@@ -147,7 +147,7 @@ export async function ownerLimitKey(relay: Relay, discordUserId: string, name: s
 /**
  * Deletes an owner's account. Their agents become orphans and keep running (one that was off is turned on, since nobody is
  * left to), losing the XP adoption gave them and any level it brought; adoption decisions they made lose their name but stay on record, and the audit trail
- * keeps only the owner ID, which no longer points at anyone.
+ * keeps only the owner ID, which no longer points at anyone. Their Logan sign-ins and requests go with them.
  */
 export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> {
   const owner = await getOwner(relay, ownerId);
@@ -180,10 +180,12 @@ export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> 
       )
       .bind(iso(relay.now()), ownerId, ownerId),
     relay.db.prepare(`UPDATE claims SET decided_by = NULL WHERE decided_by = ? AND ${exists}`).bind(ownerId, ownerId),
-    relay.db.prepare(`DELETE FROM adoption_tokens WHERE owner_id = ? AND ${exists}`).bind(ownerId, ownerId),
+    ...['adoption_tokens', 'logan_codes', 'logan_tokens', 'logan_requests'].map((table) =>
+      relay.db.prepare(`DELETE FROM ${table} WHERE owner_id = ? AND ${exists}`).bind(ownerId, ownerId),
+    ),
     relay.db.prepare('DELETE FROM owners WHERE id = ?').bind(ownerId),
   ]);
-  if (results[4]!.meta.changes === 0) throw notFound('No such owner');
+  if (results.at(-1)!.meta.changes === 0) throw notFound('No such owner');
   relay.log.info('owner.deleted', { owner_id: owner.id, agents: agents.length });
   await revokeAdoptionXp(
     relay,

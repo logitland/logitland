@@ -2,7 +2,7 @@ import type { Owner } from '@logitland/contracts';
 import { DiscordError, type GuildChannel, type GuildMember } from '@logitland/discord';
 import type { Relay } from '../../context';
 import { RelayError, forbidden, invalid, unavailable } from '../../errors';
-import { adminStanding, lookup } from '../admins';
+import { adminStanding } from '../admins';
 import { getOwner } from '../identity';
 import {
   computeEffectivePermissions,
@@ -17,13 +17,11 @@ import {
 
 // Who may have Logan do what (the Logan admin MCP). Logan holds more permissions than most people, and Discord only checks
 // Logan's, so the relay checks the person's own before every call, from scratch: their admin standing and roles fetched from
-// Discord just now, the server's roles from the Gateway, and the target channel fetched too. It follows the required-permissions
+// Discord just now along with who owns the server, the server's roles from the Gateway, and the target channel fetched too. It follows the required-permissions
 // table's own rules (packages/discord-catalog): a grant whose condition can't be verified doesn't hold, a condition that can't be
 // decided is assumed to hold, and hierarchy is enforced here because Discord compares only Logan's roles. Anything this can't
 // check is refused: stricter than Discord, never looser.
 
-/** Who owns the server changes rarely; asked again after this long. */
-const GUILD_OWNER_TTL_MS = 10 * 60_000;
 const SNOWFLAKE = /^\d{17,20}$/;
 /** Discord's channel types the rules ask about. */
 const THREAD_TYPES = new Set([10, 11, 12]);
@@ -31,6 +29,8 @@ const PRIVATE_THREAD = 12;
 const VOICE_TYPES = new Set([2, 13]);
 const FORUM_TYPES = new Set([15, 16]);
 const TEXT_TYPES = new Set([0, 5]);
+/** The message_reference type that forwards a message rather than replying to it. */
+const FORWARD = 1;
 /** Scheduled event entity types, by the names the table uses. */
 const ENTITY_TYPES: Record<string, number> = { STAGE_INSTANCE: 1, VOICE: 2, EXTERNAL: 3 };
 /** What a timed-out member keeps: Discord takes everything else until the timeout ends. */
@@ -81,7 +81,8 @@ export async function loadCaller(relay: Relay, ownerId: string): Promise<Caller>
   const standing = await adminStanding(relay, owner.discord_user_id, member.roles);
   if (!standing.permissions.includes('logan')) throw forbidden('Acting through Logan needs the logan admin power.');
 
-  const guildOwnerId = await lookup(relay, 'guild-owner', GUILD_OWNER_TTL_MS, async () => (await relay.discord.getGuild(guildId)).owner_id);
+  // Not cached: the owner holds every permission, so someone who hands the server over must lose that at once.
+  const guildOwnerId = (await relay.discord.getGuild(guildId)).owner_id;
   const { results } = await relay.db.prepare('SELECT id, name, permissions, position FROM guild_roles WHERE guild_id = ?').bind(guildId).all<RoleLike>();
   const isGuildOwner = owner.discord_user_id === guildOwnerId;
   const held = new Set(member.roles);
@@ -396,6 +397,13 @@ class CallCheck {
     for (const c of entry.conditional ?? []) {
       if ((await this.decide(c.when)) === false) continue;
       if (!(await this.anyHolds(c.anyOf))) throw forbidden(`You don’t have the permissions ${op.operationId} needs when ${c.when}.`);
+    }
+    // Discord forwards any message Logan can read, so the source channel is checked as the caller, like a target.
+    const ref = this.body.message_reference;
+    if (isObject(ref) && ref.type === FORWARD) {
+      if (typeof ref.channel_id !== 'string') throw invalid('Send message_reference.channel_id to forward a message.');
+      if (!holdsBits((await this.channel(ref.channel_id)).bits, ['ViewChannel', 'ReadMessageHistory']))
+        throw forbidden('You can’t read the message you asked Logan to forward.');
     }
     for (const h of entry.hierarchy ?? []) {
       const problem = await this.hierarchyProblem(h.rule, h.target);

@@ -265,12 +265,11 @@ export async function authenticate(relay: Relay, token: string): Promise<string>
   return row.owner_id;
 }
 
-/** Cron: forgets codes and tokens that expired a day ago. */
+/** Cron: forgets codes, tokens and confirmation requests that expired a day ago. The audit log keeps what ran. */
 export async function pruneLoganJob(relay: Relay): Promise<number> {
   const cutoff = iso(new Date(relay.now().getTime() - 86_400_000));
-  const [codes, tokens] = await relay.db.batch([
-    relay.db.prepare('DELETE FROM logan_codes WHERE expires_at < ?').bind(cutoff),
-    relay.db.prepare('DELETE FROM logan_tokens WHERE expires_at < ?').bind(cutoff),
-  ]);
-  return codes!.meta.changes + tokens!.meta.changes;
+  const results = await relay.db.batch(
+    ['logan_codes', 'logan_tokens', 'logan_requests'].map((table) => relay.db.prepare(`DELETE FROM ${table} WHERE expires_at < ?`).bind(cutoff)),
+  );
+  return results.reduce((n, r) => n + r.meta.changes, 0);
 }
