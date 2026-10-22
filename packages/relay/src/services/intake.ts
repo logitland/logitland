@@ -12,6 +12,7 @@ import { contentHash } from './moderation/rows';
 import { parseReplyLine } from './replies';
 import { planRemoval, scrubStatements, type RemovedBy } from './scrub';
 import { getSettings } from './settings';
+import { refreshShowcase } from './showcase';
 import { turnAway, type TurnedAway } from './turn-away';
 import { awardSent } from './xp/award';
 
@@ -185,8 +186,8 @@ async function sourceKey(e: MessageEvent): Promise<string | null> {
   }
 }
 
-/** A person's agreement in force: when, and to which notice. */
-type Agreement = { granted_at: string; notice_version: string };
+/** A person's agreement in force: when, to which notice, and the username and avatar the home page shows them by. */
+type Agreement = { granted_at: string; notice_version: string; username: string | null; avatar: string | null };
 
 /** Whether an agreement covers every message, not only replies to agents (the notices before `EVERY_MESSAGE_SINCE`). */
 const coversEvery = (a: Agreement | undefined) => a !== undefined && a.notice_version >= EVERY_MESSAGE_SINCE;
@@ -317,7 +318,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   for (const part of chunk([...new Set(fromPeople.map((e) => e.author.id))], MAX_PARAMS)) {
     const { results } = await relay.db
       .prepare(
-        `SELECT discord_user_id, granted_at, notice_version FROM consents WHERE revoked_at IS NULL AND discord_user_id IN (${placeholders(part.length)})`,
+        `SELECT discord_user_id, granted_at, notice_version, username, avatar FROM consents WHERE revoked_at IS NULL AND discord_user_id IN (${placeholders(part.length)})`,
       )
       .bind(...part)
       .all<Agreement & { discord_user_id: string }>();
@@ -360,6 +361,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   const cursors = new Map<string, string>();
   const removed: string[] = [];
   const createdHere: { id: string; thread: string | null }[] = [];
+  let identityChanged = false;
   const record = (event: PlannedEvent) => {
     planned.push({ at: stmts.length, event });
     stmts.push(event.stmt);
@@ -499,7 +501,15 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         const tomb = tombs.get(e.message_id);
         const reply_to = e.reply_to ?? who.reply_to;
         stmts.push(createStmt(relay, e, who, { content: e.content, reply_to, edited_at: e.edited_timestamp ?? null }));
-        if (who.username !== null) stmts.push(identityStmt(relay, who, e.timestamp));
+        if (who.username !== null) {
+          stmts.push(identityStmt(relay, who, e.timestamp));
+          const stored = agreedAt.get(e.author.id)!;
+          if (stored.username !== who.username || stored.avatar !== who.avatar) {
+            // Their first message changes nothing already on a page.
+            if (stored.username !== null) identityChanged = true;
+            Object.assign(stored, { username: who.username, avatar: who.avatar });
+          }
+        }
         if (tomb || ctx.history) out.ignored++;
         else {
           record(
@@ -632,6 +642,8 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   stmts.push(...scrubStatements(relay, removed, 'discord'));
   for (const [channelId, messageId] of cursors) stmts.push(cursorStmt(relay, channelId, messageId));
   const r = await commitPlan(relay, stmts, planned);
+  // Every message of theirs on an open home page shows them the old way, wherever the new one was written: re-read it.
+  if (identityChanged) await refreshShowcase(relay);
   return { recorded: r.recorded, ignored: out.ignored };
 }
 

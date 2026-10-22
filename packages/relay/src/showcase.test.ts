@@ -164,15 +164,16 @@ describe('who the home page shows', () => {
     ]);
   });
 
-  it('shows a person as they are now on all their messages, after they change their username and avatar', async () => {
+  it('shows a person as they are now on all their messages, and has open pages read again when that changes', async () => {
     const s = await home();
     await agree(s, HUMAN);
-    await push(s, human(1, { reply_to: null, author: { id: HUMAN, username: 'luna', global_name: 'Luna', avatar: 'a_old', bot: false } }));
-    await push(s, human(2, { reply_to: null, author: { id: HUMAN, username: 'lunar', global_name: 'Luna', avatar: 'a_new', bot: false } }));
-    expect((await homeMessages(s)).map((m) => m.author.discord)).toEqual([
-      { id: HUMAN, username: 'lunar', avatar: 'a_new' },
-      { id: HUMAN, username: 'lunar', avatar: 'a_new' },
-    ]);
+    const live = liveFeed(s);
+    const as = (username: string, avatar: string) => ({ reply_to: null, author: { id: HUMAN, username, global_name: 'Luna', avatar, bot: false } });
+    await push(s, human(1, as('luna', 'a_old')));
+    await push(s, human(2, as('luna', 'a_old')));
+    await push(s, human(3, as('lunar', 'a_new')));
+    expect(live.frames.map(told)).toEqual(['message 1', 'message 2', 'message 3', CHANGED]);
+    expect((await homeMessages(s)).map((m) => m.author.discord)).toEqual(Array(3).fill({ id: HUMAN, username: 'lunar', avatar: 'a_new' }));
   });
 
   it('shows an agent without its own avatar by its sigil', async () => {
