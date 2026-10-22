@@ -12,6 +12,7 @@ import { contentHash } from './moderation/rows';
 import { parseReplyLine } from './replies';
 import { planRemoval, scrubStatements, type RemovedBy } from './scrub';
 import { getSettings } from './settings';
+import { refreshShowcase } from './showcase';
 import { turnAway, type TurnedAway } from './turn-away';
 import { awardSent } from './xp/award';
 
@@ -185,8 +186,8 @@ async function sourceKey(e: MessageEvent): Promise<string | null> {
   }
 }
 
-/** A person's agreement in force: when, and to which notice. */
-type Agreement = { granted_at: string; notice_version: string };
+/** A person's agreement in force: when, to which notice, and the username and avatar the home page shows them by. */
+type Agreement = { granted_at: string; notice_version: string; username: string | null; avatar: string | null };
 
 /** Whether an agreement covers every message, not only replies to agents (the notices before `EVERY_MESSAGE_SINCE`). */
 const coversEvery = (a: Agreement | undefined) => a !== undefined && a.notice_version >= EVERY_MESSAGE_SINCE;
@@ -317,7 +318,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   for (const part of chunk([...new Set(fromPeople.map((e) => e.author.id))], MAX_PARAMS)) {
     const { results } = await relay.db
       .prepare(
-        `SELECT discord_user_id, granted_at, notice_version FROM consents WHERE revoked_at IS NULL AND discord_user_id IN (${placeholders(part.length)})`,
+        `SELECT discord_user_id, granted_at, notice_version, username, avatar FROM consents WHERE revoked_at IS NULL AND discord_user_id IN (${placeholders(part.length)})`,
       )
       .bind(...part)
       .all<Agreement & { discord_user_id: string }>();
@@ -360,6 +361,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   const cursors = new Map<string, string>();
   const removed: string[] = [];
   const createdHere: { id: string; thread: string | null }[] = [];
+  let identityChanged = false;
   const record = (event: PlannedEvent) => {
     planned.push({ at: stmts.length, event });
     stmts.push(event.stmt);
@@ -499,6 +501,15 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         const tomb = tombs.get(e.message_id);
         const reply_to = e.reply_to ?? who.reply_to;
         stmts.push(createStmt(relay, e, who, { content: e.content, reply_to, edited_at: e.edited_timestamp ?? null }));
+        if (who.username !== null) {
+          stmts.push(identityStmt(relay, who, e.timestamp));
+          const stored = agreedAt.get(e.author.id)!;
+          if (stored.username !== who.username || stored.avatar !== who.avatar) {
+            // Their first message changes nothing already on a page.
+            if (stored.username !== null) identityChanged = true;
+            Object.assign(stored, { username: who.username, avatar: who.avatar });
+          }
+        }
         if (tomb || ctx.history) out.ignored++;
         else {
           record(
@@ -631,6 +642,8 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   stmts.push(...scrubStatements(relay, removed, 'discord'));
   for (const [channelId, messageId] of cursors) stmts.push(cursorStmt(relay, channelId, messageId));
   const r = await commitPlan(relay, stmts, planned);
+  // Every message of theirs on an open home page shows them the old way, wherever the new one was written: re-read it.
+  if (identityChanged) await refreshShowcase(relay);
   return { recorded: r.recorded, ignored: out.ignored };
 }
 
@@ -649,7 +662,7 @@ interface Who {
   author_ref: string;
   discord_user_id: string | null;
   display_name: string;
-  /** A person's Discord username and avatar hash, for the home page; null for everyone else. */
+  /** A person's Discord username and avatar hash, kept on their agreement for the home page (`identityStmt`); null for everyone else. */
   username: string | null;
   avatar: string | null;
   relay_message_id: string | null;
@@ -737,8 +750,8 @@ async function resolveAuthor(
 function createStmt(relay: Relay, e: Create, who: Who, v: { content: string; reply_to: string | null; edited_at: string | null }): Stmt {
   return relay.db
     .prepare(
-      `INSERT OR IGNORE INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, author_username, author_avatar, content, relay_message_id, created_at, edited_at, deleted_at, removed_by, reply_to)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN d.id IS NULL THEN ? END, ?, ?, ?, d.observed_at, CASE WHEN d.id IS NOT NULL THEN COALESCE(json_extract(d.payload, '$.data.removed_by'), 'discord') END, ?
+      `INSERT OR IGNORE INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, edited_at, deleted_at, removed_by, reply_to)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN d.id IS NULL THEN ? END, ?, ?, ?, d.observed_at, CASE WHEN d.id IS NOT NULL THEN COALESCE(json_extract(d.payload, '$.data.removed_by'), 'discord') END, ?
        FROM (SELECT 1) LEFT JOIN events d ON d.source_key = ?`,
     )
     .bind(
@@ -750,8 +763,6 @@ function createStmt(relay: Relay, e: Create, who: Who, v: { content: string; rep
       who.author_ref,
       who.discord_user_id,
       who.display_name,
-      who.username,
-      who.avatar,
       v.content,
       who.relay_message_id,
       e.timestamp,
@@ -759,6 +770,20 @@ function createStmt(relay: Relay, e: Create, who: Who, v: { content: string; rep
       v.reply_to,
       `delete:${e.message_id}`,
     );
+}
+
+/**
+ * Remembers a person as their message written `at` shows them, on their agreement, so the home page shows every message of
+ * theirs that way. A message older than the one last remembered (history caught up late) changes nothing, nor does one from
+ * someone who withdrew since the round read their agreement.
+ */
+function identityStmt(relay: Relay, who: Who, at: string): Stmt {
+  return relay.db
+    .prepare(
+      `UPDATE consents SET username = ?, avatar = ?, identity_at = ?
+       WHERE discord_user_id = ? AND revoked_at IS NULL AND notice_version >= '${SHOWN_PUBLICLY_SINCE}' AND (identity_at IS NULL OR identity_at <= ?)`,
+    )
+    .bind(who.username, who.avatar, at, who.discord_user_id, at);
 }
 
 /**
