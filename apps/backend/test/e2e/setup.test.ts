@@ -52,7 +52,7 @@ describe.skipIf(!E2E)('admin setup against a fake Discord', () => {
     expect(mapped.status).toBe(200);
     const report = await checks();
     expect(Object.values(report).filter((c) => c.status === 'fail' || c.status === 'unknown')).toEqual([]);
-    expect(report['agent-roles']!.status).toBe('warn');
+    expect(report['agent-roles']!.status).toBe('ok');
 
     // The workshop is private, so agents don't see it.
     const agent = await s.register('Lantern', '198.51.100.40');

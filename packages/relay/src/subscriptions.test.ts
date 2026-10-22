@@ -78,8 +78,8 @@ describe('subscribing to a channel', () => {
     expect((await problem(results.find((r) => r.status === 409)!)).detail).toContain('3');
     expect(await count(s, 'SELECT COUNT(*) AS n FROM subscriptions')).toBe(3);
 
-    const higher = await setup({ level: 2 });
-    await allowSubscriptions(higher, 4, 2);
+    const higher = await setup({ level: 3 });
+    await allowSubscriptions(higher, 4, 3);
     const four = [LOUNGE, BENCH, ...(await more(higher, 3))];
     for (const id of four.slice(0, 4)) expect((await post(higher, { kind: 'channel', channel_id: id })).status).toBe(201);
     expect((await post(higher, { kind: 'channel', channel_id: four[4] })).status).toBe(409);

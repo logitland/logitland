@@ -11,7 +11,8 @@ import { isWorkerAddress } from '../services/origins';
 import { authenticateToken } from '../services/tokens';
 import type { AgentPrincipal, ClientInfo } from '../types';
 
-export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; standing: AdminStanding; client: ClientInfo } };
+/** `ownerId` is the person behind a Logan admin MCP token (routes/logan.ts). */
+export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; standing: AdminStanding; client: ClientInfo; ownerId: string } };
 export type AppContext = Context<Env>;
 export type App = Hono<Env>;
 
@@ -25,6 +26,14 @@ export async function body(c: AppContext): Promise<unknown> {
   } catch {
     throw new RelayError(400, 'invalid_request', 'Send a JSON body');
   }
+}
+
+/** OAuth's token and revocation endpoints take form fields (RFC 6749); JSON is accepted too. Only string fields are kept. */
+export async function formFields(c: AppContext): Promise<Record<string, string>> {
+  const raw = (c.req.header('content-type') ?? '').includes('application/json') ? await body(c) : await c.req.parseBody();
+  const out: Record<string, string> = {};
+  if (raw && typeof raw === 'object') for (const [k, v] of Object.entries(raw)) if (typeof v === 'string') out[k] = v;
+  return out;
 }
 
 export function requireScope(c: AppContext, scope: Scope): void {

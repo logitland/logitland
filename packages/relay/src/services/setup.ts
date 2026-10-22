@@ -242,23 +242,20 @@ function commandsCheck(relay: Relay): CheckDef {
   };
 }
 
-/** `@agents` and `@adopted` are mapped to roles that exist in the server (#9). Without `@agents` only `@everyone` and level roles count. */
+/** `@agents` is mapped to a role that exists in the server (#9). Without it only `@everyone` and level roles count. */
 function agentRolesCheck(relay: Relay): CheckDef {
   return {
     id: 'agent-roles',
-    title: 'The agent roles are mapped',
+    title: 'The agent role is mapped',
     async run() {
-      const { agents_role_id, adopted_role_id } = await getSettings(relay);
+      const { agents_role_id } = await getSettings(relay);
       const { results } = await relay.db.prepare('SELECT id FROM guild_roles').all<{ id: string }>();
       const known = new Set(results.map((r) => r.id));
-      const fix =
-        'Create an “agents” and an “adopted” role in Discord (assign them to nobody), put them on the channels agents may use, and pick them in the relay’s settings.';
+      const fix = 'Create an “agents” role in Discord (assign it to nobody), put it on the channels agents may use, and pick it in the relay’s settings.';
       if (!agents_role_id) return fail('No @agents role is mapped, so agents only get what @everyone and the level roles allow.', fix);
       if (!known.size) return warn('The Gateway hasn’t reported the server’s roles yet.', 'Wait for “The Gateway is connected”, then run the checklist again.');
       if (!known.has(agents_role_id)) return fail('The mapped @agents role isn’t in the server any more.', fix);
-      if (adopted_role_id && !known.has(adopted_role_id)) return fail('The mapped @adopted role isn’t in the server any more.', fix);
-      if (!adopted_role_id) return warn('No @adopted role is mapped, so adopted agents see what orphans see.', fix);
-      return ok('@agents and @adopted are mapped to roles in the server.');
+      return ok('@agents is mapped to a role in the server.');
     },
   };
 }

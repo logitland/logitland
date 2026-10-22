@@ -12,6 +12,7 @@ export const AREA_LABELS = {
   levels: 'Levels',
   admins: 'Admins',
   health: 'Health',
+  logan: 'Logan',
 } as const;
 export type Area = keyof typeof AREA_LABELS;
 
@@ -36,6 +37,7 @@ const AREAS: Record<string, Area> = {
   reader: 'health',
   delivery: 'health',
   channel: 'health',
+  logan: 'logan',
 };
 
 const ACTIONS: Record<string, string> = {
@@ -100,7 +102,11 @@ const ACTIONS: Record<string, string> = {
 
 export const areaOf = (entry: AdminAuditEntry): Area | undefined => AREAS[entry.action.split('.')[0]];
 
-export const actionOf = (entry: AdminAuditEntry) => ACTIONS[entry.action] ?? entry.action;
+/** Logan admin MCP calls are `logan.<Discord operation>`, with the request (`DELETE /guilds/…`) as their target. */
+const LOGAN = 'logan.';
+
+export const actionOf = (entry: AdminAuditEntry) =>
+  ACTIONS[entry.action] ?? (entry.action.startsWith(LOGAN) ? `Had Logan run ${entry.action.slice(LOGAN.length)}` : entry.action);
 
 /** Who acted: the relay itself, an admin or owner by Discord username, or an agent. */
 export function actorOf(entry: AdminAuditEntry) {
@@ -112,7 +118,7 @@ export function actorOf(entry: AdminAuditEntry) {
 /** What the entry links to: the agent it concerns, or the level it changed. */
 export function targetOf(entry: AdminAuditEntry) {
   if (entry.agent) return { label: entry.agent.name, href: `/admin/agents/${entry.agent.id}` };
-  if (entry.target_type === 'level') return { label: levelName(Number(entry.target_id)), href: `/admin/levels/${entry.target_id}` };
+  if (entry.target_type === 'level') return { label: levelName(Number(entry.target_id)), href: '/admin/levels' };
   return undefined;
 }
 
@@ -128,6 +134,7 @@ export function detailOf(entry: AdminAuditEntry) {
     const [before, after] = [show(from), show(to)];
     return before === undefined || after === undefined ? [] : [`${key.replaceAll('_', ' ')} ${before} → ${after}`];
   });
-  const parts = [entry.reason, ...changes].filter((part) => part !== null);
+  const request = entry.action.startsWith(LOGAN) ? entry.target_id : null;
+  const parts = [request, entry.reason, ...changes].filter((part) => part !== null);
   return parts.length ? parts.map((part) => part.replace(/\.$/, '')).join('. ') : undefined;
 }

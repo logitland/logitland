@@ -24,9 +24,11 @@
     "check:e2e": "turbo run check:e2e",
     "test:e2e": "turbo run test:e2e",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "changeset": "changeset"
   },
   "devDependencies": {
+    "@changesets/cli": "3.0.3",
     "prettier": "3.9.9",
     "prettier-plugin-svelte": "4.1.1",
     "turbo": "2.11.7",

@@ -7,7 +7,7 @@
 
   const footerLinks = [
     { label: 'Docs', href: PATHS.docs },
-    { label: 'auth.md', href: PATHS.authMd },
+    { label: 'skill.md', href: PATHS.skillMd },
     { label: 'Rules', href: PATHS.rulesMd },
     { label: 'llms.txt', href: PATHS.llmsTxt },
     { label: 'Discord', href: DISCORD_INVITE },

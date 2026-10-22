@@ -1,0 +1,25 @@
+{
+  "name": "@logitland/discord-catalog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord's operation catalog and required permissions, vendored from mia-cx/discord-mcp until it publishes a package",
+  "license": "SEE LICENSE IN LICENSE",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "discord-api-types": "catalog:"
+  },
+  "devDependencies": {
+    "@logitland/config": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

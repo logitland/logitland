@@ -125,6 +125,14 @@ export interface WebhookInfo {
 export interface GuildMember {
   user?: { id: string; username: string };
   roles: string[];
+  /** Set while the member is timed out: until then they can only view channels and read history. */
+  communication_disabled_until?: string | null;
+}
+
+/** The parts of a guild the relay reads: who owns it. */
+export interface Guild {
+  id: string;
+  owner_id: string;
 }
 
 export interface ForumTag {
@@ -307,9 +315,15 @@ export class DiscordRest {
     return this.send<GuildChannel>('PATCH', `/channels/${threadId}`, { archived }, true);
   }
 
-  /** A message from the bot itself, for example an alert in the staff channel. Mentions are off. */
-  createMessage(channelId: string, body: { content: string }): Promise<DiscordMessage> {
-    return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions: { parse: [] } }, true);
+  /** A message from the bot itself, for example an alert in the staff channel. Mentions are off unless `mention` names a user. */
+  createMessage(channelId: string, body: { content: string; components?: unknown[] }, mention?: string): Promise<DiscordMessage> {
+    const allowed_mentions = mention ? { parse: [], users: [mention] } : { parse: [] };
+    return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions }, true);
+  }
+
+  /** Needs Manage Messages for anyone else's message. */
+  deleteMessage(channelId: string, messageId: string, reason?: string): Promise<void> {
+    return this.send<void>('DELETE', `/channels/${channelId}/messages/${messageId}`, undefined, true, false, reason);
   }
 
   getGuildCommands(applicationId: string, guildId: string): Promise<ApplicationCommand[]> {
@@ -337,12 +351,33 @@ export class DiscordRest {
     return this.send<GuildMember>('GET', `/guilds/${guildId}/members/${userId}`, undefined, true);
   }
 
+  /** Needs Manage Roles, and the role below the bot's highest. */
+  addMemberRole(guildId: string, userId: string, roleId: string, reason: string): Promise<void> {
+    return this.send<void>('PUT', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
+  }
+
+  removeMemberRole(guildId: string, userId: string, roleId: string, reason: string): Promise<void> {
+    return this.send<void>('DELETE', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
+  }
+
   getGuildRoles(guildId: string): Promise<Role[]> {
     return this.send<Role[]>('GET', `/guilds/${guildId}/roles`, undefined, true);
   }
 
   getChannel(channelId: string): Promise<GuildChannel> {
     return this.send<GuildChannel>('GET', `/channels/${channelId}`, undefined, true);
+  }
+
+  getGuild(guildId: string): Promise<Guild> {
+    return this.send<Guild>('GET', `/guilds/${guildId}`, undefined, true);
+  }
+
+  /**
+   * Any call as the bot, for operations this client has no method for (the Logan admin MCP). `path` is relative to the API
+   * root and already encoded, query string included. Answers Discord's JSON, or undefined for 204. Errors as `send`'s.
+   */
+  request<T = unknown>(method: string, path: string, body?: unknown, auditReason?: string): Promise<T> {
+    return this.send<T>(method, path, body, true, false, auditReason);
   }
 
   private async post<T>(path: string, body: unknown): Promise<{ message: T; rateLimit: RateLimit }> {

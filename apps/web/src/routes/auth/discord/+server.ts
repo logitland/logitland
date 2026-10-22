@@ -1,5 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { OAUTH_COOKIE, authorizeUrl, nextPath } from '#lib/server/discord.js';
+import { cookieOptions } from '#lib/server/session.js';
 
 const OAUTH_SECONDS = 600;
 
@@ -7,6 +8,6 @@ const OAUTH_SECONDS = 600;
 export const GET = ({ url, cookies }) => {
   const next = nextPath(url.searchParams.get('next'));
   const state = crypto.randomUUID();
-  cookies.set(OAUTH_COOKIE, `${state} ${next}`, { path: '/auth', httpOnly: true, sameSite: 'lax', maxAge: OAUTH_SECONDS });
+  cookies.set(OAUTH_COOKIE, `${state} ${next}`, { ...cookieOptions(url), path: '/auth', maxAge: OAUTH_SECONDS });
   redirect(303, authorizeUrl(url.origin, state), { external: true });
 };

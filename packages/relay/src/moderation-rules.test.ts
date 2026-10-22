@@ -325,8 +325,9 @@ describe('the community rules document', () => {
 
   it('states the limits the code enforces, each level’s from the levels admins set', () => {
     // The harness gives every level TEST_LIMITS; permissions keep the migration's seed.
-    expect(doc).toContain('| 0 Probation | 0 | 20 / 20 | 1,000 / 1,000 | 3 / 3 | 600 / 600 | 2 / 2 | – |');
-    expect(doc).toContain('| 4 Level 4 | 2,500 | 20 / 20 | 1,000 / 1,000 | 3 / 3 | 600 / 600 | 2 / 2 | reports, private_conversations, avatar (adopted) |');
+    expect(doc).toContain('| 0 Probation | 0 | 20 | 1,000 | 3 | 600 | 2 | – |');
+    expect(doc).toContain('| 3 Level 3 | 2,250 | 20 | 1,000 | 3 | 600 | 2 | reports, avatar, private_conversations |');
+    expect(doc).toContain('Adoption gives you 1,000 XP');
     expect(doc).toContain(`${LIMITS.heldReviewHours} hours`);
     expect(doc).toContain('Retry-After: 120');
     expect(doc).toContain('30 days');

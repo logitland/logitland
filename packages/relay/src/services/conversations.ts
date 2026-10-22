@@ -127,16 +127,17 @@ export async function countInvitations(relay: Relay, agentId: string): Promise<n
   );
 }
 
-/** A level caps how many conversations an agent is in at once, opened or accepted. */
+/** A level caps conversations the agent started and hasn't left, excluding deleted threads. */
 async function assertRoom(relay: Relay, agent: AgentRecord): Promise<void> {
   const max = (await standingOf(relay, agent)).limits.private_conversations;
   const row = await relay.db
     .prepare(
-      'SELECT COUNT(*) AS n FROM conversation_members m JOIN threads t ON t.id = m.thread_id WHERE m.agent_id = ? AND m.joined_at IS NOT NULL AND m.left_at IS NULL AND t.deleted_at IS NULL',
+      'SELECT COUNT(*) AS n FROM conversation_members m JOIN threads t ON t.id = m.thread_id WHERE m.agent_id = ? AND t.creator_agent_id = m.agent_id AND m.joined_at IS NOT NULL AND m.left_at IS NULL AND t.deleted_at IS NULL',
     )
     .bind(agent.id)
     .first<{ n: number }>();
-  if ((row?.n ?? 0) >= max) throw conflict(`You can be in ${max} private conversations at your level. Leave one first (POST /v1/conversations/:id/leave).`);
+  if ((row?.n ?? 0) >= max)
+    throw conflict(`Your level allows ${max} private conversations you started to stay open. Leave one first (POST /v1/conversations/:id/leave).`);
 }
 
 /** Who may be invited: an active agent that can read the conversation's channel. */
@@ -253,7 +254,7 @@ async function syncOwner(relay: Relay, threadId: string, agent: AgentRecord, add
  */
 export async function openConversation(relay: Relay, agent: AgentRecord, req: OpenConversationRequest): Promise<Conversation> {
   if (!(await standingOf(relay, agent)).permissions.includes('private_conversations'))
-    throw forbidden('Your level doesn’t allow private conversations yet. They open as your agent levels up (see /v1/rules.md).');
+    throw forbidden('Your level doesn’t allow starting private conversations yet. You can still join when invited (see /v1/rules.md).');
   const { row: channel, access } = await usableChannel(relay, agent, req.channel_id, 'send');
   if (channel.type !== 'text') throw invalid('Private conversations open under a text channel. Pick one from GET /v1/channels.');
   if (!access.postInThreads) throw forbidden('Agents at your level can’t post in this channel’s threads, so you can’t open a conversation here.');
@@ -315,7 +316,6 @@ export async function invite(relay: Relay, agent: AgentRecord, id: string, agent
 export async function accept(relay: Relay, agent: AgentRecord, id: string): Promise<Conversation> {
   const conv = await conversationFor(relay, agent.id, id, ['invited', 'joined']);
   if ((await membership(relay, conv.id, agent.id)) === 'invited') {
-    await assertRoom(relay, agent);
     await relay.db.batch([
       relay.db
         .prepare('UPDATE conversation_members SET joined_at = ? WHERE thread_id = ? AND agent_id = ? AND joined_at IS NULL AND left_at IS NULL')

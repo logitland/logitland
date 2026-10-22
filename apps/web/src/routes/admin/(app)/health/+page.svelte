@@ -11,9 +11,9 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { Switch } from '#lib/components/ui/switch/index.js';
   import { HOLD_MS, formatNumber, isUrgent, plural, refusal, timeAgo, timeLeft } from '#lib/admin/format.js';
-  import { KILL_SWITCH_KEYS, KILL_SWITCHES, type KillSwitch } from '#lib/admin/labels.js';
+  import { CHANNEL_KEYS, CHANNELS, KILL_SWITCH_KEYS, KILL_SWITCHES, ROLE_KEYS, ROLES, type ChannelKey, type KillSwitch, type RoleKey } from '#lib/admin/labels.js';
   import { session } from '#lib/session.js';
-  import { health, operations, registerCommands, setAlertsChannel, setSwitch } from './health.remote.js';
+  import { health, operations, registerCommands, setChannel, setRole, setSwitch } from './health.remote.js';
 
   type Status = 'ok' | 'warning' | 'down';
   const STATUS_ICONS = { ok: CircleCheckIcon, warning: TriangleAlertIcon, down: CircleXIcon } as const;
@@ -48,6 +48,7 @@
   ] as const satisfies { key: keyof BotChannelStanding; label: string }[];
 
   const NO_CHANNEL = 'none';
+  const NO_ROLE = 'none';
 
   const h = $derived(await health());
   const ops = $derived(await operations());
@@ -119,11 +120,21 @@
     }
   }
 
-  async function alertsTo(value: string) {
+  async function channelFor(key: ChannelKey, value: string) {
     const channel = ops.channels.find((c) => c.id === value);
     try {
-      await setAlertsChannel(channel?.id ?? null);
-      toast.success(channel ? `Alerts go to #${channel.name}` : 'Turned off staff alerts');
+      await setChannel({ key, channelId: channel?.id ?? null });
+      toast.success(`${CHANNELS[key]}: ${channel ? `#${channel.name}` : 'none'}`);
+    } catch (e) {
+      toast.error(refusal(e));
+    }
+  }
+
+  async function roleFor(key: RoleKey, value: string) {
+    const role = ops.roles.find((r) => r.id === value);
+    try {
+      await setRole({ key, roleId: role?.id ?? null });
+      toast.success(`${ROLES[key]}: ${role ? `@${role.name}` : 'none'}`);
     } catch (e) {
       toast.error(refusal(e));
     }
@@ -230,26 +241,58 @@
         </div>
       </section>
 
-      <section aria-labelledby="alerts-heading">
+      <section aria-labelledby="channels-heading">
         <div class="flex min-h-8 items-center">
-          <h2 id="alerts-heading" class="text-sm font-medium">Staff alerts</h2>
+          <h2 id="channels-heading" class="text-sm font-medium">Channels</h2>
         </div>
-        <div class="mt-2 rounded-xl border bg-card px-4 py-3">
-          <Field.Field orientation="horizontal" class="justify-between">
-            <Field.Label for="alerts-channel" class="font-normal">Channel</Field.Label>
-            <Select.Root type="single" value={ops.alertsChannelId ?? NO_CHANNEL} onValueChange={alertsTo}>
-              <Select.Trigger id="alerts-channel" class="w-48">
-                {ops.alertsChannelId ? `#${ops.channels.find((c) => c.id === ops.alertsChannelId)?.name ?? ops.alertsChannelId}` : 'None'}
-              </Select.Trigger>
-              <Select.Content class="max-h-72">
-                <Select.Item value={NO_CHANNEL} label="None" />
-                {#each ops.channels as channel (channel.id)}
-                  <Select.Item value={channel.id} label="#{channel.name}" />
-                {/each}
-              </Select.Content>
-            </Select.Root>
-          </Field.Field>
+        <ul class="mt-2 divide-y overflow-hidden rounded-xl border bg-card">
+          {#each CHANNEL_KEYS as key (key)}
+            {@const current = ops.channelIds[key]}
+            <li class="px-4 py-3">
+              <Field.Field orientation="horizontal" class="justify-between">
+                <Field.Label for="channel-{key}" class="font-normal">{CHANNELS[key]}</Field.Label>
+                <Select.Root type="single" value={current ?? NO_CHANNEL} onValueChange={(value) => channelFor(key, value)}>
+                  <Select.Trigger id="channel-{key}" class="w-48">
+                    {current ? `#${ops.channels.find((c) => c.id === current)?.name ?? current}` : 'None'}
+                  </Select.Trigger>
+                  <Select.Content class="max-h-72">
+                    <Select.Item value={NO_CHANNEL} label="None" />
+                    {#each ops.channels as channel (channel.id)}
+                      <Select.Item value={channel.id} label="#{channel.name}" />
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+              </Field.Field>
+            </li>
+          {/each}
+        </ul>
+      </section>
+
+      <section aria-labelledby="roles-heading">
+        <div class="flex min-h-8 items-center">
+          <h2 id="roles-heading" class="text-sm font-medium">Roles</h2>
         </div>
+        <ul class="mt-2 divide-y overflow-hidden rounded-xl border bg-card">
+          {#each ROLE_KEYS as key (key)}
+            {@const current = ops.roleIds[key]}
+            <li class="px-4 py-3">
+              <Field.Field orientation="horizontal" class="justify-between">
+                <Field.Label for="role-{key}" class="font-normal">{ROLES[key]}</Field.Label>
+                <Select.Root type="single" value={current ?? NO_ROLE} onValueChange={(value) => roleFor(key, value)}>
+                  <Select.Trigger id="role-{key}" class="w-48">
+                    {current ? `@${ops.roles.find((r) => r.id === current)?.name ?? current}` : 'None'}
+                  </Select.Trigger>
+                  <Select.Content class="max-h-72">
+                    <Select.Item value={NO_ROLE} label="None" />
+                    {#each ops.roles as role (role.id)}
+                      <Select.Item value={role.id} label="@{role.name}" />
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+              </Field.Field>
+            </li>
+          {/each}
+        </ul>
       </section>
     </div>
   </div>

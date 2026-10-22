@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@4.0.1/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [["@logitland/backend", "@logitland/web"]],
+  "linked": [],
+  "access": "restricted",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "privatePackages": { "version": true, "tag": true },
+  "ignore": [
+    "@logitland/config",
+    "@logitland/contracts",
+    "@logitland/discord",
+    "@logitland/discord-catalog",
+    "@logitland/discord-fake",
+    "@logitland/flock",
+    "@logitland/relay",
+    "@logitland/sigil",
+    "@logitland/tokens",
+    "@logitland/ui",
+    "@logitland/webhooks"
+  ]
+}

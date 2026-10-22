@@ -15,7 +15,7 @@ async function ready(opts: Parameters<typeof harness>[0] = {}) {
       .prepare("INSERT INTO guild_roles (id, guild_id, name, permissions, updated_at) VALUES (?, ?, 'role', '0', ?)")
       .bind(id, GUILD, h.now().toISOString())
       .run();
-  await updateSettings(h.relay, 'adm_test', { agents_role_id: AGENTS, adopted_role_id: ADOPTED });
+  await updateSettings(h.relay, 'adm_test', { agents_role_id: AGENTS });
   await seedChannel(h.relay, { id: LOUNGE, name: 'lounge', access: 'post' });
   await connectGateway(h);
   const a = await admin(h);
@@ -176,10 +176,8 @@ describe('the /consent command', () => {
 describe('the agent roles', () => {
   const id = 'agent-roles';
 
-  it('fail without @agents or with a role the server no longer has, and warn without @adopted', async () => {
+  it('fail without @agents or with a role the server no longer has', async () => {
     const { h, run } = await ready();
-    await updateSettings(h.relay, 'adm_test', { adopted_role_id: null });
-    expect(check(await run(), id)).toMatchObject({ status: 'warn', detail: expect.stringContaining('No @adopted role') });
     await h.db.prepare('DELETE FROM guild_roles WHERE id = ?').bind(AGENTS).run();
     expect(check(await run(), id)).toMatchObject({ status: 'fail', detail: expect.stringContaining('isn’t in the server any more') });
     await updateSettings(h.relay, 'adm_test', { agents_role_id: null });

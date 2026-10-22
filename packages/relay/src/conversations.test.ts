@@ -122,17 +122,43 @@ describe('private conversations', () => {
     expect(page.messages.map((m) => [m.author.kind, m.content])).toEqual([['human', 'from the owner']]);
   });
 
-  it('need the level’s permission, and stop at its cap', async () => {
-    const { h, a, b, outsider } = await world();
+  it('let probation agents accept an invitation and post without permission or room to start one', async () => {
+    const { h, a } = await world();
+    await h.relay.db.prepare("UPDATE levels SET rules = json_set(rules, '$.limits.private_conversations', 0) WHERE level = 0").run();
+    const low = await seedAgent(h.relay, { name: 'Newcomer', level: 0 });
+    const conv = await open(h, a.token, [low.id]);
+    expect((await h.call('POST', `/v1/conversations/${conv.id}/accept`, undefined, h.as(low.token))).status).toBe(200);
+    const posted = await h.call(
+      'POST',
+      '/v1/messages',
+      { channel_id: LOUNGE, thread_id: conv.id, content: 'Hello everyone' },
+      { ...h.as(low.token), 'idempotency-key': 'probation-conv-post' },
+    );
+    expect(posted.status).toBe(201);
+  });
+
+  it('need the level’s permission to start a conversation', async () => {
+    const { h, b } = await world();
     const low = await seedAgent(h.relay, { name: 'Lowly', level: 1 });
     const refused = await h.call('POST', '/v1/conversations', { channel_id: LOUNGE, invite: [b.id] }, h.as(low.token));
     expect(refused.status).toBe(403);
-    // The test levels allow two at a time.
-    await open(h, a.token, [b.id]);
+    expect(h.discordCalls).toHaveLength(0);
+  });
+
+  it('cap only conversations started and still open, allowing invitations even at the cap', async () => {
+    const { h, a, b, outsider } = await world();
+    const invited = await open(h, b.token, [a.id]);
+    expect((await h.call('POST', `/v1/conversations/${invited.id}/accept`, undefined, h.as(a.token))).status).toBe(200);
+    const first = await open(h, a.token, [b.id]);
     await open(h, a.token, [outsider.id]);
     const third = await h.call('POST', '/v1/conversations', { channel_id: LOUNGE, invite: [b.id] }, h.as(a.token));
     expect(third.status).toBe(409);
-    expect(h.discordCalls.filter((r) => new URL(r.url).pathname.endsWith('/threads'))).toHaveLength(2);
+    const another = await open(h, outsider.token, [a.id]);
+    expect((await h.call('POST', `/v1/conversations/${another.id}/accept`, undefined, h.as(a.token))).status).toBe(200);
+    expect((await h.call('POST', `/v1/conversations/${first.id}/leave`, undefined, h.as(a.token))).status).toBe(204);
+    const replacement = await open(h, a.token, [b.id]);
+    await h.relay.db.prepare('UPDATE threads SET deleted_at = ? WHERE id = ?').bind(h.now().toISOString(), replacement.id).run();
+    await open(h, a.token, [b.id]);
   });
 
   it('take owners out as their agents leave, and archive the thread when the last agent leaves', async () => {

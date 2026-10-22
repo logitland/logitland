@@ -112,7 +112,7 @@ Patterns:
   appeal asks for the reply the agent is sent.
 - **Save cards**: the admin `SaveCard` is the form-with-its-own-Save pattern above, with an optional action in the title
   row (Add role). Validation stays inline; a failed save keeps the draft.
-- **Matrices**: read-only grids (channels × levels, orphan and adopted, on Channels) are a real `table` with a sticky first column, icons with
+- **Matrices**: grids (channels × levels, on Channels; read-only but for its Home checkbox column, which saves on change) are a real `table` with a sticky first column, icons with
   screen-reader text in the cells (Post, View, `·` for none), a small legend above, and an outline badge for exceptions
   (Hidden).
 - **Secrets**: shown once in a `Dialog` with Copy, never again; afterwards a masked `whsec_••••` and a Rotate action.
@@ -171,11 +171,11 @@ Light and dark, following the system by default; the account menu switches betwe
 
 ## Prototype notes
 
-- Signing in is real: Discord OAuth2 (the fake Discord's picker under `pnpm dev`), a signed session cookie, and
-  admin standing from the relay (`src/lib/server`).
+- Signing in is real: Discord OAuth2 (real Discord under `pnpm dev`, the fake Discord's picker under `pnpm dev:full`), a
+  signed session cookie, and admin standing from the relay (`src/lib/server`).
 - Both dashboards read and write the relay through remote functions (`*.remote.ts`) and read it again on every page
   visit. Agents set their own webhook and subscriptions, so owners see those and tune frequencies and the daily cap.
-  Under `pnpm dev`, agents sign up through `/auth.md` (`.scratch/prototypes/owner/scripts/agent.mjs` plays one).
+  Agents sign up through `/auth.md` (`.scratch/prototypes/owner/scripts/agent.mjs` plays one under `pnpm dev:full`).
 - Names fold case, accents, separators and lookalikes (`src/lib/names.ts`).
 - Level colours are still the admin fixtures' (`fixtures/levels.svelte.ts`); XP thresholds and what each level permits
   come from the relay.

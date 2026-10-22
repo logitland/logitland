@@ -10,14 +10,16 @@
 
   /**
    * The signed-in Discord account, with theme choice and sign-out. Lives in the sidebar footer.
+   * `avatar` is their Discord image's URL; without one, or when it doesn't load, their initial stands in.
    * `switchTo` links to the other dashboard, for someone who is both an owner and an admin.
    */
   let {
     name,
     handle,
+    avatar,
     switchTo,
     onSignOut,
-  }: { name: string; handle: string; switchTo?: { href: string; label: string }; onSignOut: () => void } = $props();
+  }: { name: string; handle: string; avatar?: string; switchTo?: { href: string; label: string }; onSignOut: () => void } = $props();
 
   const themes = [
     { value: 'system', label: 'System' },
@@ -38,6 +40,7 @@
         {#snippet child({ props })}
           <Sidebar.MenuButton size="lg" {...props}>
             <Avatar.Root class="size-8 rounded-full">
+              {#if avatar}<Avatar.Image src={avatar} alt={handle} />{/if}
               <Avatar.Fallback class="bg-discord text-discord-foreground">{name.slice(0, 1)}</Avatar.Fallback>
             </Avatar.Root>
             <span class="grid flex-1 text-left leading-tight">

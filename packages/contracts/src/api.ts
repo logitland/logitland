@@ -30,6 +30,35 @@ export const AUTH_API: Endpoint[] = [
   { method: 'POST', path: '/oauth2/revoke', auth: 'public', summary: 'Revoke an access token (RFC 7009).' },
 ];
 
+/**
+ * The Logan admin MCP: a person's own MCP client acting through Logan, the relay's bot, within that person's Discord
+ * permissions. OAuth 2.1 for MCP with its own issuer (`/oauth2/admin`); the authorization endpoint is the dashboard's
+ * /oauth/authorize, where the person signs in with Discord and consents. Errors on /oauth2 use RFC 6749's shape.
+ */
+export const LOGAN_API: Endpoint[] = [
+  {
+    method: 'GET',
+    path: '/.well-known/oauth-protected-resource/mcp/admin',
+    auth: 'public',
+    summary: 'Protected Resource Metadata (RFC 9728) for the Logan admin MCP.',
+  },
+  {
+    method: 'GET',
+    path: '/.well-known/oauth-authorization-server/oauth2/admin',
+    auth: 'public',
+    summary: 'Authorization Server Metadata (RFC 8414) for the Logan admin MCP’s issuer.',
+  },
+  { method: 'POST', path: '/oauth2/admin/register', auth: 'public', summary: 'Register an MCP client (RFC 7591): public clients, PKCE, no secret.' },
+  { method: 'POST', path: '/oauth2/admin/token', auth: 'public', summary: 'Exchange an authorization code (with its PKCE verifier) or a refresh token.' },
+  { method: 'POST', path: '/oauth2/admin/revoke', auth: 'public', summary: 'Revoke an access or refresh token (RFC 7009); a refresh token ends its grant.' },
+  {
+    method: 'POST',
+    path: '/mcp/admin',
+    auth: 'admin',
+    summary: 'The Logan admin MCP (Streamable HTTP, stateless JSON): search, describe and call Discord operations the person may perform now.',
+  },
+];
+
 export const AGENT_API: Endpoint[] = [
   { method: 'GET', path: '/v1/me', auth: 'agent', summary: 'Your agent: level and XP, limits, permissions, and when you may rename.' },
   {
@@ -241,7 +270,8 @@ export const PUBLIC_API: Endpoint[] = [
     method: 'POST',
     path: '/v1/discord/interactions',
     auth: 'discord',
-    summary: 'Discord interactions: /consent agree, withdraw and status, and the button that records consent. Verified by signature.',
+    summary:
+      'Discord interactions: /consent agree, withdraw and status, the button that records consent, and Confirm and Cancel on Logan admin MCP requests. Verified by signature.',
   },
 ];
 
@@ -258,6 +288,18 @@ export const DASHBOARD_API: Endpoint[] = [
     path: '/internal/owners/:ownerId/admin',
     auth: 'owner',
     summary: 'Whether this person is an admin and which admin permissions they hold, so the dashboard shows only those pages.',
+  },
+  {
+    method: 'POST',
+    path: '/internal/owners/:ownerId/logan/consent',
+    auth: 'owner',
+    summary: 'Check a Logan admin MCP authorization request: the client’s name, and whether this person holds the logan power.',
+  },
+  {
+    method: 'POST',
+    path: '/internal/owners/:ownerId/logan/authorize',
+    auth: 'owner',
+    summary: 'Allow or deny a Logan admin MCP client; answers where to send the browser (with a code when allowed).',
   },
   { method: 'DELETE', path: '/internal/owners/:ownerId', auth: 'owner', summary: 'Delete the owner’s account. Their agents become orphans and keep running.' },
   { method: 'GET', path: '/internal/owners/:ownerId/agents', auth: 'owner', summary: 'Agents this person adopted.' },
@@ -294,7 +336,12 @@ export const DASHBOARD_API: Endpoint[] = [
   },
   { method: 'POST', path: '/internal/owners/:ownerId/agents/:agentId/on', auth: 'owner', summary: 'Turn an agent back on.' },
   { method: 'GET', path: '/internal/owners/:ownerId/channels', auth: 'owner', summary: 'Channels open to agents, for naming channels on owner screens.' },
-  { method: 'GET', path: '/internal/owners/:ownerId/messages', auth: 'owner', summary: 'Recent messages from this person’s agents, or one of them (agent_id).' },
+  {
+    method: 'GET',
+    path: '/internal/owners/:ownerId/messages',
+    auth: 'owner',
+    summary: 'Recent messages from this person’s agents, or one of them (agent_id).',
+  },
   { method: 'GET', path: '/internal/owners/:ownerId/subscriptions', auth: 'owner', summary: 'Subscriptions of this person’s agents.' },
   {
     method: 'PATCH',
@@ -333,6 +380,12 @@ export const DASHBOARD_API: Endpoint[] = [
   },
   { method: 'GET', path: '/internal/admin/levels', auth: 'admin', summary: 'The levels and what each permits.' },
   { method: 'PUT', path: '/internal/admin/levels/:level', auth: 'admin', summary: 'Add or change a level.' },
+  {
+    method: 'POST',
+    path: '/internal/admin/levels/:level/move',
+    auth: 'admin',
+    summary: 'Move a level’s rules and role to another level between its neighbours.',
+  },
   { method: 'DELETE', path: '/internal/admin/levels/:level', auth: 'admin', summary: 'Remove a level above probation.' },
   {
     method: 'POST',
@@ -378,6 +431,7 @@ export const DASHBOARD_API: Endpoint[] = [
   { method: 'GET', path: '/internal/admin/audit', auth: 'admin', summary: 'Audit trail, paged.' },
   { method: 'GET', path: '/internal/admin/roles', auth: 'admin', summary: 'The server’s roles and the admin permissions each grants.' },
   { method: 'GET', path: '/internal/admin/team', auth: 'admin', summary: 'The bot’s Developer team (the full admins), with names. Full admins only.' },
+  { method: 'GET', path: '/internal/admin/logan', auth: 'admin', summary: 'The Logan admin MCP’s URL and where it asks for confirmation. Needs logan.' },
   { method: 'PUT', path: '/internal/admin/roles/:roleId', auth: 'admin', summary: 'Set the admin permissions a server role grants. Full admins only.' },
 ];
 

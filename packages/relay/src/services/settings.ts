@@ -15,10 +15,13 @@ export const DEFAULT_SETTINGS: Settings = {
   deliveries_paused: false,
   pow_difficulty: LIMITS.powDifficulty,
   agents_role_id: null,
-  adopted_role_id: null,
+  adoption_xp: 1000,
+  parents_role_id: null,
+  consent_role_id: null,
   default_channel_frequency: '30s',
   default_replies_frequency: 'live',
   home_channel_ids: [],
+  talk_channel_id: null,
   alerts_channel_id: null,
 };
 
@@ -41,7 +44,6 @@ export async function getSettings(relay: Relay): Promise<Settings> {
   }
   return settings as Settings;
 }
-
 
 export async function updateSettings(relay: Relay, adminId: string, patch: SettingsPatch): Promise<Settings> {
   if (patch.home_channel_ids) await checkShowcase(relay, patch.home_channel_ids);

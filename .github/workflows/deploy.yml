@@ -1,0 +1,124 @@
+# The deploy both environments run, called by deploy-staging.yml and deploy-production.yml: check, migrate D1, deploy the
+# relay, then the web app (its RELAY binding needs the relay first), then load the site. Settings and secrets come from the
+# GitHub environment of the same name; scripts/setup-deploy.sh sets them up, and DEPLOY.md describes them.
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: staging or production, both the GitHub environment and the wrangler env
+        type: string
+        required: true
+      url:
+        description: The site's address, loaded after the deploy
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.url }}
+    # One deploy per environment at a time, and never cancelled halfway through a migration.
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      DEPLOY_ENV: ${{ inputs.environment }}
+      SITE_URL: ${{ inputs.url }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the environment is set up
+        run: |
+          if grep -q "SETUP_DEPLOY_${DEPLOY_ENV^^}_D1_ID" apps/backend/wrangler.jsonc; then
+            echo "::error::apps/backend/wrangler.jsonc has no $DEPLOY_ENV database ID yet: run scripts/setup-deploy.sh $DEPLOY_ENV"
+            exit 1
+          fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::The $DEPLOY_ENV environment has no CLOUDFLARE_ACCOUNT_ID variable: run scripts/setup-deploy.sh $DEPLOY_ENV"
+            exit 1
+          fi
+
+      - run: pnpm check
+      - run: pnpm test
+
+      # The Workers' secrets go up with each version (wrangler deploy --secrets-file), so the GitHub environment is the one
+      # place they live: rotate one by setting it there and re-running this workflow. Secrets left out are never deleted.
+      - name: Write the Workers' secrets
+        env:
+          RELAY_SECRET_KEY: ${{ secrets.RELAY_SECRET_KEY }}
+          IP_HASH_KEY: ${{ secrets.IP_HASH_KEY }}
+          INTERNAL_TOKEN: ${{ secrets.INTERNAL_TOKEN }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
+          DISCORD_PUBLIC_KEY: ${{ secrets.DISCORD_PUBLIC_KEY }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: |
+          umask 077
+          missing=()
+          for name in RELAY_SECRET_KEY IP_HASH_KEY INTERNAL_TOKEN SESSION_SECRET DISCORD_APPLICATION_ID DISCORD_PUBLIC_KEY \
+            DISCORD_BOT_TOKEN DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET TYPESAFE_API_KEY; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::The $DEPLOY_ENV environment lacks these secrets: ${missing[*]}. Run scripts/setup-deploy.sh $DEPLOY_ENV"
+            exit 1
+          fi
+          jq -n 'env | {RELAY_SECRET_KEY, IP_HASH_KEY, INTERNAL_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN,
+            TYPESAFE_API_KEY, SENTRY_DSN} | with_entries(select(.value != null and .value != ""))' > "$RUNNER_TEMP/backend.json"
+          jq -n 'env | {INTERNAL_TOKEN, SESSION_SECRET, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET}' > "$RUNNER_TEMP/web.json"
+
+      - name: Migrate the database
+        working-directory: apps/backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm exec wrangler d1 migrations apply DB --remote --env "$DEPLOY_ENV"
+
+      - name: Deploy the relay
+        working-directory: apps/backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm exec wrangler deploy --env "$DEPLOY_ENV" --secrets-file "$RUNNER_TEMP/backend.json" --message "$GITHUB_REF_NAME $GITHUB_SHA"
+
+      - run: pnpm turbo run build --filter=@logitland/web
+
+      - name: Deploy the web app
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm exec wrangler deploy --env "$DEPLOY_ENV" --secrets-file "$RUNNER_TEMP/web.json" --message "$GITHUB_REF_NAME $GITHUB_SHA"
+
+      - name: Remove the secrets files
+        if: always()
+        run: rm -f "$RUNNER_TEMP/backend.json" "$RUNNER_TEMP/web.json"
+
+      # /v1/stats answers only when the relay's configuration is complete and D1 is reachable (503 misconfigured otherwise);
+      # the home page reaches the relay through the web app's RELAY binding. A first deploy waits for the certificate.
+      - name: Load the site
+        run: |
+          for path in /v1/stats /; do
+            curl --fail --silent --show-error --output /dev/null --retry 20 --retry-delay 15 --retry-all-errors "$SITE_URL$path"
+            echo "$SITE_URL$path answered"
+          done

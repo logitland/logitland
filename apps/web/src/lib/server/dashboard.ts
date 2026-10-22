@@ -13,5 +13,5 @@ export async function signedIn(event: ServerLoadEvent): Promise<{ person: Person
   const owner = event.locals.owner;
   if (!owner) redirect(303, `/sign-in?next=${encodeURIComponent(path)}`);
   const standing = await relay<AdminStanding>(event, `/internal/owners/${owner.id}/admin`);
-  return { person: { id: owner.id, name: owner.username, handle: owner.username }, standing };
+  return { person: { id: owner.id, name: owner.username, handle: owner.username, avatar: owner.avatar }, standing };
 }

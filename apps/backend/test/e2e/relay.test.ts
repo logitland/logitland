@@ -263,7 +263,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
 
   /* ---------- (e) People and consent ---------- */
 
-  it('(e) relays only a consenting person’s replies to agents, agrees only on the button, and deletes them on /consent withdraw', async () => {
+  it('(e) relays only a consenting person’s messages, agrees only on the button, and deletes them on /consent withdraw', async () => {
     const agentPost = await post(atlas, { channel_id: s.channels.lounge, content: unique('Anyone know where the lanterns are?') });
     expect(agentPost.status).toBe(201);
     const target: string = agentPost.body.discord_message_id;
@@ -274,13 +274,10 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     const early = s.fake.say(s.channels.lounge, { as: visitor, content: before });
     const earlyReply = s.fake.say(s.channels.lounge, { as: visitor, content: unique('An early reply'), replyTo: target });
     const marker = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('The admin says something after them') });
-    // The admin agreed before the suite but isn't replying to an agent, so this is dropped too; waiting for intake to pass it
-    // means the visitor's messages, sent before it, have been looked at.
-    await eventually(async () => (await s.sql('SELECT 1 FROM channel_cursors WHERE last_message_id >= CAST(? AS INTEGER)', marker.id)).length > 0, {
-      what: 'intake to pass the messages',
-    });
-    for (const m of [early, earlyReply, marker]) expect(await notStored(m.id)).toBe(true);
-    expect(await s.sql('SELECT 1 FROM events WHERE message_id IN (?, ?, ?)', early.id, earlyReply.id, marker.id)).toEqual([]);
+    // The admin agreed before the suite, so this is kept; once it is, the visitor's messages, sent before it, have been looked at.
+    await eventually(async () => !(await notStored(marker.id)), { what: 'intake to pass the messages' });
+    for (const m of [early, earlyReply]) expect(await notStored(m.id)).toBe(true);
+    expect(await s.sql('SELECT 1 FROM events WHERE message_id IN (?, ?)', early.id, earlyReply.id)).toEqual([]);
 
     // /consent agree shows the notice and a button, and agrees to nothing.
     const notice = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'agree' }, channelId: s.channels.lounge });
@@ -289,7 +286,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       type: 4,
       data: {
         flags: 64,
-        content: expect.stringContaining('Replying to agents in Logitland'),
+        content: expect.stringContaining('Talking with agents in Logitland'),
         components: [{ type: 1, components: [{ type: 2, style: 1, custom_id: expect.stringMatching(/^consent_agree:\d{4}-\d{2}-\d{2}$/) }] }],
       },
     });
@@ -303,7 +300,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       channelId: s.channels.lounge,
     });
     expect(press.status).toBe(200);
-    expect(press.body).toMatchObject({ type: 4, data: { flags: 64, content: expect.stringContaining('You agreed') } });
+    // The answer replaces the ephemeral notice instead of adding a message.
+    expect(press.body).toMatchObject({ type: 7, data: { components: [], content: expect.stringContaining('You agreed') } });
     expect(s.fake.requestsTo('guild.member.role.add')).toHaveLength(0);
     expect(
       (
@@ -314,7 +312,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       )[0],
     ).toEqual({ method: 'command', revoked_at: null, interaction_id: press.interaction.id });
 
-    // Now a reply to an agent is relayed; anything else they write still isn't.
+    // Now what they write is relayed, a reply to an agent or not.
     const text = unique('In the cellar, I think');
     const reply = s.fake.say(s.channels.lounge, { as: visitor, content: text, replyTo: target });
     const chatter = s.fake.say(s.channels.lounge, { as: visitor, content: unique('Just chatting') });
@@ -328,9 +326,9 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(row).toMatchObject({ content: text, reply_to: target, author: { kind: 'human', display_name: 'A visitor', agent_id: null } });
     expect(row.author.author_id).toMatch(/^p_/);
     expect(JSON.stringify(row)).not.toContain(visitor);
-    expect(await notStored(chatter.id)).toBe(true);
+    await eventually(async () => !(await notStored(chatter.id)), { what: 'the person’s plain message' });
 
-    // /consent withdraw: the agreement ends at once and the held replies go.
+    // /consent withdraw: the agreement ends at once and the held messages go.
     const withdraw = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'withdraw' }, channelId: s.channels.lounge });
     expect(withdraw.status).toBe(200);
     expect(withdraw.body).toMatchObject({ type: 5, data: { flags: 64 } });

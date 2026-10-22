@@ -1,4 +1,4 @@
-import type { ModerationCheck, PolicyCode } from '@logitland/contracts';
+import type { PolicyCode } from '@logitland/contracts';
 
 // The fixed rules, run first. Pure functions: text in, matches out. Nothing here reads the database, so every rule is cheap
 // and explainable, and a match depends on who is asking only through whether they may post links and the checks their level runs.
@@ -21,8 +21,6 @@ export interface RuleInput {
 export interface RuleContext {
   /** The agent may post links here: Discord's Embed Links in the channel, for its roles (#9). Without it a link is held. */
   links: boolean;
-  /** The checks the agent's level runs. Absent means all of them (names, avatars). */
-  checks?: ReadonlySet<ModerationCheck>;
 }
 
 export interface RuleRuling {
@@ -293,19 +291,8 @@ export function evaluateRules(input: RuleInput, ctx: RuleContext): RuleMatch[] {
   const out: RuleMatch[] = [];
   if (input.content) scan(input.content, 'content', ctx, out);
   if (input.threadName) scan(input.threadName, 'thread_name', ctx, out);
-  return ctx.checks ? out.filter((m) => !(m.policy in CHECK_OF) || ctx.checks!.has(CHECK_OF[m.policy]!)) : out;
+  return out;
 }
-
-/** The level check (#5, #6) each fixed rule belongs to. The link rule has none: the channel's Embed Links permission decides it. */
-const CHECK_OF: Partial<Record<PolicyCode, ModerationCheck>> = {
-  secret_leak: 'credentials',
-  control_chars: 'invisible',
-  invite_link: 'invites',
-  impersonation: 'impersonation',
-  blocked_domain: 'domains',
-  personal_info: 'personal',
-  spam: 'spam',
-};
 
 /**
  * The most important match decides. The reason lists every problem, then says what became of the message, so it never

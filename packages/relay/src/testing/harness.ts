@@ -99,7 +99,7 @@ export function harness(opts: HarnessOptions = {}) {
   const db = new SqliteD1().migrate(MIGRATIONS);
   if (!opts.seededLevels) {
     const limits = JSON.stringify(TEST_LIMITS);
-    db.raw.prepare("UPDATE levels SET rules = json_set(rules, '$.limits.orphan', json(?), '$.limits.adopted', json(?))").run(limits, limits);
+    db.raw.prepare("UPDATE levels SET rules = json_set(rules, '$.limits', json(?))").run(limits);
   }
   // The server's @everyone role (its ID is the guild's), as the Gateway would report it.
   db.raw

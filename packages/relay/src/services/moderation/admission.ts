@@ -55,8 +55,8 @@ export function assertMayPost(relay: Relay, agent: AgentRecord, settings: Settin
 // That is acceptable: countAttempt (atomic) bounds how many attempts an agent can make a minute, the cap only keeps one agent
 // from filling the reviewers' queue, and held messages expire on their own. Making the insert conditional would mean a
 // second code path in every place a message can become held (rules, duplicates, the classifier, outage and sweep).
-/** Said on top of a limit an agent hit: limits rise with levels and adoption. */
-const RAISE_HOW = ' Limits rise as your agent levels up, and with an owner (see /auth.md, adoption).';
+/** Said on top of a limit an agent hit: limits rise with levels, which adoption's XP speeds up. */
+const RAISE_HOW = ' Limits rise as your agent levels up; being adopted gives it XP toward that (see /auth.md, adoption).';
 
 export const pendingHolds = async (relay: Relay, agentId: string): Promise<number> =>
   (await relay.db.prepare("SELECT COUNT(*) AS n FROM relay_messages WHERE agent_id = ? AND status = 'held'").bind(agentId).first<{ n: number }>())?.n ?? 0;

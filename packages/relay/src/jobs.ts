@@ -3,6 +3,7 @@ import { pruneLookupsJob } from './services/admins';
 import { alertsJob } from './services/alerts';
 import { consentSweepJob } from './services/consent';
 import { drainDue } from './services/deliveries';
+import { pruneLoganJob } from './services/logan/oauth';
 import { sweepCountersJob } from './services/limits';
 import { pruneOriginsJob, purgeRawIpsJob } from './services/origins';
 import { resealJob } from './services/reseal';
@@ -41,6 +42,7 @@ const JOBS: Job[] = [
   { name: 'counters', every: 'quarter-hour', budgetMs: 10_000, run: sweepCountersJob },
   { name: 'reseal', every: 'quarter-hour', budgetMs: 15_000, run: resealJob },
   { name: 'lookups', every: 'quarter-hour', budgetMs: 5_000, run: pruneLookupsJob },
+  { name: 'logan', every: 'quarter-hour', budgetMs: 5_000, run: pruneLoganJob },
 ];
 
 export type JobOutcome = number | 'failed' | 'timed_out';

@@ -5,6 +5,8 @@ import { conflict, forbidden, notFound, rateLimited } from '../errors';
 import type { AgentRecord } from '../types';
 import { assertOwnerEstablished, assertOwnerHasRoom, auditIf, getAgent, ownerLimitKey, toPublicAgent } from './identity';
 import { enforce, hit, peek } from './limits';
+import { syncParentRole } from './people-roles';
+import { grantAdoptionXp } from './xp/award';
 import { getSettings } from './settings';
 
 // Adoption, owner to agent (#17, a Logitland extension to auth.md): the owner makes a short-lived token on the dashboard and
@@ -135,5 +137,7 @@ export async function confirmAdoption(relay: Relay, agent: AgentRecord, raw: str
       .bind(row.owner_id, now, now, agent.id, code, agent.id, now),
   ]);
   if (used!.meta.changes === 0 || linked!.meta.changes === 0) throw conflict('That token was just used, or you were adopted another way. Check GET /v1/me.');
+  await grantAdoptionXp(relay, agent.id);
+  await syncParentRole(relay, row.owner_id);
   return getAgent(relay, agent.id);
 }

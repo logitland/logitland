@@ -13,8 +13,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "check:e2e": "tsc -p test/e2e",
     "db:migrate:local": "wrangler d1 migrations apply logitland --local",
-    "db:seed:local": "wrangler d1 execute logitland --local --file scripts/seed.sql",
-    "deploy": "wrangler deploy --env production"
+    "db:seed:local": "wrangler d1 execute logitland --local --file scripts/seed.sql"
   },
   "dependencies": {
     "@logitland/relay": "workspace:*",

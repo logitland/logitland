@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { agree } from './consent.testkit';
+import { CONSENT_NOTICE_VERSION } from './services/consent';
 import { ingest } from './services/intake';
-import { AGREE_BUTTON } from './services/interactions';
+import { AGREE_BUTTON, NOTICE_BUTTON, answerFromGateway } from './services/interactions';
 import { GUILD, LOUNGE, harness, seedChannel } from './testing';
 
-// The /consent command and what it lets through intake: a person's reply to an agent, written after they agreed.
+// The /consent command and what it lets through intake: a person's messages, written after they agreed.
 
 const PERSON = '700000000000000001';
 const AGENT_POST = '810000000000000001';
@@ -61,26 +62,30 @@ describe('/consent', () => {
   it('shows the notice with a button and agrees only when the button is pressed', async () => {
     const { h, send } = await setup();
     const notice = await send(command('agree'));
-    expect(notice.body).toMatchObject({ type: 4, data: { content: expect.stringContaining('Replying to agents in Logitland') } });
+    expect(notice.body).toMatchObject({ type: 4, data: { content: expect.stringContaining('Talking with agents in Logitland') } });
     expect(notice.body.data!.components![0]!.components[0]!.custom_id).toBe(AGREE_BUTTON);
     expect(await h.db.prepare('SELECT 1 FROM consents').first()).toBeNull();
 
+    // The answer replaces the notice, button and all, instead of adding a message.
     const agreed = await send(press(AGREE_BUTTON));
-    expect(agreed.body).toMatchObject({ type: 4, data: { content: expect.stringContaining('You agreed') } });
+    expect(agreed.body).toMatchObject({ type: 7, data: { content: expect.stringContaining('You agreed'), components: [] } });
     expect(await h.db.prepare('SELECT method, revoked_at FROM consents WHERE discord_user_id = ?').bind(PERSON).first()).toEqual({
       method: 'command',
       revoked_at: null,
     });
   });
 
-  it('treats a button from an older notice as a request to see the current one', async () => {
+  it('treats a button from an older notice, or on a turned-away message, as a request to see the current one', async () => {
     const { h, send } = await setup();
-    const stale = await send(press('consent_agree:2020-01-01'));
-    expect(stale.body.data!.components![0]!.components[0]!.custom_id).toBe(AGREE_BUTTON);
+    for (const id of ['consent_agree:2020-01-01', NOTICE_BUTTON]) {
+      const shown = await send(press(id));
+      expect(shown.body).toMatchObject({ type: 4, data: { flags: 64 } });
+      expect(shown.body.data!.components![0]!.components[0]!.custom_id).toBe(AGREE_BUTTON);
+    }
     expect(await h.db.prepare('SELECT 1 FROM consents').first()).toBeNull();
   });
 
-  it('on withdraw, ends the agreement and deletes the replies the relay holds', async () => {
+  it('on withdraw, ends the agreement and deletes the messages the relay holds', async () => {
     const { h, send } = await setup();
     await agentMessage(h);
     await agree(h, PERSON);
@@ -98,19 +103,28 @@ describe('/consent', () => {
       .filter((r) => r.method === 'PATCH')
       .at(-1)!
       .json()) as { content: string };
-    expect(followUp.content).toContain('deleted 1 reply');
+    expect(followUp.content).toContain('deleted 1 message');
+  });
+});
+
+describe('/consent over the Gateway', () => {
+  it('answers through the interaction callback, without a signature', async () => {
+    const { h } = await setup();
+    await answerFromGateway(h.relay, command('agree'));
+    const call = h.discordCalls.find((r) => r.method === 'POST' && r.url.endsWith(`/interactions/${base.id}/${base.token}/callback`));
+    expect(await call?.json()).toMatchObject({ type: 4, data: { content: expect.stringContaining('Talking with agents in Logitland') } });
   });
 });
 
 describe('people’s messages at intake', () => {
-  it('keeps only a consenting person’s replies to agents, written after they agreed', async () => {
+  it('keeps only a consenting person’s messages, written after they agreed', async () => {
     const { h } = await setup();
     await agentMessage(h);
     await agree(h, PERSON, { at: '2026-10-19T02:30:00.000Z' });
     const cases = [
       // [message, kept, why]
       [message({ author: person, reply_to: AGENT_POST }), true, 'a reply to an agent after agreeing'],
-      [message({ author: person }), false, 'not a reply'],
+      [message({ author: person }), true, 'a plain message after agreeing'],
       [message({ author: person, reply_to: AGENT_POST, at: '2026-10-19T02:10:00.000Z' }), false, 'written before agreeing'],
       [message({ author: { id: '700000000000000002', username: 'sam' }, reply_to: AGENT_POST }), false, 'from someone who never agreed'],
       [message({ author: { id: '700000000000000003', username: 'newsbot', bot: true } }), true, 'a bot, which is not a person'],
@@ -120,5 +134,32 @@ describe('people’s messages at intake', () => {
       expect(Boolean(await stored(h, m.message_id)), why).toBe(kept);
       expect(Boolean(await h.db.prepare('SELECT 1 FROM events WHERE message_id = ?').bind(m.message_id).first()), why).toBe(kept);
     }
+  });
+
+  it('keeps only replies to agents under the earlier notice, and every later message once the person agrees to the current one', async () => {
+    const { h, send } = await setup();
+    await agentMessage(h);
+    await agree(h, PERSON, { notice: '2026-10-21' });
+    const reply = message({ author: person, reply_to: AGENT_POST });
+    const before = message({ author: person, at: '2026-10-19T03:00:00.000Z' });
+    await ingest(h.relay, { source: 'test', events: [reply, before] });
+    expect(await stored(h, reply.message_id)).not.toBeNull();
+    expect(await stored(h, before.message_id)).toBeNull();
+
+    expect((await send(press(AGREE_BUTTON))).body.data!.content).toContain('You agreed:');
+    const row = await h.db
+      .prepare('SELECT notice_version, granted_at FROM consents WHERE discord_user_id = ?')
+      .bind(PERSON)
+      .first<{ notice_version: string; granted_at: string }>();
+    expect(row!.notice_version).toBe(CONSENT_NOTICE_VERSION);
+    const history = await h.db.prepare("SELECT notice_version FROM consent_history WHERE discord_user_id = ? AND action = 'granted'").bind(PERSON).all();
+    expect(history.results).toEqual([{ notice_version: CONSENT_NOTICE_VERSION }]);
+
+    // A plain message from before the upgrade, arriving late, still isn't covered; one written after it is.
+    const late = message({ author: person, at: new Date(h.now().getTime() - 60_000).toISOString() });
+    const after = message({ author: person, at: new Date(h.now().getTime() + 1000).toISOString() });
+    await ingest(h.relay, { source: 'test', events: [late, after] });
+    expect(await stored(h, late.message_id)).toBeNull();
+    expect(await stored(h, after.message_id)).not.toBeNull();
   });
 });

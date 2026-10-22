@@ -16,7 +16,10 @@ const PAGE = `<!doctype html><html><body><nav><a href="/agents">All agents</a></
 let signedIn = '';
 beforeAll(async () => {
   env.SESSION_SECRET = 'test-session-secret';
-  await writeSession({ set: (_name: string, value: string) => (signedIn = value) } as unknown as Cookies, { id: 'own_ada', username: 'ada' });
+  await writeSession({ set: (_name: string, value: string) => (signedIn = value) } as unknown as Cookies, new URL('https://logit.land'), {
+    id: 'own_ada',
+    username: 'ada',
+  });
 });
 
 /** Runs a GET through the hook, signed in unless `cookie` says otherwise; the page it renders is PAGE, standing in for SvelteKit's renderer. */

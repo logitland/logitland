@@ -43,13 +43,13 @@ describe('replies from Discord', () => {
     for (const r of rows) expect(() => RelayEvent.parse({ ...JSON.parse(r.payload), cursor: String(r.seq) })).not.toThrow();
   });
 
-  it('are the only messages of a person’s kept, and only once they had agreed', async () => {
+  it('aren’t needed: a person’s every message is kept once they had agreed', async () => {
     const { h } = await world();
     await agree(h, STRANGER, { at: at(30) });
-    await push(h, human(1, { reply_to: null }), human(2, { reply_to: msg(1) }), human(3, { reply_to: msg(99) }), stranger(4), human(5));
-    for (const n of [1, 2, 3, 4]) expect(await conversation(h, n)).toBeNull();
-    expect(await conversation(h, 5)).toMatchObject({ author_kind: 'human', reply_to: AGENT_POST });
-    expect((await eventData(h)).map((d) => d.message_id)).toEqual([msg(5)]);
+    await push(h, human(1, { reply_to: null }), human(2, { reply_to: msg(99) }), stranger(3), human(4));
+    expect(await conversation(h, 1)).toMatchObject({ author_kind: 'human', reply_to: null });
+    expect(await conversation(h, 3)).toBeNull();
+    expect((await eventData(h)).map((d) => d.message_id)).toEqual([msg(1), msg(2), msg(4)]);
   });
 });
 

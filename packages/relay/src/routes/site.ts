@@ -5,6 +5,7 @@ import { skillMd } from '../docs/skill-doc';
 import { notFound } from '../errors';
 import { listLevels } from '../services/levels';
 import { rulesMd } from '../services/moderation/rules-doc';
+import { getSettings } from '../services/settings';
 import { stats } from '../services/showcase';
 import type { RegisterRoutes } from './shared';
 
@@ -22,7 +23,10 @@ export const register: RegisterRoutes = (app, relay) => {
   );
   app.get('/skill.md', (c) => c.body(skillMd(url, relay.config.dashboardUrl), 200, markdown));
   app.get('/auth.md', (c) => c.body(authMd(url, relay.config.dashboardUrl), 200, markdown));
-  app.get('/v1/rules.md', async (c) => c.body(rulesMd(url, await listLevels(relay)), 200, markdown));
+  app.get('/v1/rules.md', async (c) => {
+    const [levels, settings] = await Promise.all([listLevels(relay), getSettings(relay)]);
+    return c.body(rulesMd(url, levels, settings.adoption_xp), 200, markdown);
+  });
 
   // The home page's counts and curated channels (#28). Shared caches may keep them a minute.
   app.get('/v1/stats', async (c) => c.json(await stats(relay), 200, { 'cache-control': 'public, max-age=60' }));

@@ -4,20 +4,23 @@ import { iso, type Relay, type Stmt } from '../context';
 import { hmac, sha256 } from '../crypto';
 import { auditStmt } from './audit';
 import { anyAgentAccess } from './channels';
+import { EVERY_MESSAGE_SINCE } from './consent';
 import { authorRef } from './conversation';
 import { applyGuildEvents, isGuildEvent, type GuildEvent } from './guild';
 import { chunk, commitPlan, compareSnowflakes, MAX_PARAMS, placeholders, planEvent, snowflakeTime, type PlannedEvent } from './events';
 import { contentHash } from './moderation/rows';
 import { parseReplyLine } from './replies';
 import { planRemoval, scrubStatements, type RemovedBy } from './scrub';
+import { getSettings } from './settings';
+import { turnAway, type TurnedAway } from './turn-away';
 import { awardSent } from './xp/award';
 
 // Normalised Discord events in, the event log and the conversation projection out. Every event has a
 // deterministic source_key, so replaying a Gateway resume, a backfill or a retried batch records nothing twice,
 // and only a newly recorded event fans out to subscribers.
 //
-// A person's message is kept only when it replies to an agent's message and they had agreed through /consent by the time
-// they wrote it; in a private conversation, when they own one of its joined agents and had agreed. Every other human message
+// A person's message is kept only when they had agreed through /consent by the time they wrote it; in a private
+// conversation, only when they also own one of its joined agents. Every other human message
 // is dropped here: no row, no event, no text. Backfill goes through the same path.
 // Agents, bots and webhooks are kept as they are.
 
@@ -87,7 +90,11 @@ export const IntakeEvent = z.discriminatedUnion('kind', [
     overwrites: z.array(z.object({ id: Snowflake, type: z.union([z.literal(0), z.literal(1)]), allow: z.string(), deny: z.string() })).max(500),
     slowmode_seconds: z.number().int().min(0).max(21_600),
     tags: z.array(ChannelTag).optional(),
+    /** Its place in its category, as Discord sorts them. */
+    position: z.number().int().optional(),
   }),
+  z.object({ kind: z.literal('category_update'), category_id: Snowflake, guild_id: Snowflake, name: z.string().min(1).max(100), position: z.number().int() }),
+  z.object({ kind: z.literal('category_delete'), category_id: Snowflake }),
   // The bot can't view the channel (#9): its real name and overwrites aren't known, so no agent may use it.
   z.object({ kind: z.literal('channel_hidden'), channel_id: Snowflake, guild_id: Snowflake, type: ChannelKind }),
   z.object({ kind: z.literal('channel_delete'), channel_id: Snowflake }),
@@ -128,6 +135,9 @@ interface Relayed {
 interface Context {
   /** Channels some agent can see: their messages are kept and announced. */
   relayed: Map<string, Relayed & { id: string }>;
+  /** Where people talk with agents: a person's message there without consent is removed (turn-away.ts). */
+  talkChannelId: string | null;
+  turnedAway: TurnedAway[];
   /** Every channel the relay has a row for, closed ones too: deletes are applied there, quietly, so text removed in Discord never comes back. */
   known: Map<string, Relayed & { id: string }>;
   history: boolean;
@@ -173,6 +183,12 @@ async function sourceKey(e: MessageEvent): Promise<string | null> {
   }
 }
 
+/** A person's agreement in force: when, and to which notice. */
+type Agreement = { granted_at: string; notice_version: string };
+
+/** Whether an agreement covers every message, not only replies to agents (the notices before `EVERY_MESSAGE_SINCE`). */
+const coversEvery = (a: Agreement | undefined) => a !== undefined && a.notice_version >= EVERY_MESSAGE_SINCE;
+
 /** An event condition: this person agreed by `when` and hasn't withdrawn. */
 const agreedWhen = (discordUserId: string, when: string) => ({
   sql: 'EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = ? AND k.revoked_at IS NULL AND k.granted_at <= ?)',
@@ -210,6 +226,8 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
   const visible = await anyAgentAccess(relay);
   const ctx: Context = {
     relayed: new Map(results.filter((c) => visible(c).view).map((c) => [c.id, c])),
+    talkChannelId: (await getSettings(relay)).talk_channel_id,
+    turnedAway: [],
     known: new Map(results.map((c) => [c.id, c])),
     history: history ?? false,
   };
@@ -218,6 +236,7 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
     total.recorded += r.recorded;
     total.ignored += r.ignored;
   }
+  if (ctx.turnedAway.length) await turnAway(relay, ctx.turnedAway);
   if (total.invalid) relay.log.warn('intake.invalid_events', { source, count: total.invalid });
   if (total.recorded) relay.log.info('intake.batch', { source, ...total });
   return total;
@@ -289,19 +308,20 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
       .all<Sent & { did: string }>();
     for (const r of results) sent.set(r.did, r);
   }
-  // A person's message is kept only if it replies to an agent and they had agreed by the time they wrote it: when each person
-  // in the round agreed (for those who still have), and which of the messages they reply to are agents'.
+  // A person's message is kept only if they had agreed by the time they wrote it: when each person in the round agreed (for
+  // those who still have).
   const fromPeople = keyed.flatMap(({ e }) => (e.kind === 'message_create' && !e.author.bot && !e.author.webhook_id ? [e] : []));
-  const agreedAt = new Map<string, string>();
+  const agreedAt = new Map<string, Agreement>();
   for (const part of chunk([...new Set(fromPeople.map((e) => e.author.id))], MAX_PARAMS)) {
     const { results } = await relay.db
-      .prepare(`SELECT discord_user_id, granted_at FROM consents WHERE revoked_at IS NULL AND discord_user_id IN (${placeholders(part.length)})`)
+      .prepare(
+        `SELECT discord_user_id, granted_at, notice_version FROM consents WHERE revoked_at IS NULL AND discord_user_id IN (${placeholders(part.length)})`,
+      )
       .bind(...part)
-      .all<{ discord_user_id: string; granted_at: string }>();
-    for (const r of results) agreedAt.set(r.discord_user_id, r.granted_at);
+      .all<Agreement & { discord_user_id: string }>();
+    for (const { discord_user_id, ...r } of results) agreedAt.set(discord_user_id, r);
   }
-  // Which messages replied to are agents' (and whose): a person's reply is kept only if it answers one, and every reply to an
-  // agent goes to that agent's replies subscription.
+  // Which messages replied to are agents' (and whose): every reply to an agent goes to that agent's replies subscription.
   const agentMessages = new Map<string, string>();
   // Threads' starters too: a thread's ID is its starter message's, so this says which agent started a new thread.
   const targets = [
@@ -462,9 +482,13 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         seen.add(key!);
         const cursorKey = e.thread_id ?? e.channel_id;
         cursors.set(cursorKey, bigger(cursors.get(cursorKey), e.message_id));
-        const who = await resolveAuthor(relay, ch, e, sent, agreedAt, agentMessages, e.thread_id ? privateOwners.get(e.thread_id) : undefined);
+        const repliesToAgent = e.reply_to != null && agentMessages.has(e.reply_to);
+        const who = await resolveAuthor(relay, ch, e, sent, agreedAt, repliesToAgent, e.thread_id ? privateOwners.get(e.thread_id) : undefined);
         if (!who) {
-          // A person's message that isn't a consenting reply to an agent: dropped, not stored.
+          // A person's message their agreement doesn't cover: dropped, not stored. One written live in the talk channel, by
+          // someone who hasn't agreed to every message being relayed, is also removed from Discord.
+          if (!ctx.history && e.channel_id === ctx.talkChannelId && !coversEvery(agreedAt.get(e.author.id)))
+            ctx.turnedAway.push({ channel_id: e.thread_id ?? e.channel_id, message_id: e.message_id, user_id: e.author.id });
           out.ignored++;
           break;
         }
@@ -629,7 +653,8 @@ interface Who {
 }
 
 /**
- * Who wrote a message, or null for a person's message the relay doesn't keep: anything but a consenting reply to an agent,
+ * Who wrote a message, or null for a person's message the relay doesn't keep: anything from someone who hadn't agreed yet,
+ * anything but a reply to an agent under an agreement to an earlier notice (`coversEvery`),
  * or in a private conversation (`owners` set) anything but a consenting owner of one of its joined agents.
  */
 async function resolveAuthor(
@@ -637,8 +662,8 @@ async function resolveAuthor(
   channel: Relayed,
   e: Create,
   sent: Map<string, Sent>,
-  agreedAt: Map<string, string>,
-  agentMessages: ReadonlyMap<string, string>,
+  agreedAt: Map<string, Agreement>,
+  repliesToAgent: boolean,
   owners: ReadonlySet<string> | undefined,
 ): Promise<Who | null> {
   const a = e.author;
@@ -676,9 +701,10 @@ async function resolveAuthor(
       relay_message_id: null,
       reply_to: null,
     };
-  const granted = agreedAt.get(a.id);
-  if (granted === undefined || granted > e.timestamp) return null;
-  if (owners ? !owners.has(a.id) : !e.reply_to || !agentMessages.has(e.reply_to)) return null;
+  const agreement = agreedAt.get(a.id);
+  if (!agreement || agreement.granted_at > e.timestamp) return null;
+  if (!repliesToAgent && !coversEvery(agreement)) return null;
+  if (owners && !owners.has(a.id)) return null;
   return {
     kind: 'human',
     agent_id: null,

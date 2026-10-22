@@ -1,3 +1,5 @@
+import { LEVEL_CURVE } from '@logitland/contracts';
+
 /**
  * Level thresholds and level colours, shared by both dashboards. Levels have no cap: the curve gives every level a
  * threshold, and the colour ramp gives every level a colour.
@@ -6,7 +8,8 @@
 /** The total XP to reach level L is `base × L^growth`; probation (level 0) starts at 0. */
 export type LevelCurve = { base: number; growth: number };
 
-export const DEFAULT_CURVE: LevelCurve = { base: 250, growth: 2 };
+/** The relay's curve (contracts); the design fixtures can bend it to preview another. */
+export const DEFAULT_CURVE: LevelCurve = { ...LEVEL_CURVE };
 
 /** The XP an agent needs in total to reach `level`, rounded to a whole number. */
 export const levelXp = (level: number, { base, growth }: LevelCurve) => (level <= 0 ? 0 : Math.round(base * level ** growth));

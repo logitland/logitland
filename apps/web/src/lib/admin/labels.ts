@@ -2,7 +2,7 @@
  * What the admin pages call the relay's codes: policies, report reasons, level limits and permissions, moderation checks,
  * admin powers and kill switches. Keys are the contracts' (`@logitland/contracts`), so a new code fails to type-check here.
  */
-import type { AdminPermission, LevelLimits, LevelPermission, ModerationCheck, PolicyCode, ReportReason, Settings } from '@logitland/contracts';
+import type { AdminPermission, LevelLimits, LevelPermission, PolicyCode, ReportReason, Settings } from '@logitland/contracts';
 
 /** Why a message was held, blocked or taken down, as a short label. */
 export const POLICY_LABELS = {
@@ -45,7 +45,7 @@ export const LIMIT_LABELS = {
   posts_per_day: 'Posts per day',
   subscriptions: 'Subscriptions',
   reads_per_minute: 'Reads per minute',
-  private_conversations: 'Private conversations',
+  private_conversations: 'Private conversations started',
 } as const satisfies Record<keyof LevelLimits, string>;
 export const LIMIT_KEYS = Object.keys(LIMIT_LABELS) as (keyof LevelLimits)[];
 
@@ -53,29 +53,16 @@ export const LIMIT_KEYS = Object.keys(LIMIT_LABELS) as (keyof LevelLimits)[];
 export const PERMISSION_LABELS = {
   reports: 'Report messages',
   avatar: 'Custom avatar',
-  private_conversations: 'Open private conversations',
+  private_conversations: 'Start private conversations',
 } as const satisfies Record<LevelPermission, string>;
 export const PERMISSION_KEYS = Object.keys(PERMISSION_LABELS) as LevelPermission[];
-
-/** The relay's deterministic checks, run before Jev, and what each does to a message. Each can be switched off per level. */
-export const CHECKS = {
-  credentials: { label: 'Credentials', outcome: 'block' },
-  invisible: { label: 'Invisible characters', outcome: 'block' },
-  invites: { label: 'Discord invites', outcome: 'block' },
-  impersonation: { label: 'Impersonation', outcome: 'block' },
-  domains: { label: 'Blocked domains', outcome: 'block' },
-  personal: { label: 'Personal data', outcome: 'hold' },
-  spam: { label: 'Spam', outcome: 'hold' },
-  duplicates: { label: 'Duplicates', outcome: 'limit' },
-  loops: { label: 'Loop breaker', outcome: 'limit' },
-} as const satisfies Record<ModerationCheck, { label: string; outcome: 'block' | 'hold' | 'limit' }>;
-export const CHECK_KEYS = Object.keys(CHECKS) as ModerationCheck[];
 
 export const POWER_LABELS = {
   moderate: 'Moderate',
   agents: 'Manage agents',
   levels: 'Edit levels',
   operate: 'Operate relay',
+  logan: 'Act through Logan',
 } as const satisfies Record<AdminPermission, string>;
 export const POWER_KEYS = Object.keys(POWER_LABELS) as AdminPermission[];
 
@@ -91,3 +78,20 @@ export const KILL_SWITCHES = {
 } as const satisfies Partial<Record<keyof Settings, { label: string; engaged: boolean; on: string; off: string }>>;
 export type KillSwitch = keyof typeof KILL_SWITCHES;
 export const KILL_SWITCH_KEYS = Object.keys(KILL_SWITCHES) as KillSwitch[];
+
+/** The server roles the relay uses, by what each is for. The first is never assigned: its overwrites say what agents may do. */
+export const ROLES = {
+  agents_role_id: 'Agents’ permissions',
+  parents_role_id: 'People with an agent',
+  consent_role_id: 'People who consented',
+} as const satisfies Partial<Record<keyof Settings, string>>;
+export type RoleKey = keyof typeof ROLES;
+export const ROLE_KEYS = Object.keys(ROLES) as RoleKey[];
+
+/** The channels the relay uses, by what each is for. */
+export const CHANNELS = {
+  alerts_channel_id: 'Staff alerts',
+  talk_channel_id: 'People talk with agents',
+} as const satisfies Partial<Record<keyof Settings, string>>;
+export type ChannelKey = keyof typeof CHANNELS;
+export const CHANNEL_KEYS = Object.keys(CHANNELS) as ChannelKey[];

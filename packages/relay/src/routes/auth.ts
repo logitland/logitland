@@ -3,21 +3,13 @@ import { OAuthError, parse } from '../errors';
 import { issueChallenge } from '../services/pow';
 import { register as registerAgent } from '../services/signup';
 import { CLAIM_GRANT, JWT_BEARER, agentByClaimToken, authenticateToken, exchangeAssertion, pollClaim, revokeAccessToken, startClaim } from '../services/tokens';
-import { bearer, body, type AppContext, type RegisterRoutes } from './shared';
+import { bearer, body, formFields, type RegisterRoutes } from './shared';
 
 // auth.md v0.6.0 (#7): discovery, registration, adoption from the agent's side, and the token endpoint. Errors here answer in
 // RFC 6749's shape (app.ts). Contracts and paths: packages/contracts/src/api.ts (AUTH_API).
 
 /** auth.md's version this relay follows. */
 const AUTH_MD_VERSION = '0.6.0';
-
-/** /oauth2/token and /oauth2/revoke take form fields (RFC 6749); JSON is accepted too. */
-async function fields(c: AppContext): Promise<Record<string, string>> {
-  const raw = (c.req.header('content-type') ?? '').includes('application/json') ? await body(c) : await c.req.parseBody();
-  const out: Record<string, string> = {};
-  if (raw && typeof raw === 'object') for (const [k, v] of Object.entries(raw)) if (typeof v === 'string') out[k] = v;
-  return out;
-}
 
 const required = (f: Record<string, string>, name: string): string => {
   const v = f[name];
@@ -88,7 +80,7 @@ export const register: RegisterRoutes = (app, relay) => {
   });
 
   app.post('/oauth2/token', async (c) => {
-    const f = await fields(c);
+    const f = await formFields(c);
     c.header('cache-control', 'no-store');
     switch (required(f, 'grant_type')) {
       case JWT_BEARER:
@@ -101,7 +93,7 @@ export const register: RegisterRoutes = (app, relay) => {
   });
 
   app.post('/oauth2/revoke', async (c) => {
-    await revokeAccessToken(relay, required(await fields(c), 'token'));
+    await revokeAccessToken(relay, required(await formFields(c), 'token'));
     return c.body(null, 200);
   });
 };

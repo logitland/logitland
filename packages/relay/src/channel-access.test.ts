@@ -5,14 +5,13 @@ import { updateSettings } from './services/settings';
 import { GUILD, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
 
 // Channel access by Discord roles (#9): what an agent may see and do is the channel's overwrites, evaluated as if it held
-// @agents, @adopted when adopted, and the level roles up to its own.
+// @agents and the level roles up to its own, regardless of ownership.
 
 const AGENTS = '130000000000000001';
-const ADOPTED = '130000000000000002';
 const LEVEL_3 = '130000000000000003';
 const STAFF = '110000000000000021';
 const LAB = '110000000000000022';
-const ADOPTERS = '110000000000000023';
+const READ_ONLY = '110000000000000023';
 const ANNOUNCE = '110000000000000024';
 const P = Permission;
 const VIEW = String(P.VIEW_CHANNEL | P.READ_MESSAGE_HISTORY);
@@ -26,19 +25,18 @@ async function server() {
   const admin = 'adm_test';
   for (const [id, name] of [
     [AGENTS, 'agents'],
-    [ADOPTED, 'adopted'],
     [LEVEL_3, 'level 3'],
   ])
     await h.db
       .prepare("INSERT INTO guild_roles (id, guild_id, name, permissions, updated_at) VALUES (?, ?, ?, '0', ?)")
       .bind(id, GUILD, name, h.now().toISOString())
       .run();
-  await updateSettings(h.relay, admin, { agents_role_id: AGENTS, adopted_role_id: ADOPTED });
+  await updateSettings(h.relay, admin, { agents_role_id: AGENTS });
   await h.db.prepare('UPDATE levels SET role_id = ? WHERE level = 3').bind(LEVEL_3).run();
   await seedChannel(h.relay, { id: LOUNGE, name: 'lounge' });
   await seedChannel(h.relay, { id: STAFF, name: 'staff', overwrites: [hideFromEveryone] });
   await seedChannel(h.relay, { id: LAB, name: 'lab', overwrites: [hideFromEveryone, { id: LEVEL_3, type: 0, allow: POST, deny: '0' }] });
-  await seedChannel(h.relay, { id: ADOPTERS, name: 'adopters', overwrites: [hideFromEveryone, { id: ADOPTED, type: 0, allow: VIEW, deny: '0' }] });
+  await seedChannel(h.relay, { id: READ_ONLY, name: 'read-only', overwrites: [hideFromEveryone, { id: AGENTS, type: 0, allow: VIEW, deny: '0' }] });
   return h;
 }
 
@@ -46,12 +44,12 @@ const names = async (h: Harness, token: string) =>
   ((await (await h.call('GET', '/v1/channels', undefined, h.as(token))).json()) as { channels: { name: string }[] }).channels.map((c) => c.name).sort();
 
 describe('which channels an agent sees', () => {
-  it('follows the overwrites for its roles: level roles stack, @adopted adds to them, staff channels stay out', async () => {
+  it('stacks level roles and gives owned and unowned agents the same access at the same level', async () => {
     const h = await server();
     const owner = await seedOwner(h.relay);
-    expect(await names(h, (await seedAgent(h.relay, { level: 1 })).token)).toEqual(['lounge']);
-    expect(await names(h, (await seedAgent(h.relay, { level: 4 })).token)).toEqual(['lab', 'lounge']);
-    expect(await names(h, (await seedAgent(h.relay, { level: 1, ownerId: owner.id })).token)).toEqual(['adopters', 'lounge']);
+    expect(await names(h, (await seedAgent(h.relay, { level: 1 })).token)).toEqual(['lounge', 'read-only']);
+    expect(await names(h, (await seedAgent(h.relay, { level: 4 })).token)).toEqual(['lab', 'lounge', 'read-only']);
+    expect(await names(h, (await seedAgent(h.relay, { level: 1, ownerId: owner.id })).token)).toEqual(['lounge', 'read-only']);
   });
 
   it('treats a channel it can’t see as missing, and one it can only read as closed to posting', async () => {
@@ -61,8 +59,8 @@ describe('which channels an agent sees', () => {
     const post = await h.call(
       'POST',
       '/v1/messages',
-      { channel_id: ADOPTERS, content: 'hello' },
-      { ...h.as(agent.token), 'idempotency-key': 'adopters-post-1' },
+      { channel_id: READ_ONLY, content: 'hello' },
+      { ...h.as(agent.token), 'idempotency-key': 'read-only-post-1' },
     );
     expect(post.status).toBe(403);
   });
@@ -70,7 +68,7 @@ describe('which channels an agent sees', () => {
   it('never offers a channel the bot itself can’t view', async () => {
     const h = await server();
     await ingest(h.relay, { source: 'gateway', events: [{ kind: 'channel_hidden', channel_id: LOUNGE, guild_id: GUILD, type: 'text' }] });
-    expect(await names(h, (await seedAgent(h.relay, { level: 5 })).token)).toEqual(['lab']);
+    expect(await names(h, (await seedAgent(h.relay, { level: 5 })).token)).toEqual(['lab', 'read-only']);
   });
 });
 
@@ -80,9 +78,9 @@ describe('the Gateway keeps it current', () => {
     const agent = await seedAgent(h.relay, { level: 1 });
     const channel = { kind: 'channel_update', channel_id: STAFF, guild_id: GUILD, name: 'staff', type: 'text', slowmode_seconds: 0 };
     await ingest(h.relay, { source: 'gateway', events: [{ ...channel, overwrites: [hideFromEveryone, { id: AGENTS, type: 0, allow: VIEW, deny: '0' }] }] });
-    expect(await names(h, agent.token)).toEqual(['lounge', 'staff']);
+    expect(await names(h, agent.token)).toEqual(['lounge', 'read-only', 'staff']);
     await ingest(h.relay, { source: 'gateway', events: [{ kind: 'channel_delete', channel_id: STAFF }] });
-    expect(await names(h, agent.token)).toEqual(['lounge']);
+    expect(await names(h, agent.token)).toEqual(['lounge', 'read-only']);
   });
 
   it('keeps no messages from a channel no agent can see', async () => {

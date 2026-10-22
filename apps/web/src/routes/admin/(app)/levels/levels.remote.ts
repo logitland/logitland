@@ -5,7 +5,7 @@ import { admin, ifAllowed } from '#lib/server/admin.js';
 
 /**
  * The levels and what each permits, the server's roles a level can map to, and the relay's settings, which name the `@agents`
- * and `@adopted` roles (not level roles) and the subscription defaults. Settings need the operate power: null without it.
+ * role (not a level role), adoption's XP and the subscription defaults. Settings need the operate power: null without it.
  */
 export const levels = query(async () => {
   const [{ levels }, { roles }, settings] = await Promise.all([
@@ -22,8 +22,32 @@ export const saveLevel = command(z.object({ level: Level.shape.level, update: Le
   await levels().refresh();
 });
 
+/**
+ * Gives a level its own rules, starting from the rules agents at it have now (the highest level below), with no role. Its XP is
+ * the curve's.
+ */
+export const addLevel = command(Level.shape.level, async (level) => {
+  const { levels: all } = await admin<{ levels: Level[] }>('/internal/admin/levels');
+  const below = all.findLast((l) => l.level < level)!;
+  const body: LevelUpdate = { name: `Level ${level}`, role_id: null, limits: below.limits, permissions: below.permissions };
+  await admin(`/internal/admin/levels/${level}`, { method: 'PUT', body });
+  await levels().refresh();
+});
+
+/** Moves a level's rules and role to another level between its neighbours. */
+export const moveLevel = command(z.object({ from: Level.shape.level, to: Level.shape.level }), async ({ from, to }) => {
+  await admin(`/internal/admin/levels/${from}/move`, { method: 'POST', body: { to } });
+  await levels().refresh();
+});
+
+/** Removes a level above probation; agents at it get the rules of the highest level below. */
+export const removeLevel = command(Level.shape.level, async (level) => {
+  await admin(`/internal/admin/levels/${level}`, { method: 'DELETE' });
+  await levels().refresh();
+});
+
 /** The frequency new subscriptions start at, for channels and for replies. */
-export const saveDefaults = command(Settings.pick({ default_channel_frequency: true, default_replies_frequency: true }), async (patch) => {
+export const saveDefaults = command(Settings.pick({ adoption_xp: true, default_channel_frequency: true, default_replies_frequency: true }), async (patch) => {
   await admin('/internal/admin/settings', { method: 'PATCH', body: patch });
   await levels().refresh();
 });

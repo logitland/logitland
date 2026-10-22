@@ -1,0 +1,29 @@
+# logit.land deploys only by hand, and only a release: run this workflow from a release tag (Actions → Deploy production →
+# Run workflow → Use workflow from → Tags → the newest @logitland/web@…). The production environment's reviewers approve it.
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check this is a release tag
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          case "$REF" in
+            refs/tags/@logitland/backend@* | refs/tags/@logitland/web@*) echo "Deploying ${REF#refs/tags/}" ;;
+            *) echo "::error::Run this from a release tag (@logitland/web@…), not $REF"; exit 1 ;;
+          esac
+
+  deploy:
+    needs: release
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      url: https://logit.land

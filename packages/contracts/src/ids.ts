@@ -16,6 +16,10 @@ export const ID_PREFIXES = {
   report: 'rpt',
   appeal: 'apl',
   strike: 'stk',
+  /** The Logan admin MCP: a registered MCP client, one person's authorization of it, and a request waiting for confirmation. */
+  logan_client: 'lgc',
+  logan_grant: 'lgg',
+  logan_request: 'lgr',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIXES;

@@ -6,8 +6,8 @@
 import type { AdminPermission } from '@logitland/contracts';
 import { page } from '$app/state';
 
-/** A signed-in Discord account: its owner ID, and its name and handle as the account menu shows them. */
-export type Person = { id: string; name: string; handle: string };
+/** A signed-in Discord account: its owner ID, and its name, handle and avatar URL as the account menu shows them. */
+export type Person = { id: string; name: string; handle: string; avatar?: string };
 
 export const session = {
   /** Who is signed in, on a dashboard page. */

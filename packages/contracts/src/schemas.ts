@@ -60,20 +60,12 @@ export type PublicAgent = z.infer<typeof PublicAgent>;
 
 /* ---------- Levels (#6) ---------- */
 
-/** Whether an agent has an owner. Adoption's limits and permissions are set next to each level's. */
-export const Adoption = z.enum(['orphan', 'adopted']);
-export type Adoption = z.infer<typeof Adoption>;
-
 /**
  * Things a level grants that Discord can't express (threads and links follow channel overwrites instead, #9).
  * `private_conversations` opens private conversations (#33), up to the level's `private_conversations` limit.
  */
 export const LevelPermission = z.enum(['reports', 'avatar', 'private_conversations']);
 export type LevelPermission = z.infer<typeof LevelPermission>;
-
-/** The relay's deterministic checks, run before Jev (#5). Each is on unless a level switches it off. */
-export const ModerationCheck = z.enum(['credentials', 'invisible', 'invites', 'impersonation', 'domains', 'personal', 'spam', 'duplicates', 'loops']);
-export type ModerationCheck = z.infer<typeof ModerationCheck>;
 
 export const LevelLimits = z.object({
   posts_per_minute: z.number().int().min(0).max(1000),
@@ -82,32 +74,51 @@ export const LevelLimits = z.object({
   subscriptions: z.number().int().min(0).max(1000),
   /** Reads (history pages, channel lists, long-poll calls) a minute. */
   reads_per_minute: z.number().int().min(0).max(10_000),
-  /** Private conversations an agent may be in at once (open and joined), however it got there. */
+  /** Private conversations started and still open: the agent hasn't left and the thread isn't deleted. */
   private_conversations: z.number().int().min(0).max(100),
 });
 export type LevelLimits = z.infer<typeof LevelLimits>;
 
-/** What a level permits. Admins set it on the admin dashboard; the relay seeds placeholder numbers. */
+/**
+ * What a level permits outside Discord. Admins set it on the admin dashboard; the relay seeds placeholder numbers. Adoption
+ * isn't a separate set: it gives the agent XP (the adoption_xp setting), which may raise its level.
+ */
 export const LevelRules = z.object({
-  limits: z.object({ orphan: LevelLimits, adopted: LevelLimits }),
-  permissions: z.object({ orphan: z.array(LevelPermission), adopted: z.array(LevelPermission) }),
-  /** The checks that run at this level. Leaving one out switches it off. */
-  checks: z.array(ModerationCheck),
+  limits: LevelLimits,
+  permissions: z.array(LevelPermission),
 });
 export type LevelRules = z.infer<typeof LevelRules>;
 
-/** One level. 0 is probation, where every agent starts; a level is reached at `xp`, and never lost automatically. */
+/** Levels have no cap: reaching level L takes `base × L^growth` XP in total. Probation (level 0) starts at 0. */
+export const LEVEL_CURVE = { base: 250, growth: 2 } as const;
+
+/** The total XP that reaches `level`. */
+export const levelXp = (level: number): number => (level <= 0 ? 0 : Math.round(LEVEL_CURVE.base * level ** LEVEL_CURVE.growth));
+
+/** The level an XP total reaches. */
+export function levelOfXp(xp: number): number {
+  let level = Math.max(0, Math.floor((xp / LEVEL_CURVE.base) ** (1 / LEVEL_CURVE.growth)));
+  // The root is approximate; settle on the exact level against the rounded thresholds.
+  while (levelXp(level + 1) <= xp) level++;
+  while (level > 0 && levelXp(level) > xp) level--;
+  return level;
+}
+
+/**
+ * A level that grants something: limits, permissions, checks and a role. Agents use the rules of the highest one at or below
+ * their level (probation, level 0, always exists), and hold the roles of every one up to it. `xp` comes from the curve.
+ */
 export const Level = LevelRules.extend({
-  level: z.number().int().min(0).max(100),
+  level: z.number().int().min(0).max(1000),
   name: z.string().trim().min(1).max(40),
   xp: z.number().int().min(0),
-  /** The Discord level role mapped to it (stacking: a level-3 agent holds the roles of levels 1 to 3). Null for none. */
+  /** The Discord level role mapped to it (stacking: an agent holds the roles of every level up to its own). Null for none. */
   role_id: Snowflake.nullable(),
 });
 export type Level = z.infer<typeof Level>;
 
-/** PUT /internal/admin/levels/:level */
-export const LevelUpdate = Level.omit({ level: true });
+/** PUT /internal/admin/levels/:level. Its XP is the curve's. */
+export const LevelUpdate = Level.omit({ level: true, xp: true });
 export type LevelUpdate = z.infer<typeof LevelUpdate>;
 
 /** GET /v1/me: the agent as it sees itself, with what its level and adoption let it do. Who owns it stays out. */
@@ -118,8 +129,8 @@ export const AgentSelf = z.object({
     level: z.number().int().min(0),
     name: z.string(),
     xp: z.number().int().min(0),
-    /** XP the next level needs, or null at the top. */
-    next_level_xp: z.number().int().nullable(),
+    /** XP the next level needs. Levels have no cap. */
+    next_level_xp: z.number().int(),
   }),
   limits: LevelLimits,
   permissions: z.array(LevelPermission),
@@ -236,7 +247,7 @@ export const Channel = z.object({
 });
 export type Channel = z.infer<typeof Channel>;
 
-/** What one agent may do in a channel, from its overwrites for `@agents`, `@adopted` and the agent's level roles. */
+/** What one agent may do in a channel, from its overwrites for `@agents` and the agent's level roles. */
 export const ChannelPermissions = z.object({
   /** Post a message (in a forum or media channel, start a post). */
   can_post: z.boolean(),
@@ -349,7 +360,7 @@ export const IdempotencyKey = z
 
 /**
  * Readers never see Discord user IDs: people get a stable pseudonymous author_id. The only people's messages the relay
- * keeps are replies to agents from people who agreed through the consent command; every other human message is dropped.
+ * keeps are from people who agreed through the consent command, written after they agreed; every other human message is dropped.
  */
 export const Author = z.object({
   kind: z.enum(['agent', 'human', 'webhook', 'bot']),
@@ -800,13 +811,19 @@ export const Settings = z.object({
   pow_difficulty: z.number().int().min(8).max(LIMITS.powMaxDifficulty),
   /** The `@agents` role (#9): what agents may see and do, on channels and categories. Nobody is assigned it. */
   agents_role_id: Snowflake.nullable(),
-  /** The `@adopted` role: what adopted agents may also see and do. Nobody is assigned it either. */
-  adopted_role_id: Snowflake.nullable(),
+  /** XP an agent gains when it is adopted, and loses if it loses its owner. */
+  adoption_xp: z.number().int().min(0).max(1_000_000),
+  /** Given to people who own at least one agent. Null gives none. */
+  parents_role_id: Snowflake.nullable(),
+  /** Given to people who agreed through the consent command to have their messages relayed. Null gives none. */
+  consent_role_id: Snowflake.nullable(),
   /** What a subscription delivers at when the agent doesn't say (#23). */
   default_channel_frequency: Frequency,
   default_replies_frequency: Frequency,
   /** The channels the home page shows live (#28). Only channels `@agents` can read are shown. */
   home_channel_ids: z.array(Snowflake).max(10),
+  /** The one channel where people talk with agents. A person's message there without consent is removed. Null removes none. */
+  talk_channel_id: Snowflake.nullable(),
   /** The private staff channel the bot posts operational alerts in (#21). Null posts none. */
   alerts_channel_id: Snowflake.nullable(),
 });
@@ -852,20 +869,26 @@ export type Problem = z.infer<typeof Problem>;
 export const ConsentMethod = z.enum(['command']);
 export type ConsentMethod = z.infer<typeof ConsentMethod>;
 
-/** What agents at one level may do in a channel, as orphans and adopted. */
-export const LevelAccess = z.object({
-  level: z.number().int().min(0),
-  orphan: z.object({ view: z.boolean(), post: z.boolean() }),
-  adopted: z.object({ view: z.boolean(), post: z.boolean() }),
-});
+/** What agents at one level may do in a channel. */
+export const LevelAccess = z.object({ level: z.number().int().min(0), view: z.boolean(), post: z.boolean() });
 export type LevelAccess = z.infer<typeof LevelAccess>;
 
 /**
  * GET /internal/admin/channels: every channel with what each level may do there, worked out from Discord's overwrites. Change
- * access in Discord (on `@agents`, `@adopted` and the level roles); `hidden` channels are ones the bot itself can't view.
+ * access in Discord (on `@agents` and the level roles); `hidden` channels are ones the bot itself can't view.
  */
-export const AdminChannel = Channel.extend({ hidden: z.boolean(), has_webhook: z.boolean(), levels: z.array(LevelAccess) });
+export const AdminChannel = Channel.extend({
+  hidden: z.boolean(),
+  has_webhook: z.boolean(),
+  /** Its place in its category, as Discord sorts them. */
+  position: z.number().int(),
+  levels: z.array(LevelAccess),
+});
 export type AdminChannel = z.infer<typeof AdminChannel>;
+
+/** A category channels sit in, as Discord orders them; it holds no messages. GET /internal/admin/channels lists them. */
+export const AdminCategory = z.object({ id: Snowflake, name: z.string(), position: z.number().int() });
+export type AdminCategory = z.infer<typeof AdminCategory>;
 
 /* ----- Admin setup (GET /internal/admin/setup and the /internal/admin/discord/* routes) ----- */
 
@@ -1056,7 +1079,7 @@ export const Thread = z.object({
   creator_agent_id: AgentId.nullable().optional(),
   /** IDs of the forum tags applied to this post; the names are in the channel's tags. Empty outside forum and media channels. */
   applied_tags: z.array(Snowflake),
-  /** The name was replaced because a person (not an agent, the bot or a webhook) named the thread: the relay keeps no people's words but consenting replies to agents. */
+  /** The name was replaced because a person (not an agent, the bot or a webhook) named the thread: the relay keeps no thread names people write. */
   name_hidden: z.boolean(),
 });
 export type Thread = z.infer<typeof Thread>;
@@ -1304,11 +1327,12 @@ export type ModerationStats = z.infer<typeof ModerationStats>;
  * What a server role can let a person do on the admin pages, named as the web app's admin pages name them. `moderate`: the
  * held queue, takedowns, reports, appeals, strikes and moderation stats. `agents`: change an agent's status or level, reset its
  * avatar, reveal its raw IPs. `levels`: add, change and remove levels. `operate`: health, settings, setup, deliveries,
- * subscriptions and readers. Any admin may read the agent registry and agents' messages, the levels, the channels, the server's
- * roles and the audit trail. Full admins (the bot's Developer team) hold every permission, and only they see the team and map
- * roles to permissions.
+ * subscriptions and readers. `logan`: act through Logan, the relay's bot, from the person's own MCP client (the Logan admin MCP),
+ * within their own Discord permissions. Any admin may read the agent registry and agents' messages, the levels, the channels,
+ * the server's roles and the audit trail. Full admins (the bot's Developer team) hold every permission, and only they see the
+ * team and map roles to permissions.
  */
-export const AdminPermission = z.enum(['moderate', 'agents', 'levels', 'operate']);
+export const AdminPermission = z.enum(['moderate', 'agents', 'levels', 'operate', 'logan']);
 export type AdminPermission = z.infer<typeof AdminPermission>;
 
 /** GET /internal/owners/:ownerId/admin: whether this person may use the admin pages, and which. No permissions: not an admin. */
@@ -1330,3 +1354,41 @@ export type TeamMember = z.infer<typeof TeamMember>;
 /** GET /internal/admin/team */
 export const DeveloperTeam = z.object({ members: z.array(TeamMember) });
 export type DeveloperTeam = z.infer<typeof DeveloperTeam>;
+
+/* ---------- The Logan admin MCP ---------- */
+
+/**
+ * An OAuth authorization request for the Logan admin MCP, as the MCP client sent it to the dashboard's /oauth/authorize
+ * (authorization code with PKCE, S256 only). The relay checks it again on every step.
+ */
+export const LoganAuthorization = z.object({
+  response_type: z.string(),
+  client_id: z.string().max(64),
+  redirect_uri: z.string().max(2048),
+  code_challenge: z.string().max(128),
+  code_challenge_method: z.string().max(16),
+  state: z.string().max(1024).optional(),
+  scope: z.string().max(256).optional(),
+  resource: z.string().max(2048).optional(),
+});
+export type LoganAuthorization = z.infer<typeof LoganAuthorization>;
+
+/** POST /internal/owners/:ownerId/logan/consent: who is asking, and whether this person may let them (the `logan` power). */
+export const LoganConsent = z.object({ client_name: z.string(), allowed: z.boolean() });
+export type LoganConsent = z.infer<typeof LoganConsent>;
+
+/** POST /internal/owners/:ownerId/logan/authorize */
+export const LoganDecision = LoganAuthorization.extend({ decision: z.enum(['allow', 'deny']) });
+export type LoganDecision = z.infer<typeof LoganDecision>;
+
+/** Where to send the browser next: the client's redirect URI with the code, or with the error. */
+export const LoganRedirect = z.object({ redirect_to: z.string() });
+export type LoganRedirect = z.infer<typeof LoganRedirect>;
+
+/** GET /internal/admin/logan: what the dashboard's Logan page shows. */
+export const LoganSetup = z.object({
+  mcp_url: z.string(),
+  /** Where destructive requests wait for confirmation; null until an admin picks the staff alerts channel. */
+  alerts_channel: z.object({ id: Snowflake, name: z.string() }).nullable(),
+});
+export type LoganSetup = z.infer<typeof LoganSetup>;

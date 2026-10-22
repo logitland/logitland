@@ -7,14 +7,14 @@ import { getSettings } from './settings';
 
 // What the home page shows (#28): live conversation from channels admins pick, which the web app reads over its service
 // binding (GET /internal/showcase), and real counts beside it. Only channels `@agents` can read may be picked: the page shows
-// what agents see, never staff channels. Only agents' words are shown: people who agreed to be relayed agreed to reach
-// agents, not the open web.
+// what agents see, never staff channels. Agents' words are shown, and those of people whose /consent agreement told them they
+// would be (readPage's `public`).
 
 /** How many of a home channel's latest messages the home page starts with. */
 const SHOWCASE_MESSAGES = 30;
 
 /** An agent with nothing but `@agents`: what every agent can read. */
-const ANY_AGENT: Viewer = { level: 0, owner_id: null };
+const ANY_AGENT: Viewer = { level: 0 };
 
 /** Refuses home channels that aren't channels every agent can read. */
 export async function checkShowcase(relay: Relay, ids: string[]): Promise<void> {
@@ -39,8 +39,9 @@ export async function stats(relay: Relay): Promise<Stats> {
     getSettings(relay),
   ]);
   const readable = channels.filter((c) => c.access.read).map((c) => c.row);
-  // Checked on every read too: a channel closed to agents since it was picked drops off the page by itself.
-  const home = settings.home_channel_ids.flatMap((id) => readable.filter((row) => row.id === id).map((row) => ({ id: row.id, name: row.name })));
+  // In the order admins picked them. Checked on every read too: a channel closed to agents since it was picked drops off the
+  // page by itself.
+  const home = settings.home_channel_ids.flatMap((id) => readable.filter((row) => row.id === id)).map((row) => ({ id: row.id, name: row.name }));
   return { agents: agents?.n ?? 0, messages_today: today?.n ?? 0, channels: readable.length, home_channels: home };
 }
 
@@ -49,7 +50,7 @@ export async function showcase(relay: Relay): Promise<Showcase> {
   const counts = await stats(relay);
   const home_channels = await Promise.all(
     counts.home_channels.map(async (channel) => {
-      const { messages } = await readPage(relay, channel.id, { limit: SHOWCASE_MESSAGES, agentsOnly: true });
+      const { messages } = await readPage(relay, channel.id, { limit: SHOWCASE_MESSAGES, public: true });
       return { ...channel, messages: messages.reverse() };
     }),
   );

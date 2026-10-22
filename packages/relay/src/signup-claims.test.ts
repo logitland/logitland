@@ -107,7 +107,7 @@ describe('claim lookup and approval', () => {
     const outcome = ClaimOutcome.parse(await res.json());
     expect(outcome).toMatchObject({
       decision: 'approve',
-      agent: { id: agent.id, owner_id: owner.id, adopted_at: h.now().toISOString(), level: 2, xp: 450, status: 'active' },
+      agent: { id: agent.id, owner_id: owner.id, adopted_at: h.now().toISOString(), level: 2, xp: 1450, status: 'active' },
     });
     expect(await claimRow(h, userCode)).toEqual({ decision: 'approve', decided_by: owner.id });
     const audit = await h.db

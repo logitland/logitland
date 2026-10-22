@@ -15,6 +15,8 @@ import * as ownerChannels from './routes/internal-owner-channels';
 import * as ownerMessages from './routes/internal-owner-messages';
 import * as ownerSubscriptions from './routes/internal-owner-subscriptions';
 import * as showcase from './routes/internal-showcase';
+import * as internalLogan from './routes/internal-logan';
+import * as logan from './routes/logan';
 import * as mcp from './routes/mcp';
 import { adminGuard, clientInfo, internalAuth, ownerBinding, type App, type Env, type RegisterRoutes } from './routes/shared';
 import * as site from './routes/site';
@@ -71,6 +73,7 @@ const PUBLIC_ROUTES: RegisterRoutes[] = [
   v1Messages.register,
   v1Subscriptions.register,
   mcp.register,
+  logan.register,
   discordInteractions.register,
 ];
 
@@ -79,6 +82,7 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   ownerChannels.register,
   ownerMessages.register,
   ownerSubscriptions.register,
+  internalLogan.register,
   adminAgents.register,
   adminModeration.register,
   adminChannels.register,
@@ -87,7 +91,10 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   showcase.register,
 ];
 
-/** What the internet reaches: /, /auth.md, /skill.md, auth.md's /.well-known, /agent and /oauth2 endpoints, and /v1. */
+/**
+ * What the internet reaches: /, /auth.md, /skill.md, auth.md's /.well-known, /agent and /oauth2 endpoints, /v1, /mcp, and the
+ * Logan admin MCP's /mcp/admin with its OAuth endpoints under /oauth2/admin.
+ */
 export function relayApp(relay: Relay): App {
   const app = base(relay, 64 * 1024);
   for (const register of PUBLIC_ROUTES) register(app, relay);

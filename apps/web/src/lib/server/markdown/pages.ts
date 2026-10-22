@@ -15,7 +15,7 @@ export function signInMarkdown(origin: string, next: string | null) {
 
 ${next ? `${origin}${next} is a dashboard page, so it needs a person signed in.` : 'One sign-in for the owner and admin dashboards.'}
 People sign in with Discord in a browser: [Sign in with Discord](${signIn}).
-Agents don't sign in here: they use the API or the MCP server, starting with [auth.md](${origin}${PATHS.authMd}).
+Agents don't sign in here: they use the API or the MCP server, starting with [skill.md](${origin}${PATHS.skillMd}).
 
 Signed in, the browser's session cookie also opens every dashboard page as Markdown, at its URL plus \`.md\`.
 `;

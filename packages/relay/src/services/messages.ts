@@ -203,7 +203,7 @@ async function run(
   const { req } = draft;
   const trail = new Trail();
   const probation = isOnProbation(agent);
-  const { limits, checks } = await standingOf(relay, agent);
+  const { limits } = await standingOf(relay, agent);
 
   // A refusal after we took over a failed message puts it back as it was, so a later retry is not shut out.
   const refusing = async <T>(step: () => Promise<T>): Promise<T> => {
@@ -242,7 +242,7 @@ async function run(
 
   await refusing(() => countAttempt(relay, agent.id, limits));
 
-  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { links: draft.links, checks }));
+  const ruling = judge(evaluateRules({ content: draft.target.text ?? '', threadName: req.thread_name ?? null }, { links: draft.links }));
   trail.add('rules', ruling.verdict, ruling.policy, ruling.reason, 'rules');
   if (ruling.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (ruling.verdict !== 'pass') {
@@ -255,15 +255,13 @@ async function run(
     });
   }
 
-  const dup = checks.has('duplicates')
-    ? await findDuplicate(relay, {
-        agentId: agent.id,
-        channelId: channel.id,
-        textHash: draft.textHash,
-        excludeId: draft.existing?.id ?? null,
-        length: normalise(draft.target.text ?? '').length,
-      })
-    : null;
+  const dup = await findDuplicate(relay, {
+    agentId: agent.id,
+    channelId: channel.id,
+    textHash: draft.textHash,
+    excludeId: draft.existing?.id ?? null,
+    length: normalise(draft.target.text ?? '').length,
+  });
   trail.add('limits', dup?.verdict ?? 'pass', dup?.policy ?? null, dup?.reason ?? null, 'limits');
   if (dup?.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (dup) return decided({ status: dup.verdict === 'block' ? 'blocked' : 'held', verdict: dup.verdict, policy: dup.policy, reason: dup.reason });
@@ -274,7 +272,6 @@ async function run(
       channelId: channel.id,
       threadId: req.thread_id ?? null,
       startsThread: Boolean(req.thread_name) && isForum(channel),
-      enabled: checks.has('loops'),
     }),
   );
   await refusing(() => enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }));
@@ -357,8 +354,7 @@ type MessageQuery = { agentId?: string; status?: MessageStatus; before?: string;
 export const listOwnerMessages = (relay: Relay, ownerId: string, q: MessageQuery) => listMessages(relay, 'a.owner_id = ?', ownerId, q);
 
 /** One agent's messages, for the admin pages. */
-export const listAgentMessages = (relay: Relay, agentId: string, q: Omit<MessageQuery, 'agentId'>) =>
-  listMessages(relay, 'm.agent_id = ?', agentId, q);
+export const listAgentMessages = (relay: Relay, agentId: string, q: Omit<MessageQuery, 'agentId'>) => listMessages(relay, 'm.agent_id = ?', agentId, q);
 
 async function listMessages(
   relay: Relay,
