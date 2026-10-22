@@ -1327,11 +1327,12 @@ export type ModerationStats = z.infer<typeof ModerationStats>;
  * What a server role can let a person do on the admin pages, named as the web app's admin pages name them. `moderate`: the
  * held queue, takedowns, reports, appeals, strikes and moderation stats. `agents`: change an agent's status or level, reset its
  * avatar, reveal its raw IPs. `levels`: add, change and remove levels. `operate`: health, settings, setup, deliveries,
- * subscriptions and readers. Any admin may read the agent registry and agents' messages, the levels, the channels, the server's
- * roles and the audit trail. Full admins (the bot's Developer team) hold every permission, and only they see the team and map
- * roles to permissions.
+ * subscriptions and readers. `logan`: act through Logan, the relay's bot, from the person's own MCP client (the Logan admin MCP),
+ * within their own Discord permissions. Any admin may read the agent registry and agents' messages, the levels, the channels,
+ * the server's roles and the audit trail. Full admins (the bot's Developer team) hold every permission, and only they see the
+ * team and map roles to permissions.
  */
-export const AdminPermission = z.enum(['moderate', 'agents', 'levels', 'operate']);
+export const AdminPermission = z.enum(['moderate', 'agents', 'levels', 'operate', 'logan']);
 export type AdminPermission = z.infer<typeof AdminPermission>;
 
 /** GET /internal/owners/:ownerId/admin: whether this person may use the admin pages, and which. No permissions: not an admin. */
@@ -1353,3 +1354,41 @@ export type TeamMember = z.infer<typeof TeamMember>;
 /** GET /internal/admin/team */
 export const DeveloperTeam = z.object({ members: z.array(TeamMember) });
 export type DeveloperTeam = z.infer<typeof DeveloperTeam>;
+
+/* ---------- The Logan admin MCP ---------- */
+
+/**
+ * An OAuth authorization request for the Logan admin MCP, as the MCP client sent it to the dashboard's /oauth/authorize
+ * (authorization code with PKCE, S256 only). The relay checks it again on every step.
+ */
+export const LoganAuthorization = z.object({
+  response_type: z.string(),
+  client_id: z.string().max(64),
+  redirect_uri: z.string().max(2048),
+  code_challenge: z.string().max(128),
+  code_challenge_method: z.string().max(16),
+  state: z.string().max(1024).optional(),
+  scope: z.string().max(256).optional(),
+  resource: z.string().max(2048).optional(),
+});
+export type LoganAuthorization = z.infer<typeof LoganAuthorization>;
+
+/** POST /internal/owners/:ownerId/logan/consent: who is asking, and whether this person may let them (the `logan` power). */
+export const LoganConsent = z.object({ client_name: z.string(), allowed: z.boolean() });
+export type LoganConsent = z.infer<typeof LoganConsent>;
+
+/** POST /internal/owners/:ownerId/logan/authorize */
+export const LoganDecision = LoganAuthorization.extend({ decision: z.enum(['allow', 'deny']) });
+export type LoganDecision = z.infer<typeof LoganDecision>;
+
+/** Where to send the browser next: the client's redirect URI with the code, or with the error. */
+export const LoganRedirect = z.object({ redirect_to: z.string() });
+export type LoganRedirect = z.infer<typeof LoganRedirect>;
+
+/** GET /internal/admin/logan: what the dashboard's Logan page shows. */
+export const LoganSetup = z.object({
+  mcp_url: z.string(),
+  /** Where destructive requests wait for confirmation; null until an admin picks the staff alerts channel. */
+  alerts_channel: z.object({ id: Snowflake, name: z.string() }).nullable(),
+});
+export type LoganSetup = z.infer<typeof LoganSetup>;

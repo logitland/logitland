@@ -3,9 +3,11 @@ import { z } from 'zod';
 import { RelayError, parse, unauthorized } from '../errors';
 import type { Relay } from '../context';
 import { hit } from './limits';
+import { answerButton, isLoganButton } from './logan/calls';
 import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, removeMessages, revokeConsent, type ConsentActor } from './consent';
 
-// Discord interactions: the /consent command and its agree button. Only the button agrees: /consent agree shows the notice with it.
+// Discord interactions: the /consent command and its agree button (only the button agrees: /consent agree shows the notice
+// with it), and the Confirm and Cancel buttons on the Logan admin MCP's requests.
 // https://docs.discord.com/developers/interactions/receiving-and-responding
 // https://docs.discord.com/developers/interactions/overview (verifying requests)
 
@@ -159,10 +161,17 @@ function actionOf(i: Interaction): Action | null {
 export async function handleInteraction(relay: Relay, raw: unknown, defer: (work: Promise<void>) => void): Promise<InteractionResponse> {
   const i = parse(Interaction, raw);
   if (i.type === InteractionType.PING) return { type: Callback.PONG };
-  const action = actionOf(i);
-  if (!action) return say(UNKNOWN);
   const guildId = relay.config.discord.guildId;
   const userId = i.member?.user.id ?? i.user?.id;
+  const customId = i.data?.custom_id;
+  // Confirm and Cancel on a request the Logan admin MCP left in the staff alerts channel (logan/calls.ts).
+  if (i.type === InteractionType.MESSAGE_COMPONENT && isLoganButton(customId)) {
+    if (!guildId || i.guild_id !== guildId || !userId) return say(WRONG_PLACE);
+    const answer = await answerButton(relay, customId, userId, defer, (content) => editOriginal(relay, i, content));
+    return 'ephemeral' in answer ? say(answer.ephemeral) : edit(answer.update);
+  }
+  const action = actionOf(i);
+  if (!action) return say(UNKNOWN);
   if (!guildId || i.guild_id !== guildId || !userId) return say(WRONG_PLACE);
   const actor: ConsentActor = { type: 'public', id: userId };
 

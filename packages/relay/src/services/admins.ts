@@ -18,7 +18,7 @@ const MEMBER_KEEP_MS = 86_400_000;
 const NO_STANDING: AdminStanding = { full: false, permissions: [] };
 
 /** Discord's answer under `key`, asked again once it is older than `ttlMs`. */
-async function lookup<T>(relay: Relay, key: string, ttlMs: number, ask: () => Promise<T>): Promise<T> {
+export async function lookup<T>(relay: Relay, key: string, ttlMs: number, ask: () => Promise<T>): Promise<T> {
   const row = await relay.db.prepare('SELECT value, fetched_at FROM discord_lookups WHERE key = ?').bind(key).first<{ value: string; fetched_at: string }>();
   const now = relay.now();
   if (row && now.getTime() - Date.parse(row.fetched_at) < ttlMs) return JSON.parse(row.value) as T;
@@ -96,13 +96,16 @@ const ordered = (held: Iterable<AdminPermission>): AdminPermission[] => {
   return AdminPermission.options.filter((p) => set.has(p));
 };
 
-/** Whether this person is an admin and what they may do. Discord is only asked about their roles once a role is mapped. */
-export async function adminStanding(relay: Relay, discordUserId: string): Promise<AdminStanding> {
+/**
+ * Whether this person is an admin and what they may do. Discord is only asked about their roles once a role is mapped, and
+ * not at all when the caller passes the roles it just fetched (`fresh`), as the Logan admin MCP does on every call.
+ */
+export async function adminStanding(relay: Relay, discordUserId: string, fresh?: string[]): Promise<AdminStanding> {
   if ((await fullAdmins(relay)).includes(discordUserId)) return { full: true, permissions: [...AdminPermission.options] };
   const guildId = relay.config.discord.guildId;
   const { results: mapped } = await relay.db.prepare('SELECT role_id, permissions FROM admin_roles').all<{ role_id: string; permissions: string }>();
   if (!guildId || !mapped.length) return NO_STANDING;
-  const roles = new Set(await memberRoles(relay, guildId, discordUserId));
+  const roles = new Set(fresh ?? (await memberRoles(relay, guildId, discordUserId)));
   return { full: false, permissions: ordered(mapped.filter((m) => roles.has(m.role_id)).flatMap((m) => JSON.parse(m.permissions) as AdminPermission[])) };
 }
 

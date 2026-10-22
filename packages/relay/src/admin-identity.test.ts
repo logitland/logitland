@@ -45,7 +45,7 @@ describe('human admins', () => {
   it('makes the accepted members of the bot’s Developer team full admins', async () => {
     const { person } = await scripted();
     const lead = await person(TEAM_MEMBER);
-    expect(await lead.standing()).toEqual({ full: true, permissions: ['moderate', 'agents', 'levels', 'operate'] });
+    expect(await lead.standing()).toEqual({ full: true, permissions: ['moderate', 'agents', 'levels', 'operate', 'logan'] });
     expect((await lead.call('GET', '/internal/admin/roles')).status).toBe(200);
     expect(await (await person(INVITED)).standing()).toEqual({ full: false, permissions: [] });
   });
