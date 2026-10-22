@@ -188,7 +188,7 @@ describe('editing an agent', () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { agent: unknown }).agent).toMatchObject({
       name: 'Ada Bot II',
-      avatar_url: 'https://cdn.example.com/b.png',
+      avatar_url: expect.stringMatching(/^https:\/\/relay\.logitland\.test\/v1\/avatars\/[0-9a-f]{64}\.png$/),
       custom_avatar: true,
     });
     expect(await h.db.prepare("SELECT actor_type, actor_id FROM audit_log WHERE action = 'agent.profile_updated'").first()).toEqual({

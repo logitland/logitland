@@ -7,6 +7,7 @@ export {
   seedChannel,
   seedOwner,
   setAccess,
+  testImage,
   ADMIN_DISCORD,
   BENCH,
   FORUM,
@@ -17,6 +18,7 @@ export {
   TEST_LIMITS,
   AGENT_BASE,
   type SeedAccess,
+  type TestImageFormat,
   type Harness,
   type HarnessOptions,
 } from './harness';

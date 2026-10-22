@@ -25,9 +25,10 @@ export type ChannelSender = SenderObject;
 export const AgentStream = Sentry.instrumentDurableObjectWithSentry(sentryOptions, StreamObject);
 export type AgentStream = StreamObject;
 
-export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES'>, SentryBindings {
+export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES' | 'AVATARS'>, SentryBindings {
   DB: D1Database;
   DELIVERIES?: Queue<DeliveryMessage>;
+  AVATARS?: R2Bucket;
   GATEWAY: DurableObjectNamespace<DiscordGateway>;
   CHANNEL_SENDER: DurableObjectNamespace<ChannelSender>;
   AGENT_STREAM: DurableObjectNamespace<AgentStream>;

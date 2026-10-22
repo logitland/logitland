@@ -20,6 +20,7 @@ const prodEnv = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   DISCORD_GUILD_ID: '2',
   TYPESAFE_API_KEY: 't',
   DELIVERIES: { send: async () => undefined },
+  AVATARS: {} as RelayBindings['AVATARS'],
   ...over,
 });
 
@@ -43,8 +44,9 @@ describe('configuration fails closed', () => {
     );
   });
 
-  it('needs the DELIVERIES queue binding', () => {
+  it('needs the DELIVERIES queue and AVATARS bucket bindings', () => {
     expect(checkConfig(prodEnv({ DELIVERIES: undefined }))).toEqual(['The DELIVERIES queue binding is missing']);
+    expect(checkConfig(prodEnv({ AVATARS: undefined }))).toEqual(['The AVATARS bucket binding is missing']);
     // Development runs without a queue: the cron scan sends the deliveries.
     expect(
       checkConfig({

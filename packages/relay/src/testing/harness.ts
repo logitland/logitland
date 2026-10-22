@@ -5,7 +5,7 @@ import { ALL_SCOPES, newId, type ChannelType, type LevelLimits, type Scope } fro
 import { Permission, type Overwrite } from '@logitland/discord';
 import { fileURLToPath } from 'node:url';
 import { internalApp, relayApp } from '../app';
-import type { ChannelSenderClient, Db, GatewayClient, Relay } from '../context';
+import type { AvatarBucket, ChannelSenderClient, Db, GatewayClient, Relay } from '../context';
 import { SecretBox, randomToken, sha256 } from '../crypto';
 import { createRelay } from '../index';
 import type { RelayBindings } from '../config';
@@ -52,10 +52,74 @@ export interface HarnessOptions {
 /** The limits every level has in tests unless `seededLevels` is set. */
 export const TEST_LIMITS: LevelLimits = { posts_per_minute: 20, posts_per_day: 1000, subscriptions: 3, reads_per_minute: 600, private_conversations: 2 };
 
+/** Bytes from text (one byte per character) and numbers. */
+const bytes = (...parts: (string | number[])[]) => new Uint8Array(parts.flatMap((p) => (typeof p === 'string' ? [...p].map((c) => c.charCodeAt(0)) : p)));
+const u16le = (n: number) => [n & 255, n >> 8];
+const u16be = (n: number) => [n >> 8, n & 255];
+const u24le = (n: number) => [n & 255, (n >> 8) & 255, n >> 16];
+const u32be = (n: number) => [n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255];
+const u32le = (n: number) => u32be(n).reverse();
+
+export type TestImageFormat = 'png' | 'jpg' | 'gif' | 'webp' | 'webp-lossy' | 'webp-lossless';
+
+/**
+ * The header of an image in `format` claiming `width` × `height`, then `tail`: enough for the relay's checks, which read
+ * only headers. A different tail makes a different file. `webp` is the extended (VP8X) kind.
+ */
+export function testImage(format: TestImageFormat, width = 128, height = 128, tail = ''): Uint8Array<ArrayBuffer> {
+  const riff = (chunk: string, body: number[]) => bytes('RIFF', u32le(4 + 8 + body.length), 'WEBP', chunk, u32le(body.length), body, tail);
+  switch (format) {
+    case 'png':
+      return bytes([0x89], 'PNG\r\n\x1a\n', u32be(13), 'IHDR', u32be(width), u32be(height), [8, 6, 0, 0, 0], u32be(0), tail);
+    case 'jpg':
+      return bytes(
+        [0xff, 0xd8],
+        [0xff, 0xe0],
+        u16be(16),
+        'JFIF\0',
+        [1, 1, 0, 0, 1, 0, 1, 0, 0],
+        [0xff, 0xc0],
+        u16be(17),
+        [8],
+        u16be(height),
+        u16be(width),
+        [3],
+        tail,
+      );
+    case 'gif':
+      return bytes('GIF89a', u16le(width), u16le(height), [0, 0, 0], tail);
+    case 'webp':
+      return riff('VP8X', [0, 0, 0, 0, ...u24le(width - 1), ...u24le(height - 1)]);
+    case 'webp-lossy':
+      return riff('VP8 ', [0, 0, 0, 0x9d, 0x01, 0x2a, ...u16le(width), ...u16le(height)]);
+    case 'webp-lossless': {
+      const bits = (width - 1) | ((height - 1) << 14);
+      return riff('VP8L', [0x2f, ...u32le(bits)]);
+    }
+  }
+}
+
 export function harness(opts: HarnessOptions = {}) {
   let clock = new Date(opts.start ?? '2026-10-19T03:00:00Z');
-  const dns: Record<string, string[]> = { 'hooks.orrery.dev': ['93.184.216.34'], 'sneaky.example.org': ['10.0.0.5'] };
-  const receivers: Record<string, Handler> = {};
+  const dns: Record<string, string[]> = {
+    'hooks.orrery.dev': ['93.184.216.34'],
+    'sneaky.example.org': ['10.0.0.5'],
+    'cdn.example.com': ['93.184.216.35'],
+  };
+  /** cdn.example.com serves a 128×128 PNG at every path, different per path; replace it to serve something else. */
+  const receivers: Record<string, Handler> = {
+    'cdn.example.com': (req) => new Response(testImage('png', 128, 128, new URL(req.url).pathname), { headers: { 'content-type': 'image/png' } }),
+  };
+  /** The avatar bucket's objects, by key. */
+  const avatars = new Map<string, { bytes: Uint8Array<ArrayBuffer>; contentType: string }>();
+  const bucket: AvatarBucket = {
+    get: async (key) => {
+      const object = avatars.get(key);
+      return object ? { body: new Blob([object.bytes]).stream(), httpMetadata: { contentType: object.contentType } } : null;
+    },
+    put: async (key, value, { httpMetadata }) => void avatars.set(key, { bytes: value, contentType: httpMetadata.contentType }),
+    delete: async (key) => void avatars.delete(key),
+  };
   const discordCalls: Request[] = [];
   let nextDiscordId = 300000000000000000n;
   /** Replace to script Discord's answers. The default accepts every webhook post, and ADMIN_DISCORD is the bot's Developer team. */
@@ -120,6 +184,7 @@ export function harness(opts: HarnessOptions = {}) {
       DISCORD_APPLICATION_ID: '400000000000000001',
       DISCORD_GUILD_ID: GUILD,
       RELAY_MODE: 'development',
+      AVATARS: bucket,
       ...opts.env,
     },
     {
@@ -157,6 +222,7 @@ export function harness(opts: HarnessOptions = {}) {
     log,
     receivers,
     dns,
+    avatars,
     discordCalls,
     /** Public app: /v1, /agent, /oauth2, the docs. */
     call: request(publicApp),

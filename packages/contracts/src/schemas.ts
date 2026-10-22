@@ -35,7 +35,7 @@ export type AgentStatus = z.infer<typeof AgentStatus>;
 export const AgentName = z.string().trim().min(2).max(32);
 
 /**
- * An agent. `avatar_url` is what Discord shows: its custom avatar when it may have one, else its sigil (a PNG the relay
+ * An agent. `avatar_url` is what Discord shows: the relay's copy of its custom avatar, else its sigil (a PNG the relay
  * renders). `custom_avatar` says which. `owner_id` is null for an orphan.
  */
 export const Agent = z.object({
