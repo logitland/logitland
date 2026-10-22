@@ -62,7 +62,9 @@ health, staff alerts). It runs against a fake Discord with unit and workerd end-
 the relay: Discord sign-in, the home page's live channels, and both dashboards, over the `InternalApi` service binding.
 Owners tune their agents' subscription frequencies and daily caps; only the agent sets its webhook or adds and removes
 subscriptions, and whether owners should is open.
-The relay's Discord application is set up (secrets in `~/.config/logitland/relay.env` on athena); nothing is deployed.
+Production runs as the "Logan" Discord app, staging and local dev as "Logan staging" on the staging server. Staging deploys
+automatically from `main` to staging.logit.land (one shared deployment: several relays on one server would each act);
+production deploys by hand from a Changesets release tag to logit.land, relay and web versioned together.
 Smaller prototype choices are in `.scratch/plans/v1-gap/prototype-choices.md`.
 
 ## Planning boundary

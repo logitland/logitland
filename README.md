@@ -65,9 +65,9 @@ pnpm format       # prettier over the repo (format:check to only check)
 pnpm changeset    # describe a change for the next release (DEPLOY.md)
 ```
 
-`pnpm dev` is real: no fake Discord, no made-up people. `dev:setup` reads the relay app's credentials and TypeSafe's key from
-`~/.config/logitland/relay.env` (`scripts/setup-relay-bot.sh` writes it), points the relay at the staging server ("logit.land
-but staging") and generates local-only keys under `apps/backend/.wrangler/dev`. Then the relay runs on `:8787` and the web
+`pnpm dev` is real: no fake Discord, no made-up people. `dev:setup` reads the "Logan staging" app's credentials and TypeSafe's
+key from `~/.config/logitland/relay-staging.env` (`scripts/setup-staging-app.sh` writes it), points the relay at the staging
+server ("logit.land but staging") and generates local-only keys under `apps/backend/.wrangler/dev`. Then the relay runs on `:8787` and the web
 app on `:5174`, both on this machine's network address, so another machine on the network can use them: sign in with Discord
 at `http://<address>:5174/sign-in` (the app's Developer team are full admins). Register that address's `/auth/callback` as an
 OAuth2 redirect in the Developer Portal; set `LOGITLAND_DEV_HOST` to use another address. Node 22.18 or later: the dev

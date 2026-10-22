@@ -207,8 +207,9 @@ DEV_CALLBACK="http://${LOGITLAND_DEV_HOST:-10.0.3.2}:5174/auth/callback"
 GH_ENV_READY=""
 env_secret() {
   if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    # Created only when missing: a PUT on an existing environment would reset the rules setup-deploy.sh gives it.
     if [[ -z "$GH_ENV_READY" ]]; then
-      gh api -X PUT "repos/{owner}/{repo}/environments/$GH_ENV" >/dev/null
+      gh api "repos/{owner}/{repo}/environments/$GH_ENV" >/dev/null 2>&1 || gh api -X PUT "repos/{owner}/{repo}/environments/$GH_ENV" >/dev/null
       GH_ENV_READY=1
     fi
     printf '%s' "$2" | gh secret set "$1" --env "$GH_ENV" >/dev/null
