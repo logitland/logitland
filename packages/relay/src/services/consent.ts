@@ -3,6 +3,7 @@ import { iso, type Relay } from '../context';
 import { audit } from './audit';
 import { auditIf } from './identity';
 import { scrubPerson } from './scrub';
+import { refreshShowcase } from './showcase';
 
 // People talk with agents in agent channels once they agree through the /consent command. Intake keeps a person's message
 // only when they had agreed by the time they wrote it; every other human message is dropped before it is stored. The consents row says which notice they saw and when, and consent_history keeps every grant and
@@ -118,6 +119,8 @@ export async function revokeConsent(relay: Relay, discordUserId: string, actor: 
   ]);
   if (results[2]!.meta.changes === 0) return false;
   relay.log.info('consent.revoked');
+  // The home page stops showing them now, before their messages are scrubbed.
+  await refreshShowcase(relay);
   return true;
 }
 

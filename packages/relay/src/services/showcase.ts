@@ -128,5 +128,13 @@ export async function publishShowcase(relay: Relay, events: PlannedEvent[]): Pro
       if (results.length) frames.push({ type: 'message.deleted', channel_id: e.channelId, message_ids: results.map((r) => r.id) });
     }
   }
-  if (frames.length) await relay.showcase.publish(frames.map((f) => JSON.stringify(f)));
+  if (frames.length) await relay.showcase.publish(frames);
+}
+
+/**
+ * Tells the live feed to read the home page again, after a change frames can't carry: a channel picked, dropped or closed to
+ * agents, or a person withdrawing. The change is made; a visitor who misses this sees it on their next visit.
+ */
+export async function refreshShowcase(relay: Relay): Promise<void> {
+  await relay.showcase?.publish([{ type: 'showcase.changed' }]).catch((error: unknown) => relay.log.error('showcase.publish_failed', { error }));
 }

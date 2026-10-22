@@ -302,6 +302,9 @@ importers:
 
   apps/backend:
     dependencies:
+      '@logitland/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@logitland/relay':
         specifier: workspace:*
         version: link:../../packages/relay

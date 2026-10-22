@@ -1,10 +1,12 @@
+import type { ShowcaseFrame } from '@logitland/contracts';
 import { DurableObject } from 'cloudflare:workers';
 import type { ShowcaseHub } from '@logitland/relay';
 import type { Bindings } from './index';
 
 // The home page's live feed (#28): one Durable Object holds every visitor's WebSocket, with the Hibernation API, so idle
 // sockets cost nothing while they wait. The relay decides what to send (publishShowcase, after each commit); this object
-// only fans the frames out. Visitors say nothing: "ping" is answered without waking it, anything else closes the socket.
+// fans the frames out, and keeps what it deleted from coming back. Visitors say nothing: "ping" is answered without waking
+// it, anything else closes the socket.
 
 /** Set by the hub only: who the /v1/showcase/live request came from, a hash of their address. */
 const VISITOR_HEADER = 'x-logitland-visitor';
@@ -14,6 +16,8 @@ const MAX_PER_VISITOR = 8;
 const MAX_SOCKETS = 10_000;
 /** WebSocket close code for a visitor who sent something other than "ping" (1008, policy violation). */
 const CLOSE_SPOKE = 1008;
+/** How long the feed remembers a deleted message: far longer than any publication can be in flight. */
+const REMEMBER_GONE_MS = 60 * 60_000;
 
 const tooMany = (detail: string) =>
   Response.json(
@@ -38,12 +42,25 @@ export class ShowcaseLive extends DurableObject<Bindings> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  /** Sends the frames to every open socket. */
-  async publish(frames: string[]): Promise<void> {
+  /**
+   * Sends the frames to every open socket. A publication reads its messages before it sends them, so one still in flight when
+   * a message is removed could send it again after its deletion; the feed remembers what it deleted and drops those.
+   */
+  async publish(frames: ShowcaseFrame[]): Promise<void> {
+    const gone = this.ctx.storage.kv;
+    const now = Date.now();
+    for (const [id, at] of gone.list<number>()) if (at < now - REMEMBER_GONE_MS) gone.delete(id);
+    const sent: string[] = [];
+    for (const frame of frames) {
+      if (frame.type === 'message.deleted') for (const id of frame.message_ids) gone.put(id, now);
+      else if (frame.type !== 'showcase.changed' && gone.get(frame.message.message_id) !== undefined) continue;
+      sent.push(JSON.stringify(frame));
+    }
+    if (!sent.length) return;
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       try {
-        for (const frame of frames) ws.send(frame);
+        for (const frame of sent) ws.send(frame);
       } catch {
         // Closing as we sent: its close handler tidies up.
       }

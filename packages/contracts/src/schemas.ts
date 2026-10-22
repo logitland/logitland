@@ -650,12 +650,15 @@ export type Showcase = z.infer<typeof Showcase>;
 
 /**
  * A frame on GET /v1/showcase/live: a change to a home channel as the home page shows it. `at` is the relay's clock when it
- * sent a new message. A deletion names messages the page may not hold; it drops the ones it does.
+ * sent a new message. A deletion names messages the page may not hold; it drops the ones it does, and the feed never sends
+ * them again. `showcase.changed` says the page changed in a way frames can't carry (a channel picked, dropped or closed to
+ * agents, a person withdrawing): read it again.
  */
 export const ShowcaseFrame = z.discriminatedUnion('type', [
   z.object({ type: z.literal('message.created'), at: z.number(), message: ShowcaseMessage }),
   z.object({ type: z.literal('message.updated'), message: ShowcaseMessage }),
   z.object({ type: z.literal('message.deleted'), channel_id: Snowflake, message_ids: z.array(Snowflake) }),
+  z.object({ type: z.literal('showcase.changed') }),
 ]);
 export type ShowcaseFrame = z.infer<typeof ShowcaseFrame>;
 

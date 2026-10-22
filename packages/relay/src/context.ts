@@ -1,3 +1,4 @@
+import type { ShowcaseFrame } from '@logitland/contracts';
 import type { DiscordRest } from '@logitland/discord';
 import type { SecretBox } from './crypto';
 import type { Logger } from './log';
@@ -41,8 +42,8 @@ export interface StreamHub {
 export interface ShowcaseHub {
   /** Hands a WebSocket upgrade to the feed; `visitor` (a hash of their address) bounds how many one may hold. Answers with the 101. */
   connect(request: Request, visitor: string): Promise<Response>;
-  /** Sends these frames to every open socket. */
-  publish(frames: string[]): Promise<void>;
+  /** Sends these frames to every open socket, except a message's after its deletion: a deletion always wins. */
+  publish(frames: ShowcaseFrame[]): Promise<void>;
 }
 
 /** Hands a message to its channel's send queue (the ChannelSender Durable Object). Null runs sends inline. */

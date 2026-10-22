@@ -1,4 +1,5 @@
 import type { Showcase, ShowcaseFrame, Stats } from '@logitland/contracts';
+import { Permission } from '@logitland/discord';
 import { describe, expect, it } from 'vitest';
 import { agree } from './consent.testkit';
 import { say, setup, type Setup } from './deliveries.testkit';
@@ -6,7 +7,7 @@ import { edit, human, HUMAN, msg, push, remove } from './intake-fixtures';
 import { removeMessages, revokeConsent } from './services/consent';
 import { recordAgentPost } from './services/intake';
 import { updateSettings } from './services/settings';
-import { BENCH, LOUNGE, seedChannel, setAccess } from './testing';
+import { BENCH, GUILD, LOUNGE, seedChannel, setAccess } from './testing';
 
 // The home page (#28): counts and the channels admins picked, only ever channels every agent can read, and the live feed
 // that follows them.
@@ -42,13 +43,15 @@ function liveFeed(s: Setup) {
       visitors.push(visitor);
       return new Response(null, { status: 200 });
     },
-    publish: async (sent) => void frames.push(...sent.map((f) => JSON.parse(f) as ShowcaseFrame)),
+    publish: async (sent) => void frames.push(...sent),
   };
   return { frames, visitors };
 }
 
 /** What a frame says, briefly: the new message's text, or the change. */
-const told = (f: ShowcaseFrame) => (f.type === 'message.deleted' ? f : f.type === 'message.created' ? f.message.content : { edited: f.message.content });
+const told = (f: ShowcaseFrame) =>
+  f.type === 'message.deleted' || f.type === 'showcase.changed' ? f : f.type === 'message.created' ? f.message.content : { edited: f.message.content };
+const CHANGED = { type: 'showcase.changed' };
 
 async function home() {
   const s = await setup();
@@ -174,7 +177,7 @@ describe('who the home page shows', () => {
     expect(
       await s.db.prepare('SELECT discord_user_id, display_name, author_username, author_avatar FROM conversation WHERE message_id = ?').bind(msg(1)).first(),
     ).toEqual({ discord_user_id: null, display_name: 'Former participant', author_username: null, author_avatar: null });
-    expect(live.frames.map(told)).toEqual(['message 1', { type: 'message.deleted', channel_id: LOUNGE, message_ids: [msg(1)] }]);
+    expect(live.frames.map(told)).toEqual(['message 1', CHANGED, { type: 'message.deleted', channel_id: LOUNGE, message_ids: [msg(1)] }]);
   });
 });
 
@@ -221,6 +224,19 @@ describe('the live feed', () => {
       { edited: 'message 2, edited' },
       { type: 'message.deleted', channel_id: LOUNGE, message_ids: [msg(2)] },
     ]);
+  });
+
+  it('tells open pages to read again when a channel is picked or dropped, closed to agents, or a person withdraws', async () => {
+    const s = await home();
+    const live = liveFeed(s);
+    await updateSettings(s.relay, 'own_admin', { home_channel_ids: [] });
+    expect(live.frames).toEqual([CHANGED]);
+    const closed = [{ id: GUILD, type: 0, allow: '0', deny: String(Permission.VIEW_CHANNEL) }];
+    await push(s, { kind: 'channel_update', channel_id: LOUNGE, guild_id: GUILD, name: 'lounge', type: 'text', overwrites: closed, slowmode_seconds: 0 });
+    expect(live.frames).toEqual([CHANGED, CHANGED]);
+    await agree(s, HUMAN);
+    await revokeConsent(s.relay, HUMAN, ACTOR);
+    expect(live.frames).toEqual([CHANGED, CHANGED, CHANGED]);
   });
 
   it('opens only as a WebSocket, one count per address', async () => {

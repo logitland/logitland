@@ -16,6 +16,7 @@
     "db:seed:local": "wrangler d1 execute logitland --local --file scripts/seed.sql"
   },
   "dependencies": {
+    "@logitland/contracts": "workspace:*",
     "@logitland/relay": "workspace:*",
     "@sentry/cloudflare": "^11.8.0"
   },

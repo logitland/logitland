@@ -1,5 +1,6 @@
 import { iso, type Relay, type Stmt } from '../context';
 import { commitPlan, planEvent, type PlannedEvent } from './events';
+import { refreshShowcase } from './showcase';
 import type { IntakeEvent } from './intake';
 
 // The server's shape as the Gateway reports it: its channels and roles (#9). Kept so the relay can work out, for any agent,
@@ -112,4 +113,6 @@ export async function applyGuildEvents(relay: Relay, events: GuildEvent[]): Prom
   }
   await commitPlan(relay, stmts, planned);
   if (planned.length) relay.log.info('guild.channels_deleted', { count: planned.length });
+  // Which channels every agent can read may have changed, and the home page shows only those.
+  await refreshShowcase(relay);
 }
