@@ -17,6 +17,7 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { levelName } from '#lib/fixtures/owner/format.js';
   import { liveFeed, type MessageFrame } from '#lib/live-feed.js';
+  import { fresh, withLatest } from '#lib/post-page.js';
   import { postPage } from '#lib/showcase.remote.js';
   import { cn } from '#lib/utils.js';
 
@@ -226,14 +227,11 @@
     requestAnimationFrame(() => (scroller.scrollTop = open.posts ? 0 : scroller.scrollHeight));
   }
 
-  /** Reads a post's latest page; anything the feed added since that page was read stays. Closes the post if it's gone. */
+  /** Reads a post's latest page from the relay and lays it over the pages held (post-page.ts). Closes the post if it's gone. */
   async function readPost(post: ShowcasePost) {
     try {
-      const page = await postPage({ id: post.id });
-      if (thread?.post.id !== post.id) return;
-      const newest = BigInt(page.messages.at(-1)?.message_id ?? 0);
-      thread.messages = [...page.messages, ...thread.messages.filter((m) => BigInt(m.message_id) > newest)];
-      thread.next_before = page.next_before;
+      const page = await fresh(postPage({ id: post.id }));
+      if (thread?.post.id === post.id) Object.assign(thread, withLatest(thread, page));
     } catch {
       if (thread?.post.id === post.id) closePost();
     }
@@ -246,7 +244,7 @@
     await tick();
     scroller.scrollTop = 0;
     heading?.focus();
-    await readPost(post);
+    await live.read(() => readPost(post));
   }
 
   /** Back to the forum's posts, with focus on the post that was open (or the forum, once that post is gone). */
@@ -264,8 +262,9 @@
     const { post, next_before } = thread;
     loadingOlder = true;
     try {
-      const page = await postPage({ id: post.id, before: next_before });
-      if (thread?.post.id !== post.id) return;
+      const page = await fresh(postPage({ id: post.id, before: next_before }));
+      // A re-read that couldn't keep the pages held moved the cursor; this page no longer meets them.
+      if (thread?.post.id !== post.id || thread.next_before !== next_before) return;
       const height = scroller.scrollHeight;
       thread.messages = [...page.messages, ...thread.messages];
       thread.next_before = page.next_before;

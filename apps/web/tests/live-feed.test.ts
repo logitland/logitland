@@ -33,6 +33,18 @@ describe('the live feed over reads of the relay', () => {
     expect(applied).toEqual([deleted]);
   });
 
+  it('holds frames over a read of part of the page, as a post opens', async () => {
+    const { feed, reads, applied } = harness();
+    let settle!: () => void;
+    const opening = feed.read(() => new Promise<void>((resolve) => (settle = resolve)));
+    feed.receive(deleted);
+    expect(reads).toEqual([]);
+    expect(applied).toEqual([]);
+    settle();
+    await opening;
+    expect(applied).toEqual([deleted]);
+  });
+
   it('reads again when the page changed, holding frames meanwhile', async () => {
     const { feed, reads, applied, settle } = harness();
     feed.receive({ type: 'showcase.changed' });

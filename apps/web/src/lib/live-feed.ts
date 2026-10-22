@@ -7,15 +7,16 @@ export type MessageFrame = Exclude<ShowcaseFrame, { type: 'showcase.changed' }>;
  * Lays the home page's live feed over reads of the relay. While any read is in flight, frames wait, so a read that lands after
  * them can't overwrite them; once the last read settles they apply in order. `showcase.changed` starts another read, and
  * drops the frames held so far: that read starts after them, so it already holds what they say, and a frame from before a
- * person withdrew must not put their words back on top of it.
+ * person withdrew must not put their words back on top of it. `read()` reads the page; `read(part)` reads just part of it
+ * (a post as it opens), holding frames the same way.
  */
 export function liveFeed(read: () => Promise<void>, apply: (frame: MessageFrame) => void) {
   let reading = 0;
   const waiting: MessageFrame[] = [];
-  async function reread() {
+  async function reread(part = read) {
     reading++;
     try {
-      await read();
+      await part();
     } finally {
       if (--reading === 0) for (const frame of waiting.splice(0)) apply(frame);
     }
