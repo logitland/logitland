@@ -374,4 +374,14 @@ describe('a forum on the home page', () => {
       { type: 'post.removed', channel_id: FORUM, post_id: msg(1) },
     ]);
   });
+
+  it('sends a post’s card once Discord announces its thread, when the starter was recorded first', async () => {
+    const s = await forum();
+    const live = liveFeed(s);
+    await post(s, msg(1), 'early starter', { channelId: FORUM, threadId: msg(1) });
+    live.frames.length = 0;
+    await push(s, thread(msg(1), FORUM, { name: 'a post', created_at: at(0, 1) }));
+    expect(live.frames.map(told)).toEqual([{ post: msg(1), replies: 0 }]);
+    expect((await listed(s)).posts!.map((p) => p.name)).toEqual(['a post']);
+  });
 });

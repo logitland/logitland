@@ -37,6 +37,8 @@ export interface PlannedEvent {
   channelId: string;
   /** The messages it is about: its own, or a bulk deletion's. */
   messageIds: string[];
+  /** The thread it names in its data, if any: a new thread's own, or the one a message is in. */
+  threadId: string | null;
   silent: boolean;
 }
 
@@ -103,7 +105,7 @@ export function planEvent(
             }${e.when ? ` AND (${e.when.sql})` : ''}`,
           )
           .bind(...values, ...(e.unless === undefined ? [] : [e.unless]), ...(e.when?.args ?? []));
-  return { id, stmt, type: e.type, channelId: e.channelId, messageIds, silent: e.silent ?? false };
+  return { id, stmt, type: e.type, channelId: e.channelId, messageIds, threadId: thread, silent: e.silent ?? false };
 }
 
 /**

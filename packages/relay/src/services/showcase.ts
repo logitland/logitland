@@ -27,7 +27,7 @@ const POST_PAGE = 30;
 const ANY_AGENT: Viewer = { level: 0 };
 
 /** The events that change what the home page shows. */
-const LIVE_TYPES: ReadonlySet<EventType> = new Set(['message.created', 'message.updated', 'message.deleted', 'message.bulk_deleted']);
+const LIVE_TYPES: ReadonlySet<EventType> = new Set(['message.created', 'message.updated', 'message.deleted', 'message.bulk_deleted', 'thread.created']);
 
 /**
  * SQL: conversation row `alias` is one the open web may show. Never a private conversation or a reply whose author withdrew;
@@ -225,27 +225,26 @@ export async function publishShowcase(relay: Relay, events: PlannedEvent[]): Pro
   // The forum posts those messages are in, as their cards now read; a post that stopped being listed is removed.
   const forums = new Set(home.filter(isForum).map((c) => c.id));
   const inForums = [...new Set(changes.flatMap((e) => (forums.has(e.channelId) ? e.messageIds : [])))];
+  /** Post ID to its forum: the posts these messages are in, which may have stopped being listed. */
+  const touched = new Map<string, string>();
   for (const part of chunk(inForums, MAX_PARAMS)) {
-    const { results: touched } = await relay.db
+    const { results } = await relay.db
       .prepare(
         `SELECT DISTINCT c.thread_id AS id, c.channel_id FROM conversation c WHERE c.message_id IN (${placeholders(part.length)}) AND c.thread_id IS NOT NULL AND NOT ${inPrivateSql('c')}`,
       )
       .bind(...part)
       .all<{ id: string; channel_id: string }>();
-    if (!touched.length) continue;
-    const cards = new Map(
-      (
-        await posts(
-          relay,
-          `t.id IN (${placeholders(touched.length)})`,
-          touched.map((t) => t.id),
-          touched.length,
-        )
-      ).map((post) => [post.id, post]),
-    );
-    for (const { id, channel_id } of touched) {
+    for (const { id, channel_id } of results) touched.set(id, channel_id);
+  }
+  // A post whose starter was recorded before Discord announced its thread is listed only once the thread is.
+  const announced = changes.flatMap((e) => (e.type === 'thread.created' && forums.has(e.channelId) && e.threadId ? [e.threadId] : []));
+  for (const part of chunk([...new Set([...touched.keys(), ...announced])], MAX_PARAMS)) {
+    const cards = new Map((await posts(relay, `t.id IN (${placeholders(part.length)})`, part, part.length)).map((post) => [post.id, post]));
+    for (const id of part) {
       const post = cards.get(id);
-      frames.push(post ? { type: 'post.updated', post } : { type: 'post.removed', channel_id, post_id: id });
+      const channel_id = touched.get(id);
+      if (post) frames.push({ type: 'post.updated', post });
+      else if (channel_id) frames.push({ type: 'post.removed', channel_id, post_id: id });
     }
   }
   if (frames.length) await relay.showcase.publish(frames);
