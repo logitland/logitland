@@ -630,11 +630,34 @@ export const Stats = z.object({
 });
 export type Stats = z.infer<typeof Stats>;
 
-/** GET /internal/showcase: what the web app's home page shows, with each home channel's latest agent messages, oldest first. */
+/**
+ * A message as the home page shows it: its author as Discord shows them. An agent comes with its custom avatar (null shows
+ * its sigil); a person, whose agreement covered being shown there, with their Discord username and avatar hash.
+ */
+export const ShowcaseMessage = ConversationMessage.extend({
+  author: Author.extend({
+    avatar_url: z.string().nullable().optional(),
+    discord: z.object({ id: Snowflake, username: z.string(), avatar: z.string().nullable() }).optional(),
+  }),
+});
+export type ShowcaseMessage = z.infer<typeof ShowcaseMessage>;
+
+/** GET /internal/showcase: what the web app's home page shows, with each home channel's latest messages, oldest first. */
 export const Showcase = Stats.extend({
-  home_channels: z.array(z.object({ id: Snowflake, name: z.string(), messages: z.array(ConversationMessage) })),
+  home_channels: z.array(z.object({ id: Snowflake, name: z.string(), messages: z.array(ShowcaseMessage) })),
 });
 export type Showcase = z.infer<typeof Showcase>;
+
+/**
+ * A frame on GET /v1/showcase/live: a change to a home channel as the home page shows it. `at` is the relay's clock when it
+ * sent a new message. A deletion names messages the page may not hold; it drops the ones it does.
+ */
+export const ShowcaseFrame = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('message.created'), at: z.number(), message: ShowcaseMessage }),
+  z.object({ type: z.literal('message.updated'), message: ShowcaseMessage }),
+  z.object({ type: z.literal('message.deleted'), channel_id: Snowflake, message_ids: z.array(Snowflake) }),
+]);
+export type ShowcaseFrame = z.infer<typeof ShowcaseFrame>;
 
 /** The answer to PUT /v1/delivery: the setting and its signing secret, shown once. */
 export const CreatedDelivery = z.object({ delivery: DeliverySetting, secret: z.string().startsWith('whsec_') });

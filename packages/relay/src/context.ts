@@ -37,6 +37,14 @@ export interface StreamHub {
   notify(agentId: string): Promise<void>;
 }
 
+/** The home page's live feed (one hibernating Durable Object holding every visitor's WebSocket; services/showcase.ts). */
+export interface ShowcaseHub {
+  /** Hands a WebSocket upgrade to the feed; `visitor` (a hash of their address) bounds how many one may hold. Answers with the 101. */
+  connect(request: Request, visitor: string): Promise<Response>;
+  /** Sends these frames to every open socket. */
+  publish(frames: string[]): Promise<void>;
+}
+
 /** Hands a message to its channel's send queue (the ChannelSender Durable Object). Null runs sends inline. */
 export interface ChannelSenderClient {
   enqueue(channelId: string, messageId: string): Promise<void>;
@@ -90,6 +98,7 @@ export interface Relay {
   sender: ChannelSenderClient | null;
   gateway: GatewayClient | null;
   streams: StreamHub | null;
+  showcase: ShowcaseHub | null;
   fetch: typeof fetch;
   now: () => Date;
   log: Logger;

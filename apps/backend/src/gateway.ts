@@ -12,6 +12,7 @@ import {
 } from '@logitland/relay';
 import type { Bindings } from './index';
 import { reportError } from './sentry';
+import { showcaseHub } from './showcase';
 import { streamHub } from './stream';
 
 // The Discord Gateway client. One instance, named "discord".
@@ -38,8 +39,12 @@ export class DiscordGateway extends DurableObject<Bindings> {
   }
 
   protected buildRelay(): Relay {
-    // Events it records wake the agents' streams.
-    return createRelay(this.env as unknown as RelayBindings, { streams: streamHub(this.env.AGENT_STREAM), log });
+    // Events it records wake the agents' streams and reach the home page's live feed.
+    return createRelay(this.env as unknown as RelayBindings, {
+      streams: streamHub(this.env.AGENT_STREAM),
+      showcase: showcaseHub(this.env.SHOWCASE_LIVE),
+      log,
+    });
   }
 
   /** An outbound WebSocket is a fetch with `Upgrade: websocket` to the https form of the URL. Outbound sockets don't hibernate. */

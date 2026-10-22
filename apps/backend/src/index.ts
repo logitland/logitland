@@ -15,6 +15,7 @@ import {
 import { DiscordGateway as GatewayObject, gatewayClient } from './gateway';
 import { reportError, sentryOptions, type SentryBindings } from './sentry';
 import { ChannelSender as SenderObject, senderClient } from './sender';
+import { ShowcaseLive as ShowcaseObject, showcaseHub } from './showcase';
 import { AgentStream as StreamObject, streamHub } from './stream';
 
 // The Durable Objects as deployed: each wrapped so Sentry captures what its handlers and RPC methods throw.
@@ -24,6 +25,8 @@ export const ChannelSender = Sentry.instrumentDurableObjectWithSentry(sentryOpti
 export type ChannelSender = SenderObject;
 export const AgentStream = Sentry.instrumentDurableObjectWithSentry(sentryOptions, StreamObject);
 export type AgentStream = StreamObject;
+export const ShowcaseLive = Sentry.instrumentDurableObjectWithSentry(sentryOptions, ShowcaseObject);
+export type ShowcaseLive = ShowcaseObject;
 
 export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES' | 'AVATARS'>, SentryBindings {
   DB: D1Database;
@@ -32,6 +35,7 @@ export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES' | 'AVA
   GATEWAY: DurableObjectNamespace<DiscordGateway>;
   CHANNEL_SENDER: DurableObjectNamespace<ChannelSender>;
   AGENT_STREAM: DurableObjectNamespace<AgentStream>;
+  SHOWCASE_LIVE: DurableObjectNamespace<ShowcaseLive>;
 }
 
 const log = consoleLogger({ service: 'relay' }, reportError);
@@ -46,6 +50,7 @@ export function relayFor(env: Bindings) {
       sender: senderClient(env.CHANNEL_SENDER),
       gateway: gatewayClient(env.GATEWAY),
       streams: streamHub(env.AGENT_STREAM),
+      showcase: showcaseHub(env.SHOWCASE_LIVE),
       log,
     });
     hit = { relay, publicApp: relayApp(relay), internal: internalApp(relay) };

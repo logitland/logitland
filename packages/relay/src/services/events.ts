@@ -1,6 +1,7 @@
 import { newId, type EventType } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
 import { wake } from './deliveries';
+import { publishShowcase } from './showcase';
 
 // The event log: recording events (shared by intake, scrub and the status trigger). Subscriptions read it from their own
 // cursor (feed.ts); there is no per-event fan-out. Payloads are stored without `cursor`; whoever serves an event adds
@@ -32,6 +33,11 @@ const PRIVATE_THREAD_SQL = `(SELECT t.id FROM threads t WHERE t.private = 1 AND 
 export interface PlannedEvent {
   id: string;
   stmt: Stmt;
+  type: EventType;
+  channelId: string;
+  /** The messages it is about: its own, or a bulk deletion's. */
+  messageIds: string[];
+  silent: boolean;
 }
 
 /**
@@ -66,7 +72,8 @@ export function planEvent(
   // An event inside a private conversation is marked with it, so only its members get it (feed.ts). The thread is the event's
   // own, or the thread of the message it is about (an edit or a removal names only the message).
   const thread = typeof e.data.thread_id === 'string' ? e.data.thread_id : null;
-  const message = e.messageId ?? (Array.isArray(e.data.message_ids) ? (e.data.message_ids[0] as string) : null);
+  const messageIds = e.messageId ? [e.messageId] : Array.isArray(e.data.message_ids) ? (e.data.message_ids as string[]) : [];
+  const message = messageIds[0] ?? null;
   const values = [
     id,
     e.sourceKey,
@@ -96,17 +103,23 @@ export function planEvent(
             }${e.when ? ` AND (${e.when.sql})` : ''}`,
           )
           .bind(...values, ...(e.unless === undefined ? [] : [e.unless]), ...(e.when?.args ?? []));
-  return { id, stmt };
+  return { id, stmt, type: e.type, channelId: e.channelId, messageIds, silent: e.silent ?? false };
 }
 
-/** Runs the statements as one transaction, then wakes whoever has something due. `at` is the index of the event's INSERT. */
+/**
+ * Runs the statements as one transaction, then wakes whoever has something due and tells the home page's live feed.
+ * `at` is the index of the event's INSERT.
+ */
 export async function commitPlan(relay: Relay, stmts: Stmt[], events: { at: number; event: PlannedEvent }[]): Promise<{ recorded: number }> {
   if (!stmts.length) return { recorded: 0 };
   const results = await relay.db.batch(stmts);
-  const recorded = events.filter(({ at }) => results[at]!.meta.changes > 0).length;
-  // The events are committed; a failed wake is caught up by the minute's cron, so it mustn't fail the caller.
-  if (recorded) await wake(relay).catch((error: unknown) => relay.log.error('events.wake_failed', { error }));
-  return { recorded };
+  const recorded = events.filter(({ at }) => results[at]!.meta.changes > 0).map(({ event }) => event);
+  if (!recorded.length) return { recorded: 0 };
+  // The events are committed; a failed wake is caught up by the minute's cron, so it mustn't fail the caller. A visitor who
+  // misses a frame sees the message on their next visit.
+  await wake(relay).catch((error: unknown) => relay.log.error('events.wake_failed', { error }));
+  await publishShowcase(relay, recorded).catch((error: unknown) => relay.log.error('showcase.publish_failed', { error }));
+  return { recorded: recorded.length };
 }
 
 export async function eventTail(relay: Relay): Promise<number> {

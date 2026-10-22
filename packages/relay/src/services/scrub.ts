@@ -34,7 +34,10 @@ export interface ScrubJob {
   anonymise?: boolean;
 }
 
-/** Makes messages stop saying who wrote them: the Discord ID, name and pseudonym go from the conversation and from event payloads. */
+/**
+ * Makes messages stop saying who wrote them: the Discord ID, name, username, avatar and pseudonym go from the conversation,
+ * and the name and pseudonym from event payloads.
+ */
 export function anonymiseStatements(relay: Relay, ids: string[]): Stmt[] {
   const stmts: Stmt[] = [];
   for (const part of chunk(ids, IDS_PER_STATEMENT)) {
@@ -42,7 +45,7 @@ export function anonymiseStatements(relay: Relay, ids: string[]): Stmt[] {
     stmts.push(
       relay.db
         .prepare(
-          `UPDATE conversation SET discord_user_id = NULL, display_name = '${FORMER_PARTICIPANT}', author_ref = '${REMOVED_AUTHOR_REF}' WHERE message_id IN (${marks})`,
+          `UPDATE conversation SET discord_user_id = NULL, display_name = '${FORMER_PARTICIPANT}', author_username = NULL, author_avatar = NULL, author_ref = '${REMOVED_AUTHOR_REF}' WHERE message_id IN (${marks})`,
         )
         .bind(...part),
       relay.db

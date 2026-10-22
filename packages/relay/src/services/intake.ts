@@ -4,7 +4,7 @@ import { iso, type Relay, type Stmt } from '../context';
 import { hmac, sha256 } from '../crypto';
 import { auditStmt } from './audit';
 import { anyAgentAccess } from './channels';
-import { EVERY_MESSAGE_SINCE } from './consent';
+import { EVERY_MESSAGE_SINCE, SHOWN_PUBLICLY_SINCE } from './consent';
 import { authorRef } from './conversation';
 import { applyGuildEvents, isGuildEvent, type GuildEvent } from './guild';
 import { chunk, commitPlan, compareSnowflakes, MAX_PARAMS, placeholders, planEvent, snowflakeTime, type PlannedEvent } from './events';
@@ -42,6 +42,8 @@ export const IntakeEvent = z.discriminatedUnion('kind', [
       id: Snowflake,
       username: z.string().max(100),
       global_name: z.string().max(100).nullish(),
+      // Discord's avatar hash; none for someone who never set one.
+      avatar: z.string().max(100).nullish(),
       bot: z.boolean().nullish(),
       webhook_id: Snowflake.nullish(),
     }),
@@ -647,10 +649,16 @@ interface Who {
   author_ref: string;
   discord_user_id: string | null;
   display_name: string;
+  /** A person's Discord username and avatar hash, for the home page; null for everyone else. */
+  username: string | null;
+  avatar: string | null;
   relay_message_id: string | null;
   /** What the relay knows an agent's message replies to; the Gateway's echo of a webhook message can't say. */
   reply_to: string | null;
 }
+
+/** Who isn't a person: no Discord username or avatar is kept. */
+const NOT_A_PERSON = { username: null, avatar: null };
 
 /**
  * Who wrote a message, or null for a person's message the relay doesn't keep: anything from someone who hadn't agreed yet,
@@ -677,6 +685,7 @@ async function resolveAuthor(
         author_ref: agent.agent_id,
         discord_user_id: null,
         display_name: agent.name,
+        ...NOT_A_PERSON,
         relay_message_id: agent.id,
         reply_to: agent.reply_to,
       };
@@ -686,6 +695,7 @@ async function resolveAuthor(
       author_ref: `w_${a.webhook_id}`,
       discord_user_id: null,
       display_name: a.username,
+      ...NOT_A_PERSON,
       relay_message_id: null,
       reply_to: null,
     };
@@ -698,6 +708,7 @@ async function resolveAuthor(
       author_ref: `b_${(await hmac(relay.config.hashKey, `bot:${a.id}`)).slice(0, 20)}`,
       discord_user_id: null,
       display_name,
+      ...NOT_A_PERSON,
       relay_message_id: null,
       reply_to: null,
     };
@@ -705,12 +716,15 @@ async function resolveAuthor(
   if (!agreement || agreement.granted_at > e.timestamp) return null;
   if (!repliesToAgent && !coversEvery(agreement)) return null;
   if (owners && !owners.has(a.id)) return null;
+  // Their username and avatar are kept only when their agreement covers the home page, the one place that shows them.
+  const shown = agreement.notice_version >= SHOWN_PUBLICLY_SINCE;
   return {
     kind: 'human',
     agent_id: null,
     author_ref: await authorRef(relay, a.id),
     discord_user_id: a.id,
     display_name,
+    ...(shown ? { username: a.username, avatar: a.avatar ?? null } : NOT_A_PERSON),
     relay_message_id: null,
     reply_to: null,
   };
@@ -723,8 +737,8 @@ async function resolveAuthor(
 function createStmt(relay: Relay, e: Create, who: Who, v: { content: string; reply_to: string | null; edited_at: string | null }): Stmt {
   return relay.db
     .prepare(
-      `INSERT OR IGNORE INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, edited_at, deleted_at, removed_by, reply_to)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN d.id IS NULL THEN ? END, ?, ?, ?, d.observed_at, CASE WHEN d.id IS NOT NULL THEN COALESCE(json_extract(d.payload, '$.data.removed_by'), 'discord') END, ?
+      `INSERT OR IGNORE INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, author_username, author_avatar, content, relay_message_id, created_at, edited_at, deleted_at, removed_by, reply_to)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN d.id IS NULL THEN ? END, ?, ?, ?, d.observed_at, CASE WHEN d.id IS NOT NULL THEN COALESCE(json_extract(d.payload, '$.data.removed_by'), 'discord') END, ?
        FROM (SELECT 1) LEFT JOIN events d ON d.source_key = ?`,
     )
     .bind(
@@ -736,6 +750,8 @@ function createStmt(relay: Relay, e: Create, who: Who, v: { content: string; rep
       who.author_ref,
       who.discord_user_id,
       who.display_name,
+      who.username,
+      who.avatar,
       v.content,
       who.relay_message_id,
       e.timestamp,

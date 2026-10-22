@@ -1,6 +1,6 @@
 import { DiscordRest } from '@logitland/discord';
 import { ConfigError, buildConfig, checkConfig, parseOldKeys, type RelayBindings } from './config';
-import type { ChannelSenderClient, GatewayClient, Relay, StreamHub } from './context';
+import type { ChannelSenderClient, GatewayClient, Relay, ShowcaseHub, StreamHub } from './context';
 import { SecretBox } from './crypto';
 import { consoleLogger, type Logger } from './log';
 import { dohResolver, type Resolver } from './services/destinations';
@@ -11,7 +11,19 @@ export { internalApp, relayApp } from './app';
 export { authMd } from './docs/auth-doc';
 export { skillMd } from './docs/skill-doc';
 export { ConfigError, checkConfig, type RelayBindings } from './config';
-export type { AvatarBucket, ChannelSenderClient, Db, DeliveryMessage, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt, StreamHub } from './context';
+export type {
+  AvatarBucket,
+  ChannelSenderClient,
+  Db,
+  DeliveryMessage,
+  DeliveryQueue,
+  GatewayClient,
+  Relay,
+  RelayConfig,
+  ShowcaseHub,
+  Stmt,
+  StreamHub,
+} from './context';
 export { SecretBox, hmac, randomToken, sha256 } from './crypto';
 export { RelayError } from './errors';
 export * from './gateway';
@@ -35,6 +47,7 @@ export interface RelayOverrides {
   sender?: ChannelSenderClient | null;
   gateway?: GatewayClient | null;
   streams?: StreamHub | null;
+  showcase?: ShowcaseHub | null;
   log?: Logger;
 }
 
@@ -66,6 +79,7 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     sender: overrides.sender ?? null,
     gateway: overrides.gateway ?? null,
     streams: overrides.streams ?? null,
+    showcase: overrides.showcase ?? null,
     fetch: f,
     now: overrides.now ?? (() => new Date()),
     log: overrides.log ?? consoleLogger({ service: 'relay' }),

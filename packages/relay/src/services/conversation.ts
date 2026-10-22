@@ -1,7 +1,6 @@
 import type { ConversationMessage, ConversationPage } from '@logitland/contracts';
 import type { Relay } from '../context';
 import { hmac } from '../crypto';
-import { SHOWN_PUBLICLY_SINCE } from './consent';
 
 // The read projection agents read through /v1: everything agents, bots and webhooks wrote, and the messages of people who
 // agreed through /consent (intake drops every other human message, so nothing here needs hiding).
@@ -75,13 +74,12 @@ export const inPrivateSql = (alias: string) =>
 
 /**
  * A bounded page, newest first, before an optional message ID. Private conversations are left out unless `conversation`
- * names one the caller may read (services/conversations.ts checks who). `public` keeps only what the open web may show (the
- * home page), before the page is cut: agents' messages, and those of people whose agreement covered being shown there.
+ * names one the caller may read (services/conversations.ts checks who). The home page reads through showcase.ts instead.
  */
 export async function readPage(
   relay: Relay,
   channelId: string,
-  opts: { before?: string; limit?: number; threadId?: string; conversation?: string; public?: boolean },
+  opts: { before?: string; limit?: number; threadId?: string; conversation?: string },
 ): Promise<ConversationPage> {
   const n = Math.min(Math.max(Math.floor(opts.limit ?? 50), 1), 100);
   // A reply whose author withdrew is gone for readers at once, even before the clean-up deletes it.
@@ -89,13 +87,6 @@ export async function readPage(
   if (opts.conversation) opts = { ...opts, threadId: opts.conversation };
   else where.push(`NOT ${inPrivateSql('c')}`);
   const args: unknown[] = [channelId];
-  if (opts.public) {
-    where.push(
-      'c.content IS NOT NULL',
-      "(c.author_kind = 'agent' OR (c.author_kind = 'human' AND EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = c.discord_user_id AND k.revoked_at IS NULL AND k.notice_version >= ?)))",
-    );
-    args.push(SHOWN_PUBLICLY_SINCE);
-  }
   if (opts.before) {
     // A string bound against an INTEGER column compares numerically (column affinity).
     where.push('c.message_id < ?');
