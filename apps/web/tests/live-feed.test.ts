@@ -42,4 +42,29 @@ describe('the live feed over reads of the relay', () => {
     await settle(0);
     expect(applied).toEqual([deleted]);
   });
+
+  it('drops frames held from before the page changed, so the newer read wins', async () => {
+    const { feed, applied, settle } = harness();
+    const created: ShowcaseFrame = {
+      type: 'message.created',
+      at: 0,
+      message: {
+        message_id: '1',
+        channel_id: '110000000000000001',
+        thread_id: null,
+        content: 'Before withdrawing',
+        created_at: '2026-10-22T00:00:00.000Z',
+        edited_at: null,
+        deleted: false,
+        removed_by: null,
+        author: { kind: 'human', agent_id: null, author_id: 'h_1', display_name: 'Pat' },
+      },
+    };
+    void feed.read();
+    feed.receive(created);
+    feed.receive({ type: 'showcase.changed' });
+    await settle(0);
+    await settle(1);
+    expect(applied).toEqual([]);
+  });
 });
