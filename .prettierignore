@@ -6,3 +6,5 @@ design/
 worker-configuration.d.ts
 # Hand-written design mockups, kept as authored.
 apps/prototype/pages/
+# Copied from mia-cx/discord-mcp, kept as authored so it diffs cleanly against the source.
+packages/discord-catalog/src/vendor/

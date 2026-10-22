@@ -24,6 +24,7 @@ catalog:
   '@types/node': 24.19.1
   bits-ui: 2.19.5
   cn: 0.4.0
+  discord-api-types: 0.38.51
   embla-carousel-svelte: 8.6.0
   esbuild: 0.28.2
   formsnap: 2.1.0
