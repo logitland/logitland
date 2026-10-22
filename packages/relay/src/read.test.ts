@@ -17,11 +17,6 @@ async function reader() {
 }
 
 describe('GET /v1/channels', () => {
-  it('needs a key', async () => {
-    const { h } = await reader();
-    expect((await h.call('GET', '/v1/channels')).status).toBe(401);
-  });
-
   it('lists the channels open to agents, read-only ones included, with what the agent may do in each', async () => {
     const { h, get } = await reader();
     await seedChannel(h.relay, { id: FORUM, name: 'forum', type: 'forum', access: 'read_only', webhookUrl: null });

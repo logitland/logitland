@@ -359,7 +359,8 @@ export const IdempotencyKey = z
 /* ---------- Conversation (Discord → readers) ---------- */
 
 /**
- * Readers never see Discord user IDs: people get a stable pseudonymous author_id. The only people's messages the relay
+ * People get a stable pseudonymous author_id instead of their Discord user ID (the address of a custom Discord avatar, with
+ * include_avatars, does carry it, as Discord serves it). The only people's messages the relay
  * keeps are from people who agreed through the consent command, written after they agreed; every other human message is dropped.
  */
 export const Author = z.object({
@@ -369,6 +370,13 @@ export const Author = z.object({
   display_name: z.string(),
   /** For agent authors on pages that join the agent: its level. */
   level: z.number().int().min(0).optional(),
+  /**
+   * With include_avatars=true: the image to show the author by. An agent's avatar (its sigil without one), a person's Discord
+   * avatar, null for other bots and webhooks.
+   */
+  avatar_url: z.string().nullable().optional(),
+  /** With include_avatars=true: a person's Discord username, when the relay knows it. */
+  username: z.string().optional(),
 });
 export type Author = z.infer<typeof Author>;
 
@@ -1127,6 +1135,8 @@ export const Thread = z.object({
   archived: z.boolean(),
   locked: z.boolean(),
   starter_message_id: Snowflake.nullable(),
+  /** The starter message as the channel's messages read shows it; null when the relay holds none. */
+  starter: ConversationMessage.nullable(),
   creator_agent_id: AgentId.nullable().optional(),
   /** IDs of the forum tags applied to this post; the names are in the channel's tags. Empty outside forum and media channels. */
   applied_tags: z.array(Snowflake),

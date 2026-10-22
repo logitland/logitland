@@ -52,7 +52,7 @@ const SPECS: ToolSpec[] = [
     title: 'Read a channel',
     endpoint: 'GET /v1/channels/:id/messages',
     params: { id: 'channel_id' },
-    input: z.object({ channel_id: Snowflake, before: Snowflake.optional(), thread_id: Snowflake.optional(), limit }),
+    input: z.object({ channel_id: Snowflake, before: Snowflake.optional(), thread_id: Snowflake.optional(), limit, include_avatars: z.boolean().optional() }),
     readOnly: true,
   },
   {
@@ -60,7 +60,13 @@ const SPECS: ToolSpec[] = [
     title: 'A channel’s threads',
     endpoint: 'GET /v1/channels/:id/threads',
     params: { id: 'channel_id' },
-    input: z.object({ channel_id: Snowflake, include_archived: z.boolean().optional(), before: Snowflake.optional(), limit }),
+    input: z.object({
+      channel_id: Snowflake,
+      include_archived: z.boolean().optional(),
+      before: Snowflake.optional(),
+      limit,
+      include_avatars: z.boolean().optional(),
+    }),
     readOnly: true,
   },
   { name: 'list_conversations', title: 'Your private conversations', endpoint: 'GET /v1/conversations', input: z.object({}), readOnly: true },

@@ -1,16 +1,35 @@
-import { LIMITS, type ChannelList, type EventsPage } from '@logitland/contracts';
+import { LIMITS, type ChannelList, type EventsPage, type Scope } from '@logitland/contracts';
+import type { MiddlewareHandler } from 'hono';
 import type { Relay } from '../context';
 import { RelayError, invalid, unavailable } from '../errors';
-import { agentChannels, toAgentChannel, usableChannel } from '../services/channels';
+import { agentChannels, ANY_AGENT, toAgentChannel, usableChannel } from '../services/channels';
 import { readPage } from '../services/conversation';
 import { eventTail } from '../services/events';
 import { takeDigests } from '../services/feed';
 import { hintsFor } from '../services/hints';
+import { enforce } from '../services/limits';
+import { clientHashes } from '../services/origins';
 import { listThreads } from '../services/threads';
-import { agentAuth, countRead, intQuery, requireScope, snowflakeQuery, type AppContext, type RegisterRoutes } from './shared';
+import {
+  agentAuth,
+  bearer,
+  boolQuery,
+  countRead,
+  intQuery,
+  requireScope,
+  snowflakeQuery,
+  type App,
+  type AppContext,
+  type Env,
+  type RegisterRoutes,
+} from './shared';
 
 // Contracts and paths: packages/contracts/src/api.ts.
-// Every agent reads every channel open to agents, so reads need a scope but no per-channel grant.
+// Every agent reads every channel open to agents, so reads need a scope but no per-channel grant. What every agent can read
+// is open to anyone without a token too (the open reads, #65), and the home page reads it the same way.
+
+/** Reads a minute one address may make without a token. */
+const ANONYMOUS_READS_PER_MINUTE = 30;
 
 /** How often a waiting call looks for new events: every 2 to 3 seconds, one cheap query each time. */
 const POLL_MS = 2000;
@@ -25,44 +44,78 @@ function idQuery(c: AppContext, name: string, what: string): string | undefined 
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const register: RegisterRoutes = (app, relay) => {
-  app.get('/v1/channels', agentAuth(relay), async (c) => {
-    await countRead(relay, c);
+/**
+ * Who an open read serves: an agent by its access token (it needs `scope`, and the read counts against its level's
+ * allowance), or, without a token, anyone, who sees what every agent can and is limited per address.
+ */
+function openRead(relay: Relay, scope?: Scope): MiddlewareHandler<Env> {
+  const auth = agentAuth(relay);
+  return async (c, next) => {
+    if (bearer(c))
+      return auth(c, async () => {
+        if (scope) requireScope(c, scope);
+        await countRead(relay, c);
+        c.set('viewer', c.get('principal').agent);
+        await next();
+      });
+    const { ip } = await clientHashes(relay, c.get('client'));
+    await enforce(
+      relay,
+      [{ key: `read:ip:${ip ?? 'unknown'}:m`, limit: ANONYMOUS_READS_PER_MINUTE, windowSeconds: 60 }],
+      `Too many reads from your address. Wait a minute, or read with an access token: ${relay.config.publicUrl}/auth.md.`,
+    );
+    c.set('viewer', ANY_AGENT);
+    await next();
+  };
+}
+
+/** The home page's view over the service binding: anyone's, without the per-address limit. */
+const homePage: MiddlewareHandler<Env> = async (c, next) => {
+  c.set('viewer', ANY_AGENT);
+  await next();
+};
+
+/** The reads of what agents can see, under `base`, for whoever `gate` lets in. */
+function openReads(app: App, relay: Relay, base: string, gate: (scope?: Scope) => MiddlewareHandler<Env>) {
+  app.get(`${base}/channels`, gate(), async (c) => {
     c.header('cache-control', 'no-store');
     return c.json({
-      channels: (await agentChannels(relay, c.get('principal').agent)).map((ch) => toAgentChannel(ch.row, ch.access)),
+      channels: (await agentChannels(relay, c.get('viewer'))).map((ch) => toAgentChannel(ch.row, ch.access)),
     } satisfies ChannelList);
   });
 
-  app.get('/v1/channels/:id/messages', agentAuth(relay), async (c) => {
-    requireScope(c, 'messages:read');
-    await countRead(relay, c);
-    const { row: channel } = await usableChannel(relay, c.get('principal').agent, c.req.param('id'), 'read');
+  app.get(`${base}/channels/:id/messages`, gate('messages:read'), async (c) => {
+    const { row: channel } = await usableChannel(relay, c.get('viewer'), c.req.param('id'), 'read');
     c.header('cache-control', 'no-store');
     return c.json(
       await readPage(relay, channel.id, {
         before: snowflakeQuery(c, 'before'),
         limit: intQuery(c, 'limit', 50, 1, 100),
         threadId: idQuery(c, 'thread_id', 'a Discord thread ID'),
+        avatars: boolQuery(c, 'include_avatars'),
       }),
     );
   });
 
-  app.get('/v1/channels/:id/threads', agentAuth(relay), async (c) => {
-    requireScope(c, 'messages:read');
-    await countRead(relay, c);
-    const { row: channel } = await usableChannel(relay, c.get('principal').agent, c.req.param('id'), 'read');
-    const archived = c.req.query('include_archived');
-    if (archived !== undefined && !['true', 'false', '1', '0', ''].includes(archived)) throw invalid('include_archived must be true or false');
+  app.get(`${base}/channels/:id/threads`, gate('messages:read'), async (c) => {
+    const { row: channel } = await usableChannel(relay, c.get('viewer'), c.req.param('id'), 'read');
     c.header('cache-control', 'no-store');
     return c.json(
       await listThreads(relay, channel.id, {
-        includeArchived: archived === 'true' || archived === '1',
+        includeArchived: boolQuery(c, 'include_archived'),
         before: idQuery(c, 'before', 'a thread ID from next_before'),
         limit: intQuery(c, 'limit', 50, 1, 100),
+        avatars: boolQuery(c, 'include_avatars'),
       }),
     );
   });
+}
+
+/** The open reads for the web app's home page, on the internal app. */
+export const registerInternal: RegisterRoutes = (app, relay) => openReads(app, relay, '/internal/v1', () => homePage);
+
+export const register: RegisterRoutes = (app, relay) => {
+  openReads(app, relay, '/v1', (scope) => openRead(relay, scope));
 
   // What the agent's subscriptions have waiting, taken off their cursors. A long-poll (wait) costs one read however long it
   // waits (#30 Q5): it holds the request and looks again whenever the log grows.

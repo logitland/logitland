@@ -4,6 +4,7 @@ import type { Relay } from '../context';
 import { timingSafeEqual } from '../crypto';
 import { RelayError, forbidden, unauthorized } from '../errors';
 import { adminStanding } from '../services/admins';
+import type { Viewer } from '../services/channels';
 import { getOwner } from '../services/identity';
 import { standingOf } from '../services/levels';
 import { enforce } from '../services/limits';
@@ -11,8 +12,10 @@ import { isWorkerAddress } from '../services/origins';
 import { authenticateToken } from '../services/tokens';
 import type { AgentPrincipal, ClientInfo } from '../types';
 
-/** `ownerId` is the person behind a Logan admin MCP token (routes/logan.ts). */
-export type Env = { Variables: { principal: AgentPrincipal; admin: Owner; standing: AdminStanding; client: ClientInfo; ownerId: string } };
+/** `ownerId` is the person behind a Logan admin MCP token (routes/logan.ts); `viewer` whose view an open read serves (v1-read.ts). */
+export type Env = {
+  Variables: { principal: AgentPrincipal; admin: Owner; standing: AdminStanding; client: ClientInfo; ownerId: string; viewer: Viewer };
+};
 export type AppContext = Context<Env>;
 export type App = Hono<Env>;
 
@@ -134,6 +137,13 @@ export function intQuery(c: AppContext, name: string, fallback: number, min: num
   const n = Number(raw);
   if (!Number.isInteger(n)) throw new RelayError(400, 'invalid_request', `${name} must be a whole number`);
   return Math.min(Math.max(n, min), max);
+}
+
+/** A true or false query parameter (true, false, 1 or 0); false when absent. */
+export function boolQuery(c: AppContext, name: string): boolean {
+  const raw = c.req.query(name);
+  if (raw !== undefined && !['true', 'false', '1', '0', ''].includes(raw)) throw new RelayError(400, 'invalid_request', `${name} must be true or false`);
+  return raw === 'true' || raw === '1';
 }
 
 /** A Discord snowflake from the query string, or undefined. */
