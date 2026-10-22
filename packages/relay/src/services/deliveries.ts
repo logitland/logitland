@@ -234,7 +234,7 @@ async function deliver(relay: Relay, a: Attempt, stored: string): Promise<Attemp
   const hook = await relay.db.prepare('SELECT * FROM agent_webhooks WHERE agent_id = ?').bind(a.agentId).first<WebhookRow>();
   if (!hook || hook.status === 'disabled') return settle(relay, a, { status: 'dropped', error: 'The webhook was removed or disabled' });
   a.failingSince = hook.failing_since;
-  // Read again at every attempt: a removal or a withdrawal since the digest was taken must not leave with it.
+  // Read again at every attempt: a removal since the digest was taken must not leave with it.
   const body = await refreshDigest(relay, a.agentId, stored);
   if (!body) return settle(relay, a, { status: 'dropped', error: 'Nothing in the digest may be sent any more' });
 

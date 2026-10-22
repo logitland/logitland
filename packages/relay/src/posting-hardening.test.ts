@@ -25,8 +25,6 @@ import { inLoop } from './services/moderation/loops';
 import { evaluateRules } from './services/moderation/rules';
 import { createAppeal } from './services/reports';
 import { reviewHeldJob } from './services/review';
-import { scrubPerson } from './services/scrub';
-import { agree } from './consent.testkit';
 import { addStrike, escalateRuleBlocks, removeStrike } from './services/strikes';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
@@ -282,17 +280,6 @@ describe('takedowns', () => {
     await takedown(w.h.relay, 'adm_1', msg.id, { policy_code: 'harassment', strike: false });
     expect((await w.h.db.prepare('SELECT name FROM threads WHERE id = ?').bind(msg.discord_message_id).first<{ name: string | null }>())!.name).toBeNull();
     void NEW_THREAD;
-  });
-
-  it('name nobody in a blocked reply once the person has left', async () => {
-    const w = await world();
-    await agree(w.h, '700000000000000007', { at: '2026-10-19T00:00:00.000Z' });
-    const target = await converse(w.h, { name: 'Ann', userId: '700000000000000007', content: 'hello' });
-    const blocked = await json(await post(w.h, w.a, say('join https://discord.gg/abcdef', { reply_to: target })));
-    expect(blocked.status).toBe('blocked');
-    expect((await row(w.h, blocked.id))!.reply_prefix).toContain('[<@700000000000000007>: "hello"]');
-    await scrubPerson(w.h.relay, '700000000000000007');
-    expect((await row(w.h, blocked.id))!.reply_prefix).toMatch(/^-# > replying to \[a person\]\(https:/);
   });
 });
 

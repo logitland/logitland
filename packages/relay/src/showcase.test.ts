@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { agree } from './consent.testkit';
 import { say, setup, type Setup } from './deliveries.testkit';
 import { at, edit, human, HUMAN, msg, push, remove, thread } from './intake-fixtures';
-import { removeMessages, revokeConsent } from './services/consent';
+import { revokeConsent } from './services/consent';
 import { recordAgentPost } from './services/intake';
 import { updateSettings } from './services/settings';
 import { BENCH, FORUM, GUILD, LOUNGE, seedChannel, setAccess } from './testing';
@@ -182,20 +182,14 @@ describe('who the home page shows', () => {
     expect((await homeMessages(s))[0]!.author).toMatchObject({ kind: 'agent', avatar_url: null });
   });
 
-  it('forgets a person who withdraws: their messages, who they were, and their place on the live page', async () => {
+  it('keeps showing what a person wrote before they withdrew, as they were', async () => {
     const s = await home();
-    const live = liveFeed(s);
     await agree(s, HUMAN);
     await push(s, human(1, { reply_to: null, author: { id: HUMAN, username: 'luna', global_name: 'Luna', avatar: 'a1b2', bot: false } }));
     await revokeConsent(s.relay, HUMAN, ACTOR);
-    await removeMessages(s.relay, HUMAN, ACTOR);
-    expect(await homeMessages(s)).toEqual([]);
-    expect(await s.db.prepare('SELECT discord_user_id, display_name FROM conversation WHERE message_id = ?').bind(msg(1)).first()).toEqual({
-      discord_user_id: null,
-      display_name: 'Former participant',
-    });
-    expect(await s.db.prepare('SELECT username, avatar FROM consents WHERE discord_user_id = ?').bind(HUMAN).first()).toEqual({ username: null, avatar: null });
-    expect(live.frames.map(told)).toEqual(['message 1', CHANGED, { type: 'message.deleted', channel_id: LOUNGE, message_ids: [msg(1)] }]);
+    expect((await homeMessages(s)).map((m) => m.author)).toEqual([
+      expect.objectContaining({ display_name: 'Luna', discord: { id: HUMAN, username: 'luna', avatar: 'a1b2' } }),
+    ]);
   });
 });
 
@@ -244,7 +238,7 @@ describe('the live feed', () => {
     ]);
   });
 
-  it('tells open pages to read again when a channel is picked or dropped, closed to agents, or a person withdraws', async () => {
+  it('tells open pages to read again when a channel is picked or dropped, or closed to agents', async () => {
     const s = await home();
     const live = liveFeed(s);
     await updateSettings(s.relay, 'own_admin', { home_channel_ids: [] });
@@ -252,9 +246,6 @@ describe('the live feed', () => {
     const closed = [{ id: GUILD, type: 0, allow: '0', deny: String(Permission.VIEW_CHANNEL) }];
     await push(s, { kind: 'channel_update', channel_id: LOUNGE, guild_id: GUILD, name: 'lounge', type: 'text', overwrites: closed, slowmode_seconds: 0 });
     expect(live.frames).toEqual([CHANGED, CHANGED]);
-    await agree(s, HUMAN);
-    await revokeConsent(s.relay, HUMAN, ACTOR);
-    expect(live.frames).toEqual([CHANGED, CHANGED, CHANGED]);
   });
 
   it('opens only as a WebSocket, one count per address', async () => {

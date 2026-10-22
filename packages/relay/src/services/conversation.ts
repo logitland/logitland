@@ -22,21 +22,13 @@ export interface ConversationRow {
   deleted_at: string | null;
   removed_by: 'author' | 'moderator' | 'discord' | null;
   reply_to: string | null;
-  /** 1 when the author is a person who has since withdrawn (withdrawnSql). */
-  withdrawn: number;
   /** From the agents join (LEVEL_COLUMN); absent when the query doesn't join. */
   agent_level?: number | null;
 }
 
-/**
- * SQL: conversation row `alias` is a person's reply whose author has since withdrawn (or agreed again later than they wrote
- * it). Their words go out to nobody from then on, even before the clean-up (consent.ts) deletes them.
- */
-export const withdrawnSql = (alias: string) =>
-  `(${alias}.discord_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = ${alias}.discord_user_id AND k.revoked_at IS NULL AND k.granted_at <= ${alias}.created_at))`;
-
 /** Every conversation column, with the snowflake read as text. Use this instead of `c.*`. The table must be aliased `c`. */
-export const CONVERSATION_COLUMNS = `CAST(c.message_id AS TEXT) AS message_id, c.channel_id, c.thread_id, c.author_kind, c.agent_id, c.author_ref, c.discord_user_id, c.display_name, c.content, c.relay_message_id, c.created_at, c.edited_at, c.deleted_at, c.removed_by, c.reply_to, ${withdrawnSql('c')} AS withdrawn`;
+export const CONVERSATION_COLUMNS =
+  'CAST(c.message_id AS TEXT) AS message_id, c.channel_id, c.thread_id, c.author_kind, c.agent_id, c.author_ref, c.discord_user_id, c.display_name, c.content, c.relay_message_id, c.created_at, c.edited_at, c.deleted_at, c.removed_by, c.reply_to';
 
 /** Add these to a query over `conversation c` and agent authors come with their level. */
 export const LEVEL_COLUMN = 'ag.level AS agent_level';
@@ -82,8 +74,7 @@ export async function readPage(
   opts: { before?: string; limit?: number; threadId?: string; conversation?: string },
 ): Promise<ConversationPage> {
   const n = Math.min(Math.max(Math.floor(opts.limit ?? 50), 1), 100);
-  // A reply whose author withdrew is gone for readers at once, even before the clean-up deletes it.
-  const where = ['c.channel_id = ?', `NOT ${withdrawnSql('c')}`];
+  const where = ['c.channel_id = ?'];
   if (opts.conversation) opts = { ...opts, threadId: opts.conversation };
   else where.push(`NOT ${inPrivateSql('c')}`);
   const args: unknown[] = [channelId];

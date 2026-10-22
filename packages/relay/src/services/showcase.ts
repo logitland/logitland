@@ -3,7 +3,7 @@ import type { Relay } from '../context';
 import { notFound, RelayError } from '../errors';
 import { agentChannels, type ChannelRow, type Viewer } from './channels';
 import { SHOWN_PUBLICLY_SINCE } from './consent';
-import { CONVERSATION_COLUMNS, inPrivateSql, LEVEL_COLUMN, LEVEL_JOIN, toConversationMessage, withdrawnSql, type ConversationRow } from './conversation';
+import { CONVERSATION_COLUMNS, inPrivateSql, LEVEL_COLUMN, LEVEL_JOIN, toConversationMessage, type ConversationRow } from './conversation';
 import { chunk, MAX_PARAMS, placeholders, type PlannedEvent } from './events';
 import { isForum } from './moderation/target';
 import { getSettings } from './settings';
@@ -30,12 +30,12 @@ const ANY_AGENT: Viewer = { level: 0 };
 const LIVE_TYPES: ReadonlySet<EventType> = new Set(['message.created', 'message.updated', 'message.deleted', 'message.bulk_deleted', 'thread.created']);
 
 /**
- * SQL: conversation row `alias` is one the open web may show. Never a private conversation or a reply whose author withdrew;
- * only text, from agents or from people whose agreement covered being shown on the home page.
+ * SQL: conversation row `alias` is one the open web may show. Never a private conversation; only text, from agents or from
+ * people whose agreement covered being shown on the home page (withdrawing later doesn't take it back).
  */
 const shownSql = (alias: string) =>
-  `(NOT ${withdrawnSql(alias)} AND NOT ${inPrivateSql(alias)} AND ${alias}.content IS NOT NULL
-    AND (${alias}.author_kind = 'agent' OR (${alias}.author_kind = 'human' AND EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = ${alias}.discord_user_id AND k.revoked_at IS NULL AND k.notice_version >= '${SHOWN_PUBLICLY_SINCE}'))))`;
+  `(NOT ${inPrivateSql(alias)} AND ${alias}.content IS NOT NULL
+    AND (${alias}.author_kind = 'agent' OR (${alias}.author_kind = 'human' AND EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = ${alias}.discord_user_id AND k.notice_version >= '${SHOWN_PUBLICLY_SINCE}'))))`;
 
 type ShownRow = ConversationRow & { agent_avatar_url: string | null; author_username: string | null; author_avatar: string | null };
 
@@ -252,7 +252,7 @@ export async function publishShowcase(relay: Relay, events: PlannedEvent[]): Pro
 
 /**
  * Tells the live feed to read the home page again, after a change frames can't carry: a channel picked, dropped or closed to
- * agents, or a person withdrawing. The change is made; a visitor who misses this sees it on their next visit.
+ * agents, or a person shown differently. The change is made; a visitor who misses this sees it on their next visit.
  */
 export async function refreshShowcase(relay: Relay): Promise<void> {
   await relay.showcase?.publish([{ type: 'showcase.changed' }]).catch((error: unknown) => relay.log.error('showcase.publish_failed', { error }));

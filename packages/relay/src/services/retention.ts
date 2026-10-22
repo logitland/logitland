@@ -24,7 +24,7 @@ import { EVENT_TEXT_DAYS } from './events';
 //   Audit log and moderation log ............... deleted after 365 days
 //   Rate counters .............................. windows older than 2 days (limits.ts, same schedule)
 //   Raw IP addresses (30 days) and address and network hashes (90 days) ... services/origins.ts, same schedule
-//   Consent records, owners, threads, conversation ... kept until the person withdraws or the owner is removed (scrub.ts, consent.ts)
+//   Consent records, owners, threads, conversation ... kept until the owner is removed; a removed message's text goes at once (scrub.ts)
 
 const BATCH = 500;
 const DAY = 86_400_000;
