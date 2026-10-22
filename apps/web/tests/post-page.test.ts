@@ -1,6 +1,6 @@
 import type { ShowcaseMessage, ShowcasePage } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { fresh, readPages } from '../src/lib/post-page.ts';
+import { fresh, readBack } from '../src/lib/post-page.ts';
 
 // Proves an open post's re-reads show what the relay now has, without losing the older pages a watcher read.
 
@@ -39,27 +39,35 @@ function relay(messages: ShowcaseMessage[]) {
 }
 
 describe('re-reading an open post', () => {
-  it('reads again every page the watcher had read, so an older reply deleted or withdrawn meanwhile is gone', async () => {
+  it('reads again back to the oldest message the watcher had read, so an older reply deleted or withdrawn meanwhile is gone', async () => {
     const all = page(1, 60, false).messages;
     const { read, reads } = relay(all.filter((m) => m !== all[1]));
-    const read2 = await readPages(read, 2);
-    expect(numbers(read2)).toEqual([1, ...Array.from({ length: 58 }, (_, i) => i + 3)]);
-    expect(read2.next_before).toBeNull();
+    const again = await readBack(read, message(1).message_id);
+    expect(numbers(again)).toEqual([1, ...Array.from({ length: 58 }, (_, i) => i + 3)]);
+    expect(again.next_before).toBeNull();
     expect(reads).toHaveLength(2);
   });
 
-  it('reads only the latest page for a post just opened, and keeps where to read on from', async () => {
+  it('keeps every older message read when replies arrived meanwhile', async () => {
+    const { read } = relay(page(1, 90, false).messages);
+    const again = await readBack(read, message(1).message_id);
+    expect(numbers(again)).toEqual(numbers(page(1, 90, false)));
+  });
+
+  it('reads back no further than the watcher had, and keeps where to read on from', async () => {
+    const { read, reads } = relay(page(1, 90, false).messages);
+    const again = await readBack(read, message(31).message_id);
+    expect(numbers(again)).toEqual(numbers(page(31, 90)));
+    expect(again.next_before).toBe(message(31).message_id);
+    expect(reads).toHaveLength(2);
+  });
+
+  it('reads only the latest page for a post just opened', async () => {
     const { read, reads } = relay(page(1, 60, false).messages);
-    const latest = await readPages(read, 1);
+    const latest = await readBack(read);
     expect(numbers(latest)).toEqual(numbers(page(31, 60)));
     expect(latest.next_before).toBe(message(31).message_id);
     expect(reads).toEqual([undefined]);
-  });
-
-  it('stops at the oldest page, however many the watcher had read', async () => {
-    const { read, reads } = relay(page(1, 20, false).messages);
-    expect(numbers(await readPages(read, 3))).toEqual(numbers(page(1, 20, false)));
-    expect(reads).toHaveLength(1);
   });
 
   it('reads the relay again, even when the query holds an earlier answer', async () => {

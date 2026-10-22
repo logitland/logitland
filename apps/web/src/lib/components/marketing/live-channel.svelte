@@ -17,7 +17,7 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { levelName } from '#lib/fixtures/owner/format.js';
   import { liveFeed, type MessageFrame } from '#lib/live-feed.js';
-  import { fresh, readPages } from '#lib/post-page.js';
+  import { fresh, readBack } from '#lib/post-page.js';
   import { postPage } from '#lib/showcase.remote.js';
   import { cn } from '#lib/utils.js';
 
@@ -53,8 +53,8 @@
 
   /** The channel the watcher opened; the first one until they pick. */
   let current = $state<string>();
-  /** The forum post the watcher opened, with the pages of it read so far. */
-  let thread = $state<{ post: ShowcasePost; messages: ShowcaseMessage[]; next_before: string | null; pages: number }>();
+  /** The forum post the watcher opened, with the pages of it read so far, back to `oldest` (unset before the first). */
+  let thread = $state<{ post: ShowcasePost; messages: ShowcaseMessage[]; next_before: string | null; oldest?: string }>();
   let loadingOlder = $state(false);
   const unread = new SvelteSet<string>();
   /** Only posts that land while their channel is open rise in; switching channels shows the rest at rest. */
@@ -227,12 +227,15 @@
     requestAnimationFrame(() => (scroller.scrollTop = open.posts ? 0 : scroller.scrollHeight));
   }
 
-  /** Reads the pages of a post the watcher had read again, from the relay (post-page.ts). Closes the post if it's gone. */
-  async function readPost(post: ShowcasePost) {
-    const pages = thread?.pages || 1;
+  /** Reads the post again from the relay, back to the oldest message the watcher had read (post-page.ts). Closes it if it's gone. */
+  async function readPost(post: ShowcasePost): Promise<void> {
+    const oldest = thread?.oldest;
     try {
-      const read = await readPages((before) => fresh(postPage({ id: post.id, before })), pages);
-      if (thread?.post.id === post.id) Object.assign(thread, read, { pages });
+      const read = await readBack((before) => fresh(postPage({ id: post.id, before })), oldest);
+      if (thread?.post.id !== post.id) return;
+      // Older messages loaded meanwhile: read back to them instead.
+      if (thread.oldest !== oldest) return readPost(post);
+      Object.assign(thread, read, { oldest: read.messages[0]?.message_id });
     } catch {
       if (thread?.post.id === post.id) closePost();
     }
@@ -240,7 +243,7 @@
 
   /** Opens a post on its starter at once, then its latest page, and takes focus into it. */
   async function openPost(post: ShowcasePost) {
-    thread = { post, messages: [post.starter], next_before: null, pages: 0 };
+    thread = { post, messages: [post.starter], next_before: null };
     arrived.clear();
     await tick();
     scroller.scrollTop = 0;
@@ -269,7 +272,7 @@
       const height = scroller.scrollHeight;
       thread.messages = [...page.messages, ...thread.messages];
       thread.next_before = page.next_before;
-      thread.pages++;
+      thread.oldest = page.messages[0]?.message_id ?? thread.oldest;
       await tick();
       scroller.scrollTop += scroller.scrollHeight - height;
       if (!page.next_before) scroller.focus();

@@ -10,13 +10,14 @@ export async function fresh<T>(query: PromiseLike<T> & { refresh(): Promise<void
 }
 
 /**
- * Reads as many of a post's pages as the watcher had read, newest first, and answers them as one page. Everything shown comes
- * from this read, older pages included, so nothing deleted or withdrawn while the watcher was away stays on screen.
+ * Reads a post's pages again, newest first, back to `oldest` (the oldest message the watcher had read; just the latest page
+ * when unset), and answers them as one page. Everything shown comes from this read, older pages included, so nothing deleted
+ * or withdrawn while the watcher was away stays on screen, and replies that arrived meanwhile don't push older ones out.
  */
-export async function readPages(read: (before?: string) => Promise<ShowcasePage>, pages: number): Promise<ShowcasePage> {
+export async function readBack(read: (before?: string) => Promise<ShowcasePage>, oldest?: string): Promise<ShowcasePage> {
   let page = await read();
   let messages = page.messages;
-  for (let n = 1; n < pages && page.next_before; n++) {
+  while (oldest && page.next_before && BigInt(page.next_before) > BigInt(oldest)) {
     page = await read(page.next_before);
     messages = [...page.messages, ...messages];
   }
