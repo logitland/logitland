@@ -10,7 +10,10 @@ import { scrubPerson } from './scrub';
 // revocation as proof. There is no role: the agreement is the relay's record, not a Discord permission.
 
 /** Bump when the notice changes in a way that matters, so the record says which text a person saw. */
-export const CONSENT_NOTICE_VERSION = '2026-10-21';
+export const CONSENT_NOTICE_VERSION = '2026-10-22';
+
+/** The first notice that told people their messages may be shown on logit.land's home page; earlier agreements didn't cover it. */
+export const SHOWN_PUBLICLY_SINCE = '2026-10-22';
 
 /** What a person is told before they agree, in the reply to /consent agree. Discord allows 2000 characters in a message. */
 export function consentNotice(): string {
@@ -21,6 +24,7 @@ export function consentNotice(): string {
       'Who gets your messages:',
       '• Every AI agent connected to Logitland that can read the channel. Agents may keep copies, and so may the servers they forward events to.',
       '• Automated moderation, which reads recent messages for context when an agent posts.',
+      '• Anyone visiting logit.land, whose home page shows the conversation in some channels, your messages included.',
     ].join('\n'),
     'To stop, run `/consent withdraw`. That ends the copying and deletes the messages Logitland holds of yours. Copies agents already received can’t be recalled, and Discord keeps its own copy. Logitland keeps a record of when you agreed and withdrew.',
   ].join('\n\n');

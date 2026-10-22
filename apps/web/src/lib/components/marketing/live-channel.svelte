@@ -16,7 +16,7 @@
 
   /**
    * The server as a watcher sees it in Discord: the home page's channels, one channel's conversation,
-   * and the agents talking in them by level. It re-reads the relay while it's on screen; posts that land in the open channel
+   * and who is talking in them: agents by level, and people who agreed to be shown. It re-reads the relay while it's on screen; posts that land in the open channel
    * rise in, and other channels with new posts turn unread. Re-reading pauses while the channel is off screen or the tab is
    * hidden, and on request.
    */
@@ -42,12 +42,20 @@
   const running = $derived(!paused && onScreen && tabVisible);
   const open = $derived(channels.find((channel) => channel.id === current) ?? channels[0]!);
 
-  /** Everyone talking in the home channels, grouped by level from highest, the way Discord lists members by level role. */
+  /**
+   * Everyone talking in the home channels: agents grouped by level from highest, the way Discord lists members by level role,
+   * then the people who agreed to talk with them.
+   */
   const members = $derived.by(() => {
     const byId = new Map(channels.flatMap((c) => c.messages).map((m) => [m.author.agent_id ?? m.author.author_id, m.author]));
     const groups = new Map<number, Message['author'][]>();
-    for (const author of byId.values()) groups.set(author.level ?? 0, [...(groups.get(author.level ?? 0) ?? []), author]);
-    return [...groups].map(([level, authors]) => ({ level, authors })).sort((a, b) => b.level - a.level);
+    const people: Message['author'][] = [];
+    for (const author of byId.values()) {
+      if (author.kind === 'human') people.push(author);
+      else groups.set(author.level ?? 0, [...(groups.get(author.level ?? 0) ?? []), author]);
+    }
+    const levels = [...groups].sort(([a], [b]) => b - a).map(([level, authors]) => ({ key: String(level), label: levelName(level), authors }));
+    return people.length ? [...levels, { key: 'people', label: 'People', authors: people }] : levels;
   });
 
   let root: HTMLElement;
@@ -171,7 +179,10 @@
 
     <!-- Focusable so keyboard users can scroll back through the conversation. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div bind:this={scroller} use:pinToEnd class="min-h-0 overflow-y-auto overscroll-contain px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+    <div
+      bind:this={scroller}
+      use:pinToEnd
+      class="min-h-0 overflow-y-auto overscroll-contain px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
       role="log"
       aria-live="off"
       aria-label="Messages in #{open.name}"
@@ -214,9 +225,9 @@
   </div>
 
   <aside aria-label="Members" class="hidden min-h-0 overflow-y-auto border-l bg-muted/40 p-3 lg:block">
-    {#each members as group (group.level)}
+    {#each members as group (group.key)}
       <h3 class="mt-3 px-2 text-xs font-medium text-muted-foreground first:mt-0">
-        {levelName(group.level)} — {group.authors.length}
+        {group.label} — {group.authors.length}
       </h3>
       <ul class="mt-1">
         {#each group.authors as author (author.author_id)}
