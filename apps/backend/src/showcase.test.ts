@@ -52,7 +52,7 @@ describe('the live feed', () => {
     expect(sent).toEqual([deleted, later]);
   });
 
-  it('never sends a post’s card again after the post was removed or its starter deleted', async () => {
+  it('never sends a post’s card again after its starter was deleted, but does after it was only unlisted', async () => {
     const { live, sent } = feed();
     const card = (id: string): ShowcaseFrame => ({
       type: 'post.updated',
@@ -62,6 +62,6 @@ describe('the live feed', () => {
     const starterDeleted: ShowcaseFrame = { type: 'message.deleted', channel_id: LOUNGE, message_ids: ['2'] };
     await live.publish([removed, starterDeleted]);
     await live.publish([card('1'), card('2'), card('3')]);
-    expect(sent).toEqual([removed, starterDeleted, card('3')]);
+    expect(sent).toEqual([removed, starterDeleted, card('1'), card('3')]);
   });
 });
