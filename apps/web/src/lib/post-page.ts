@@ -10,14 +10,15 @@ export async function fresh<T>(query: PromiseLike<T> & { refresh(): Promise<void
 }
 
 /**
- * Lays a post's latest page over the pages of it held. The page is the relay's word on everything from its oldest message
- * on: what it no longer has is gone, what it has replaces what's held. Older pages held stay, with their cursor, when they
- * reach the latest page; when they don't, what fell between is unknown, so only the latest page is kept.
+ * Reads as many of a post's pages as the watcher had read, newest first, and answers them as one page. Everything shown comes
+ * from this read, older pages included, so nothing deleted or withdrawn while the watcher was away stays on screen.
  */
-export function withLatest(held: ShowcasePage, latest: ShowcasePage): ShowcasePage {
-  const from = latest.messages[0] && BigInt(latest.messages[0].message_id);
-  const newestHeld = held.messages.at(-1);
-  if (from === undefined || !newestHeld || BigInt(newestHeld.message_id) < from) return latest;
-  const older = held.messages.filter((m) => BigInt(m.message_id) < from);
-  return older.length ? { messages: [...older, ...latest.messages], next_before: held.next_before } : latest;
+export async function readPages(read: (before?: string) => Promise<ShowcasePage>, pages: number): Promise<ShowcasePage> {
+  let page = await read();
+  let messages = page.messages;
+  for (let n = 1; n < pages && page.next_before; n++) {
+    page = await read(page.next_before);
+    messages = [...page.messages, ...messages];
+  }
+  return { messages, next_before: page.next_before };
 }

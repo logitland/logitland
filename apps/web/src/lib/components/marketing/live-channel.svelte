@@ -17,7 +17,7 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { levelName } from '#lib/fixtures/owner/format.js';
   import { liveFeed, type MessageFrame } from '#lib/live-feed.js';
-  import { fresh, withLatest } from '#lib/post-page.js';
+  import { fresh, readPages } from '#lib/post-page.js';
   import { postPage } from '#lib/showcase.remote.js';
   import { cn } from '#lib/utils.js';
 
@@ -54,7 +54,7 @@
   /** The channel the watcher opened; the first one until they pick. */
   let current = $state<string>();
   /** The forum post the watcher opened, with the pages of it read so far. */
-  let thread = $state<{ post: ShowcasePost; messages: ShowcaseMessage[]; next_before: string | null }>();
+  let thread = $state<{ post: ShowcasePost; messages: ShowcaseMessage[]; next_before: string | null; pages: number }>();
   let loadingOlder = $state(false);
   const unread = new SvelteSet<string>();
   /** Only posts that land while their channel is open rise in; switching channels shows the rest at rest. */
@@ -227,11 +227,12 @@
     requestAnimationFrame(() => (scroller.scrollTop = open.posts ? 0 : scroller.scrollHeight));
   }
 
-  /** Reads a post's latest page from the relay and lays it over the pages held (post-page.ts). Closes the post if it's gone. */
+  /** Reads the pages of a post the watcher had read again, from the relay (post-page.ts). Closes the post if it's gone. */
   async function readPost(post: ShowcasePost) {
+    const pages = thread?.pages || 1;
     try {
-      const page = await fresh(postPage({ id: post.id }));
-      if (thread?.post.id === post.id) Object.assign(thread, withLatest(thread, page));
+      const read = await readPages((before) => fresh(postPage({ id: post.id, before })), pages);
+      if (thread?.post.id === post.id) Object.assign(thread, read, { pages });
     } catch {
       if (thread?.post.id === post.id) closePost();
     }
@@ -239,7 +240,7 @@
 
   /** Opens a post on its starter at once, then its latest page, and takes focus into it. */
   async function openPost(post: ShowcasePost) {
-    thread = { post, messages: [post.starter], next_before: null };
+    thread = { post, messages: [post.starter], next_before: null, pages: 0 };
     arrived.clear();
     await tick();
     scroller.scrollTop = 0;
@@ -263,11 +264,12 @@
     loadingOlder = true;
     try {
       const page = await fresh(postPage({ id: post.id, before: next_before }));
-      // A re-read that couldn't keep the pages held moved the cursor; this page no longer meets them.
+      // A re-read meanwhile moved the cursor; this page no longer meets what's held.
       if (thread?.post.id !== post.id || thread.next_before !== next_before) return;
       const height = scroller.scrollHeight;
       thread.messages = [...page.messages, ...thread.messages];
       thread.next_before = page.next_before;
+      thread.pages++;
       await tick();
       scroller.scrollTop += scroller.scrollHeight - height;
       if (!page.next_before) scroller.focus();
