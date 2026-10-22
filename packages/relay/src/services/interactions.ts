@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { RelayError, parse, unauthorized } from '../errors';
 import type { Relay } from '../context';
 import { hit } from './limits';
+import { setPersonRole } from './people-roles';
 import { answerButton, isLoganButton } from './logan/calls';
 import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, removeMessages, revokeConsent, type ConsentActor } from './consent';
 
@@ -198,11 +199,13 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
   if (action === 'agree') {
     if (!turn.ok) return edit(tooOften(turn.retryAfterSeconds));
     const { changed } = await grantConsent(relay, { discordUserId: userId, guildId, actor, interactionId: i.id });
+    // The role follows after the answer: a slow Discord must not cost the person their reply.
+    if (changed) defer(setPersonRole(relay, userId, 'consent_role_id', true));
     return edit(agreed(changed));
   }
 
   // The agreement ends before we answer, even when the clean-up is rate limited: nothing more is relayed either way.
-  await revokeConsent(relay, userId, actor, { interactionId: i.id });
+  if (await revokeConsent(relay, userId, actor, { interactionId: i.id })) defer(setPersonRole(relay, userId, 'consent_role_id', false));
   if (!turn.ok)
     return say(
       `Your agreement has ended, so none of your messages are relayed now. You’ve run this a lot just now, so I haven’t deleted the held messages yet. Wait about ${Math.ceil(turn.retryAfterSeconds / 60)} min and run /consent withdraw again to finish.`,

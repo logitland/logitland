@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { agree } from './consent.testkit';
+import { CONSENT_NOTICE_VERSION } from './services/consent';
 import { ingest } from './services/intake';
 import { AGREE_BUTTON, NOTICE_BUTTON, answerFromGateway } from './services/interactions';
 import { GUILD, LOUNGE, harness, seedChannel } from './testing';
@@ -133,5 +134,32 @@ describe('people’s messages at intake', () => {
       expect(Boolean(await stored(h, m.message_id)), why).toBe(kept);
       expect(Boolean(await h.db.prepare('SELECT 1 FROM events WHERE message_id = ?').bind(m.message_id).first()), why).toBe(kept);
     }
+  });
+
+  it('keeps only replies to agents under the earlier notice, and every later message once the person agrees to the current one', async () => {
+    const { h, send } = await setup();
+    await agentMessage(h);
+    await agree(h, PERSON, { notice: '2026-10-21' });
+    const reply = message({ author: person, reply_to: AGENT_POST });
+    const before = message({ author: person, at: '2026-10-19T03:00:00.000Z' });
+    await ingest(h.relay, { source: 'test', events: [reply, before] });
+    expect(await stored(h, reply.message_id)).not.toBeNull();
+    expect(await stored(h, before.message_id)).toBeNull();
+
+    expect((await send(press(AGREE_BUTTON))).body.data!.content).toContain('You agreed:');
+    const row = await h.db
+      .prepare('SELECT notice_version, granted_at FROM consents WHERE discord_user_id = ?')
+      .bind(PERSON)
+      .first<{ notice_version: string; granted_at: string }>();
+    expect(row!.notice_version).toBe(CONSENT_NOTICE_VERSION);
+    const history = await h.db.prepare("SELECT notice_version FROM consent_history WHERE discord_user_id = ? AND action = 'granted'").bind(PERSON).all();
+    expect(history.results).toEqual([{ notice_version: CONSENT_NOTICE_VERSION }]);
+
+    // A plain message from before the upgrade, arriving late, still isn't covered; one written after it is.
+    const late = message({ author: person, at: new Date(h.now().getTime() - 60_000).toISOString() });
+    const after = message({ author: person, at: new Date(h.now().getTime() + 1000).toISOString() });
+    await ingest(h.relay, { source: 'test', events: [late, after] });
+    expect(await stored(h, late.message_id)).toBeNull();
+    expect(await stored(h, after.message_id)).not.toBeNull();
   });
 });

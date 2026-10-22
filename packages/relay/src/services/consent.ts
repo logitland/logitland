@@ -2,15 +2,18 @@ import type { ConsentMethod } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { audit } from './audit';
 import { auditIf } from './identity';
-import { setPersonRole } from './people-roles';
 import { scrubPerson } from './scrub';
 
 // People talk with agents in agent channels once they agree through the /consent command. Intake keeps a person's message
 // only when they had agreed by the time they wrote it; every other human message is dropped before it is stored. The consents row says which notice they saw and when, and consent_history keeps every grant and
-// revocation as proof. There is no role: the agreement is the relay's record, not a Discord permission.
+// revocation as proof. The consent role in Discord follows the record (`interactions.ts` syncs it after answering) but
+// grants nothing: the agreement is the relay's record, not a Discord permission.
 
 /** Bump when the notice changes in a way that matters, so the record says which text a person saw. */
 export const CONSENT_NOTICE_VERSION = '2026-10-22';
+
+/** The first notice that covered every message a person writes; earlier agreements covered only their replies to agents. */
+export const EVERY_MESSAGE_SINCE = '2026-10-22';
 
 /** The first notice that told people their messages may be shown on logit.land's home page; earlier agreements didn't cover it. */
 export const SHOWN_PUBLICLY_SINCE = '2026-10-22';
@@ -52,13 +55,14 @@ export async function consentStatus(relay: Relay, discordUserId: string): Promis
   return { agreed: Boolean(row && !row.revoked_at), granted_at: row && !row.revoked_at ? row.granted_at : null, messages: held?.n ?? 0 };
 }
 
-const NOT_AGREED = 'NOT EXISTS (SELECT 1 FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL)';
+/** No agreement to the current notice in force: none at all, or one to an earlier notice. */
+const NOT_AGREED = `NOT EXISTS (SELECT 1 FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL AND notice_version >= '${CONSENT_NOTICE_VERSION}')`;
 const AGREED = 'EXISTS (SELECT 1 FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL)';
 
 /**
- * Records the agreement: the consents row, a consent_history row and the audit entry, in one batch. An agreement already
- * in force keeps its original time and notice and writes nothing; agreeing again after withdrawing starts over with a new
- * time, so nothing written in between is relayed.
+ * Records the agreement: the consents row, a consent_history row and the audit entry, in one batch. An agreement to the
+ * current notice already in force keeps its original time and writes nothing. Agreeing again after withdrawing, or to a
+ * newer notice than the one in force, starts over with a new time, so nothing written before it is relayed under its terms.
  */
 export async function grantConsent(
   relay: Relay,
@@ -85,15 +89,12 @@ export async function grantConsent(
         `INSERT INTO consents (discord_user_id, guild_id, method, notice_version, interaction_id, granted_at, revoked_at) VALUES (?, ?, 'command', ?, ?, ?, NULL)
          ON CONFLICT (discord_user_id) DO UPDATE SET guild_id = excluded.guild_id, method = excluded.method, notice_version = excluded.notice_version,
            interaction_id = excluded.interaction_id, granted_at = excluded.granted_at, revoked_at = NULL
-         WHERE consents.revoked_at IS NOT NULL`,
+         WHERE consents.revoked_at IS NOT NULL OR consents.notice_version < excluded.notice_version`,
       )
       .bind(discordUserId, guildId, CONSENT_NOTICE_VERSION, interactionId, at),
   ]);
   const changed = results[2]!.meta.changes > 0;
-  if (changed) {
-    relay.log.info('consent.granted');
-    await setPersonRole(relay, discordUserId, 'consent_role_id', true);
-  }
+  if (changed) relay.log.info('consent.granted');
   return { changed };
 }
 
@@ -117,7 +118,6 @@ export async function revokeConsent(relay: Relay, discordUserId: string, actor: 
   ]);
   if (results[2]!.meta.changes === 0) return false;
   relay.log.info('consent.revoked');
-  await setPersonRole(relay, discordUserId, 'consent_role_id', false);
   return true;
 }
 
