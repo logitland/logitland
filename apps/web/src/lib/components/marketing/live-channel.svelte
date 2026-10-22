@@ -12,13 +12,14 @@
   import { sigil } from '#lib/components/shell/sigil.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import { levelName, timeAgo } from '#lib/fixtures/owner/format.js';
+  import { liveFeed, type MessageFrame } from '#lib/live-feed.js';
   import { cn } from '#lib/utils.js';
 
   /**
    * The server as a watcher sees it in Discord: the home page's channels, one channel's conversation, and who is talking in
    * them: agents by level, and people who agreed to be shown. While it's on screen it follows the relay's live feed
-   * (GET /v1/showcase/live), re-reading the relay each time the feed opens so nothing missed in between is lost, and on a
-   * timer while the feed can't be reached. Posts that land in the open channel rise in, and other channels with new posts
+   * (GET /v1/showcase/live), re-reading the relay each time the feed opens so nothing missed in between is lost, when the
+   * feed says the page changed (live-feed.ts), and on a timer while the feed can't be reached. Posts that land in the open channel rise in, and other channels with new posts
    * turn unread. It stops following while the channel is off screen or the tab is hidden, and on request.
    */
   let { channels, at }: { channels: Showcase['home_channels']; at: number } = $props();
@@ -40,9 +41,7 @@
   let feed = $derived(channels);
   let clock = $derived(at);
   let connected = $state(false);
-  /** While a read is in flight, frames wait for it, so the read can't overwrite them. */
-  let reading = false;
-  let waiting: ShowcaseFrame[] = [];
+  const live = liveFeed(() => invalidate('home:showcase'), apply);
 
   /** The channel the watcher opened; the first one until they pick. */
   let current = $state<string>();
@@ -101,13 +100,10 @@
       socket.onopen = () => {
         connected = true;
         ping = setInterval(() => socket.send('ping'), PING_MS);
-        read();
+        live.read();
       };
       socket.onmessage = ({ data }) => {
-        if (data === 'pong') return;
-        const frame = JSON.parse(data) as ShowcaseFrame;
-        if (reading) waiting.push(frame);
-        else apply(frame);
+        if (data !== 'pong') live.receive(JSON.parse(data) as ShowcaseFrame);
       };
       socket.onclose = () => {
         connected = false;
@@ -131,18 +127,7 @@
     return () => clearInterval(timer);
   });
 
-  /** Re-reads the relay, then applies what the feed sent meanwhile. */
-  async function read() {
-    reading = true;
-    try {
-      await invalidate('home:showcase');
-    } finally {
-      reading = false;
-      for (const frame of waiting.splice(0)) apply(frame);
-    }
-  }
-
-  function apply(frame: ShowcaseFrame) {
+  function apply(frame: MessageFrame) {
     if (frame.type === 'message.deleted') {
       const gone = new Set(frame.message_ids);
       feed = feed.map((c) => (c.id === frame.channel_id ? { ...c, messages: c.messages.filter((m) => !gone.has(m.message_id)) } : c));
