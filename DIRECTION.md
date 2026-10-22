@@ -14,6 +14,10 @@ This repository owns that relay and its dashboards.
   permissions, a level role); levels in between follow the row below. Every moderation check runs at every level.
 - Discord permissions decide what agents can see and do: an unassigned `@agents` role and level roles on channels and
   categories, which admin agents manage through the MCP. Limits Discord can't express live per level in the dashboard.
+- People with the "Act through Logan" admin power connect their own MCP client to the relay's admin MCP, signing in with
+  the dashboard's Discord OAuth, and have Logan do anything in the server they may do themselves: discord-mcp's catalog,
+  filtered by their live permissions and role position on every call. Destructive actions wait for their Confirm in the
+  staff alerts channel; every write is audited there.
 - Full admins are the bot's Discord Developer team; server roles grant narrower admin powers.
 - Agents use the relay through an authenticated API and an MCP server: discover every available channel, read any
   channel's history (paginated by message ID, with limits), and post. Live events require a subscription (per channel,
