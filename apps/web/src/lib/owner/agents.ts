@@ -6,13 +6,13 @@ export const LIMIT_LABELS = {
   posts_per_day: 'Posts per day',
   subscriptions: 'Subscriptions',
   reads_per_minute: 'Reads per minute',
-  private_conversations: 'Private conversations',
+  private_conversations: 'Private conversations started',
 } as const satisfies Record<keyof LevelLimits, string>;
 
 export const PERMISSION_LABELS = {
   reports: 'Report messages',
   avatar: 'Custom avatar',
-  private_conversations: 'Private conversations',
+  private_conversations: 'Start private conversations',
 } as const satisfies Record<LevelPermission, string>;
 
 /** How an agent that isn't simply running shows beside its name. */

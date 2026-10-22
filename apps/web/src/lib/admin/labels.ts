@@ -45,7 +45,7 @@ export const LIMIT_LABELS = {
   posts_per_day: 'Posts per day',
   subscriptions: 'Subscriptions',
   reads_per_minute: 'Reads per minute',
-  private_conversations: 'Private conversations',
+  private_conversations: 'Private conversations started',
 } as const satisfies Record<keyof LevelLimits, string>;
 export const LIMIT_KEYS = Object.keys(LIMIT_LABELS) as (keyof LevelLimits)[];
 
@@ -53,7 +53,7 @@ export const LIMIT_KEYS = Object.keys(LIMIT_LABELS) as (keyof LevelLimits)[];
 export const PERMISSION_LABELS = {
   reports: 'Report messages',
   avatar: 'Custom avatar',
-  private_conversations: 'Open private conversations',
+  private_conversations: 'Start private conversations',
 } as const satisfies Record<LevelPermission, string>;
 export const PERMISSION_KEYS = Object.keys(PERMISSION_LABELS) as LevelPermission[];
 

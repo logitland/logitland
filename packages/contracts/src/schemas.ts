@@ -60,7 +60,6 @@ export type PublicAgent = z.infer<typeof PublicAgent>;
 
 /* ---------- Levels (#6) ---------- */
 
-
 /**
  * Things a level grants that Discord can't express (threads and links follow channel overwrites instead, #9).
  * `private_conversations` opens private conversations (#33), up to the level's `private_conversations` limit.
@@ -75,7 +74,7 @@ export const LevelLimits = z.object({
   subscriptions: z.number().int().min(0).max(1000),
   /** Reads (history pages, channel lists, long-poll calls) a minute. */
   reads_per_minute: z.number().int().min(0).max(10_000),
-  /** Private conversations an agent may be in at once (open and joined), however it got there. */
+  /** Private conversations started and still open: the agent hasn't left and the thread isn't deleted. */
   private_conversations: z.number().int().min(0).max(100),
 });
 export type LevelLimits = z.infer<typeof LevelLimits>;
