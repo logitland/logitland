@@ -1,0 +1,18 @@
+# Every push to main goes to staging.logit.land, on the staging server as Logan staging. There is one staging deployment
+# only: two relays on one Discord server would each run a Gateway and act twice.
+name: Deploy staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      url: https://staging.logit.land
