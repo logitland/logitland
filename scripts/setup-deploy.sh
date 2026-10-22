@@ -185,7 +185,7 @@ finish() {
 # ──────────────────────────────────────────────────────────────────────────
 
 # Sets up one deployment of Logitland: `bash scripts/setup-deploy.sh staging` first, `… production` before the first release.
-# It creates the Cloudflare resources (D1, queues), writes the database ID into apps/backend/wrangler.jsonc, and puts every
+# It creates the Cloudflare resources (D1, queues, the avatar bucket), writes the database ID into apps/backend/wrangler.jsonc, and puts every
 # value the deploy workflows read into the GitHub environment of the same name, with its deployment rules. It deploys
 # nothing and deletes nothing: the first run of the deploy workflow creates the Workers, routes and Custom Domain.
 # Values are kept in the same private file the Discord app wizard writes, so a re-run offers them back.
@@ -203,6 +203,7 @@ case "$DEPLOY_ENV" in
     D1_NAME=logitland-staging
     D1_PLACEHOLDER=SETUP_DEPLOY_STAGING_D1_ID
     QUEUE=logitland-staging-deliveries
+    BUCKET=logitland-staging-avatars
     ;;
   production)
     HOST=logit.land
@@ -212,6 +213,7 @@ case "$DEPLOY_ENV" in
     D1_NAME=logitland
     D1_PLACEHOLDER=SETUP_DEPLOY_PRODUCTION_D1_ID
     QUEUE=logitland-deliveries
+    BUCKET=logitland-avatars
     ;;
   *)
     echo "Usage: bash scripts/setup-deploy.sh staging|production" >&2
@@ -296,6 +298,7 @@ if [[ -z "$REUSE_TOKEN" ]]; then
   step "  Account · Workers Scripts · Edit"
   step "  Account · D1 · Edit"
   step "  Account · Queues · Edit"
+  step "  Account · Workers R2 Storage · Edit"
   step "  Account · Account Settings · Read"
   step "  Zone · Workers Routes · Edit"
   step "  Zone · DNS · Edit   (the first deploy creates $HOST's record)"
@@ -339,7 +342,7 @@ else
 fi
 pause "Press Enter to continue"
 
-stage "Database and queues"
+stage "Database, queues and avatar storage"
 D1_ID="$(wr d1 list --json | json "j.find((d) => d.name === '$D1_NAME')?.uuid" || true)"
 if [[ -z "$D1_ID" ]]; then
   wr d1 create "$D1_NAME" </dev/null >/dev/null
@@ -356,6 +359,14 @@ for queue in "$QUEUE" "$QUEUE-dlq"; do
     printf '  %s✓ created%s queue %s\n' "$GREEN" "$RESET" "$queue"
   fi
 done
+if wr r2 bucket info "$BUCKET" >/dev/null 2>&1; then
+  note "R2 bucket $BUCKET exists."
+elif wr r2 bucket create "$BUCKET" >/dev/null; then
+  printf '  %s✓ created%s R2 bucket %s\n' "$GREEN" "$RESET" "$BUCKET"
+else
+  warn "Couldn't create R2 bucket $BUCKET. Give the token Account · Workers R2 Storage · Edit, then run this wizard again."
+  exit 1
+fi
 if grep -q "$D1_PLACEHOLDER" apps/backend/wrangler.jsonc; then
   node -e 'const fs = require("fs"); const [file, from, to] = process.argv.slice(1); fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(from, to));' \
     apps/backend/wrangler.jsonc "$D1_PLACEHOLDER" "$D1_ID"

@@ -1,9 +1,11 @@
-import type { Db, DeliveryQueue, RelayConfig } from './context';
+import type { AvatarBucket, Db, DeliveryQueue, RelayConfig } from './context';
 
 /** Plain values a Worker provides. Secrets come from `wrangler secret put` (or .dev.vars locally). */
 export interface RelayBindings {
   DB: Db;
   DELIVERIES?: DeliveryQueue;
+  /** The R2 bucket holding the relay's copies of custom avatars. */
+  AVATARS?: AvatarBucket;
   RELAY_SECRET_KEY: string;
   /** Defaults to k1. Change it together with RELAY_SECRET_KEY when rotating. */
   RELAY_SECRET_KEY_ID?: string;
@@ -123,6 +125,7 @@ export function checkConfig(env: RelayBindings): string[] {
   if (!env.TYPESAFE_API_KEY) problems.push('No classifier: set TYPESAFE_API_KEY');
   // Without the queue the cron scan would attempt every delivery itself, inside its own query budget.
   if (!env.DELIVERIES) problems.push('The DELIVERIES queue binding is missing');
+  if (!env.AVATARS) problems.push('The AVATARS bucket binding is missing');
   if (env.MODERATION_OUTAGE && !['hold', 'refuse'].includes(env.MODERATION_OUTAGE)) problems.push('MODERATION_OUTAGE must be hold or refuse');
   return problems;
 }

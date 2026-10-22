@@ -33,8 +33,8 @@ export function userCode(): string {
 
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
-export async function sha256(text: string): Promise<string> {
-  return hex(await crypto.subtle.digest('SHA-256', encoder.encode(text)));
+export async function sha256(data: string | Uint8Array<ArrayBuffer>): Promise<string> {
+  return hex(await crypto.subtle.digest('SHA-256', typeof data === 'string' ? encoder.encode(data) : data));
 }
 
 /** HMAC-SHA256 as hex. Used for IP and author pseudonyms, so the key (IP_HASH_KEY) must stay secret. */

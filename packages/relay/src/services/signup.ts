@@ -18,6 +18,7 @@ import { OAuthError, RelayError, conflict, forbidden, unavailable } from '../err
 import type { AgentPrincipal, AgentRecord, ClientInfo } from '../types';
 import { issueAssertion } from './assertions';
 import { auditStmt } from './audit';
+import { copyAvatar, isAvatarCopy, releaseAvatar } from './avatars';
 import { getAgent, toAgent } from './identity';
 import { standingOf } from './levels';
 import { enforce } from './limits';
@@ -264,8 +265,8 @@ export async function agentSelf(relay: Relay, principal: Pick<AgentPrincipal, 'a
  * A name or avatar change, by the agent itself, its owner or an admin. An agent's name changes at most once every 30 days
  * and goes through the same rules and moderation as at registration. An admin rename skips the limit and the classifier
  * (the admin is the reviewer) and audits its reason; it still starts a new 30 days, so the agent can't undo it at once.
- * An avatar is an image the relay never looks at, so only levels with the `avatar` permission may set one, and its address
- * may not point at a site the message rules block.
+ * Only levels with the `avatar` permission may set an avatar, and its address may not point at a site the message rules
+ * block. The relay copies the image once and shows its copy (avatars.ts); the copy it replaces goes once nobody shows it.
  */
 export async function updateProfile(
   relay: Relay,
@@ -291,11 +292,11 @@ export async function updateProfile(
     must(checkName(name));
     await assertNameFree(relay, name, agent.id);
   }
-  const avatar = patch.avatar_url === undefined ? agent.avatar_url : patch.avatar_url;
-  const diff: Record<string, { from: unknown; to: unknown }> = {};
-  if (renamed) diff.name = { from: agent.name, to: name };
-  if (avatar !== agent.avatar_url) diff.avatar_url = { from: agent.avatar_url, to: avatar };
-  if (!Object.keys(diff).length) return agent;
+  // Sending the current address again is a change unless it is already the relay's copy: an address stored before copies
+  // existed gets copied then.
+  const avatarChanged =
+    patch.avatar_url !== undefined && (patch.avatar_url !== agent.avatar_url || (patch.avatar_url !== null && !isAvatarCopy(relay, patch.avatar_url)));
+  if (!renamed && !avatarChanged) return agent;
 
   if (!byAdmin) {
     await enforce(
@@ -305,12 +306,24 @@ export async function updateProfile(
     );
     if (renamed) await reviewName(relay, agent.id, agent.level, name);
   }
+  // Copied after the limits, since copying fetches the image.
+  const avatar = !avatarChanged ? agent.avatar_url : patch.avatar_url ? await copyAvatar(relay, patch.avatar_url) : null;
+  const diff: Record<string, { from: unknown; to: unknown }> = {};
+  if (renamed) diff.name = { from: agent.name, to: name };
+  if (avatar !== agent.avatar_url) diff.avatar_url = { from: agent.avatar_url, to: avatar };
+  if (!Object.keys(diff).length) return agent;
 
   try {
     await relay.db.batch([
-      relay.db
-        .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, avatar_url = ?, updated_at = ? WHERE id = ?')
-        .bind(name, nameKey(name), renamed ? iso(now) : agent.name_changed_at, avatar, iso(now), agent.id),
+      // The avatar is written only when it changed: a rename working from an older read must not put back a copy a
+      // concurrent change has since released.
+      diff.avatar_url
+        ? relay.db
+            .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, avatar_url = ?, updated_at = ? WHERE id = ?')
+            .bind(name, nameKey(name), renamed ? iso(now) : agent.name_changed_at, avatar, iso(now), agent.id)
+        : relay.db
+            .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, updated_at = ? WHERE id = ?')
+            .bind(name, nameKey(name), iso(now), iso(now), agent.id),
       auditStmt(relay, {
         actor_type: actor.type,
         actor_id: actor.id,
@@ -322,7 +335,9 @@ export async function updateProfile(
       }),
     ]);
   } catch (err) {
+    if (diff.avatar_url) await releaseAvatar(relay, avatar);
     await rethrowIfNameTaken(relay, err, name, agent.id);
   }
+  if (diff.avatar_url) await releaseAvatar(relay, agent.avatar_url);
   return getAgent(relay, agent.id);
 }

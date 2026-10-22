@@ -11,7 +11,7 @@ export { internalApp, relayApp } from './app';
 export { authMd } from './docs/auth-doc';
 export { skillMd } from './docs/skill-doc';
 export { ConfigError, checkConfig, type RelayBindings } from './config';
-export type { ChannelSenderClient, Db, DeliveryMessage, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt, StreamHub } from './context';
+export type { AvatarBucket, ChannelSenderClient, Db, DeliveryMessage, DeliveryQueue, GatewayClient, Relay, RelayConfig, Stmt, StreamHub } from './context';
 export { SecretBox, hmac, randomToken, sha256 } from './crypto';
 export { RelayError } from './errors';
 export * from './gateway';
@@ -62,6 +62,7 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     moderator,
     resolver: overrides.resolver ?? dohResolver(f),
     queue: env.DELIVERIES ?? null,
+    avatars: env.AVATARS ?? null,
     sender: overrides.sender ?? null,
     gateway: overrides.gateway ?? null,
     streams: overrides.streams ?? null,

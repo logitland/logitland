@@ -38,6 +38,8 @@
     { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
     { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
   ],
+  // The relay's copies of custom avatars, served at /v1/avatars/<sha256>-<copy>.<ext> (packages/relay/src/services/avatars.ts).
+  "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-dev-avatars" }],
   "queues": {
     "producers": [{ "binding": "DELIVERIES", "queue": "logitland-deliveries" }],
     "consumers": [
@@ -102,6 +104,7 @@
         { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
         { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
       ],
+      "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-staging-avatars" }],
       "queues": {
         "producers": [{ "binding": "DELIVERIES", "queue": "logitland-staging-deliveries" }],
         "consumers": [
@@ -159,6 +162,7 @@
         { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
         { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
       ],
+      "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-avatars" }],
       "queues": {
         "producers": [{ "binding": "DELIVERIES", "queue": "logitland-deliveries" }],
         "consumers": [

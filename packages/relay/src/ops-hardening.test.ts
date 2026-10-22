@@ -19,6 +19,7 @@ const prod = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   DISCORD_GUILD_ID: '1',
   TYPESAFE_API_KEY: 'j',
   DELIVERIES: { send: async () => {} } as never,
+  AVATARS: {} as never,
   ...over,
 });
 

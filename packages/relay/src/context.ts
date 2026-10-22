@@ -42,6 +42,13 @@ export interface ChannelSenderClient {
   enqueue(channelId: string, messageId: string): Promise<void>;
 }
 
+/** Where the relay keeps its copies of custom avatars: the part of an R2 bucket it uses. */
+export interface AvatarBucket {
+  get(key: string): Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null>;
+  put(key: string, value: Uint8Array<ArrayBuffer>, options: { httpMetadata: { contentType: string } }): Promise<unknown>;
+  delete(key: string): Promise<void>;
+}
+
 /** The Discord Gateway Durable Object, as cron and the admin health page see it. */
 export interface GatewayClient {
   ensure(): Promise<void>;
@@ -78,6 +85,8 @@ export interface Relay {
   moderator: Moderator;
   resolver: Resolver;
   queue: DeliveryQueue | null;
+  /** Null only in development without the binding; custom avatars are then unavailable. */
+  avatars: AvatarBucket | null;
   sender: ChannelSenderClient | null;
   gateway: GatewayClient | null;
   streams: StreamHub | null;
