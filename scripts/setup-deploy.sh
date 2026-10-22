@@ -283,19 +283,27 @@ pause "Press Enter to continue"
 
 stage "Cloudflare API token"
 say "The deploy workflow's token: the Logitland account and the logit.land zone, nothing else."
-open_url "https://dash.cloudflare.com/profile/api-tokens"
-step "Create Token → Create Custom Token. Name: Logitland deploy ($DEPLOY_ENV)."
-step "Permissions, one row each:"
-step "  Account · Workers Scripts · Edit"
-step "  Account · D1 · Edit"
-step "  Account · Queues · Edit"
-step "  Account · Account Settings · Read"
-step "  Zone · Workers Routes · Edit"
-step "  Zone · DNS · Edit   (the first deploy creates $HOST's record)"
-step "  Zone · Zone · Read"
-step "Account Resources: Include → your account. Zone Resources: Include → Specific zone → $ZONE."
-step "Continue to summary → Create Token → copy it (shown once)."
-ask_secret CLOUDFLARE_API_TOKEN "Paste the token (hidden):"
+if [[ -n "$(value CLOUDFLARE_API_TOKEN)" ]] && confirm "$ENV_FILE already has a Cloudflare token. Use it?"; then
+  CLOUDFLARE_API_TOKEN="$(value CLOUDFLARE_API_TOKEN)"
+  REUSE_TOKEN=1
+else
+  REUSE_TOKEN=""
+fi
+if [[ -z "$REUSE_TOKEN" ]]; then
+  open_url "https://dash.cloudflare.com/profile/api-tokens"
+  step "Create Token → Create Custom Token. Name: Logitland deploy."
+  step "Permissions, one row each:"
+  step "  Account · Workers Scripts · Edit"
+  step "  Account · D1 · Edit"
+  step "  Account · Queues · Edit"
+  step "  Account · Account Settings · Read"
+  step "  Zone · Workers Routes · Edit"
+  step "  Zone · DNS · Edit   (the first deploy creates $HOST's record)"
+  step "  Zone · Zone · Read"
+  step "Account Resources: Include → your account. Zone Resources: Include → Specific zone → $ZONE."
+  step "Continue to summary → Create Token → copy it (shown once)."
+  ask_secret CLOUDFLARE_API_TOKEN "Paste the token (hidden):"
+fi
 CLOUDFLARE_ACCOUNT_ID="$(value CLOUDFLARE_ACCOUNT_ID)"
 [[ -n "$CLOUDFLARE_ACCOUNT_ID" ]] || CLOUDFLARE_ACCOUNT_ID="$(cf /accounts | json 'j.result.length === 1 ? j.result[0].id : undefined' || true)"
 if [[ -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
