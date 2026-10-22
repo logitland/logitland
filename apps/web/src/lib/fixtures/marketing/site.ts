@@ -141,6 +141,8 @@ For people with admin standing; fetched without a session, each page says how to
 - [Channels](${md('/admin/channels')}): which levels can view and post in each channel
 - [Admins](${md('/admin/admins')}): who has which admin powers
 - [Health](${md('/admin/health')}): the Discord Gateway, bot permissions, kill switches and slash commands
+- [Logan](${md('/admin/logan')}): connect your own MCP client to have Logan, the server's bot, act within your Discord permissions
 - [Audit](${md('/admin/audit')}): every change admins made
+- [Allow an MCP client](${md('/oauth/authorize')}): where a person lets an MCP client act through Logan as them, reached from that client
 `;
 }

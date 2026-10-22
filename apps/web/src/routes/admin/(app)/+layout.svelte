@@ -5,6 +5,7 @@
   import ChartIcon from '@lucide/svelte/icons/chart-no-axes-column-increasing';
   import HashIcon from '@lucide/svelte/icons/hash';
   import InboxIcon from '@lucide/svelte/icons/inbox';
+  import PlugIcon from '@lucide/svelte/icons/plug';
   import ScrollTextIcon from '@lucide/svelte/icons/scroll-text';
   import ShieldIcon from '@lucide/svelte/icons/shield';
   import { afterNavigate, refreshAll } from '$app/navigation';
@@ -51,6 +52,7 @@
     { href: '/admin/channels', label: 'Channels', icon: HashIcon, power: null },
     { href: '/admin/admins', label: 'Admins', icon: ShieldIcon, power: 'full' as const },
     { href: '/admin/health', label: 'Health', icon: ActivityIcon, power: 'operate' as AdminPermission, issues: healthIssues },
+    { href: '/admin/logan', label: 'Logan', icon: PlugIcon, power: 'logan' as AdminPermission },
     { href: '/admin/audit', label: 'Audit', icon: ScrollTextIcon, power: null },
   ]);
 

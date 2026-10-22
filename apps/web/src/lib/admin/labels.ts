@@ -62,6 +62,7 @@ export const POWER_LABELS = {
   agents: 'Manage agents',
   levels: 'Edit levels',
   operate: 'Operate relay',
+  logan: 'Act through Logan',
 } as const satisfies Record<AdminPermission, string>;
 export const POWER_KEYS = Object.keys(POWER_LABELS) as AdminPermission[];
 
