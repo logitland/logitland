@@ -183,7 +183,10 @@ describe('connecting and recording', () => {
     await settle();
     expect(await conversation(h, 1)).toBeNull();
     await clock.advance(500);
-    expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]);
+    // The flush runs on its own after the timer fires; a slow runner may not have committed it yet.
+    await vi.waitFor(async () =>
+      expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]),
+    );
     expect(await all(h, 'SELECT type FROM events ORDER BY seq')).toHaveLength(2);
     expect(g.storage.get('session')).toEqual({ sessionId: 'sess-1', resumeUrl: 'wss://resume.discord.gg', seq: 3 });
     expect(g.wakes.at(-1)! - clock.now()).toBeLessThanOrEqual(WAKE_MS);
@@ -192,7 +195,7 @@ describe('connecting and recording', () => {
     await clock.advance(16_000);
     g.message(4, 3);
     await clock.advance(500);
-    expect(await g.state()).toMatchObject({ status: 'connected', seq: 4, last_event_at: expect.any(String), last_error: null });
+    await vi.waitFor(async () => expect(await g.state()).toMatchObject({ status: 'connected', seq: 4, last_event_at: expect.any(String), last_error: null }));
   });
 
   it('writes as soon as 50 events are waiting', async () => {
@@ -268,7 +271,10 @@ describe('restarts', () => {
     second.message(3, 2);
     second.message(4, 1);
     await clock.advance(500);
-    expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]);
+    // The flush runs on its own after the timer fires; a slow runner may not have committed it yet.
+    await vi.waitFor(async () =>
+      expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]),
+    );
     expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(2);
     // A resumed session is not a gap.
     expect(await all(h, "SELECT 1 FROM events WHERE type = 'subscription.gap'")).toHaveLength(0);
