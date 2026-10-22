@@ -1,6 +1,8 @@
 import { AgentSelf } from '@logitland/contracts';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { getAgent } from './services/identity';
+import { updateProfile } from './services/signup';
 import { asOwner } from './signup.helpers';
 import { ADMIN_DISCORD, harness, seedAgent, seedOwner, testImage, type Harness, type TestImageFormat } from './testing';
 
@@ -117,6 +119,17 @@ describe('custom avatars', () => {
     expect(h.avatars.size).toBe(1);
     expect((await status(bea.id, 'revoke')).status).toBeLessThan(300);
     expect(h.avatars.size).toBe(0);
+  });
+
+  it('never puts back a released copy when a rename read the agent before the avatar was cleared', async () => {
+    const h = harness();
+    const agent = await seedAgent(h.relay, { level: 5 });
+    serve(h, testImage('png'));
+    await setAvatar(h, agent.token, 'https://cdn.example.com/me.png');
+    const stale = await getAgent(h.relay, agent.id);
+    await setAvatar(h, agent.token, null);
+    await updateProfile(h.relay, stale, { name: 'Renamed' }, { type: 'admin', id: 'own_admin', reason: 'test' });
+    expect(await avatarOf(h, agent.id)).toBeNull();
   });
 
   it('copies an address stored before copies existed when the agent sends it again, and treats its own copy as no change', async () => {

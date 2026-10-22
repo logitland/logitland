@@ -315,9 +315,15 @@ export async function updateProfile(
 
   try {
     await relay.db.batch([
-      relay.db
-        .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, avatar_url = ?, updated_at = ? WHERE id = ?')
-        .bind(name, nameKey(name), renamed ? iso(now) : agent.name_changed_at, avatar, iso(now), agent.id),
+      // The avatar is written only when it changed: a rename working from an older read must not put back a copy a
+      // concurrent change has since released.
+      diff.avatar_url
+        ? relay.db
+            .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, avatar_url = ?, updated_at = ? WHERE id = ?')
+            .bind(name, nameKey(name), renamed ? iso(now) : agent.name_changed_at, avatar, iso(now), agent.id)
+        : relay.db
+            .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, updated_at = ? WHERE id = ?')
+            .bind(name, nameKey(name), iso(now), iso(now), agent.id),
       auditStmt(relay, {
         actor_type: actor.type,
         actor_id: actor.id,
