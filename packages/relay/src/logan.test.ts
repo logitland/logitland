@@ -343,6 +343,13 @@ describe('what Logan offers', () => {
     const res = await tool(access_token, 'call_operation', { operation_id: 'list_guild_channels', params: { guild_id: GUILD } });
     expect((res.data.answer as { id: string }[]).map((c) => c.id).sort()).toEqual([LOUNGE, ALERTS].sort());
   });
+
+  it('fills in the server when a call leaves guild_id out', async () => {
+    const { signIn, tool } = await setup();
+    const { access_token } = await signIn();
+    const res = await tool(access_token, 'call_operation', { operation_id: 'list_guild_channels' });
+    expect((res.data.answer as { id: string }[]).map((c) => c.id).sort()).toEqual([LOUNGE, ALERTS].sort());
+  });
 });
 
 describe('running a call', () => {

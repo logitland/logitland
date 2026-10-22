@@ -378,6 +378,8 @@ class CallCheck {
   async run(): Promise<Checked> {
     const { op, input, caller } = this;
     if (!offered(op)) throw forbidden(`Logan doesn’t offer ${op.operationId}.`);
+    // There is only one server, so the tool lets callers leave it out.
+    if (op.pathParams.includes('guild_id')) input.params.guild_id ??= caller.guildId;
     for (const name of op.pathParams) {
       const value = input.params[name];
       if (typeof value !== 'string' || !value) throw invalid(`Send params.${name}.`);
