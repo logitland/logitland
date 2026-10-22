@@ -14,6 +14,7 @@ without `--env` can't replace a live Worker. The relay refuses to serve while a 
 | Deploys      | every push to `main` (`deploy-staging.yml`)          | by hand, from a release tag (`deploy-production.yml`) |
 | Workers      | `logitland-backend-staging`, `logitland-web-staging` | `logitland-backend`, `logitland-web`                  |
 | D1, queue    | `logitland-staging`, `logitland-staging-deliveries`  | `logitland`, `logitland-deliveries`                   |
+| R2 (avatars) | `logitland-staging-avatars`                          | `logitland-avatars`                                   |
 | Local values | `~/.config/logitland/relay-staging.env`              | `~/.config/logitland/relay.env`                       |
 
 There is one staging deployment, never one per branch: relays on the same Discord server each run a Gateway and would each
@@ -30,11 +31,16 @@ bash scripts/setup-deploy.sh staging
 bash scripts/setup-deploy.sh production   # before the first release; Logan itself comes from scripts/setup-relay-bot.sh
 ```
 
-`setup-deploy.sh` asks for a Cloudflare API token, creates the D1 database and queues, writes the database ID into
+`setup-deploy.sh` asks for a Cloudflare API token, creates the D1 database, the queues and the avatar bucket (where the relay
+keeps its copy of each custom avatar), writes the database ID into
 `apps/backend/wrangler.jsonc` (commit it), checks nothing in DNS blocks the Custom Domain, generates the relay's keys, and
 puts everything into the GitHub environment with its rules: staging deploys only from `main`; production only from a
 release tag, after a required reviewer approves. It deploys nothing. Back up the local values file: GitHub never shows a
 secret again, and losing `RELAY_SECRET_KEY` makes stored webhooks and secrets unreadable.
+
+**A token made before the avatar bucket** lacks its permission. Edit it at https://dash.cloudflare.com/profile/api-tokens,
+add the row `Account · Workers R2 Storage · Edit` (the token's value stays the same), then run `setup-deploy.sh` for each
+environment again to create the bucket.
 
 **Interactions Endpoint URL.** Without one, Discord sends `/consent` and its buttons over the Gateway, which the relay
 answers. Leave it unset on Logan staging: dev runs as that app, and a URL would send dev's `/consent` to staging (the Setup
