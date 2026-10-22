@@ -28,8 +28,12 @@ export const DEFAULT_PORTS = { fake: 8790, relay: 8787, web: 5174 };
 /** `pnpm dev`'s settings, and its relay's database (apart from dev:full's and from plain `wrangler dev`'s). */
 export const DEV_STATE = join(backend, '.wrangler/dev');
 export const DEV_PERSIST = join(DEV_STATE, 'wrangler-state');
-/** The real relay app's credentials, kept outside the repository. */
-export const RELAY_ENV = join(homedir(), '.config/logitland/relay.env');
+/**
+ * The relay app's credentials, kept outside the repository: Logan staging's (scripts/setup-staging-app.sh) when they exist,
+ * so local dev never acts as production's bot, else the original app's (scripts/setup-relay-bot.sh).
+ */
+const STAGING_RELAY_ENV = join(homedir(), '.config/logitland/relay-staging.env');
+export const RELAY_ENV = existsSync(STAGING_RELAY_ENV) ? STAGING_RELAY_ENV : join(homedir(), '.config/logitland/relay.env');
 /** "logit.land but staging", mirrored from the live server: where `pnpm dev`'s relay works. */
 export const STAGING_GUILD_ID = '1562476123131093042';
 /** The fake application's ID, which is also its bot user's. */
@@ -118,10 +122,10 @@ function localDatabase({ state, reset, registry, persist }) {
  * The server is set up the way it would be live: an admin maps `@agents` and picks the home page's channels on the dashboard.
  */
 export async function prepareDev({ reset = false } = {}) {
-  if (!existsSync(RELAY_ENV)) throw new Error(`${RELAY_ENV} is missing: run scripts/setup-relay-bot.sh to set up the relay's Discord app.`);
+  if (!existsSync(RELAY_ENV)) throw new Error(`${RELAY_ENV} is missing: run scripts/setup-staging-app.sh to set up Logan staging.`);
   const real = parseEnv(RELAY_ENV);
   const missing = ['DISCORD_BOT_TOKEN', 'DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET'].filter((k) => !real[k]);
-  if (missing.length) throw new Error(`${RELAY_ENV} lacks ${missing.join(', ')}: run scripts/setup-relay-bot.sh.`);
+  if (missing.length) throw new Error(`${RELAY_ENV} lacks ${missing.join(', ')}: run scripts/setup-staging-app.sh.`);
   const at = devUrls();
   const d1 = localDatabase({ state: DEV_STATE, reset, persist: DEV_PERSIST });
   const local = keptSecrets(DEV_STATE, {
