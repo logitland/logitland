@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   CONTINUE_MS,
+  FLUSH_MS,
   GatewayService,
   QUERY_BUDGET,
   SEED_CHECK_MS,
@@ -32,6 +33,19 @@ class FakeSocket implements GatewaySocket {
     this.closed = code;
   }
 }
+
+/**
+ * Advances the clock until `check` passes. A dispatch is handled asynchronously, so on a slow runner its flush timer may be
+ * set only after one advance has already looked for due timers; advancing again fires it.
+ */
+const advanceUntil = (clock: Clock, ms: number, check: () => Promise<void>) =>
+  vi.waitFor(
+    async () => {
+      await clock.advance(ms);
+      await check();
+    },
+    { timeout: 5_000 },
+  );
 
 function clockFor(h: Harness) {
   let timers: { at: number; fn: () => void; live: boolean }[] = [];
@@ -182,9 +196,7 @@ describe('connecting and recording', () => {
     g.message(3, 2);
     await settle();
     expect(await conversation(h, 1)).toBeNull();
-    await clock.advance(500);
-    // The flush runs on its own after the timer fires; a slow runner may not have committed it yet.
-    await vi.waitFor(async () =>
+    await advanceUntil(clock, FLUSH_MS, async () =>
       expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]),
     );
     expect(await all(h, 'SELECT type FROM events ORDER BY seq')).toHaveLength(2);
@@ -194,8 +206,9 @@ describe('connecting and recording', () => {
     // Health is mirrored at most every 15 seconds, so the next write after that carries the news.
     await clock.advance(16_000);
     g.message(4, 3);
-    await clock.advance(500);
-    await vi.waitFor(async () => expect(await g.state()).toMatchObject({ status: 'connected', seq: 4, last_event_at: expect.any(String), last_error: null }));
+    await advanceUntil(clock, FLUSH_MS, async () =>
+      expect(await g.state()).toMatchObject({ status: 'connected', seq: 4, last_event_at: expect.any(String), last_error: null }),
+    );
   });
 
   it('writes as soon as 50 events are waiting', async () => {
@@ -270,9 +283,7 @@ describe('restarts', () => {
     second.dispatch('RESUMED', 3, {});
     second.message(3, 2);
     second.message(4, 1);
-    await clock.advance(500);
-    // The flush runs on its own after the timer fires; a slow runner may not have committed it yet.
-    await vi.waitFor(async () =>
+    await advanceUntil(clock, FLUSH_MS, async () =>
       expect((await all<{ id: string }>(h, `SELECT CAST(message_id AS TEXT) AS id ${FED} ORDER BY message_id`)).map((r) => r.id)).toEqual([msg(1), msg(2)]),
     );
     expect(await all(h, 'SELECT 1 FROM events')).toHaveLength(2);
@@ -443,8 +454,7 @@ describe('a lost session', () => {
     second.ready(1, 'sess-2');
     // A live message in the new session lands first and moves the channel's cursor ahead.
     second.message(2, 9);
-    await clock.advance(500);
-    await vi.waitFor(async () => expect(await conversation(h, 9)).not.toBeNull());
+    await advanceUntil(clock, FLUSH_MS, async () => expect(await conversation(h, 9)).not.toBeNull());
     expect(calls.filter((c) => c.includes('after='))).toEqual([`GET /channels/${LOUNGE}/messages?limit=100&after=${msg(2)}`]);
   });
 
