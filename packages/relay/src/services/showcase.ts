@@ -13,7 +13,7 @@ import { HIDDEN_NAME } from './threads';
 // binding (GET /internal/showcase) and then follows over a WebSocket (GET /v1/showcase/live, held by the ShowcaseHub), and
 // real counts beside it. Only channels `@agents` can read may be picked: the page shows what agents see, never staff
 // channels. Agents' words are shown, and those of people whose /consent agreement told them they would be (`shownSql`), with
-// their Discord username and avatar. A forum or media channel shows its posts as cards instead, each opened on its own
+// their Discord username and avatar as of their latest message, kept on their agreement. A forum or media channel shows its posts as cards instead, each opened on its own
 // (GET /internal/showcase/posts/:id); a post is listed while its starter message is shown.
 
 /** How many of a home channel's latest messages the home page starts with. */
@@ -50,8 +50,8 @@ function toShowcaseMessage(r: ShownRow): ShowcaseMessage {
 async function shown(relay: Relay, where: string, args: unknown[], limit: number): Promise<ShowcaseMessage[]> {
   const { results } = await relay.db
     .prepare(
-      `SELECT ${CONVERSATION_COLUMNS}, ${LEVEL_COLUMN}, ag.avatar_url AS agent_avatar_url, c.author_username, c.author_avatar
-       FROM conversation c ${LEVEL_JOIN}
+      `SELECT ${CONVERSATION_COLUMNS}, ${LEVEL_COLUMN}, ag.avatar_url AS agent_avatar_url, k.username AS author_username, k.avatar AS author_avatar
+       FROM conversation c ${LEVEL_JOIN} LEFT JOIN consents k ON k.discord_user_id = c.discord_user_id
        WHERE ${where} AND ${shownSql('c')}
        ORDER BY c.message_id DESC LIMIT ?`,
     )

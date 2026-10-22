@@ -99,7 +99,10 @@ export async function grantConsent(
   return { changed };
 }
 
-/** Ends the agreement at once: no message written from here on is relayed. Returns whether one was in force. */
+/**
+ * Ends the agreement at once: no message written from here on is relayed, and the username and avatar the home page showed
+ * them by are forgotten. Returns whether one was in force.
+ */
 export async function revokeConsent(relay: Relay, discordUserId: string, actor: ConsentActor, opts: { interactionId?: string | null } = {}): Promise<boolean> {
   const at = iso(relay.now());
   const results = await relay.db.batch([
@@ -115,7 +118,9 @@ export async function revokeConsent(relay: Relay, discordUserId: string, actor: 
          SELECT discord_user_id, guild_id, 'revoked', 'command', notice_version, ?, ? FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL`,
       )
       .bind(opts.interactionId ?? null, at, discordUserId),
-    relay.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ? AND revoked_at IS NULL').bind(at, discordUserId),
+    relay.db
+      .prepare('UPDATE consents SET revoked_at = ?, username = NULL, avatar = NULL, identity_at = NULL WHERE discord_user_id = ? AND revoked_at IS NULL')
+      .bind(at, discordUserId),
   ]);
   if (results[2]!.meta.changes === 0) return false;
   relay.log.info('consent.revoked');

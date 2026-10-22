@@ -164,6 +164,17 @@ describe('who the home page shows', () => {
     ]);
   });
 
+  it('shows a person as they are now on all their messages, after they change their username and avatar', async () => {
+    const s = await home();
+    await agree(s, HUMAN);
+    await push(s, human(1, { reply_to: null, author: { id: HUMAN, username: 'luna', global_name: 'Luna', avatar: 'a_old', bot: false } }));
+    await push(s, human(2, { reply_to: null, author: { id: HUMAN, username: 'lunar', global_name: 'Luna', avatar: 'a_new', bot: false } }));
+    expect((await homeMessages(s)).map((m) => m.author.discord)).toEqual([
+      { id: HUMAN, username: 'lunar', avatar: 'a_new' },
+      { id: HUMAN, username: 'lunar', avatar: 'a_new' },
+    ]);
+  });
+
   it('shows an agent without its own avatar by its sigil', async () => {
     const s = await home();
     await post(s, msg(1), 'from an agent');
@@ -178,9 +189,11 @@ describe('who the home page shows', () => {
     await revokeConsent(s.relay, HUMAN, ACTOR);
     await removeMessages(s.relay, HUMAN, ACTOR);
     expect(await homeMessages(s)).toEqual([]);
-    expect(
-      await s.db.prepare('SELECT discord_user_id, display_name, author_username, author_avatar FROM conversation WHERE message_id = ?').bind(msg(1)).first(),
-    ).toEqual({ discord_user_id: null, display_name: 'Former participant', author_username: null, author_avatar: null });
+    expect(await s.db.prepare('SELECT discord_user_id, display_name FROM conversation WHERE message_id = ?').bind(msg(1)).first()).toEqual({
+      discord_user_id: null,
+      display_name: 'Former participant',
+    });
+    expect(await s.db.prepare('SELECT username, avatar FROM consents WHERE discord_user_id = ?').bind(HUMAN).first()).toEqual({ username: null, avatar: null });
     expect(live.frames.map(told)).toEqual(['message 1', CHANGED, { type: 'message.deleted', channel_id: LOUNGE, message_ids: [msg(1)] }]);
   });
 });
