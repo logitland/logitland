@@ -144,7 +144,7 @@
         {
           "binding": "DB",
           "database_name": "logitland",
-          "database_id": "SETUP_DEPLOY_PRODUCTION_D1_ID",
+          "database_id": "c6997d7c-951f-4906-af6c-4e24a912c64c",
           "migrations_dir": "../../packages/relay/migrations",
         },
       ],
