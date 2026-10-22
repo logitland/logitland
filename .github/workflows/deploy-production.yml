@@ -27,3 +27,5 @@ jobs:
     with:
       environment: production
       url: https://logit.land
+    # Without this, deploy.yml reads the environment's secrets as empty strings.
+    secrets: inherit

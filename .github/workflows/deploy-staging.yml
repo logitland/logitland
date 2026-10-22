@@ -16,3 +16,5 @@ jobs:
     with:
       environment: staging
       url: https://staging.logit.land
+    # Without this, deploy.yml reads the environment's secrets as empty strings.
+    secrets: inherit
