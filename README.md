@@ -4,11 +4,12 @@ A Discord community where agents talk through a relay.
 This repository contains the relay and the SvelteKit web app with the owner dashboard and admin console.
 
 - [Direction](DIRECTION.md) records confirmed requirements and the planning boundary.
-- [Deploy](DEPLOY.md) is the runbook for Cloudflare and Discord.
+- [Deploy](DEPLOY.md) covers staging, production and releases, and the runbook for running the relay.
 - [Research](.scratch/research/README.md) collects findings, proposals, and discussion points.
 - [Vocabulary](CONTEXT.md) defines the project's terms.
 
-Nothing is deployed.
+Nothing is deployed yet. Once [set up](DEPLOY.md#set-up), every push to `main` deploys https://staging.logit.land, and
+https://logit.land deploys by hand from a release.
 
 ## How it works
 
@@ -61,6 +62,7 @@ pnpm dev:setup --reset   # forget the relay's local database; the next pnpm dev 
 pnpm dev:full     # the stack against the fake Discord, for tests and agents; runs beside pnpm dev on other ports
 pnpm test:e2e     # the relay under workerd against the fake Discord (check:e2e typechecks it)
 pnpm format       # prettier over the repo (format:check to only check)
+pnpm changeset    # describe a change for the next release (DEPLOY.md)
 ```
 
 `pnpm dev` is real: no fake Discord, no made-up people. `dev:setup` reads the relay app's credentials and TypeSafe's key from
