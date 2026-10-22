@@ -296,11 +296,6 @@ step "  Zone · Zone · Read"
 step "Account Resources: Include → your account. Zone Resources: Include → Specific zone → $ZONE."
 step "Continue to summary → Create Token → copy it (shown once)."
 ask_secret CLOUDFLARE_API_TOKEN "Paste the token (hidden):"
-if [[ "$(cf /user/tokens/verify | json 'j.result.status' || true)" != active ]]; then
-  warn "Cloudflare doesn't accept that token. Check you copied all of it, then run this wizard again."
-  exit 1
-fi
-write_env CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN"
 CLOUDFLARE_ACCOUNT_ID="$(value CLOUDFLARE_ACCOUNT_ID)"
 [[ -n "$CLOUDFLARE_ACCOUNT_ID" ]] || CLOUDFLARE_ACCOUNT_ID="$(cf /accounts | json 'j.result.length === 1 ? j.result[0].id : undefined' || true)"
 if [[ -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
@@ -308,6 +303,13 @@ if [[ -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
   step "Open the Logitland account; its ID is in the address bar after dash.cloudflare.com/."
   ask CLOUDFLARE_ACCOUNT_ID "Paste the account ID:"
 fi
+# A user token verifies at /user/tokens/verify, an account token (Manage Account → API Tokens) at its account's endpoint.
+if [[ "$(cf /user/tokens/verify | json 'j.result.status' || true)" != active ]] &&
+  [[ "$(cf "/accounts/$CLOUDFLARE_ACCOUNT_ID/tokens/verify" | json 'j.result.status' || true)" != active ]]; then
+  warn "Cloudflare doesn't accept that token for account $CLOUDFLARE_ACCOUNT_ID. Check you copied all of it and the account ID, then run this wizard again."
+  exit 1
+fi
+write_env CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN"
 write_env CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
 
 stage "Hostname: $HOST"
