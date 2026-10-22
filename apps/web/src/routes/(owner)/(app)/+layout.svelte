@@ -91,6 +91,7 @@
       <AccountMenu
         name={person.name}
         handle={person.handle}
+        avatar={person.avatar}
         switchTo={session.standing?.permissions.length ? { href: '/admin', label: 'Admin dashboard' } : undefined}
         onSignOut={() => session.signOut()}
       />

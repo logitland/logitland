@@ -23,8 +23,8 @@ export function authorizeUrl(origin: string, state: string): string {
   return `${env.DISCORD_URL}/oauth2/authorize?${query}`;
 }
 
-/** Trades the callback's code for the person it signed in. */
-export async function signedInUser(origin: string, code: string): Promise<{ id: string; username: string }> {
+/** Trades the callback's code for the person it signed in. `avatar` is Discord's image hash, null without a custom one. */
+export async function signedInUser(origin: string, code: string): Promise<{ id: string; username: string; avatar: string | null }> {
   const token = await fetch(`${env.DISCORD_URL}/api/v10/oauth2/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -40,5 +40,5 @@ export async function signedInUser(origin: string, code: string): Promise<{ id: 
   const { access_token } = (await token.json()) as { access_token: string };
   const me = await fetch(`${env.DISCORD_URL}/api/v10/users/@me`, { headers: { authorization: `Bearer ${access_token}` } });
   if (!me.ok) error(502, 'Discord didn’t say who signed in. Try again.');
-  return (await me.json()) as { id: string; username: string };
+  return (await me.json()) as { id: string; username: string; avatar: string | null };
 }

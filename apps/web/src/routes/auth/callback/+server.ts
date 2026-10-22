@@ -1,5 +1,6 @@
 import type { OwnerSession } from '@logitland/contracts';
 import { redirect } from '@sveltejs/kit';
+import { avatarUrl } from '#lib/discord-avatar.js';
 import { OAUTH_COOKIE, nextPath, signedInUser } from '#lib/server/discord.js';
 import { relay } from '#lib/server/relay.js';
 import { cookieOptions, writeSession } from '#lib/server/session.js';
@@ -21,6 +22,6 @@ export const GET = async (event) => {
     method: 'POST',
     body: { discord_user_id: user.id, username: user.username },
   });
-  await writeSession(cookies, url, owner);
+  await writeSession(cookies, url, { ...owner, avatar: avatarUrl(user) });
   redirect(303, next);
 };

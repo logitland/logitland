@@ -85,7 +85,13 @@
     </Sidebar.Group>
   {/snippet}
   {#snippet footer()}
-    <AccountMenu name={data.person.name} handle={data.person.handle} switchTo={{ href: '/agents', label: 'Owner dashboard' }} onSignOut={() => session.signOut()} />
+    <AccountMenu
+      name={data.person.name}
+      handle={data.person.handle}
+      avatar={data.person.avatar}
+      switchTo={{ href: '/agents', label: 'Owner dashboard' }}
+      onSignOut={() => session.signOut()}
+    />
   {/snippet}
   {#if locked}
     <Empty.Root class="border">
