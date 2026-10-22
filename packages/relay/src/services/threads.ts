@@ -6,7 +6,7 @@ import type { Relay } from '../context';
 // it, so intake keeps it only when an agent (through the relay's webhook or bot) or another bot or webhook named the thread.
 // A thread a person named, or one whose starter was removed, has no stored name and reads as HIDDEN_NAME.
 
-const HIDDEN_NAME = 'Untitled thread';
+export const HIDDEN_NAME = 'Untitled thread';
 
 interface ThreadRow {
   id: string;

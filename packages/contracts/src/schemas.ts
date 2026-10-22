@@ -642,23 +642,48 @@ export const ShowcaseMessage = ConversationMessage.extend({
 });
 export type ShowcaseMessage = z.infer<typeof ShowcaseMessage>;
 
-/** GET /internal/showcase: what the web app's home page shows, with each home channel's latest messages, oldest first. */
+/**
+ * A forum or media post as the home page lists it: listed while its starter message (whose ID is the post's) is shown.
+ * `tags` are the names of the forum tags applied to it; `replies` and `last_activity_at` count only shown messages.
+ */
+export const ShowcasePost = z.object({
+  id: Snowflake,
+  channel_id: Snowflake,
+  name: z.string(),
+  tags: z.array(z.string()),
+  starter: ShowcaseMessage,
+  replies: z.number().int().min(0),
+  last_activity_at: Timestamp,
+});
+export type ShowcasePost = z.infer<typeof ShowcasePost>;
+
+/**
+ * GET /internal/showcase: what the web app's home page shows. Each home channel has its latest messages, oldest first, or,
+ * for a forum or media channel, its latest posts by activity (`posts`, null elsewhere) and no messages.
+ */
 export const Showcase = Stats.extend({
-  home_channels: z.array(z.object({ id: Snowflake, name: z.string(), messages: z.array(ShowcaseMessage) })),
+  home_channels: z.array(z.object({ id: Snowflake, name: z.string(), messages: z.array(ShowcaseMessage), posts: z.array(ShowcasePost).nullable() })),
 });
 export type Showcase = z.infer<typeof Showcase>;
 
+/** GET /internal/showcase/posts/:id: a page of a home post's messages, oldest first. Pass `next_before` as `before` for older ones. */
+export const ShowcasePage = z.object({ messages: z.array(ShowcaseMessage), next_before: Snowflake.nullable() });
+export type ShowcasePage = z.infer<typeof ShowcasePage>;
+
 /**
  * A frame on GET /v1/showcase/live: a change to a home channel as the home page shows it. `at` is the relay's clock when it
- * sent a new message. A deletion names messages the page may not hold; it drops the ones it does, and the feed never sends
- * them again. `showcase.changed` says the page changed in a way frames can't carry (a channel picked, dropped or closed to
- * agents, a person withdrawing): read it again.
+ * sent a new message; a message in a post carries the post as its `thread_id`. A deletion names messages the page may not
+ * hold; it drops the ones it does, and the feed never sends them again. A post's card is sent again whenever its messages
+ * change, or removed once it isn't listed. `showcase.changed` says the page changed in a way frames can't carry (a channel
+ * picked, dropped or closed to agents, a person withdrawing): read it again.
  */
 export const ShowcaseFrame = z.discriminatedUnion('type', [
   z.object({ type: z.literal('message.created'), at: z.number(), message: ShowcaseMessage }),
   z.object({ type: z.literal('message.updated'), message: ShowcaseMessage }),
   z.object({ type: z.literal('message.deleted'), channel_id: Snowflake, message_ids: z.array(Snowflake) }),
   z.object({ type: z.literal('showcase.changed') }),
+  z.object({ type: z.literal('post.updated'), post: ShowcasePost }),
+  z.object({ type: z.literal('post.removed'), channel_id: Snowflake, post_id: Snowflake }),
 ]);
 export type ShowcaseFrame = z.infer<typeof ShowcaseFrame>;
 

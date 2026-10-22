@@ -1,13 +1,13 @@
-import type { Showcase, ShowcaseFrame, Stats } from '@logitland/contracts';
+import { ShowcasePage, type Showcase, type ShowcaseFrame, type Stats } from '@logitland/contracts';
 import { Permission } from '@logitland/discord';
 import { describe, expect, it } from 'vitest';
 import { agree } from './consent.testkit';
 import { say, setup, type Setup } from './deliveries.testkit';
-import { edit, human, HUMAN, msg, push, remove } from './intake-fixtures';
+import { at, edit, human, HUMAN, msg, push, remove, thread } from './intake-fixtures';
 import { removeMessages, revokeConsent } from './services/consent';
 import { recordAgentPost } from './services/intake';
 import { updateSettings } from './services/settings';
-import { BENCH, GUILD, LOUNGE, seedChannel, setAccess } from './testing';
+import { BENCH, FORUM, GUILD, LOUNGE, seedChannel, setAccess } from './testing';
 
 // The home page (#28): counts and the channels admins picked, only ever channels every agent can read, and the live feed
 // that follows them.
@@ -49,8 +49,12 @@ function liveFeed(s: Setup) {
 }
 
 /** What a frame says, briefly: the new message's text, or the change. */
-const told = (f: ShowcaseFrame) =>
-  f.type === 'message.deleted' || f.type === 'showcase.changed' ? f : f.type === 'message.created' ? f.message.content : { edited: f.message.content };
+const told = (f: ShowcaseFrame) => {
+  if (f.type === 'message.created') return f.message.content;
+  if (f.type === 'message.updated') return { edited: f.message.content };
+  if (f.type === 'post.updated') return { post: f.post.id, replies: f.post.replies };
+  return f;
+};
 const CHANGED = { type: 'showcase.changed' };
 
 async function home() {
@@ -245,5 +249,139 @@ describe('the live feed', () => {
     expect((await s.call('GET', '/v1/showcase/live')).status).toBe(426);
     expect((await s.call('GET', '/v1/showcase/live', undefined, { upgrade: 'websocket' })).status).toBe(200);
     expect(live.visitors).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)]);
+  });
+});
+
+describe('a forum on the home page', () => {
+  const QUESTION = '140000000000000001';
+  const SHOWCASE = '140000000000000002';
+
+  /** A home page showing #forum, with two tags, and a person who agreed under the notice before the home page was mentioned. */
+  async function forum() {
+    const s = await setup();
+    await seedChannel(s.relay, { id: FORUM, name: 'forum', type: 'forum', access: 'post', webhookUrl: null });
+    await s.db
+      .prepare('UPDATE channels SET tags = ? WHERE id = ?')
+      .bind(
+        JSON.stringify([
+          { id: QUESTION, name: 'question', moderated: false },
+          { id: SHOWCASE, name: 'showcase', moderated: false },
+        ]),
+        FORUM,
+      )
+      .run();
+    await updateSettings(s.relay, 'own_admin', { home_channel_ids: [FORUM] });
+    await agree(s, HUMAN);
+    await agree(s, EARLIER, { notice: '2026-10-21' });
+    return s;
+  }
+
+  /** An agent's forum post: the thread as the Gateway announces it, and its starter as the posting pipeline records it. */
+  async function startPost(s: Setup, n: number, name: string, tags: string[] = []) {
+    await push(s, thread(msg(n), FORUM, { name, applied_tags: tags, created_at: at(0, n) }));
+    await recordAgentPost(s.relay, {
+      discordMessageId: msg(n),
+      channelId: FORUM,
+      threadId: msg(n),
+      agentId: s.agent.id,
+      displayName: s.agent.name,
+      content: `${name}, first lines`,
+      relayMessageId: `rm_${n}`,
+      createdAt: at(0, n),
+    });
+  }
+
+  const reply = (n: number, post: number, over: Record<string, unknown> = {}) => human(n, { channel_id: FORUM, thread_id: msg(post), reply_to: null, ...over });
+
+  const listed = async (s: Setup) => ((await (await s.internal('GET', '/internal/showcase')).json()) as Showcase).home_channels[0]!;
+  const opened = (s: Setup, post: string, before?: string) => s.internal('GET', `/internal/showcase/posts/${post}${before ? `?before=${before}` : ''}`);
+
+  it('lists its posts by latest activity, with title, tags, starter, replies and last activity', async () => {
+    const s = await forum();
+    await startPost(s, 1, 'older post', [SHOWCASE, QUESTION]);
+    await startPost(s, 2, 'newer post');
+    await push(s, reply(3, 1));
+    // Kept for agents (a reply to one), but never shown on the web: not counted.
+    await push(s, reply(4, 2, { author: { id: EARLIER, username: 'early', bot: false }, reply_to: msg(2) }));
+    expect(await s.db.prepare('SELECT 1 AS kept FROM conversation WHERE message_id = ?').bind(msg(4)).first()).toEqual({ kept: 1 });
+
+    const channel = await listed(s);
+    expect(channel.messages).toEqual([]);
+    expect(channel.posts).toEqual([
+      {
+        id: msg(1),
+        channel_id: FORUM,
+        name: 'older post',
+        tags: ['question', 'showcase'],
+        starter: expect.objectContaining({
+          message_id: msg(1),
+          content: 'older post, first lines',
+          author: expect.objectContaining({ kind: 'agent', display_name: 'Orrery' }),
+        }),
+        replies: 1,
+        last_activity_at: at(0, 3),
+      },
+      expect.objectContaining({ id: msg(2), name: 'newer post', tags: [], replies: 0, last_activity_at: at(0, 2) }),
+    ]);
+  });
+
+  it('lists a post only while its starter is shown, and never a private conversation', async () => {
+    const s = await forum();
+    await startPost(s, 1, 'kept');
+    await startPost(s, 2, 'starter removed');
+    await push(s, reply(3, 2), remove(2, { channel_id: FORUM, thread_id: msg(2) }));
+    await s.db
+      .prepare('INSERT INTO threads (id, parent_id, name, created_at, private, updated_at) VALUES (?, ?, ?, ?, 1, ?)')
+      .bind(PRIVATE, FORUM, 'private', at(0, 4), at(0, 4))
+      .run();
+    await post(s, PRIVATE, 'in a private conversation', { channelId: FORUM, threadId: PRIVATE });
+    expect((await listed(s)).posts!.map((p) => p.name)).toEqual(['kept']);
+    expect((await opened(s, msg(2))).status).toBe(404);
+    expect((await opened(s, PRIVATE)).status).toBe(404);
+  });
+
+  it('opens a post through the same filter, the latest page first, and nothing off the home page', async () => {
+    const s = await forum();
+    await startPost(s, 1, 'long thread');
+    for (let n = 2; n <= 32; n++) await push(s, reply(n, 1));
+    await push(s, reply(33, 1, { author: { id: EARLIER, username: 'early', bot: false }, reply_to: msg(1) }));
+
+    const latest = ShowcasePage.parse(await (await opened(s, msg(1))).json());
+    expect(latest.messages.map((m) => m.content)).toEqual(Array.from({ length: 30 }, (_, i) => `message ${i + 3}`));
+    expect(latest.messages[0]!.author).toMatchObject({ kind: 'human', display_name: 'Luna' });
+    const older = ShowcasePage.parse(await (await opened(s, msg(1), latest.next_before!)).json());
+    expect(older).toEqual({
+      messages: [expect.objectContaining({ content: 'long thread, first lines' }), expect.objectContaining({ content: 'message 2' })],
+      next_before: null,
+    });
+
+    await updateSettings(s.relay, 'own_admin', { home_channel_ids: [LOUNGE] });
+    expect((await opened(s, msg(1))).status).toBe(404);
+  });
+
+  it('sends a reply live with its post’s ID, and the post’s card as it now reads; a removed post leaves the list', async () => {
+    const s = await forum();
+    await startPost(s, 1, 'a post');
+    const live = liveFeed(s);
+    await push(s, reply(2, 1));
+    expect(live.frames[0]).toMatchObject({ type: 'message.created', message: { thread_id: msg(1), content: 'message 2' } });
+    expect(live.frames.slice(1).map(told)).toEqual([{ post: msg(1), replies: 1 }]);
+
+    live.frames.length = 0;
+    await push(s, remove(1, { channel_id: FORUM, thread_id: msg(1) }));
+    expect(live.frames.map(told)).toEqual([
+      { type: 'message.deleted', channel_id: FORUM, message_ids: [msg(1)] },
+      { type: 'post.removed', channel_id: FORUM, post_id: msg(1) },
+    ]);
+  });
+
+  it('sends a post’s card once Discord announces its thread, when the starter was recorded first', async () => {
+    const s = await forum();
+    const live = liveFeed(s);
+    await post(s, msg(1), 'early starter', { channelId: FORUM, threadId: msg(1) });
+    live.frames.length = 0;
+    await push(s, thread(msg(1), FORUM, { name: 'a post', created_at: at(0, 1) }));
+    expect(live.frames.map(told)).toEqual([{ post: msg(1), replies: 0 }]);
+    expect((await listed(s)).posts!.map((p) => p.name)).toEqual(['a post']);
   });
 });

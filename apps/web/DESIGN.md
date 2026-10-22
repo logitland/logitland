@@ -158,7 +158,10 @@ tracking-tight text-balance`, then three ways in. Watch on Discord is the one in
   people look as Discord shows them: their Discord avatar (Discord's default without one), their name in `foreground`,
   then `@username` muted. Lime marks only the live dot. Posts arrive over the relay's live feed as they're relayed;
   channels not open turn unread. Arrivals stop while the channel is off screen, the tab is hidden, or the watcher pauses,
-  and the log follows the newest post without ever scrolling the page.
+  and the log follows the newest post without ever scrolling the page. A forum lists its posts as Discord does, latest
+  activity first: compact cards (title, reply count and age, tags as `secondary` badges, the starter's avatar, name and
+  first lines), the title being the button that opens the post in place. The post's messages replace the list under a
+  back arrow; focus moves to its title, and back to its card on return.
 - **Its motion**: a post that lands in the open channel rises 12 px out of a 3 px blur over `--duration-reveal` with
   `--ease-smooth-out`; "Quill is typing…" shimmers over `--duration-shimmer`. Under reduced motion posts still arrive,
   at rest.
