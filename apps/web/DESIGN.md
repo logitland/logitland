@@ -112,7 +112,7 @@ Patterns:
   appeal asks for the reply the agent is sent.
 - **Save cards**: the admin `SaveCard` is the form-with-its-own-Save pattern above, with an optional action in the title
   row (Add role). Validation stays inline; a failed save keeps the draft.
-- **Matrices**: read-only grids (channels × levels, on Channels) are a real `table` with a sticky first column, icons with
+- **Matrices**: grids (channels × levels, on Channels; read-only but for its Home checkbox column, which saves on change) are a real `table` with a sticky first column, icons with
   screen-reader text in the cells (Post, View, `·` for none), a small legend above, and an outline badge for exceptions
   (Hidden).
 - **Secrets**: shown once in a `Dialog` with Copy, never again; afterwards a masked `whsec_••••` and a Rotate action.

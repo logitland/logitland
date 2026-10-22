@@ -7,17 +7,36 @@
   import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
   import MessagesSquareIcon from '@lucide/svelte/icons/messages-square';
   import SendIcon from '@lucide/svelte/icons/send';
+  import { toast } from 'svelte-sonner';
   import { Badge } from '#lib/components/ui/badge/index.js';
+  import { Checkbox } from '#lib/components/ui/checkbox/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
   import { SvelteSet } from 'svelte/reactivity';
-  import { levelName } from '#lib/admin/format.js';
+  import { levelName, refusal } from '#lib/admin/format.js';
   import { cn } from '#lib/utils.js';
-  import { channels } from './channels.remote.js';
+  import { channels, saveHome } from './channels.remote.js';
 
-  // Worked out from Discord's overwrites; admins change them in Discord, so nothing here is editable.
+  // Access is worked out from Discord's overwrites; admins change it in Discord, so only the home page's picks are editable here.
   const KIND_ICONS = { text: HashIcon, forum: MessagesSquareIcon, announcement: MegaphoneIcon, media: ImageIcon } satisfies Record<ChannelType, unknown>;
+  /** As many channels as the home page shows (the relay's settings limit). */
+  const HOME_CHANNELS_MAX = 10;
 
-  const groups = $derived(await channels());
+  const data = $derived(await channels());
+  const groups = $derived(data.groups);
+  /** The home page's channels, picked by hand; null without the operate power, which hides the column. Ahead of the relay while saving. */
+  let home = $derived(data.home);
+
+  async function pick(id: string, name: string, on: boolean) {
+    const before = home!;
+    home = on ? [...before, id] : before.filter((h) => h !== id);
+    try {
+      await saveHome(home);
+      toast.success(on ? `Showing #${name} on the home page` : `Removed #${name} from the home page`);
+    } catch (e) {
+      home = before;
+      toast.error(refusal(e));
+    }
+  }
   /** Every channel lists the same levels, lowest first. */
   const levels = $derived(groups[0]?.channels[0]?.levels.map((l) => l.level) ?? []);
   /** Categories folded shut, as in Discord's sidebar. */
@@ -48,6 +67,7 @@
       <thead class="text-xs text-muted-foreground">
         <tr class="border-b">
           <th scope="col" class="sticky left-0 bg-card px-4 py-2 text-left font-medium">Channel</th>
+          {#if home}<th scope="col" class="px-3 py-2 text-center font-medium">Home</th>{/if}
           {#each levels as level (level)}
             <th scope="col" class="px-3 py-2 text-center font-medium whitespace-nowrap">{levelName(level)}</th>
           {/each}
@@ -58,7 +78,7 @@
         <tbody>
           {#if group.id}
             <tr>
-              <th scope="colgroup" colspan={levels.length + 1} class="sticky left-0 bg-card px-2 pt-4 pb-1 text-left">
+              <th scope="colgroup" colspan={levels.length + (home ? 2 : 1)} class="sticky left-0 bg-card px-2 pt-4 pb-1 text-left">
                 <button
                   type="button"
                   aria-expanded={open}
@@ -81,6 +101,19 @@
                   {#if channel.hidden}<Badge variant="outline" class="text-muted-foreground">Hidden</Badge>{/if}
                 </span>
               </th>
+              {#if home}
+                {@const shown = home.includes(channel.id)}
+                <td class="px-2 py-2.5 text-center">
+                  <!-- Only channels every agent (the lowest level) can view may be picked; a picked one can always be removed. -->
+                  <Checkbox
+                    checked={shown}
+                    disabled={!shown && (!channel.levels[0]?.view || home.length >= HOME_CHANNELS_MAX)}
+                    onCheckedChange={(on) => pick(channel.id, channel.name, on)}
+                    aria-label="Show #{channel.name} on the home page"
+                    class="mx-auto"
+                  />
+                </td>
+              {/if}
               {#each channel.levels as can (can.level)}
                 <td class="px-2 py-2.5 text-center">
                   {#if can.post}
