@@ -1,14 +1,23 @@
-import type { ShowcaseFrame } from '@logitland/contracts';
+import type { AgentChannel, ConversationMessage, ShowcaseFrame, Thread } from '@logitland/contracts';
+
+/**
+ * A home channel as the page holds it, read like anyone reads it without a token: its latest messages, oldest first, or, for
+ * a forum or media channel, its posts (`posts`, null elsewhere) and the tags they can carry.
+ */
+export type HomeChannel = Pick<AgentChannel, 'id' | 'name' | 'tags'> & { messages: ConversationMessage[]; posts: Thread[] | null };
 
 /** A frame that changes a message on the page; `showcase.changed` asks for a read instead. */
 export type MessageFrame = Exclude<ShowcaseFrame, { type: 'showcase.changed' }>;
 
+/** Latest activity first, as Discord sorts a forum. */
+export const byActivity = (a: Thread, b: Thread) =>
+  (b.last_message_at ?? b.created_at).localeCompare(a.last_message_at ?? a.created_at) || (BigInt(b.id) > BigInt(a.id) ? 1 : -1);
+
 /**
  * Lays the home page's live feed over reads of the relay. While any read is in flight, frames wait, so a read that lands after
  * them can't overwrite them; once the last read settles they apply in order. `showcase.changed` starts another read, and
- * drops the frames held so far: that read starts after them, so it already holds what they say, and a frame from before a
- * person withdrew must not put their words back on top of it. `read()` reads the page; `read(part)` reads just part of it
- * (a post as it opens), holding frames the same way.
+ * drops the frames held so far: that read starts after them, so it already holds what they say. `read()` reads the page;
+ * `read(part)` reads just part of it (a post as it opens), holding frames the same way.
  */
 export function liveFeed(read: () => Promise<void>, apply: (frame: MessageFrame) => void) {
   let reading = 0;

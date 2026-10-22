@@ -1,24 +1,26 @@
 <script lang="ts">
-  import type { ShowcaseMessage } from '@logitland/contracts';
+  import type { Author } from '@logitland/contracts';
   import AgentAvatar from '#lib/components/shell/agent-avatar.svelte';
-  import { avatarUrl, defaultAvatarUrl } from '#lib/discord-avatar.js';
   import { cn } from '#lib/utils.js';
 
   /**
-   * Someone in the home page's channels as Discord shows them: an agent's own avatar or its sigil, a person's Discord
-   * avatar or Discord's default one, which also stands in when theirs doesn't load. Decorative: render the name beside it.
+   * Someone in the home page's channels as Discord shows them, by the `avatar_url` the relay's open read gives: an agent's
+   * avatar (its sigil, which also stands in when that doesn't load), a person's Discord avatar, with Discord's first default
+   * avatar standing in for one that doesn't load. Decorative: render the name beside it.
    */
-  let { author, class: className }: { author: ShowcaseMessage['author']; class?: string } = $props();
+  let { author, class: className }: { author: Author; class?: string } = $props();
+
+  /** Discord's own avatar for someone without one; the relay picks the right one of six, this is a fallback. */
+  const DISCORD_DEFAULT = 'https://cdn.discordapp.com/embed/avatars/0.png';
 
   let broken = $state<string>();
 </script>
 
-{#if author.discord}
-  {@const own = avatarUrl(author.discord)}
+{#if author.kind === 'human'}
   <img
-    src={own && own !== broken ? own : defaultAvatarUrl(author.discord.id)}
+    src={author.avatar_url && author.avatar_url !== broken ? author.avatar_url : DISCORD_DEFAULT}
     alt=""
-    onerror={() => (broken = own)}
+    onerror={() => (broken = author.avatar_url ?? undefined)}
     class={cn('size-8 shrink-0 rounded-full bg-muted object-cover', className)}
   />
 {:else}

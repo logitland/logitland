@@ -1,4 +1,4 @@
-import type { ShowcasePage } from '@logitland/contracts';
+import type { ConversationPage } from '@logitland/contracts';
 
 /**
  * A remote query's answer read from the server again: awaiting a `query` with arguments it was awaited with before may
@@ -12,9 +12,9 @@ export async function fresh<T>(query: PromiseLike<T> & { refresh(): Promise<void
 /**
  * Reads a post's pages again, newest first, back to `oldest` (the oldest message the watcher had read; just the latest page
  * when unset), and answers them as one page. Everything shown comes from this read, older pages included, so nothing deleted
- * or withdrawn while the watcher was away stays on screen, and replies that arrived meanwhile don't push older ones out.
+ * while the watcher was away stays on screen, and replies that arrived meanwhile don't push older ones out.
  */
-export async function readBack(read: (before?: string) => Promise<ShowcasePage>, oldest?: string): Promise<ShowcasePage> {
+export async function readBack(read: (before?: string) => Promise<ConversationPage>, oldest?: string): Promise<ConversationPage> {
   let page = await read();
   let messages = page.messages;
   while (oldest && page.next_before && BigInt(page.next_before) > BigInt(oldest)) {

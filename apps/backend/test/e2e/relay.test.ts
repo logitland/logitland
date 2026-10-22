@@ -263,7 +263,7 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
 
   /* ---------- (e) People and consent ---------- */
 
-  it('(e) relays only a consenting person’s messages, agrees only on the button, and deletes them on /consent withdraw', async () => {
+  it('(e) relays only a consenting person’s messages, agrees only on the button, and stops relaying on /consent withdraw', async () => {
     const agentPost = await post(atlas, { channel_id: s.channels.lounge, content: unique('Anyone know where the lanterns are?') });
     expect(agentPost.status).toBe(201);
     const target: string = agentPost.body.discord_message_id;
@@ -328,34 +328,21 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(JSON.stringify(row)).not.toContain(visitor);
     await eventually(async () => !(await notStored(chatter.id)), { what: 'the person’s plain message' });
 
-    // /consent withdraw: the agreement ends at once and the held messages go.
+    // /consent withdraw: the agreement ends at once; what was relayed stays, and nothing written after it is.
     const withdraw = await s.fake.interact({ user: visitor, command: { name: 'consent', subcommand: 'withdraw' }, channelId: s.channels.lounge });
     expect(withdraw.status).toBe(200);
-    expect(withdraw.body).toMatchObject({ type: 5, data: { flags: 64 } });
-    const gone = await eventually(
-      async () => {
-        const r = find(await channelPage(orrery, s.channels.lounge), reply.id);
-        return r?.deleted ? r : null;
-      },
-      { what: 'the reply to be deleted' },
-    );
-    expect(gone).toMatchObject({ content: null, deleted: true });
-    const created = await s.sql<{ text: string | null }>(
-      "SELECT json_extract(payload, '$.data.content') AS text FROM events WHERE message_id = ? AND type = 'message.created'",
-      reply.id,
-    );
-    expect(created.map((r) => r.text)).toEqual(['']);
+    expect(withdraw.body).toMatchObject({ type: 4, data: { flags: 64, content: expect.stringContaining('Your agreement has ended') } });
     expect(
       (await s.sql('SELECT action FROM consent_history WHERE discord_user_id = ? ORDER BY id', visitor)).map((r) => (r as { action: string }).action),
     ).toEqual(['granted', 'revoked']);
-    const record = s.fake.interactions.all().find((i) => i.id === withdraw.interaction.id)!;
-    await eventually(() => record.followUps.length > 0, { what: 'the follow-up to /consent withdraw' });
-    expect(record.followUps[0]).toMatchObject({ kind: 'original', content: expect.stringContaining('You withdrew'), flags: 64 });
-    // Nothing the person wrote is anywhere in the relay's stores, before or after.
-    for (const word of [before, text]) {
-      expect(JSON.stringify(await s.sql('SELECT payload FROM events'))).not.toContain(word);
-      expect(JSON.stringify(await s.sql('SELECT content FROM conversation'))).not.toContain(word);
-    }
+    const after = s.fake.say(s.channels.lounge, { as: visitor, content: unique('Said after withdrawing') });
+    const lastWord = s.fake.say(s.channels.lounge, { as: DEV.admin, content: unique('The admin speaks after them') });
+    await eventually(async () => !(await notStored(lastWord.id)), { what: 'intake to pass the messages' });
+    expect(await notStored(after.id)).toBe(true);
+    expect(find(await channelPage(orrery, s.channels.lounge), reply.id)).toMatchObject({ content: text, deleted: false });
+    // Nothing the person wrote before agreeing is anywhere in the relay's stores.
+    expect(JSON.stringify(await s.sql('SELECT payload FROM events'))).not.toContain(before);
+    expect(JSON.stringify(await s.sql('SELECT content FROM conversation'))).not.toContain(before);
   });
 
   // Interaction follow-ups use DISCORD_API_BASE in development, so /consent withdraw never reaches the real Discord.
@@ -947,7 +934,10 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
       const frame = await eventually(() => frames.map((f) => JSON.parse(f)).find((f) => f.type === 'message.created' && f.message.content === content), {
         what: 'the message on the live feed',
       });
-      expect(frame.message.author).toMatchObject({ kind: 'agent', agent_id: atlas.agent_id, display_name: atlas.name });
+      expect(frame.message.author).toMatchObject({ kind: 'agent', agent_id: atlas.agent_id, display_name: atlas.name, avatar_url: expect.any(String) });
+      // Anyone reads the same channel without a token, in the same shape.
+      const open = await s.call('GET', `/v1/channels/${s.channels.lounge}/messages?include_avatars=true`);
+      expect(find(open, frame.message.message_id)).toEqual(frame.message);
 
       ws.send('ping');
       await eventually(() => frames.includes('pong') || null, { what: 'pong' });

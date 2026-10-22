@@ -52,12 +52,15 @@ export class ShowcaseLive extends DurableObject<Bindings> {
     for (const [id, at] of gone.list<number>()) if (at < now - REMEMBER_GONE_MS) gone.delete(id);
     const sent: string[] = [];
     for (const frame of frames) {
-      // A post's ID is its starter's, so deleting the starter keeps its card off too. `post.removed` alone is no deletion: a
-      // post can be unlisted for a moment (its starter recorded before its thread) and listed again.
+      // A post still showing a starter that was deleted is from before the deletion; one read since shows it deleted.
+      // `post.removed` alone is no deletion: a post can be unlisted for a moment (its starter recorded before its thread).
       if (frame.type === 'message.deleted') for (const id of frame.message_ids) gone.put(id, now);
       else if (frame.type === 'message.created' || frame.type === 'message.updated') {
         if (gone.get(frame.message.message_id) !== undefined) continue;
-      } else if (frame.type === 'post.updated' && gone.get(frame.post.id) !== undefined) continue;
+      } else if (frame.type === 'post.updated') {
+        const { starter } = frame.post;
+        if (starter && !starter.deleted && gone.get(starter.message_id) !== undefined) continue;
+      }
       sent.push(JSON.stringify(frame));
     }
     if (!sent.length) return;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ShowcaseMessage } from '@logitland/contracts';
+  import type { ConversationMessage } from '@logitland/contracts';
   import CornerUpRightIcon from '@lucide/svelte/icons/corner-up-right';
   import type { Snippet } from 'svelte';
   import AuthorAvatar from '#lib/components/marketing/author-avatar.svelte';
@@ -12,7 +12,7 @@
    * (the relay's, so the server and the browser render the same text), and the message it replies to. Messages in `arrived`
    * rise in. `start` renders above the first message: an empty state, or a way to older ones.
    */
-  let { messages, arrived, clock, start }: { messages: ShowcaseMessage[]; arrived: ReadonlySet<string>; clock: number; start?: Snippet } = $props();
+  let { messages, arrived, clock, start }: { messages: ConversationMessage[]; arrived: ReadonlySet<string>; clock: number; start?: Snippet } = $props();
 
   /** Relay replies quote the original's first ten words. */
   const QUOTE_WORDS = 10;
@@ -39,11 +39,11 @@
           </p>
         {/if}
         <p class="flex min-w-0 items-baseline gap-2">
-          <span class={cn('truncate text-sm font-semibold', message.author.discord ? 'text-foreground' : 'text-agent-name')}>
+          <span class={cn('truncate text-sm font-semibold', message.author.kind === 'human' ? 'text-foreground' : 'text-agent-name')}>
             {message.author.display_name}
           </span>
-          {#if message.author.discord}
-            <span class="truncate text-xs text-muted-foreground">@{message.author.discord.username}</span>
+          {#if message.author.username}
+            <span class="truncate text-xs text-muted-foreground">@{message.author.username}</span>
           {/if}
           <span class="shrink-0 text-xs text-muted-foreground">{timeAgo(Date.parse(message.created_at), clock)}</span>
         </p>

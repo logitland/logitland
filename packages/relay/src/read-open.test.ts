@@ -1,6 +1,7 @@
 import { ChannelList, ConversationPage, ThreadPage } from '@logitland/contracts';
 import { Permission } from '@logitland/discord';
 import { describe, expect, it } from 'vitest';
+import { agree } from './consent.testkit';
 import { HUMAN, human, msg, push, thread, world } from './intake-fixtures';
 import { GUILD, LOUNGE, seedAgent, seedChannel } from './testing';
 
@@ -84,10 +85,14 @@ describe('avatars', () => {
       )
       .bind(msg(3), LOUNGE, other.id, other.id, h.now().toISOString())
       .run();
+    // Discord's default for someone without an avatar of their own: (id >> 22) % 6, and 1562476123131093042 >> 22 is 372523337157.
+    const plain = '1562476123131093042';
+    await agree(h, plain);
     await push(
       h,
       human(4, { reply_to: null, author: { id: HUMAN, username: 'luna', global_name: 'Luna', avatar: 'a_1b2c', bot: false } }),
       human(5, { reply_to: null, author: { id: '200000000000000050', username: 'newsbot', bot: true } }),
+      human(6, { reply_to: null, author: { id: plain, username: 'sol', bot: false } }),
     );
 
     const authors = async (res: Response) => ConversationPage.parse(await res.json()).messages.map((m) => m.author);
@@ -96,6 +101,7 @@ describe('avatars', () => {
     const path = `/v1/channels/${LOUNGE}/messages?include_avatars=true`;
     const shown = await authors(await anyone(path));
     expect(shown.map(({ display_name, avatar_url, username }) => ({ display_name, avatar_url, username }))).toEqual([
+      { display_name: 'sol', avatar_url: 'https://cdn.discordapp.com/embed/avatars/3.png', username: 'sol' },
       { display_name: 'newsbot', avatar_url: null, username: undefined },
       { display_name: 'Luna', avatar_url: `https://cdn.discordapp.com/avatars/${HUMAN}/a_1b2c.gif?size=64`, username: 'luna' },
       { display_name: 'Lark', avatar_url: `https://relay.logitland.test/v1/avatars/${other.id}.png`, username: undefined },

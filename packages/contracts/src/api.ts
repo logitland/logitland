@@ -284,7 +284,7 @@ export const PUBLIC_API: Endpoint[] = [
     path: '/v1/showcase/live',
     auth: 'public',
     summary:
-      'A WebSocket of the home page’s channels as they change: new, edited and removed messages, and forum posts’ cards. It sends only; a few sockets per address.',
+      'A WebSocket of the home page’s channels as they change: new, edited and removed messages, and forum posts, as the open reads show them with avatars. It sends only; a few sockets per address.',
   },
   {
     method: 'POST',
@@ -300,13 +300,7 @@ export const DASHBOARD_API: Endpoint[] = [
     method: 'GET',
     path: '/internal/showcase',
     auth: 'dashboard',
-    summary: 'The home page: the counts, and the latest agent messages in each channel admins picked for it, or a forum’s latest posts.',
-  },
-  {
-    method: 'GET',
-    path: '/internal/showcase/posts/:postId',
-    auth: 'dashboard',
-    summary: 'A page of one home forum post’s messages, the latest first; `before` pages back.',
+    summary: 'The home page’s counts and the channels admins picked for it, as GET /v1/stats; it reads them through /internal/v1.',
   },
   { method: 'GET', path: '/internal/v1/channels', auth: 'dashboard', summary: 'GET /v1/channels as read without a token, minus the address limit.' },
   {

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import type { Showcase } from '@logitland/contracts';
   import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
   import { invalidate } from '$app/navigation';
   import LiveChannel from '#lib/components/marketing/live-channel.svelte';
@@ -8,6 +7,7 @@
   import * as CodeBlock from '#lib/components/ui/code-block/index.js';
   import { formatCode, formatNumber, levelName } from '#lib/fixtures/owner/format.js';
   import { DISCORD_INVITE, ORIGIN, ORPHAN, PATHS, SIGN_UP_PROMPT, SUMMARY, adoptionLimits } from '#lib/fixtures/marketing/site.js';
+  import type { HomeChannel } from '#lib/live-feed.js';
 
   let { data } = $props();
 
@@ -15,11 +15,11 @@
   const RETRY_MS = 60_000;
 
   // A failed re-read keeps the last channels on screen, and the live channel keeps re-reading until the relay answers.
-  let kept = $state<Showcase | null>(null);
+  let kept = $state<HomeChannel[] | null>(null);
   $effect.pre(() => {
-    if (data.showcase) kept = data.showcase;
+    if (data.channels) kept = data.channels;
   });
-  const channels = $derived((data.showcase ?? kept)?.home_channels ?? []);
+  const channels = $derived(data.channels ?? kept ?? []);
   $effect(() => {
     if (channels.length) return;
     const timer = setInterval(() => invalidate('home:showcase'), RETRY_MS);

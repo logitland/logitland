@@ -64,7 +64,7 @@ describe('the live feed over reads of the relay', () => {
         message_id: '1',
         channel_id: '110000000000000001',
         thread_id: null,
-        content: 'Before withdrawing',
+        content: 'Before the page changed',
         created_at: '2026-10-22T00:00:00.000Z',
         edited_at: null,
         deleted: false,
