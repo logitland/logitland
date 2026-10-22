@@ -6,6 +6,8 @@ import { ADMIN_DISCORD, harness, seedAgent, seedOwner, testImage, type Harness, 
 
 const RELAY = 'https://relay.logitland.test';
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+/** The address of a copy of these bytes: their SHA-256, the copy's own suffix, and the format. */
+const copyOf = (bytes: Uint8Array, ext: string) => new RegExp(`^${RELAY}/v1/avatars/${hash(bytes)}-[0-9a-f]{16}\\.${ext}$`);
 const setAvatar = (h: Harness, token: string, url: string | null) => h.call('PATCH', '/v1/me', { avatar_url: url }, h.as(token));
 const avatarOf = async (h: Harness, id: string) =>
   (await h.db.prepare('SELECT avatar_url FROM agents WHERE id = ?').bind(id).first<{ avatar_url: string | null }>())!.avatar_url;
@@ -29,10 +31,11 @@ describe('custom avatars', () => {
     serve(h, image);
     const res = await setAvatar(h, agent.token, 'https://cdn.example.com/me');
     expect(res.status).toBe(200);
-    const url = `${RELAY}/v1/avatars/${hash(image)}.${ext}`;
-    expect(AgentSelf.parse(await res.json()).agent).toMatchObject({ avatar_url: url, custom_avatar: true });
+    const { avatar_url: url, custom_avatar } = AgentSelf.parse(await res.json()).agent;
+    expect(custom_avatar).toBe(true);
+    expect(url).toMatch(copyOf(image, ext));
 
-    const copy = await h.call('GET', new URL(url).pathname);
+    const copy = await h.call('GET', new URL(url!).pathname);
     expect(copy.headers.get('content-type')).toBe(type);
     expect(copy.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
     expect(new Uint8Array(await copy.arrayBuffer())).toEqual(image);
@@ -78,7 +81,7 @@ describe('custom avatars', () => {
       return n === 0 ? new Response(image) : new Response(null, { status: 302, headers: { location: `/${n - 1}` } });
     };
     expect((await setAvatar(h, agent.token, 'https://cdn.example.com/3')).status).toBe(200);
-    expect(await avatarOf(h, agent.id)).toBe(`${RELAY}/v1/avatars/${hash(image)}.png`);
+    expect(await avatarOf(h, agent.id)).toMatch(copyOf(image, 'png'));
     const tooFar = await setAvatar(h, agent.token, 'https://cdn.example.com/4');
     expect(tooFar.status).toBe(422);
     expect((await tooFar.json()).detail).toContain('redirected more than 3 times');
@@ -90,18 +93,22 @@ describe('custom avatars', () => {
     const status = (id: string, action: string) => h.internal('POST', `/internal/admin/agents/${id}/status`, { action, reason: 'test' }, asOwner(admin.id));
     const ada = await seedAgent(h.relay, { level: 5 });
     const bea = await seedAgent(h.relay, { level: 5 });
-    const shared = `${hash(testImage('png', 128, 128, '/shared.png'))}.png`;
+    const path = async (id: string) => new URL((await avatarOf(h, id))!).pathname;
 
-    // Both show the same picture; one moving on leaves it for the other.
+    // Both show the same picture, each from a copy of its own: one moving on never takes the other's.
     await setAvatar(h, ada.token, 'https://cdn.example.com/shared.png');
     await setAvatar(h, bea.token, 'https://cdn.example.com/shared.png');
+    const adas = await path(ada.id);
+    const beas = await path(bea.id);
+    expect(adas).not.toBe(beas);
     await setAvatar(h, ada.token, 'https://cdn.example.com/ada.png');
-    expect([...h.avatars.keys()].sort()).toEqual([shared, `${hash(testImage('png', 128, 128, '/ada.png'))}.png`].sort());
-    expect((await h.call('GET', `/v1/avatars/${shared}`)).status).toBe(200);
+    expect((await h.call('GET', adas)).status).toBe(404);
+    expect((await h.call('GET', beas)).status).toBe(200);
+    expect(h.avatars.size).toBe(2);
 
     await setAvatar(h, bea.token, null);
-    expect(h.avatars.has(shared)).toBe(false);
-    expect((await h.call('GET', `/v1/avatars/${shared}`)).status).toBe(404);
+    expect((await h.call('GET', beas)).status).toBe(404);
+    expect(h.avatars.size).toBe(1);
 
     expect((await status(ada.id, 'reset_avatar')).status).toBe(200);
     expect(h.avatars.size).toBe(0);
@@ -110,5 +117,19 @@ describe('custom avatars', () => {
     expect(h.avatars.size).toBe(1);
     expect((await status(bea.id, 'revoke')).status).toBeLessThan(300);
     expect(h.avatars.size).toBe(0);
+  });
+
+  it('copies an address stored before copies existed when the agent sends it again, and treats its own copy as no change', async () => {
+    const h = harness();
+    const agent = await seedAgent(h.relay, { level: 5 });
+    const image = testImage('png');
+    serve(h, image);
+    await h.db.prepare('UPDATE agents SET avatar_url = ? WHERE id = ?').bind('https://cdn.example.com/old.png', agent.id).run();
+    expect((await setAvatar(h, agent.token, 'https://cdn.example.com/old.png')).status).toBe(200);
+    const copy = await avatarOf(h, agent.id);
+    expect(copy).toMatch(copyOf(image, 'png'));
+    expect((await setAvatar(h, agent.token, copy)).status).toBe(200);
+    expect(await avatarOf(h, agent.id)).toBe(copy);
+    expect(h.avatars.size).toBe(1);
   });
 });

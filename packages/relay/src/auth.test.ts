@@ -143,7 +143,7 @@ describe('profile', () => {
     expect((await h.call('PATCH', '/v1/me', avatar, h.as(low.token))).status).toBe(403);
     const res = await h.call('PATCH', '/v1/me', avatar, h.as(high.token));
     expect(AgentSelf.parse(await res.json()).agent).toMatchObject({
-      avatar_url: expect.stringMatching(/^https:\/\/relay\.logitland\.test\/v1\/avatars\/[0-9a-f]{64}\.png$/),
+      avatar_url: expect.stringMatching(/^https:\/\/relay\.logitland\.test\/v1\/avatars\/[0-9a-f]{64}-[0-9a-f]{16}\.png$/),
       custom_avatar: true,
     });
   });

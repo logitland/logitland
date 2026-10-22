@@ -1,6 +1,7 @@
-// Custom avatars. The relay fetches the agent's image once, checks what it really is, and keeps its own copy in R2 named by
-// its SHA-256, so the agent can't swap the picture after the check and its host can't break it. Discord and the dashboards
-// only ever see the copy (`/v1/avatars/<hash>.<ext>`). Addresses stored before copies existed keep working as they are.
+// Custom avatars. The relay fetches the agent's image once, checks what it really is, and keeps its own copy in R2, so the
+// agent can't swap the picture after the check and its host can't break it. Discord and the dashboards only ever see the copy
+// (`/v1/avatars/<sha256>-<copy>.<ext>`). Each copy belongs to one agent, even when two set the same image, so deleting one
+// can never take another agent's picture. Addresses stored before copies existed keep working until the agent sets one again.
 
 import { LIMITS } from '@logitland/contracts';
 import type { Relay } from '../context';
@@ -15,8 +16,13 @@ const FETCH_TIMEOUT_MS = 5000;
 const AVATAR_TYPES = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' } as const;
 type Format = keyof typeof AVATAR_TYPES;
 
-/** A stored copy's file name: the image's SHA-256 and its format. */
-export const AVATAR_FILE = /^[0-9a-f]{64}\.(png|jpg|webp|gif)$/;
+/** A stored copy's file name: the image's SHA-256, a random suffix of its own, and its format. */
+export const AVATAR_FILE = /^[0-9a-f]{64}-[0-9a-f]{16}\.(png|jpg|webp|gif)$/;
+
+const avatarPrefix = (relay: Relay) => `${relay.config.publicUrl}/v1/avatars/`;
+
+/** Whether `url` is one of the relay's own copies, rather than an address stored before copies existed. */
+export const isAvatarCopy = (relay: Relay, url: string) => url.startsWith(avatarPrefix(relay)) && AVATAR_FILE.test(url.slice(avatarPrefix(relay).length));
 
 const refuse = (detail: string) => new RelayError(422, 'invalid_request', detail);
 
@@ -33,17 +39,16 @@ export async function copyAvatar(relay: Relay, url: string): Promise<string> {
   const { format, width, height } = image;
   if ([width, height].some((side) => side < MIN_SIDE || side > MAX_SIDE))
     throw refuse(`The avatar is ${width}×${height} pixels. Each side must be ${MIN_SIDE} to ${MAX_SIDE} pixels.`);
-  const file = `${await sha256(bytes)}.${format}`;
+  const copy = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const file = `${await sha256(bytes)}-${copy}.${format}`;
   await relay.avatars.put(file, bytes, { httpMetadata: { contentType: AVATAR_TYPES[format] } });
-  return `${relay.config.publicUrl}/v1/avatars/${file}`;
+  return `${avatarPrefix(relay)}${file}`;
 }
 
-/** Deletes the copy behind `url` once no agent shows it any more. Addresses the relay doesn't host are left alone. */
+/** Deletes the copy behind `url`, which only the agent letting go of it showed. Addresses the relay doesn't host are left alone. */
 export async function releaseAvatar(relay: Relay, url: string | null): Promise<void> {
-  const prefix = `${relay.config.publicUrl}/v1/avatars/`;
-  const file = url?.startsWith(prefix) ? url.slice(prefix.length) : null;
-  if (!file || !AVATAR_FILE.test(file) || !relay.avatars) return;
-  if (await relay.db.prepare('SELECT 1 FROM agents WHERE avatar_url = ? LIMIT 1').bind(url).first()) return;
+  if (!url || !isAvatarCopy(relay, url) || !relay.avatars) return;
+  const file = url.slice(avatarPrefix(relay).length);
   try {
     await relay.avatars.delete(file);
   } catch (err) {

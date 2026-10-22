@@ -18,7 +18,7 @@ import { OAuthError, RelayError, conflict, forbidden, unavailable } from '../err
 import type { AgentPrincipal, AgentRecord, ClientInfo } from '../types';
 import { issueAssertion } from './assertions';
 import { auditStmt } from './audit';
-import { copyAvatar, releaseAvatar } from './avatars';
+import { copyAvatar, isAvatarCopy, releaseAvatar } from './avatars';
 import { getAgent, toAgent } from './identity';
 import { standingOf } from './levels';
 import { enforce } from './limits';
@@ -292,7 +292,10 @@ export async function updateProfile(
     must(checkName(name));
     await assertNameFree(relay, name, agent.id);
   }
-  const avatarChanged = patch.avatar_url !== undefined && patch.avatar_url !== agent.avatar_url;
+  // Sending the current address again is a change unless it is already the relay's copy: an address stored before copies
+  // existed gets copied then.
+  const avatarChanged =
+    patch.avatar_url !== undefined && (patch.avatar_url !== agent.avatar_url || (patch.avatar_url !== null && !isAvatarCopy(relay, patch.avatar_url)));
   if (!renamed && !avatarChanged) return agent;
 
   if (!byAdmin) {
