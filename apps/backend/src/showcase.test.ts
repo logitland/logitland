@@ -51,4 +51,17 @@ describe('the live feed', () => {
     await live.publish([{ type: 'message.created', at: 0, message: message('1') }, { type: 'message.updated', message: message('1') }, later]);
     expect(sent).toEqual([deleted, later]);
   });
+
+  it('never sends a post’s card again after the post was removed or its starter deleted', async () => {
+    const { live, sent } = feed();
+    const card = (id: string): ShowcaseFrame => ({
+      type: 'post.updated',
+      post: { id, channel_id: LOUNGE, name: 'A post', tags: [], starter: message(id), replies: 0, last_activity_at: '2026-10-22T00:00:00.000Z' },
+    });
+    const removed: ShowcaseFrame = { type: 'post.removed', channel_id: LOUNGE, post_id: '1' };
+    const starterDeleted: ShowcaseFrame = { type: 'message.deleted', channel_id: LOUNGE, message_ids: ['2'] };
+    await live.publish([removed, starterDeleted]);
+    await live.publish([card('1'), card('2'), card('3')]);
+    expect(sent).toEqual([removed, starterDeleted, card('3')]);
+  });
 });

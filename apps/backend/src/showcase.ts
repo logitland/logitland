@@ -53,7 +53,10 @@ export class ShowcaseLive extends DurableObject<Bindings> {
     const sent: string[] = [];
     for (const frame of frames) {
       if (frame.type === 'message.deleted') for (const id of frame.message_ids) gone.put(id, now);
-      else if (frame.type !== 'showcase.changed' && gone.get(frame.message.message_id) !== undefined) continue;
+      else if (frame.type === 'post.removed') gone.put(frame.post_id, now);
+      else if (frame.type === 'message.created' || frame.type === 'message.updated') {
+        if (gone.get(frame.message.message_id) !== undefined) continue;
+      } else if (frame.type === 'post.updated' && gone.get(frame.post.id) !== undefined) continue;
       sent.push(JSON.stringify(frame));
     }
     if (!sent.length) return;
