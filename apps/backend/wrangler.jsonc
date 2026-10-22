@@ -87,7 +87,7 @@
         {
           "binding": "DB",
           "database_name": "logitland-staging",
-          "database_id": "SETUP_DEPLOY_STAGING_D1_ID",
+          "database_id": "e059fa37-1b9a-425d-bf95-27368bda0b67",
           "migrations_dir": "../../packages/relay/migrations",
         },
       ],
