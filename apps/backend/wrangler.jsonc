@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // The top level is local development and gets its own name, so a deploy without --env production can't replace the live Worker.
+  // The top level is local development and gets its own name, so a deploy without --env can't replace a live Worker.
   "name": "logitland-backend-dev",
   "main": "src/index.ts",
   // Not later than the workerd bundled with the pinned wrangler (1.20261001.1).
@@ -8,7 +8,7 @@
   // Sentry (@sentry/cloudflare) keeps each request's scope in AsyncLocalStorage.
   "compatibility_flags": ["nodejs_als"],
 
-  // The top level is local development (`wrangler dev`, with .dev.vars). Deploy with `--env production`.
+  // The top level is local development (`wrangler dev`, with .dev.vars). CI deploys `--env staging` and `--env production` (DEPLOY.md).
   // Never on workers.dev: the dashboard's API is a named entrypoint, and nothing else should be public by accident.
   "workers_dev": false,
   "preview_urls": false,
@@ -54,20 +54,89 @@
     "SENTRY_ENVIRONMENT": "development",
   },
 
+  // Both environments share one hostname with the web app (#30 Q9): the web Worker owns it as a Custom Domain, and these
+  // routes, which Cloudflare runs before a Custom Domain, send the relay's paths here. Keep them in step with PUBLIC_API in
+  // packages/contracts/src/api.ts. Everything is repeated per environment on purpose: don't rely on what one inherits.
+  // The D1 IDs are filled in by scripts/setup-deploy.sh; secrets come from the GitHub environment on every deploy (DEPLOY.md).
   "env": {
+    "staging": {
+      "name": "logitland-backend-staging",
+      "workers_dev": false,
+      "preview_urls": false,
+      "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
+      "cache": { "enabled": true },
+      "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },
+      "routes": [
+        { "pattern": "staging.logit.land/v1/*", "zone_name": "logit.land" },
+        { "pattern": "staging.logit.land/mcp*", "zone_name": "logit.land" },
+        { "pattern": "staging.logit.land/oauth2/*", "zone_name": "logit.land" },
+        { "pattern": "staging.logit.land/agent/*", "zone_name": "logit.land" },
+        { "pattern": "staging.logit.land/.well-known/oauth-*", "zone_name": "logit.land" },
+        { "pattern": "staging.logit.land/auth.md", "zone_name": "logit.land" },
+        { "pattern": "staging.logit.land/skill.md", "zone_name": "logit.land" },
+      ],
+      "vars": {
+        "PUBLIC_URL": "https://staging.logit.land",
+        "DASHBOARD_URL": "https://staging.logit.land",
+        // logit.land but staging, where the Logan staging app's bot lives.
+        "DISCORD_GUILD_ID": "1562476123131093042",
+        "MODERATION_OUTAGE": "hold",
+        "SENTRY_ENVIRONMENT": "staging",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "logitland-staging",
+          "database_id": "SETUP_DEPLOY_STAGING_D1_ID",
+          "migrations_dir": "../../packages/relay/migrations",
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "GATEWAY", "class_name": "DiscordGateway" },
+          { "name": "CHANNEL_SENDER", "class_name": "ChannelSender" },
+          { "name": "AGENT_STREAM", "class_name": "AgentStream" },
+        ],
+      },
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
+        { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
+      ],
+      "queues": {
+        "producers": [{ "binding": "DELIVERIES", "queue": "logitland-staging-deliveries" }],
+        "consumers": [
+          {
+            "queue": "logitland-staging-deliveries",
+            "max_batch_size": 10,
+            "max_concurrency": 10,
+            "max_retries": 24,
+            "dead_letter_queue": "logitland-staging-deliveries-dlq",
+          },
+        ],
+      },
+      "triggers": { "crons": ["* * * * *"] },
+    },
     "production": {
       "name": "logitland-backend",
       "workers_dev": false,
       "preview_urls": false,
-      // Repeated on purpose: don't rely on what an environment inherits.
       "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
       "cache": { "enabled": true },
       "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },
-      // Replace the placeholders before the first deploy; the relay refuses to start while they remain.
-      "routes": [{ "pattern": "relay.REPLACE.invalid", "custom_domain": true }],
+      "routes": [
+        { "pattern": "logit.land/v1/*", "zone_name": "logit.land" },
+        { "pattern": "logit.land/mcp*", "zone_name": "logit.land" },
+        { "pattern": "logit.land/oauth2/*", "zone_name": "logit.land" },
+        { "pattern": "logit.land/agent/*", "zone_name": "logit.land" },
+        { "pattern": "logit.land/.well-known/oauth-*", "zone_name": "logit.land" },
+        { "pattern": "logit.land/auth.md", "zone_name": "logit.land" },
+        { "pattern": "logit.land/skill.md", "zone_name": "logit.land" },
+      ],
       "vars": {
-        "PUBLIC_URL": "https://relay.REPLACE.invalid",
-        "DASHBOARD_URL": "https://REPLACE.invalid",
+        "PUBLIC_URL": "https://logit.land",
+        "DASHBOARD_URL": "https://logit.land",
+        // The logitland server, where production's Logan lives.
+        "DISCORD_GUILD_ID": "1561539052400934992",
         "MODERATION_OUTAGE": "hold",
         "SENTRY_ENVIRONMENT": "production",
       },
@@ -75,7 +144,7 @@
         {
           "binding": "DB",
           "database_name": "logitland",
-          "database_id": "REPLACE-with-wrangler-d1-create-output",
+          "database_id": "SETUP_DEPLOY_PRODUCTION_D1_ID",
           "migrations_dir": "../../packages/relay/migrations",
         },
       ],
@@ -99,7 +168,7 @@
       "triggers": { "crons": ["* * * * *"] },
     },
   },
-  // Secrets (wrangler secret put --env production): RELAY_SECRET_KEY, IP_HASH_KEY, INTERNAL_TOKEN,
-  // DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, DISCORD_GUILD_ID,
-  // TYPESAFE_API_KEY, optionally JEV_MODEL, BLOCKED_HOSTS and SENTRY_DSN. See DEPLOY.md.
+  // Secrets, pushed from the GitHub environment with each deploy: RELAY_SECRET_KEY, IP_HASH_KEY, INTERNAL_TOKEN,
+  // DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, TYPESAFE_API_KEY, optionally SENTRY_DSN.
+  // JEV_MODEL and BLOCKED_HOSTS are optional and set by hand (wrangler secret put). See DEPLOY.md.
 }
