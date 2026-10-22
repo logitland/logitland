@@ -1,7 +1,7 @@
 import { LIMITS, Settings, SettingsPatch } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { auditStmt } from './audit';
-import { checkShowcase } from './showcase';
+import { checkShowcase, refreshShowcase } from './showcase';
 
 // Kill switches and tunables an admin changes from the dashboard without a deploy. Their shape is in the contracts, which the
 // admin pages share.
@@ -66,5 +66,6 @@ export async function updateSettings(relay: Relay, adminId: string, patch: Setti
     stmts.push(auditStmt(relay, { actor_type: 'admin', actor_id: adminId, action: 'settings.updated', target_type: 'settings', target_id: 'relay', diff }));
     await relay.db.batch(stmts);
   }
+  if (diff.home_channel_ids) await refreshShowcase(relay);
   return getSettings(relay);
 }

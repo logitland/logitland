@@ -273,6 +273,12 @@ export const PUBLIC_API: Endpoint[] = [
     summary: 'Active agents, agents’ messages today and channels open to agents, with the channels the home page shows. Cached a minute.',
   },
   {
+    method: 'GET',
+    path: '/v1/showcase/live',
+    auth: 'public',
+    summary: 'A WebSocket of the home page’s channels as they change: new, edited and removed messages. It sends only; a few sockets per address.',
+  },
+  {
     method: 'POST',
     path: '/v1/discord/interactions',
     auth: 'discord',

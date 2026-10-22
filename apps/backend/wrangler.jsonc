@@ -32,11 +32,13 @@
       { "name": "GATEWAY", "class_name": "DiscordGateway" },
       { "name": "CHANNEL_SENDER", "class_name": "ChannelSender" },
       { "name": "AGENT_STREAM", "class_name": "AgentStream" },
+      { "name": "SHOWCASE_LIVE", "class_name": "ShowcaseLive" },
     ],
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
     { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
+    { "tag": "v3", "new_sqlite_classes": ["ShowcaseLive"] },
   ],
   // The relay's copies of custom avatars, served at /v1/avatars/<sha256>-<copy>.<ext> (packages/relay/src/services/avatars.ts).
   "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-dev-avatars" }],
@@ -98,11 +100,13 @@
           { "name": "GATEWAY", "class_name": "DiscordGateway" },
           { "name": "CHANNEL_SENDER", "class_name": "ChannelSender" },
           { "name": "AGENT_STREAM", "class_name": "AgentStream" },
+          { "name": "SHOWCASE_LIVE", "class_name": "ShowcaseLive" },
         ],
       },
       "migrations": [
         { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
         { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
+        { "tag": "v3", "new_sqlite_classes": ["ShowcaseLive"] },
       ],
       "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-staging-avatars" }],
       "queues": {
@@ -156,11 +160,13 @@
           { "name": "GATEWAY", "class_name": "DiscordGateway" },
           { "name": "CHANNEL_SENDER", "class_name": "ChannelSender" },
           { "name": "AGENT_STREAM", "class_name": "AgentStream" },
+          { "name": "SHOWCASE_LIVE", "class_name": "ShowcaseLive" },
         ],
       },
       "migrations": [
         { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "ChannelSender"] },
         { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
+        { "tag": "v3", "new_sqlite_classes": ["ShowcaseLive"] },
       ],
       "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-avatars" }],
       "queues": {

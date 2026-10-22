@@ -25,7 +25,7 @@ export interface DiscordMessageLike {
   id: string;
   channel_id: string;
   guild_id?: string;
-  author?: { id: string; username: string; global_name?: string | null; bot?: boolean };
+  author?: { id: string; username: string; global_name?: string | null; avatar?: string | null; bot?: boolean };
   webhook_id?: string;
   content?: string;
   timestamp?: string;
@@ -87,6 +87,7 @@ export function messageCreated(m: DiscordMessageLike, threads: ReadonlyMap<strin
       id: m.author.id,
       username: m.author.username,
       global_name: m.author.global_name ?? null,
+      avatar: m.author.avatar ?? null,
       bot: m.author.bot ?? false,
       webhook_id: m.webhook_id ?? null,
     },

@@ -13,7 +13,14 @@ function stackSettings() {
   return existsSync(file) ? [file] : undefined;
 }
 
+/**
+ * The local relay. Deployed, the shared hostname sends /v1/* to the relay Worker; in development the dev server passes it
+ * on, WebSockets included, so the home page's live feed answers on the page's own origin.
+ */
+const RELAY_URL = process.env.LOGITLAND_RELAY_URL ?? 'http://localhost:8787';
+
 export default defineConfig({
+  server: { proxy: { '/v1': { target: RELAY_URL, ws: true } } },
   plugins: [
     tailwindcss(),
     sveltekit({

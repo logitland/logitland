@@ -230,7 +230,7 @@ console.log('Starting the web app…');
 const web = join(root, 'apps/web');
 start('web', 'node', [join(web, 'node_modules/vite/bin/vite.js'), 'dev', '--host', WEB_HOST, '--port', String(ports.web), '--strictPort'], {
   cwd: web,
-  env: { WRANGLER_REGISTRY_PATH: registry, LOGITLAND_WEB_ENV_FILE: files.web },
+  env: { WRANGLER_REGISTRY_PATH: registry, LOGITLAND_WEB_ENV_FILE: files.web, LOGITLAND_RELAY_URL: at.relay },
 });
 await waitFor('the web app to answer', async () => (await fetch(`${at.web}/sign-in`)).ok);
 

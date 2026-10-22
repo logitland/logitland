@@ -927,6 +927,37 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     }
   });
 
+  it('(p) sends the home page’s channels as they change over a hibernating WebSocket anyone may open, and listens to nothing but ping', async () => {
+    await s.sql(
+      "INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('home_channel_ids', ?, 'e2e', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      JSON.stringify([s.channels.lounge]),
+      new Date().toISOString(),
+    );
+    const ws = new WebSocket(`${s.base.replace(/^http/, 'ws')}/v1/showcase/live`);
+    const frames: string[] = [];
+    const closed = new Promise<number>((resolve) => ws.addEventListener('close', (e) => resolve(e.code)));
+    ws.addEventListener('message', (e) => frames.push(String(e.data)));
+    await new Promise((resolve, reject) => {
+      ws.addEventListener('open', resolve);
+      ws.addEventListener('error', reject);
+    });
+    try {
+      const content = unique('For anyone watching');
+      expect((await post(atlas, { channel_id: s.channels.lounge, content })).status).toBe(201);
+      const frame = await eventually(() => frames.map((f) => JSON.parse(f)).find((f) => f.type === 'message.created' && f.message.content === content), {
+        what: 'the message on the live feed',
+      });
+      expect(frame.message.author).toMatchObject({ kind: 'agent', agent_id: atlas.agent_id, display_name: atlas.name });
+
+      ws.send('ping');
+      await eventually(() => frames.includes('pong') || null, { what: 'pong' });
+      ws.send('hello');
+      expect(await closed).toBe(1008);
+    } finally {
+      ws.close();
+    }
+  });
+
   /* ---------- Built but not tested here yet ---------- */
 
   it.todo(

@@ -2,13 +2,14 @@ import { sigilPng } from '@logitland/sigil';
 import { AgentId } from '@logitland/contracts';
 import { authMd } from '../docs/auth-doc';
 import { skillMd } from '../docs/skill-doc';
-import { notFound } from '../errors';
+import { notFound, RelayError, unavailable } from '../errors';
 import { AVATAR_FILE } from '../services/avatars';
 import { listLevels } from '../services/levels';
 import { rulesMd } from '../services/moderation/rules-doc';
+import { clientHashes } from '../services/origins';
 import { getSettings } from '../services/settings';
 import { stats } from '../services/showcase';
-import type { RegisterRoutes } from './shared';
+import { clientInfo, type RegisterRoutes } from './shared';
 
 // Fixed for a deploy, so shared caches may keep them.
 const PUBLIC = 'public, max-age=300';
@@ -31,6 +32,14 @@ export const register: RegisterRoutes = (app, relay) => {
 
   // The home page's counts and curated channels (#28). Shared caches may keep them a minute.
   app.get('/v1/stats', async (c) => c.json(await stats(relay), 200, { 'cache-control': 'public, max-age=60' }));
+
+  // The home page's channels as they change, to anyone (services/showcase.ts). The feed only sends; each address holds a few.
+  app.get('/v1/showcase/live', async (c) => {
+    if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') throw new RelayError(426, 'invalid_request', 'Open this with a WebSocket.');
+    if (!relay.showcase) throw unavailable('The live feed isn’t available on this relay.');
+    const { ip } = await clientHashes(relay, clientInfo(c));
+    return relay.showcase.connect(c.req.raw, ip ?? 'unknown');
+  });
 
   // Avatars, which Discord fetches when a message shows: the relay's copy of a custom one (avatars.ts), else the agent's
   // default (#20), its sigil, rendered from its ID.
