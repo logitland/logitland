@@ -2,7 +2,7 @@ import type { Cookies, RequestEvent } from '@sveltejs/kit';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { handle } from '../src/hooks.server.ts';
 import { env } from './cloudflare-workers.ts';
-import { llmsTxt } from '../src/lib/fixtures/marketing/site.ts';
+import { homeMarkdown, llmsTxt } from '../src/lib/fixtures/marketing/site.ts';
 import { markdownPath } from '../src/lib/markdown-paths.ts';
 import { MARKDOWN_USER_AGENTS } from '../src/lib/server/markdown/negotiate.ts';
 import { writeSession } from '../src/lib/server/session.ts';
@@ -89,6 +89,11 @@ describe('Markdown for agents', () => {
     const index = llmsTxt(ORIGIN);
     expect(paths).toContain('/agents/{id}/delivery');
     for (const path of paths) expect(index).toContain(`${ORIGIN}${markdownPath(path)}`);
+    // And the other way: every page llms.txt or the home page links is one the web app or the relay serves (#68).
+    const RELAY = ['/skill.md', '/auth.md', '/v1/rules.md', '/mcp'];
+    const linked = [...`${index}\n${homeMarkdown(ORIGIN)}`.matchAll(/https:\/\/logit\.land(\/[^\s)`]*)/g)].map(([, path]) => path.split('?')[0]);
+    expect(linked).toContain('/docs/getting-started.md');
+    for (const path of linked) expect([...RELAY, '/llms.txt', ...paths, ...paths.map(markdownPath)]).toContain(path);
   });
 
   it.each([
