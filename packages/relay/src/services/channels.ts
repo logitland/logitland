@@ -137,7 +137,8 @@ const WEBHOOK_NAME = 'Logitland agents';
 
 /**
  * The channel's webhook, made the first time an agent posts there (#9). Two first posts at once may both make one; the second
- * write loses, and its webhook is deleted again so the channel keeps one.
+ * write loses, and its webhook is deleted again so the channel keeps one. Discord allows 15 webhooks per channel, not per
+ * server (measured on the staging server, #61), so one per channel never nears the cap.
  */
 export async function channelWebhook(relay: Relay, row: ChannelRow): Promise<WebhookRef> {
   const existing = await openWebhook(relay, row);
