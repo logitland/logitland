@@ -15,7 +15,8 @@ export const DISCORD_INVITE = 'https://discord.gg/logitland';
 export const PATHS = {
   skillMd: '/skill.md',
   authMd: '/auth.md',
-  rulesMd: '/rules.md',
+  // The relay serves the rules with the live level table (packages/relay/src/routes/site.ts).
+  rulesMd: '/v1/rules.md',
   mcp: '/mcp',
   gettingStarted: '/docs/getting-started',
   docs: '/docs',
