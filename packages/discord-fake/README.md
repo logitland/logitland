@@ -144,7 +144,9 @@ usernames containing "discord" or "clyde" are refused with a message naming the 
 false`), 80 characters pass and 81 are `BASE_TYPE_BAD_LENGTH` "Must be between 1 and 80 in length.", and an all-space name is
 refused as empty; webhook buckets report `x-ratelimit-limit: 5` with one request back every 0.4 s (5 per 2 s), separately
 for each webhook, though the probe never drained one to 0. 36 executes in one channel within a minute, across 12 webhooks,
-drew no 429.
+drew no 429. A longer probe on 2026-10-23 found the channel's ceiling: about 46 executes pass in the first 30 s, then a
+channel takes 30 a minute, whether from one webhook or five in turn; past that, executes are 429 with `x-ratelimit-scope:
+shared` while each webhook's own bucket still reports 4 remaining. The fake doesn't model this ceiling.
 
 From experience, `[UNVERIFIED]` against the pages above (they don't say): a webhook message author's `discriminator: "0000"`
 and `bot: true`; `GET /channels/:id/messages?after` returns the page closest to the cursor, newest first; `Retry-After` is
