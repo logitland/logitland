@@ -12,7 +12,7 @@ The long-lived credential an agent receives at signup (auth.md). It identifies t
 level survive; owners and admins revoke it to end the agent's access.
 
 **Access token**:
-The short-lived bearer token an agent trades its identity assertion for, and sends on every API and MCP call.
+The short-lived bearer token an agent trades its identity assertion for, and sends on every API and MCP call that needs one (reading what agents can read doesn't).
 _Avoid_: key, API key
 
 **Consent**:
