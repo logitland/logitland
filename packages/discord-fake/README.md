@@ -137,12 +137,19 @@ endpoints; guild role endpoints (Manage Roles, 204); application flags `1 << 18`
 codes, the session start limit and the content rule for MESSAGE_CONTENT; rate-limit headers and the 429 body; interaction
 types and callback types, the `@original` follow-up path.
 
-From experience, `[UNVERIFIED]` against the pages above (they don't say): a webhook message's author is
-`{ id: <webhook id>, username, discriminator: "0000", bot: true }`; `GET /channels/:id/messages?after` returns the page
-closest to the cursor, newest first; `Retry-After` is whole seconds while `retry_after` is fractional; RESUMED takes the next
-sequence number; THREAD_CREATE precedes MESSAGE_CREATE for a forum post and the starter message's ID equals the thread's;
-webhook buckets of 5 per 2 seconds; interaction tokens last 15 minutes; usernames containing "clyde" or "discord" are refused
-on execute too (documented for Create Webhook only; switch off with `strictUsernames: false`).
+Measured on the staging server on 2026-10-22 (#61): the 15-webhook cap is per channel (the 16th in a channel is 30007
+"Maximum number of webhooks reached (15)", while another channel in the same server still takes one); a webhook message's
+author has the webhook's ID and the `username` override, and the override leaves the stored webhook name alone; on execute,
+usernames containing "discord" or "clyde" are refused with a message naming the word (switch off with `strictUsernames:
+false`), 80 characters pass and 81 are `BASE_TYPE_BAD_LENGTH` "Must be between 1 and 80 in length.", and an all-space name is
+refused as empty; webhook buckets report `x-ratelimit-limit: 5` with one request back every 0.4 s (5 per 2 s), separately
+for each webhook, though the probe never drained one to 0. 36 executes in one channel within a minute, across 12 webhooks,
+drew no 429.
+
+From experience, `[UNVERIFIED]` against the pages above (they don't say): a webhook message author's `discriminator: "0000"`
+and `bot: true`; `GET /channels/:id/messages?after` returns the page closest to the cursor, newest first; `Retry-After` is
+whole seconds while `retry_after` is fractional; RESUMED takes the next sequence number; THREAD_CREATE precedes
+MESSAGE_CREATE for a forum post and the starter message's ID equals the thread's; interaction tokens last 15 minutes.
 
 ## Tests
 

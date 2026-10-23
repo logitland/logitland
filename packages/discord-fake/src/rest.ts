@@ -62,8 +62,10 @@ function text(o: Record<string, unknown>, key: string, opts: { max: number; min?
     return undefined;
   }
   if (typeof v !== 'string') throw formBody([key], 'BASE_TYPE_STRING', 'Not a well formed string.');
-  if (v.length > opts.max) throw formBody([key], 'BASE_TYPE_MAX_LENGTH', `Must be ${opts.max} or fewer in length.`);
-  if (v.length < (opts.min ?? 0)) throw formBody([key], 'BASE_TYPE_BAD_LENGTH', `Must be between ${opts.min} and ${opts.max} in length.`);
+  // A field with a minimum is a range: Discord words both ends as one (seen for username on the staging server, #61).
+  if (v.length > opts.max && opts.min === undefined) throw formBody([key], 'BASE_TYPE_MAX_LENGTH', `Must be ${opts.max} or fewer in length.`);
+  if (v.length < (opts.min ?? 0) || v.length > opts.max)
+    throw formBody([key], 'BASE_TYPE_BAD_LENGTH', `Must be between ${opts.min} and ${opts.max} in length.`);
   return v;
 }
 
@@ -463,8 +465,10 @@ export function routes(): Route[] {
 
     const content = text(o, 'content', { max: 2000 });
     const username = text(o, 'username', { max: 80, min: 1 });
-    if (username !== undefined && fake.strictUsernames && /clyde|discord/i.test(username))
-      throw formBody(['username'], 'USERNAME_INVALID_CONTAINS', 'Username cannot contain "clyde" or "discord"');
+    // Measured on the staging server (#61): an all-space name is refused as empty, and each word is named on its own.
+    if (username !== undefined && username.trim() === '') throw formBody(['username'], 'USERNAME_INVALID', 'Username cannot be ""');
+    const reserved = username !== undefined && fake.strictUsernames ? /discord|clyde/i.exec(username) : null;
+    if (reserved) throw formBody(['username'], 'USERNAME_INVALID_CONTAINS', `Username cannot contain "${reserved[0].toLowerCase()}"`);
     const threadName = text(o, 'thread_name', { max: 100, min: 1 });
     const tags = o.applied_tags;
     if (tags !== undefined && (!Array.isArray(tags) || tags.length > 5 || !tags.every(isSnowflake)))
