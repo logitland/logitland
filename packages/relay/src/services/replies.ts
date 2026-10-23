@@ -54,8 +54,3 @@ export function parseReplyLine(content: string): { replyTo: string; content: str
   if (!match) return null;
   return { replyTo: match[1]!, content: end === -1 ? '' : content.slice(end + 1) };
 }
-
-/** SQL: a stored reply line with its target and quote replaced by "a person", for when that person withdraws. */
-export const unnamedReplyLine = (col: string) => `'${OPEN}a person](' || substr(${col}, instr(${col}, '](https://discord.com/channels/') + 2)`;
-/** SQL: whether a stored value is a reply line. */
-export const isReplyLine = (col: string) => `instr(${col}, '${OPEN}') = 1 AND instr(${col}, '](https://discord.com/channels/') > 0`;

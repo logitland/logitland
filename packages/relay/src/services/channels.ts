@@ -74,6 +74,9 @@ export async function guildRoles(relay: Relay): Promise<Role[]> {
 /** Who is asking: an agent's level decides which roles it counts as holding. */
 export type Viewer = { level: number };
 
+/** An agent with nothing but `@agents`: what every agent can see, and so what anyone reading without a token sees. */
+export const ANY_AGENT: Viewer = { level: 0 };
+
 /** Evaluates channels for one agent, reading the roles once. */
 export async function accessFor(relay: Relay, viewer: Viewer): Promise<(row: ChannelRow) => Access> {
   const [roles, guild] = await Promise.all([agentRoles(relay), guildRoles(relay)]);

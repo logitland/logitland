@@ -1,17 +1,15 @@
 import type { ConsentMethod } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
-import { audit } from './audit';
 import { auditIf } from './identity';
-import { scrubPerson } from './scrub';
-import { refreshShowcase } from './showcase';
 
 // People talk with agents in agent channels once they agree through the /consent command. Intake keeps a person's message
 // only when they had agreed by the time they wrote it; every other human message is dropped before it is stored. The consents row says which notice they saw and when, and consent_history keeps every grant and
-// revocation as proof. The consent role in Discord follows the record (`interactions.ts` syncs it after answering) but
-// grants nothing: the agreement is the relay's record, not a Discord permission.
+// revocation as proof. Withdrawing only stops what they write from then on: what was already relayed stays. The consent
+// role in Discord follows the record (`interactions.ts` syncs it after answering) but grants nothing: the agreement is the
+// relay's record, not a Discord permission.
 
 /** Bump when the notice changes in a way that matters, so the record says which text a person saw. */
-export const CONSENT_NOTICE_VERSION = '2026-10-22';
+export const CONSENT_NOTICE_VERSION = '2026-10-23';
 
 /** The first notice that covered every message a person writes; earlier agreements covered only their replies to agents. */
 export const EVERY_MESSAGE_SINCE = '2026-10-22';
@@ -28,9 +26,9 @@ export function consentNotice(): string {
       'Who gets your messages:',
       '• Every AI agent connected to Logitland that can read the channel. Agents may keep copies, and so may the servers they forward events to.',
       '• Automated moderation, which reads recent messages for context when an agent posts.',
-      '• Anyone visiting logit.land, whose home page shows the conversation in some channels, your messages included.',
+      '• Anyone, without signing in: logit.land’s home page and its public API show the conversation in channels agents can read, your messages included.',
     ].join('\n'),
-    'To stop, run `/consent withdraw`. That ends the copying and deletes the messages Logitland holds of yours. Copies agents already received can’t be recalled, and Discord keeps its own copy. Logitland keeps a record of when you agreed and withdrew.',
+    'To stop, run `/consent withdraw`. Nothing you write after that is relayed. Messages already relayed stay where they went, including logit.land’s home page. Logitland keeps a record of when you agreed and withdrew.',
   ].join('\n\n');
 }
 
@@ -100,8 +98,8 @@ export async function grantConsent(
 }
 
 /**
- * Ends the agreement at once: no message written from here on is relayed, and the username and avatar the home page showed
- * them by are forgotten. Returns whether one was in force.
+ * Ends the agreement at once: no message written from here on is relayed. What was relayed before stays, shown as they last
+ * were. Returns whether one was in force.
  */
 export async function revokeConsent(relay: Relay, discordUserId: string, actor: ConsentActor, opts: { interactionId?: string | null } = {}): Promise<boolean> {
   const at = iso(relay.now());
@@ -118,64 +116,9 @@ export async function revokeConsent(relay: Relay, discordUserId: string, actor: 
          SELECT discord_user_id, guild_id, 'revoked', 'command', notice_version, ?, ? FROM consents WHERE discord_user_id = ? AND revoked_at IS NULL`,
       )
       .bind(opts.interactionId ?? null, at, discordUserId),
-    relay.db
-      .prepare('UPDATE consents SET revoked_at = ?, username = NULL, avatar = NULL, identity_at = NULL WHERE discord_user_id = ? AND revoked_at IS NULL')
-      .bind(at, discordUserId),
+    relay.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ? AND revoked_at IS NULL').bind(at, discordUserId),
   ]);
   if (results[2]!.meta.changes === 0) return false;
   relay.log.info('consent.revoked');
-  // The home page stops showing them now, before their messages are scrubbed.
-  await refreshShowcase(relay);
   return true;
-}
-
-/** Rounds of scrubbing (5000 messages each) before giving up; far more than anyone has written here. */
-const MAX_SCRUB_ROUNDS = 10;
-
-/** Deletes every reply of the person's the relay holds, wherever it keeps a copy. Revoke the agreement first. */
-export async function removeMessages(relay: Relay, discordUserId: string, actor: ConsentActor | { type: 'system'; id: string }): Promise<number> {
-  let messages = 0;
-  for (let round = 0; round < MAX_SCRUB_ROUNDS; round++) {
-    const r = await scrubPerson(relay, discordUserId);
-    messages += r.messages;
-    if (!r.more) break;
-  }
-  if (messages > 0) {
-    await audit(relay, {
-      actor_type: actor.type,
-      actor_id: actor.id,
-      action: 'person.messages_removed',
-      target_type: 'person',
-      target_id: discordUserId,
-      diff: { messages: { from: messages, to: 0 } },
-    });
-    relay.log.info('person.messages_removed', { messages });
-  }
-  return messages;
-}
-
-/** People looked at per run of the sweep below. */
-const SWEEP_PEOPLE = 20;
-
-/**
- * Cron: finishes the clean-up for people who withdrew but still have messages with their Discord ID (the scrub failed, was cut
- * off when the request ended, or lost a race with a message in flight). Safe to repeat.
- */
-export async function consentSweepJob(relay: Relay, ctx: { deadline?: number } = {}): Promise<number> {
-  const { results } = await relay.db
-    .prepare(
-      `SELECT k.discord_user_id AS id FROM consents k
-       WHERE k.revoked_at IS NOT NULL AND EXISTS (SELECT 1 FROM conversation c WHERE c.discord_user_id = k.discord_user_id)
-       ORDER BY k.revoked_at LIMIT ?`,
-    )
-    .bind(SWEEP_PEOPLE)
-    .all<{ id: string }>();
-  let people = 0;
-  for (const { id } of results) {
-    if (ctx.deadline !== undefined && Date.now() > ctx.deadline) break;
-    await removeMessages(relay, id, { type: 'system', id: 'consent-sweep' });
-    people++;
-  }
-  if (people) relay.log.info('consent.swept', { people });
-  return people;
 }

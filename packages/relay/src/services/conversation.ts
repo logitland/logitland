@@ -1,9 +1,12 @@
 import type { ConversationMessage, ConversationPage } from '@logitland/contracts';
 import type { Relay } from '../context';
 import { hmac } from '../crypto';
+import { chunk, compareSnowflakes, MAX_PARAMS, placeholders } from './events';
+import { sigilUrl } from './identity';
 
-// The read projection agents read through /v1: everything agents, bots and webhooks wrote, and the messages of people who
-// agreed through /consent (intake drops every other human message, so nothing here needs hiding).
+// The read projection agents, anyone without a token, and the home page read through /v1: everything agents, bots and
+// webhooks wrote, and the messages of people who agreed through /consent (intake drops every other human message, so
+// nothing here needs hiding).
 
 /** Read with CAST(message_id AS TEXT): snowflakes don't fit a JavaScript number. */
 export interface ConversationRow {
@@ -22,21 +25,13 @@ export interface ConversationRow {
   deleted_at: string | null;
   removed_by: 'author' | 'moderator' | 'discord' | null;
   reply_to: string | null;
-  /** 1 when the author is a person who has since withdrawn (withdrawnSql). */
-  withdrawn: number;
   /** From the agents join (LEVEL_COLUMN); absent when the query doesn't join. */
   agent_level?: number | null;
 }
 
-/**
- * SQL: conversation row `alias` is a person's reply whose author has since withdrawn (or agreed again later than they wrote
- * it). Their words go out to nobody from then on, even before the clean-up (consent.ts) deletes them.
- */
-export const withdrawnSql = (alias: string) =>
-  `(${alias}.discord_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = ${alias}.discord_user_id AND k.revoked_at IS NULL AND k.granted_at <= ${alias}.created_at))`;
-
 /** Every conversation column, with the snowflake read as text. Use this instead of `c.*`. The table must be aliased `c`. */
-export const CONVERSATION_COLUMNS = `CAST(c.message_id AS TEXT) AS message_id, c.channel_id, c.thread_id, c.author_kind, c.agent_id, c.author_ref, c.discord_user_id, c.display_name, c.content, c.relay_message_id, c.created_at, c.edited_at, c.deleted_at, c.removed_by, c.reply_to, ${withdrawnSql('c')} AS withdrawn`;
+export const CONVERSATION_COLUMNS =
+  'CAST(c.message_id AS TEXT) AS message_id, c.channel_id, c.thread_id, c.author_kind, c.agent_id, c.author_ref, c.discord_user_id, c.display_name, c.content, c.relay_message_id, c.created_at, c.edited_at, c.deleted_at, c.removed_by, c.reply_to';
 
 /** Add these to a query over `conversation c` and agent authors come with their level. */
 export const LEVEL_COLUMN = 'ag.level AS agent_level';
@@ -72,18 +67,51 @@ export function toConversationMessage(r: ConversationRow): ConversationMessage {
 export const inPrivateSql = (alias: string) =>
   `(${alias}.thread_id IS NOT NULL AND EXISTS (SELECT 1 FROM threads pt WHERE pt.id = CAST(${alias}.thread_id AS INTEGER) AND pt.private = 1))`;
 
+type AvatarRow = ConversationRow & { agent_avatar_url: string | null; person_username: string | null; person_avatar: string | null };
+
+/** Where Discord serves a person's avatar, 64px: their own (a GIF when animated, `a_`), else Discord's default for their ID. */
+function discordAvatarUrl(discordUserId: string, avatar: string | null): string {
+  if (!avatar) return `https://cdn.discordapp.com/embed/avatars/${(BigInt(discordUserId) >> 22n) % 6n}.png`;
+  return `https://cdn.discordapp.com/avatars/${discordUserId}/${avatar}.${avatar.startsWith('a_') ? 'gif' : 'png'}?size=64`;
+}
+
+/**
+ * What include_avatars adds to an author: an agent's avatar (its sigil without a custom one), a person's Discord avatar and
+ * username as of their latest message (kept on their agreement, intake.ts), and null for other bots and webhooks.
+ */
+function avatarOf(relay: Relay, r: AvatarRow): { avatar_url: string | null; username?: string } {
+  if (r.author_kind === 'agent' && r.agent_id) return { avatar_url: r.agent_avatar_url ?? sigilUrl(relay, r.agent_id) };
+  if (r.author_kind !== 'human' || !r.discord_user_id) return { avatar_url: null };
+  return { avatar_url: discordAvatarUrl(r.discord_user_id, r.person_avatar), ...(r.person_username === null ? {} : { username: r.person_username }) };
+}
+
+/** The messages matching `where` over `conversation c`, newest first, with their authors' avatars when asked for. */
+async function select(relay: Relay, where: string[], args: unknown[], limit: number, avatars = false): Promise<ConversationMessage[]> {
+  const columns = avatars ? ', ag.avatar_url AS agent_avatar_url, k.username AS person_username, k.avatar AS person_avatar' : '';
+  const join = avatars ? ' LEFT JOIN consents k ON k.discord_user_id = c.discord_user_id' : '';
+  const { results } = await relay.db
+    .prepare(
+      `SELECT ${CONVERSATION_COLUMNS}, ${LEVEL_COLUMN}${columns} FROM conversation c ${LEVEL_JOIN}${join} WHERE ${where.join(' AND ')} ORDER BY c.message_id DESC LIMIT ?`,
+    )
+    .bind(...args, limit)
+    .all<AvatarRow>();
+  return results.map((r) => {
+    const message = toConversationMessage(r);
+    return avatars ? { ...message, author: { ...message.author, ...avatarOf(relay, r) } } : message;
+  });
+}
+
 /**
  * A bounded page, newest first, before an optional message ID. Private conversations are left out unless `conversation`
- * names one the caller may read (services/conversations.ts checks who). The home page reads through showcase.ts instead.
+ * names one the caller may read (services/conversations.ts checks who).
  */
 export async function readPage(
   relay: Relay,
   channelId: string,
-  opts: { before?: string; limit?: number; threadId?: string; conversation?: string },
+  opts: { before?: string; limit?: number; threadId?: string; conversation?: string; avatars?: boolean },
 ): Promise<ConversationPage> {
   const n = Math.min(Math.max(Math.floor(opts.limit ?? 50), 1), 100);
-  // A reply whose author withdrew is gone for readers at once, even before the clean-up deletes it.
-  const where = ['c.channel_id = ?', `NOT ${withdrawnSql('c')}`];
+  const where = ['c.channel_id = ?'];
   if (opts.conversation) opts = { ...opts, threadId: opts.conversation };
   else where.push(`NOT ${inPrivateSql('c')}`);
   const args: unknown[] = [channelId];
@@ -96,14 +124,16 @@ export async function readPage(
     where.push('c.thread_id = ?');
     args.push(opts.threadId);
   }
-  const { results } = await relay.db
-    .prepare(
-      `SELECT ${CONVERSATION_COLUMNS}, ${LEVEL_COLUMN} FROM conversation c ${LEVEL_JOIN} WHERE ${where.join(' AND ')} ORDER BY c.message_id DESC LIMIT ?`,
-    )
-    .bind(...args, n)
-    .all<ConversationRow>();
-  return {
-    messages: results.map(toConversationMessage),
-    next_before: results.length === n ? results[results.length - 1]!.message_id : null,
-  };
+  const messages = await select(relay, where, args, n, opts.avatars);
+  return { messages, next_before: messages.length === n ? messages.at(-1)!.message_id : null };
+}
+
+/** The messages with these IDs as a channel's readers see them (never a private conversation's), newest first. */
+export async function readMessages(relay: Relay, ids: string[], opts: { avatars?: boolean } = {}): Promise<ConversationMessage[]> {
+  const pages = await Promise.all(
+    chunk(ids, MAX_PARAMS).map((part) =>
+      select(relay, [`c.message_id IN (${placeholders(part.length)})`, `NOT ${inPrivateSql('c')}`], part, part.length, opts.avatars),
+    ),
+  );
+  return pages.flat().sort((a, b) => compareSnowflakes(b.message_id, a.message_id));
 }

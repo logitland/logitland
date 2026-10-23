@@ -5,7 +5,7 @@ import type { Relay } from '../context';
 import { hit } from './limits';
 import { setPersonRole } from './people-roles';
 import { answerButton, isLoganButton } from './logan/calls';
-import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, removeMessages, revokeConsent, type ConsentActor } from './consent';
+import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, revokeConsent, type ConsentActor } from './consent';
 
 // Discord interactions: the /consent command and its agree button (only the button agrees: /consent agree shows the notice
 // with it), and the Confirm and Cancel buttons on the Logan admin MCP's requests.
@@ -13,7 +13,7 @@ import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, rem
 // https://docs.discord.com/developers/interactions/overview (verifying requests)
 
 const InteractionType = { PING: 1, APPLICATION_COMMAND: 2, MESSAGE_COMPONENT: 3 } as const;
-const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5, UPDATE_MESSAGE: 7 } as const;
+const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, UPDATE_MESSAGE: 7 } as const;
 const EPHEMERAL = 64;
 
 /**
@@ -37,7 +37,7 @@ export const CONSENT_COMMAND = {
   description: 'Let agents read your messages, or stop it',
   options: [
     { type: 1, name: 'agree', description: 'See what is shared and with whom, then agree to have your messages relayed to agents' },
-    { type: 1, name: 'withdraw', description: 'Stop relaying your messages and have the ones Logitland holds deleted' },
+    { type: 1, name: 'withdraw', description: 'Stop relaying your messages from now on' },
     { type: 1, name: 'status', description: 'See whether you have agreed and how many of your messages Logitland holds' },
   ],
 } as const;
@@ -119,23 +119,14 @@ const tooOften = (seconds: number) =>
 
 const WRONG_PLACE = 'This only works in the Logitland server. Run it there.';
 const UNKNOWN = 'I don’t know that command. Try /consent agree, /consent withdraw or /consent status.';
-const STUCK =
-  'Your agreement has ended, so none of your messages are relayed now, but deleting the ones held went wrong. Run /consent withdraw again to finish.';
-const WITHDRAW_NOTE = 'To stop, run `/consent withdraw`: it ends the relaying and deletes your messages Logitland holds.';
+const WITHDRAW_NOTE = 'To stop, run `/consent withdraw`: nothing you write after that is relayed.';
+const WITHDRAWN = 'Your agreement has ended: nothing you write from now on is relayed. Messages already relayed stay.';
 
 const agreed = (changed: boolean) =>
   [
     changed ? 'You agreed: your messages are relayed to agents from now on.' : 'You had already agreed: your messages are relayed to agents.',
     'Your messages in channels agents can read are passed on, with your Discord display name.',
     WITHDRAW_NOTE,
-  ].join('\n\n');
-
-const withdrawn = (messages: number) =>
-  [
-    'You withdrew: your messages are no longer relayed to agents.',
-    messages > 0
-      ? `I deleted ${messages === 1 ? '1 message' : `${messages} messages`} of yours that Logitland held. Messages in Discord itself stay there unless you delete them in Discord.`
-      : 'Logitland held no messages of yours.',
   ].join('\n\n');
 
 /* ---------- Handling ---------- */
@@ -156,8 +147,7 @@ function actionOf(i: Interaction): Action | null {
 
 /**
  * Answers one verified interaction. `defer` takes work that finishes after the answer (a follow-up edit); the route passes
- * executionCtx.waitUntil. Everything is ephemeral: only the person who asked sees the reply. Discord wants an answer within
- * three seconds, so withdrawing ends the agreement first and deletes the replies after, behind a deferral.
+ * executionCtx.waitUntil. Everything is ephemeral: only the person who asked sees the reply.
  */
 export async function handleInteraction(relay: Relay, raw: unknown, defer: (work: Promise<void>) => void): Promise<InteractionResponse> {
   const i = parse(Interaction, raw);
@@ -189,9 +179,7 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
       return say(
         `You agreed on ${s.granted_at!.slice(0, 10)}: your messages are relayed to agents. Logitland holds ${s.messages} of them.\n\n${WITHDRAW_NOTE}`,
       );
-    return say(
-      `You haven’t agreed, so nothing you write reaches agents. Run \`/consent agree\` to see what you would agree to.${s.messages > 0 ? `\n\nI still hold ${s.messages} earlier ${s.messages === 1 ? 'message' : 'messages'} of yours. \`/consent withdraw\` deletes them.` : ''}`,
-    );
+    return say('You haven’t agreed, so nothing you write reaches agents. Run `/consent agree` to see what you would agree to.');
   }
 
   const turn = await hit(relay, { key: `consent:${userId}:10m`, limit: TOGGLES_PER_10_MIN, windowSeconds: 600 }, 1, true);
@@ -204,14 +192,9 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
     return edit(agreed(changed));
   }
 
-  // The agreement ends before we answer, even when the clean-up is rate limited: nothing more is relayed either way.
+  // Withdrawing is never limited: the agreement ends at once, however often they have toggled.
   if (await revokeConsent(relay, userId, actor, { interactionId: i.id })) defer(setPersonRole(relay, userId, 'consent_role_id', false));
-  if (!turn.ok)
-    return say(
-      `Your agreement has ended, so none of your messages are relayed now. You’ve run this a lot just now, so I haven’t deleted the held messages yet. Wait about ${Math.ceil(turn.retryAfterSeconds / 60)} min and run /consent withdraw again to finish.`,
-    );
-  defer(finishWithdraw(relay, i, userId, actor));
-  return { type: Callback.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: { flags: EPHEMERAL } };
+  return say(WITHDRAWN);
 }
 
 /**
@@ -236,16 +219,6 @@ export async function answerFromGateway(relay: Relay, raw: unknown): Promise<voi
     relay.log.warn('interaction.callback_failed', { reason: err instanceof Error ? err.name : 'unknown' });
   }
   await Promise.all(deferred);
-}
-
-async function finishWithdraw(relay: Relay, i: Interaction, userId: string, actor: ConsentActor): Promise<void> {
-  let content = STUCK;
-  try {
-    content = withdrawn(await removeMessages(relay, userId, actor));
-  } catch (err) {
-    relay.log.error('interaction.withdraw_failed', { interaction: i.id, error: err });
-  }
-  await editOriginal(relay, i, content);
 }
 
 /**

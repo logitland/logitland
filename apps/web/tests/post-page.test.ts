@@ -1,4 +1,4 @@
-import type { ShowcaseMessage, ShowcasePage } from '@logitland/contracts';
+import type { ConversationMessage, ConversationPage } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { fresh, readBack } from '../src/lib/post-page.ts';
 
@@ -6,7 +6,7 @@ import { fresh, readBack } from '../src/lib/post-page.ts';
 
 const POST = '300000000000000001';
 
-const message = (n: number, content = `message ${n}`): ShowcaseMessage => ({
+const message = (n: number, content = `message ${n}`): ConversationMessage => ({
   message_id: String(300000000000000000n + BigInt(n)),
   channel_id: '110000000000000001',
   thread_id: POST,
@@ -19,15 +19,15 @@ const message = (n: number, content = `message ${n}`): ShowcaseMessage => ({
 });
 
 /** Messages `from` to `to`, and the cursor the relay gives when there are older ones. */
-const page = (from: number, to: number, more = from > 1): ShowcasePage => ({
+const page = (from: number, to: number, more = from > 1): ConversationPage => ({
   messages: Array.from({ length: to - from + 1 }, (_, i) => message(from + i)),
   next_before: more ? message(from).message_id : null,
 });
 
-const numbers = (p: ShowcasePage) => p.messages.map((m) => Number(BigInt(m.message_id) - 300000000000000000n));
+const numbers = (p: ConversationPage) => p.messages.map((m) => Number(BigInt(m.message_id) - 300000000000000000n));
 
 /** The relay's post, 30 messages a page, newest first: what `read(before)` answers. */
-function relay(messages: ShowcaseMessage[]) {
+function relay(messages: ConversationMessage[]) {
   const reads: (string | undefined)[] = [];
   const read = async (before?: string) => {
     reads.push(before);
@@ -39,7 +39,7 @@ function relay(messages: ShowcaseMessage[]) {
 }
 
 describe('re-reading an open post', () => {
-  it('reads again back to the oldest message the watcher had read, so an older reply deleted or withdrawn meanwhile is gone', async () => {
+  it('reads again back to the oldest message the watcher had read, so an older reply deleted meanwhile is gone', async () => {
     const all = page(1, 60, false).messages;
     const { read, reads } = relay(all.filter((m) => m !== all[1]));
     const again = await readBack(read, message(1).message_id);
@@ -72,9 +72,10 @@ describe('re-reading an open post', () => {
 
   it('reads the relay again, even when the query holds an earlier answer', async () => {
     let relay = page(31, 60);
-    let cached: ShowcasePage | undefined;
+    let cached: ConversationPage | undefined;
     const query = {
-      then: <A, B>(resolve?: ((p: ShowcasePage) => A) | null, reject?: ((e: unknown) => B) | null) => Promise.resolve((cached ??= relay)).then(resolve, reject),
+      then: <A, B>(resolve?: ((p: ConversationPage) => A) | null, reject?: ((e: unknown) => B) | null) =>
+        Promise.resolve((cached ??= relay)).then(resolve, reject),
       refresh: async () => void (cached = relay),
     };
     expect(await fresh(query)).toEqual(page(31, 60));

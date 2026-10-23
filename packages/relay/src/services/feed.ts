@@ -1,7 +1,6 @@
 import type { Digest, Frequency, RelayEvent, SubscriptionKind } from '@logitland/contracts';
 import { iso, type Relay, type Stmt } from '../context';
 import { accessFor, listChannels, type Viewer } from './channels';
-import { withdrawnSql } from './conversation';
 import { eventTail } from './events';
 import { hit, peek } from './limits';
 
@@ -58,7 +57,7 @@ const REMOVALS = "e.type IN ('message.deleted', 'message.bulk_deleted', 'channel
 
 /**
  * A bulk removal that takes away a reply to the agent (one parameter, its ID). A single removal names the agent in
- * reply_agent_id; a bulk one (a person withdrawing, a Discord bulk delete) can hold replies to many agents.
+ * reply_agent_id; a bulk one (a Discord bulk delete) can hold replies to many agents.
  */
 const BULK_REPLY = `(e.type = 'message.bulk_deleted' AND EXISTS (SELECT 1 FROM json_each(e.payload, '$.data.message_ids') j
   JOIN conversation c ON c.message_id = CAST(j.value AS INTEGER) JOIN conversation p ON p.message_id = c.reply_to WHERE p.agent_id = ?))`;
@@ -77,12 +76,10 @@ export async function readableChannels(relay: Relay, viewer: Viewer): Promise<st
  * only with include_own. Replies: replies to the agent's messages by others, and the events addressed to the agent
  * (message.status, conversation.invited). Conversation: the events of the private conversations the agent joined, and
  * removals in the ones it left; no other kind sees those (#33). In a channel the agent can no longer read (`readable`, from
- * readableChannels) only removals reach it; a deleted channel's subscription still gets its last events. A person who
- * withdrew takes their words back, even before the clean-up reaches their events. The events_due trigger in the migration
- * says the same for what is due.
+ * readableChannels) only removals reach it; a deleted channel's subscription still gets its last events. The events_due
+ * trigger in the migration says the same for what is due.
  */
 function belongs(sub: SubscriptionRow, readable: string): { sql: string; args: unknown[] } {
-  const words = `NOT (e.type IN ('message.created', 'message.updated') AND EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = e.message_id AND ${withdrawnSql('c')}))`;
   const own = '(? = 1 OR e.author_agent_id IS NULL OR e.author_agent_id != ?)';
   const read = `(e.channel_id IN (SELECT value FROM json_each(?)) OR ${REMOVALS})`;
   // The first OR picks the rows by index (events_for_agent, events_replies, events_bulk); the rest decides.
@@ -90,22 +87,22 @@ function belongs(sub: SubscriptionRow, readable: string): { sql: string; args: u
     return {
       sql: `(e.agent_id = ? OR e.reply_agent_id = ? OR e.type = 'message.bulk_deleted') AND e.silent = 0
         AND (e.agent_id = ? OR (e.private_thread_id IS NULL AND (e.author_agent_id IS NULL OR e.author_agent_id != ?)
-          AND (e.reply_agent_id = ? OR ${BULK_REPLY}) AND ${read})) AND ${words}`,
+          AND (e.reply_agent_id = ? OR ${BULK_REPLY}) AND ${read}))`,
       args: [sub.agent_id, sub.agent_id, sub.agent_id, sub.agent_id, sub.agent_id, sub.agent_id, readable],
     };
   if (sub.kind === 'conversation')
     return {
       sql: `e.private_thread_id IN (SELECT m.thread_id FROM conversation_members m WHERE m.agent_id = ? AND m.joined_at IS NOT NULL AND (m.left_at IS NULL OR ${REMOVALS}))
-        AND e.agent_id IS NULL AND e.silent = 0 AND ${own} AND ${words}`,
+        AND e.agent_id IS NULL AND e.silent = 0 AND ${own}`,
       args: [sub.agent_id, sub.include_own, sub.agent_id],
     };
   if (sub.ended_at)
     return {
-      sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own} AND ${words}`,
+      sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own}`,
       args: [sub.channel_id, sub.include_own, sub.agent_id],
     };
   return {
-    sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own} AND ${words} AND ${read}`,
+    sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own} AND ${read}`,
     args: [sub.channel_id, sub.include_own, sub.agent_id, readable],
   };
 }
@@ -195,7 +192,7 @@ async function take(relay: Relay, sub: SubscriptionRow, readable: string, handof
 
 /**
  * A stored digest as it may be sent now: its events read again from the log, so whatever happened since it was taken (a
- * removal, a person withdrawing, the agent leaving a conversation or losing a channel) applies to it too. A subscription
+ * removal, the agent leaving a conversation or losing a channel) applies to it too. A subscription
  * that is gone still owes its removals. Null when nothing in it may go.
  */
 export async function refreshDigest(relay: Relay, agentId: string, body: string): Promise<string | null> {

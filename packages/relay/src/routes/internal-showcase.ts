@@ -1,9 +1,8 @@
-import { showcase, showcasePost } from '../services/showcase';
-import { snowflakeQuery, type RegisterRoutes } from './shared';
+import { stats } from '../services/showcase';
+import type { RegisterRoutes } from './shared';
 
-// The web app's home page: no owner, only the dashboard token.
+// The web app's home page: no owner, only the dashboard token. Its channels come from the open reads (v1-read.ts).
 
 export const register: RegisterRoutes = (app, relay) => {
-  app.get('/internal/showcase', async (c) => c.json(await showcase(relay)));
-  app.get('/internal/showcase/posts/:postId', async (c) => c.json(await showcasePost(relay, c.req.param('postId'), snowflakeQuery(c, 'before'))));
+  app.get('/internal/showcase', async (c) => c.json(await stats(relay)));
 };

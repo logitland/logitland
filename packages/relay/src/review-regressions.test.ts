@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Conversation, EventsPage } from '@logitland/contracts';
+import type { Conversation } from '@logitland/contracts';
 import { Permission } from '@logitland/discord';
-import { agree } from './consent.testkit';
 import { contents, poll, say, setup, subscribe, useWebhook } from './deliveries.testkit';
-import { HUMAN, human, push, world } from './intake-fixtures';
+import { human, push, world } from './intake-fixtures';
 import { attemptDelivery, pushDue } from './services/deliveries';
-import { removeMessages, revokeConsent } from './services/consent';
 import { ingest } from './services/intake';
 import { awardPost } from './services/xp/award';
 import { GUILD, LOUNGE, seedAgent } from './testing';
@@ -13,18 +11,6 @@ import { GUILD, LOUNGE, seedAgent } from './testing';
 afterEach(() => vi.restoreAllMocks());
 
 describe('what digests may still carry, and what reading costs', () => {
-  it('notifies a replies-only subscriber when a person withdraws', async () => {
-    const { h, agent } = await world();
-    await h.call('POST', '/v1/subscriptions', { kind: 'replies' }, h.as(agent.token));
-    await push(h, human(1));
-    const first = (await (await h.call('GET', '/v1/events', undefined, h.as(agent.token))).json()) as EventsPage;
-    expect(first.digests.flatMap((d) => d.events).map((e) => e.type)).toEqual(['message.created']);
-    await revokeConsent(h.relay, HUMAN, { type: 'public', id: HUMAN });
-    await removeMessages(h.relay, HUMAN, { type: 'public', id: HUMAN });
-    const next = (await (await h.call('GET', '/v1/events', undefined, h.as(agent.token))).json()) as EventsPage;
-    expect(next.digests.flatMap((d) => d.events).map((e) => e.type)).toContain('message.bulk_deleted');
-  });
-
   it('does not expose replies after the channel closes to this agent', async () => {
     const { h, agent } = await world();
     const role = '100000000000000022';
@@ -94,26 +80,6 @@ describe('what digests may still carry, and what reading costs', () => {
     expect(s.received.map(contents)).toEqual([['message.deleted']]);
     await attemptDelivery(s.relay, original!.id);
     expect(JSON.stringify(s.received)).not.toContain('text that will be deleted');
-  });
-
-  it('does not send a queued human reply once consent is revoked', async () => {
-    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
-    const mine = '299000000000000001';
-    await s.db
-      .prepare(
-        "INSERT INTO conversation (message_id, channel_id, author_kind, agent_id, author_ref, display_name, content, created_at) VALUES (?, ?, 'agent', ?, ?, ?, 'question', ?)",
-      )
-      .bind(mine, LOUNGE, s.agent.id, s.agent.id, s.agent.name, s.now().toISOString())
-      .run();
-    await agree(s, HUMAN);
-    await subscribe(s, { kind: 'replies' });
-    await useWebhook(s);
-    await ingest(s.relay, { source: 'test', events: [human(1, { content: 'a reply whose consent is revoked' })] });
-    expect(await pushDue(s.relay, s.agent.id)).toBe(1);
-    const delivery = await s.db.prepare('SELECT id FROM deliveries').first<{ id: string }>();
-    await revokeConsent(s.relay, HUMAN, { type: 'public', id: HUMAN });
-    await attemptDelivery(s.relay, delivery!.id);
-    expect(JSON.stringify(s.received)).not.toContain('a reply whose consent is revoked');
   });
 
   it('keeps a webhook digest recoverable when its ledger insert fails', async () => {

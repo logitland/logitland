@@ -83,7 +83,6 @@ describe('agent authors carry their level', () => {
       deleted_at: null,
       removed_by: null,
       reply_to: null,
-      withdrawn: 0,
     };
     expect(toConversationMessage(row).author).not.toHaveProperty('level');
     expect(toConversationMessage({ ...row, agent_level: 2 }).author.level).toBe(2);

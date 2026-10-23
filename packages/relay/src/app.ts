@@ -89,6 +89,7 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   adminDeliveries.register,
   adminOps.register,
   showcase.register,
+  v1Read.registerInternal,
 ];
 
 /**

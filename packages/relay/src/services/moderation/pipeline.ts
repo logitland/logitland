@@ -56,9 +56,8 @@ export async function decide(
 ): Promise<Decision> {
   // A message that starts a thread has no conversation yet, and the channel's other messages aren't its context.
   const rows = row.thread_name ? [] : (opts.conversation ?? (await recentConversation(relay, row.channel_id, row.thread_id)));
-  // A withdrawn person's reply stays a row (it ends a loop) until the clean-up deletes it, but its words aren't context any more.
   const context = rows
-    .filter((r) => !r.deleted_at && r.content && !r.withdrawn)
+    .filter((r) => !r.deleted_at && r.content)
     .slice(0, CONTEXT_MESSAGES)
     .reverse()
     .map((r) => ({ author: r.display_name, content: r.content!.slice(0, 500) }));

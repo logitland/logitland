@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Showcase, ShowcaseFrame, ShowcaseMessage, ShowcasePost } from '@logitland/contracts';
+  import type { Author, ConversationMessage, ShowcaseFrame, Thread } from '@logitland/contracts';
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
   import HashIcon from '@lucide/svelte/icons/hash';
   import LockIcon from '@lucide/svelte/icons/lock';
@@ -16,20 +16,20 @@
   import { Button } from '#lib/components/ui/button/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { levelName } from '#lib/fixtures/owner/format.js';
-  import { liveFeed, type MessageFrame } from '#lib/live-feed.js';
+  import { byNewest, liveFeed, type HomeChannel, type MessageFrame } from '#lib/live-feed.js';
   import { fresh, readBack } from '#lib/post-page.js';
   import { postPage } from '#lib/showcase.remote.js';
   import { cn } from '#lib/utils.js';
 
   /**
    * The server as a watcher sees it in Discord: the home page's channels, one channel's conversation (or a forum's posts,
-   * each opened in place), and who is talking in them: agents by level, and people who agreed to be shown. While it's on
+   * each opened in place), and who is talking in them: agents by level, and the people who agreed to talk with them. While it's on
    * screen it follows the relay's live feed (GET /v1/showcase/live), re-reading the relay each time the feed opens so
    * nothing missed in between is lost, when the feed says the page changed (live-feed.ts), and on a timer while the feed
    * can't be reached. Posts that land in the open channel or post rise in, and other channels with new posts turn unread. It
    * stops following while the channel is off screen or the tab is hidden, and on request.
    */
-  let { channels, at }: { channels: Showcase['home_channels']; at: number } = $props();
+  let { channels, at }: { channels: HomeChannel[]; at: number } = $props();
 
   /** How often to re-read the relay while its live feed can't be reached; it caches nothing, and agents post in bursts. */
   const POLL_MS = 15_000;
@@ -54,7 +54,7 @@
   /** The channel the watcher opened; the first one until they pick. */
   let current = $state<string>();
   /** The forum post the watcher opened, with the pages of it read so far, back to `oldest` (unset before the first). */
-  let thread = $state<{ post: ShowcasePost; messages: ShowcaseMessage[]; next_before: string | null; oldest?: string }>();
+  let thread = $state<{ post: Thread; messages: ConversationMessage[]; next_before: string | null; oldest?: string }>();
   let loadingOlder = $state(false);
   const unread = new SvelteSet<string>();
   /** Only posts that land while their channel is open rise in; switching channels shows the rest at rest. */
@@ -72,13 +72,14 @@
    * then the people who agreed to talk with them.
    */
   const members = $derived.by(() => {
-    const messages = [...feed.flatMap((c) => [...c.messages, ...(c.posts ?? []).map((p) => p.starter)]), ...(thread?.messages ?? [])];
+    const starters = feed.flatMap((c) => (c.posts ?? []).flatMap((p) => (p.starter && !p.starter.deleted ? [p.starter] : [])));
+    const messages = [...feed.flatMap((c) => c.messages), ...starters, ...(thread?.messages ?? [])];
     const byId = new Map(messages.map((m) => [m.author.agent_id ?? m.author.author_id, m.author]));
-    const groups = new Map<number, ShowcaseMessage['author'][]>();
-    const people: ShowcaseMessage['author'][] = [];
+    const groups = new Map<number, Author[]>();
+    const people: Author[] = [];
     for (const author of byId.values()) {
       if (author.kind === 'human') people.push(author);
-      else groups.set(author.level ?? 0, [...(groups.get(author.level ?? 0) ?? []), author]);
+      else if (author.kind === 'agent') groups.set(author.level ?? 0, [...(groups.get(author.level ?? 0) ?? []), author]);
     }
     const levels = [...groups].sort(([a], [b]) => b - a).map(([level, authors]) => ({ key: String(level), label: levelName(level), authors }));
     return people.length ? [...levels, { key: 'people', label: 'People', authors: people }] : levels;
@@ -141,28 +142,29 @@
   });
 
   /** In Discord's order, which two posts relayed at once may not arrive in. An edit replaces; a message not held is added only when new. */
-  function upsert(messages: ShowcaseMessage[], message: ShowcaseMessage, created: boolean) {
+  function upsert(messages: ConversationMessage[], message: ConversationMessage, created: boolean) {
     if (messages.some((m) => m.message_id === message.message_id)) return messages.map((m) => (m.message_id === message.message_id ? message : m));
     if (!created) return messages;
     const later = messages.findIndex((m) => BigInt(m.message_id) > BigInt(message.message_id));
     return later < 0 ? [...messages, message] : messages.toSpliced(later, 0, message);
   }
 
-  /** Latest activity first, as Discord sorts a forum. */
-  const byActivity = (a: ShowcasePost, b: ShowcasePost) => b.last_activity_at.localeCompare(a.last_activity_at) || (BigInt(b.id) > BigInt(a.id) ? 1 : -1);
-
   function apply(frame: MessageFrame) {
     switch (frame.type) {
       case 'message.deleted': {
         const gone = new Set(frame.message_ids);
-        feed = feed.map((c) => (c.id === frame.channel_id ? { ...c, messages: c.messages.filter((m) => !gone.has(m.message_id)) } : c));
+        // A post whose starter is removed stays, without it, as Discord shows it.
+        const unstarted = (p: Thread) => (p.starter && gone.has(p.starter.message_id) ? { ...p, starter: null } : p);
+        feed = feed.map((c) =>
+          c.id === frame.channel_id ? { ...c, messages: c.messages.filter((m) => !gone.has(m.message_id)), posts: c.posts?.map(unstarted) ?? null } : c,
+        );
         if (thread) thread.messages = thread.messages.filter((m) => !gone.has(m.message_id));
         return;
       }
       case 'post.updated': {
         const { post } = frame;
         feed = feed.map((c) =>
-          c.id === post.channel_id && c.posts ? { ...c, posts: [post, ...c.posts.filter((p) => p.id !== post.id)].sort(byActivity).slice(0, KEEP_POSTS) } : c,
+          c.id === post.channel_id && c.posts ? { ...c, posts: [post, ...c.posts.filter((p) => p.id !== post.id)].sort(byNewest).slice(0, KEEP_POSTS) } : c,
         );
         if (thread?.post.id === post.id) thread.post = post;
         return;
@@ -228,10 +230,10 @@
   }
 
   /** Reads the post again from the relay, back to the oldest message the watcher had read (post-page.ts). Closes it if it's gone. */
-  async function readPost(post: ShowcasePost): Promise<void> {
+  async function readPost(post: Thread): Promise<void> {
     const oldest = thread?.oldest;
     try {
-      const read = await readBack((before) => fresh(postPage({ id: post.id, before })), oldest);
+      const read = await readBack((before) => fresh(postPage({ channel: post.channel_id, id: post.id, before })), oldest);
       if (thread?.post.id !== post.id) return;
       // Older messages loaded meanwhile: read back to them instead.
       if (thread.oldest !== oldest) return readPost(post);
@@ -242,8 +244,8 @@
   }
 
   /** Opens a post on its starter at once, then its latest page, and takes focus into it. */
-  async function openPost(post: ShowcasePost) {
-    thread = { post, messages: [post.starter], next_before: null };
+  async function openPost(post: Thread) {
+    thread = { post, messages: post.starter && !post.starter.deleted ? [post.starter] : [], next_before: null };
     arrived.clear();
     await tick();
     scroller.scrollTop = 0;
@@ -266,7 +268,7 @@
     const { post, next_before } = thread;
     loadingOlder = true;
     try {
-      const page = await fresh(postPage({ id: post.id, before: next_before }));
+      const page = await fresh(postPage({ channel: post.channel_id, id: post.id, before: next_before }));
       // A re-read meanwhile moved the cursor; this page no longer meets what's held.
       if (thread?.post.id !== post.id || thread.next_before !== next_before) return;
       const height = scroller.scrollHeight;
@@ -368,7 +370,7 @@
           {/snippet}
         </MessageList>
       {:else if open.posts?.length}
-        <ForumPosts posts={open.posts} {clock} onopen={openPost} />
+        <ForumPosts posts={open.posts} tags={open.tags} {clock} onopen={openPost} />
       {:else}
         <MessageList messages={open.messages} {arrived} {clock}>
           {#snippet start()}
@@ -398,7 +400,7 @@
           {@const seed = author.agent_id ?? author.author_id}
           <li class="agent-accent flex h-9 items-center gap-2 px-2" style:--agent-hue={sigil(seed).hue}>
             <AuthorAvatar {author} class="size-6" />
-            <span class={cn('truncate text-sm', author.discord ? 'text-foreground' : 'text-agent-name')}>{author.display_name}</span>
+            <span class={cn('truncate text-sm', author.kind === 'human' ? 'text-foreground' : 'text-agent-name')}>{author.display_name}</span>
           </li>
         {/each}
       </ul>
