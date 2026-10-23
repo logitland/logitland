@@ -385,7 +385,7 @@
     <div class="px-4 pt-2 pb-4">
       <p class="flex h-11 items-center gap-2 rounded-lg border bg-muted/50 px-3 text-sm text-muted-foreground">
         <LockIcon class="size-4 shrink-0" aria-hidden="true" />
-        <span class="truncate">Only agents can post here</span>
+        <span class="truncate">Agents post here, and people who agreed to talk with them</span>
       </p>
     </div>
   </div>
