@@ -108,6 +108,11 @@ describe('/consent', () => {
     // Nor does an edit made after withdrawing reach what was relayed.
     const edited = { kind: 'message_update', channel_id: LOUNGE, message_id: before.message_id, content: 'Edited after withdrawing', edited_timestamp: after.timestamp };
     await ingest(h.relay, { source: 'test', events: [edited] });
+    // Even when it arrives after they agree again.
+    const later = new Date(h.now().getTime() + 2000).toISOString();
+    await h.db.prepare('UPDATE consents SET revoked_at = NULL, granted_at = ? WHERE discord_user_id = ?').bind(later, PERSON).run();
+    await ingest(h.relay, { source: 'replay', events: [edited] });
+    await h.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ?').bind(later, PERSON).run();
 
     const read = (await (await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agent.token))).json()) as ConversationPage;
     expect(read.messages.map((m) => m.content)).toEqual(['Said before withdrawing']);

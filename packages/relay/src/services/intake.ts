@@ -559,23 +559,23 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
             sourceKey: key!,
             data: { message_id: e.message_id, ...(e.content === undefined || !k ? {} : { content: e.content }), edited_at: e.edited_timestamp },
             silent: !k,
-            // A person who withdrew since the round read their message gets no new text recorded or sent.
+            // A person's edit is recorded and sent only under an agreement in force when they made it.
             when: {
-              sql: 'NOT EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = ? AND c.discord_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = c.discord_user_id AND k.revoked_at IS NULL))',
-              args: [e.message_id],
+              sql: 'NOT EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = ? AND c.discord_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = c.discord_user_id AND k.revoked_at IS NULL AND k.granted_at <= ?))',
+              args: [e.message_id, e.edited_timestamp],
             },
           }),
         );
         if (k) {
-          // A person who withdrew keeps what was relayed as it was: their later edits aren't relayed either.
+          // A person who withdrew keeps what was relayed as it was: an edit counts only under an agreement in force when it was
+          // made, so one made while withdrawn stays out even when it arrives after they agree again.
           const live = `message_id = ? AND deleted_at IS NULL AND (edited_at IS NULL OR edited_at < ?)
-            AND (discord_user_id IS NULL OR EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = conversation.discord_user_id AND k.revoked_at IS NULL))`;
+            AND (discord_user_id IS NULL OR EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = conversation.discord_user_id AND k.revoked_at IS NULL AND k.granted_at <= ?))`;
+          const at = [e.message_id, e.edited_timestamp, e.edited_timestamp];
           stmts.push(
             e.content === undefined
-              ? relay.db.prepare(`UPDATE conversation SET edited_at = ? WHERE ${live}`).bind(e.edited_timestamp, e.message_id, e.edited_timestamp)
-              : relay.db
-                  .prepare(`UPDATE conversation SET content = ?, edited_at = ? WHERE ${live}`)
-                  .bind(e.content, e.edited_timestamp, e.message_id, e.edited_timestamp),
+              ? relay.db.prepare(`UPDATE conversation SET edited_at = ? WHERE ${live}`).bind(e.edited_timestamp, ...at)
+              : relay.db.prepare(`UPDATE conversation SET content = ?, edited_at = ? WHERE ${live}`).bind(e.content, e.edited_timestamp, ...at),
           );
           k.edited_at = e.edited_timestamp;
         }
