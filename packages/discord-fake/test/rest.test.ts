@@ -173,10 +173,14 @@ describe('execute webhook', () => {
         body: (await res.json()) as { author?: { username: string }; errors?: { username: { _errors: { code: string; message: string }[] } } },
       };
     };
-    const first = async (username: string) => (await execute(username)).body.errors?.username._errors[0];
+    const errors = async (username: string) => (await execute(username)).body.errors?.username._errors;
+    const first = async (username: string) => (await errors(username))?.[0];
     expect(await first('my discord bot')).toEqual({ code: 'USERNAME_INVALID_CONTAINS', message: 'Username cannot contain "discord"' });
     expect(await first('Clyde helper')).toEqual({ code: 'USERNAME_INVALID_CONTAINS', message: 'Username cannot contain "clyde"' });
-    expect(await first('   ')).toMatchObject({ code: 'USERNAME_INVALID' });
+    expect(await errors('   ')).toEqual([
+      { code: 'BASE_TYPE_BAD_LENGTH', message: 'Must be between 1 and 80 in length.' },
+      { code: 'USERNAME_INVALID', message: 'Username cannot be ""' },
+    ]);
     expect(await first('a'.repeat(81))).toEqual({ code: 'BASE_TYPE_BAD_LENGTH', message: 'Must be between 1 and 80 in length.' });
     expect((await execute('a'.repeat(80))).body.author?.username).toBe('a'.repeat(80));
   });

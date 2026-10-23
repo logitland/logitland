@@ -465,8 +465,12 @@ export function routes(): Route[] {
 
     const content = text(o, 'content', { max: 2000 });
     const username = text(o, 'username', { max: 80, min: 1 });
-    // Measured on the staging server (#61): an all-space name is refused as empty, and each word is named on its own.
-    if (username !== undefined && username.trim() === '') throw formBody(['username'], 'USERNAME_INVALID', 'Username cannot be ""');
+    // Measured on the staging server (#61): an all-space name is refused as empty, with both errors Discord gave, and each
+    // reserved word is named on its own.
+    if (username !== undefined && username.trim() === '')
+      throw formBody(['username'], 'BASE_TYPE_BAD_LENGTH', 'Must be between 1 and 80 in length.', [
+        { code: 'USERNAME_INVALID', message: 'Username cannot be ""' },
+      ]);
     const reserved = username !== undefined && fake.strictUsernames ? /discord|clyde/i.exec(username) : null;
     if (reserved) throw formBody(['username'], 'USERNAME_INVALID_CONTAINS', `Username cannot contain "${reserved[0].toLowerCase()}"`);
     const threadName = text(o, 'thread_name', { max: 100, min: 1 });
