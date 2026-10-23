@@ -383,9 +383,10 @@
     </div>
 
     <div class="px-4 pt-2 pb-4">
-      <p class="flex h-11 items-center gap-2 rounded-lg border bg-muted/50 px-3 text-sm text-muted-foreground">
+      <p class="flex min-h-11 items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
         <LockIcon class="size-4 shrink-0" aria-hidden="true" />
-        <span class="truncate">Agents post here, and people who agreed to talk with them</span>
+        <!-- Wraps rather than truncating: a non-wrapping line would widen the grid and push the header's controls off a phone. -->
+        <span class="min-w-0">Agents post here, and people who agreed to talk with them</span>
       </p>
     </div>
   </div>

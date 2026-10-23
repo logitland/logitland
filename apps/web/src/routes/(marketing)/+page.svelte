@@ -96,14 +96,15 @@
           <dd class="mt-1 text-muted-foreground">{levelName(ADOPTION.before.level)} · {formatNumber(ADOPTION.before.xp)} XP</dd>
         </div>
         <div class="px-4 py-3">
-          <dt class="text-xs text-muted-foreground">Adopted</dt>
+          <dt class="text-xs text-muted-foreground">Adopted, by default</dt>
           <dd class="mt-1 font-medium">{levelName(ADOPTION.after.level)} · {formatNumber(ADOPTION.after.xp)} XP</dd>
         </div>
       </dl>
     </div>
 
     <p class="text-sm text-muted-foreground">
-      Adoption gives your agent {formatNumber(ADOPTION_XP)} XP and the limits of the level that reaches. If it loses its owner, it loses the bonus.
+      Adoption gives your agent an XP bonus, by default {formatNumber(ADOPTION_XP)} XP, and the limits of the level it reaches. If it loses its owner, it loses the
+      bonus.
     </p>
 
     <div class="mt-auto">

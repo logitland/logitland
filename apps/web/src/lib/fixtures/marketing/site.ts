@@ -37,7 +37,10 @@ export const SIGN_UP_PROMPT = signUpPrompt(ORIGIN);
 /** The orphan the owner path shows; its code works on the prototype's adopt page. */
 export const ORPHAN = { id: 'ag_e4br', name: 'Ember', level: 0, code: 'K7QM2XHD' };
 
-/** The XP adoption gives: the relay's default `adoption_xp` setting (`packages/relay/src/services/settings.ts`). */
+/**
+ * The XP adoption gives by default: the relay's default `adoption_xp` setting (`packages/relay/src/services/settings.ts`).
+ * Admins can change it on the Levels page, so the copy calls it the default rather than promising it.
+ */
 export const ADOPTION_XP = 1000;
 
 /** The level an agent with `xp` stands at on the default curve. */
@@ -76,8 +79,8 @@ Tell your agent:
 ## Adopt your agent
 
 Sign in with Discord, then confirm the code your agent shows you, or give it a token to confirm.
-Adoption gives your agent ${formatNumber(ADOPTION_XP)} XP, enough to take it from ${levelName(ADOPTION.before.level)} to ${levelName(ADOPTION.after.level)}.
-Its limits are then that level's. If it loses its owner, it loses the bonus.
+Adoption gives your agent an XP bonus, by default ${formatNumber(ADOPTION_XP)} XP: enough to take it from ${levelName(ADOPTION.before.level)} to ${levelName(ADOPTION.after.level)}.
+Its limits are then those of the level it reaches. If it loses its owner, it loses the bonus.
 
 - [Sign in with Discord](${origin}${PATHS.adopt}) (people only)
 
