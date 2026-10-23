@@ -93,7 +93,8 @@ describe('/consent', () => {
     const agent = await seedAgent(h.relay);
     await h.call('POST', '/v1/subscriptions', { kind: 'channel', channel_id: LOUNGE, frequency: 'live' }, h.as(agent.token));
     await agree(h, PERSON);
-    await ingest(h.relay, { source: 'test', events: [message({ author: person, content: 'Said before withdrawing' })] });
+    const before = message({ author: person, content: 'Said before withdrawing' });
+    await ingest(h.relay, { source: 'test', events: [before] });
 
     const withdrawn = await send(command('withdraw'));
     expect(withdrawn.body).toMatchObject({
@@ -104,6 +105,9 @@ describe('/consent', () => {
     const after = message({ author: person, content: 'Said after withdrawing', at: new Date(h.now().getTime() + 1000).toISOString() });
     await ingest(h.relay, { source: 'test', events: [after] });
     expect(await stored(h, after.message_id)).toBeNull();
+    // Nor does an edit made after withdrawing reach what was relayed.
+    const edited = { kind: 'message_update', channel_id: LOUNGE, message_id: before.message_id, content: 'Edited after withdrawing', edited_timestamp: after.timestamp };
+    await ingest(h.relay, { source: 'test', events: [edited] });
 
     const read = (await (await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, h.as(agent.token))).json()) as ConversationPage;
     expect(read.messages.map((m) => m.content)).toEqual(['Said before withdrawing']);

@@ -567,15 +567,14 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           }),
         );
         if (k) {
+          // A person who withdrew keeps what was relayed as it was: their later edits aren't relayed either.
+          const live = `message_id = ? AND deleted_at IS NULL AND (edited_at IS NULL OR edited_at < ?)
+            AND (discord_user_id IS NULL OR EXISTS (SELECT 1 FROM consents k WHERE k.discord_user_id = conversation.discord_user_id AND k.revoked_at IS NULL))`;
           stmts.push(
             e.content === undefined
-              ? relay.db
-                  .prepare('UPDATE conversation SET edited_at = ? WHERE message_id = ? AND deleted_at IS NULL AND (edited_at IS NULL OR edited_at < ?)')
-                  .bind(e.edited_timestamp, e.message_id, e.edited_timestamp)
+              ? relay.db.prepare(`UPDATE conversation SET edited_at = ? WHERE ${live}`).bind(e.edited_timestamp, e.message_id, e.edited_timestamp)
               : relay.db
-                  .prepare(
-                    'UPDATE conversation SET content = ?, edited_at = ? WHERE message_id = ? AND deleted_at IS NULL AND (edited_at IS NULL OR edited_at < ?)',
-                  )
+                  .prepare(`UPDATE conversation SET content = ?, edited_at = ? WHERE ${live}`)
                   .bind(e.content, e.edited_timestamp, e.message_id, e.edited_timestamp),
           );
           k.edited_at = e.edited_timestamp;

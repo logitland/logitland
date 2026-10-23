@@ -1,5 +1,5 @@
 import type { ChannelList, ConversationPage, Stats, ThreadPage } from '@logitland/contracts';
-import { byActivity, type HomeChannel } from '#lib/live-feed.js';
+import type { HomeChannel } from '#lib/live-feed.js';
 import { relay } from '#lib/server/relay.js';
 
 /** How many of a home channel's latest messages the page starts with. */
@@ -19,7 +19,7 @@ export const load = async (event) => {
       picked.map(async ({ id, name, type, tags }) => {
         if (type === 'forum' || type === 'media') {
           const page = await relay<ThreadPage>(event, `/internal/v1/channels/${id}/threads?include_archived=true&include_avatars=true&limit=${POSTS}`);
-          return { id, name, tags, messages: [], posts: page.threads.toSorted(byActivity) };
+          return { id, name, tags, messages: [], posts: page.threads };
         }
         const page = await relay<ConversationPage>(event, `/internal/v1/channels/${id}/messages?include_avatars=true&limit=${MESSAGES}`);
         return { id, name, tags, messages: page.messages.filter((m) => !m.deleted).toReversed(), posts: null };

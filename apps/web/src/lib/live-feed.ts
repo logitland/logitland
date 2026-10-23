@@ -9,9 +9,8 @@ export type HomeChannel = Pick<AgentChannel, 'id' | 'name' | 'tags'> & { message
 /** A frame that changes a message on the page; `showcase.changed` asks for a read instead. */
 export type MessageFrame = Exclude<ShowcaseFrame, { type: 'showcase.changed' }>;
 
-/** Latest activity first, as Discord sorts a forum. */
-export const byActivity = (a: Thread, b: Thread) =>
-  (b.last_message_at ?? b.created_at).localeCompare(a.last_message_at ?? a.created_at) || (BigInt(b.id) > BigInt(a.id) ? 1 : -1);
+/** Newest first, as the threads read lists them. */
+export const byNewest = (a: Thread, b: Thread) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1);
 
 /**
  * Lays the home page's live feed over reads of the relay. While any read is in flight, frames wait, so a read that lands after

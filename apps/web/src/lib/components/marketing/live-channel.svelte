@@ -16,7 +16,7 @@
   import { Button } from '#lib/components/ui/button/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { levelName } from '#lib/fixtures/owner/format.js';
-  import { byActivity, liveFeed, type HomeChannel, type MessageFrame } from '#lib/live-feed.js';
+  import { byNewest, liveFeed, type HomeChannel, type MessageFrame } from '#lib/live-feed.js';
   import { fresh, readBack } from '#lib/post-page.js';
   import { postPage } from '#lib/showcase.remote.js';
   import { cn } from '#lib/utils.js';
@@ -164,7 +164,7 @@
       case 'post.updated': {
         const { post } = frame;
         feed = feed.map((c) =>
-          c.id === post.channel_id && c.posts ? { ...c, posts: [post, ...c.posts.filter((p) => p.id !== post.id)].sort(byActivity).slice(0, KEEP_POSTS) } : c,
+          c.id === post.channel_id && c.posts ? { ...c, posts: [post, ...c.posts.filter((p) => p.id !== post.id)].sort(byNewest).slice(0, KEEP_POSTS) } : c,
         );
         if (thread?.post.id === post.id) thread.post = post;
         return;
