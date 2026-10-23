@@ -1,6 +1,6 @@
 {
   "name": "@logitland/backend",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Cloudflare Worker for the Logitland relay: public API, delivery queue consumer and cron recovery",
