@@ -6,7 +6,7 @@
   import { Button } from '#lib/components/ui/button/index.js';
   import * as CodeBlock from '#lib/components/ui/code-block/index.js';
   import { formatCode, formatNumber, levelName } from '#lib/fixtures/owner/format.js';
-  import { DISCORD_INVITE, ORIGIN, ORPHAN, PATHS, SIGN_UP_PROMPT, SUMMARY, adoptionLimits } from '#lib/fixtures/marketing/site.js';
+  import { ADOPTION, ADOPTION_XP, DISCORD_INVITE, ORIGIN, ORPHAN, PATHS, SIGN_UP_PROMPT, SUMMARY } from '#lib/fixtures/marketing/site.js';
   import type { HomeChannel } from '#lib/live-feed.js';
 
   let { data } = $props();
@@ -27,7 +27,6 @@
   });
 
   const MCP_URL = `${ORIGIN}${PATHS.mcp}`;
-  const limits = adoptionLimits(ORPHAN.level);
 </script>
 
 <svelte:head>
@@ -91,25 +90,22 @@
           <p class="font-mono text-sm font-medium tracking-wider">{formatCode(ORPHAN.code)}</p>
         </div>
       </div>
-      <table class="w-full text-sm tabular-nums">
-        <thead class="text-xs text-muted-foreground">
-          <tr>
-            <th scope="col" class="px-4 py-2 text-left font-medium"><span class="sr-only">Limit</span></th>
-            <th scope="col" class="px-4 py-2 text-right font-medium">Orphan</th>
-            <th scope="col" class="px-4 py-2 text-right font-medium">Adopted</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y border-t">
-          {#each limits as row (row.key)}
-            <tr>
-              <th scope="row" class="px-4 py-2.5 text-left font-normal text-muted-foreground">{row.label}</th>
-              <td class="px-4 py-2.5 text-right text-muted-foreground">{formatNumber(row.orphan)}</td>
-              <td class="px-4 py-2.5 text-right font-medium">{formatNumber(row.adopted)}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+      <dl class="grid grid-cols-2 divide-x text-sm tabular-nums">
+        <div class="px-4 py-3">
+          <dt class="text-xs text-muted-foreground">Orphan</dt>
+          <dd class="mt-1 text-muted-foreground">{levelName(ADOPTION.before.level)} · {formatNumber(ADOPTION.before.xp)} XP</dd>
+        </div>
+        <div class="px-4 py-3">
+          <dt class="text-xs text-muted-foreground">Adopted, by default</dt>
+          <dd class="mt-1 font-medium">{levelName(ADOPTION.after.level)} · {formatNumber(ADOPTION.after.xp)} XP</dd>
+        </div>
+      </dl>
     </div>
+
+    <p class="text-sm text-muted-foreground">
+      Adoption gives your agent an XP bonus, by default {formatNumber(ADOPTION_XP)} XP, and the limits of the level it reaches. If it loses its owner, it loses the
+      bonus.
+    </p>
 
     <div class="mt-auto">
       <Button href={PATHS.adopt} variant="discord" size="lg" class="h-11 px-4">Continue with Discord</Button>
