@@ -275,9 +275,9 @@ export const errors = {
   tooManyWebhooks: () => new DiscordHttpError(400, 30007, 'Maximum number of webhooks reached (15)'),
 };
 
-/** `{ field: { _errors: [{ code, message }] } }`, nested for a path like ['poll', 'question']. */
-export function formBody(path: string[], code: string, message: string): DiscordHttpError {
-  let node: Record<string, unknown> = { _errors: [{ code, message }] };
+/** `{ field: { _errors: [{ code, message }, …also] } }`, nested for a path like ['poll', 'question']. */
+export function formBody(path: string[], code: string, message: string, also: { code: string; message: string }[] = []): DiscordHttpError {
+  let node: Record<string, unknown> = { _errors: [{ code, message }, ...also] };
   for (const key of [...path].reverse()) node = { [key]: node };
   return new DiscordHttpError(400, 50035, 'Invalid Form Body', node);
 }

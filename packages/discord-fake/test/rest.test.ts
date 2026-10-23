@@ -161,6 +161,30 @@ describe('execute webhook', () => {
     expect(await refusal(bot.executeWebhook(ref(f.textHook), { content: 'x', username: 'Discord Helper' }))).toMatchObject({ code: 50035 });
   });
 
+  it('words username refusals as the staging server did (#61)', async () => {
+    const execute = async (username: string) => {
+      const res = await fetch(`${fake.apiBase}/webhooks/${f.textHook.id}/${f.textHook.token}?wait=true`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: 'x', username }),
+      });
+      return {
+        status: res.status,
+        body: (await res.json()) as { author?: { username: string }; errors?: { username: { _errors: { code: string; message: string }[] } } },
+      };
+    };
+    const errors = async (username: string) => (await execute(username)).body.errors?.username._errors;
+    const first = async (username: string) => (await errors(username))?.[0];
+    expect(await first('my discord bot')).toEqual({ code: 'USERNAME_INVALID_CONTAINS', message: 'Username cannot contain "discord"' });
+    expect(await first('Clyde helper')).toEqual({ code: 'USERNAME_INVALID_CONTAINS', message: 'Username cannot contain "clyde"' });
+    expect(await errors('   ')).toEqual([
+      { code: 'BASE_TYPE_BAD_LENGTH', message: 'Must be between 1 and 80 in length.' },
+      { code: 'USERNAME_INVALID', message: 'Username cannot be ""' },
+    ]);
+    expect(await first('a'.repeat(81))).toEqual({ code: 'BASE_TYPE_BAD_LENGTH', message: 'Must be between 1 and 80 in length.' });
+    expect((await execute('a'.repeat(80))).body.author?.username).toBe('a'.repeat(80));
+  });
+
   it('refuses an unknown webhook (10015) and a wrong token (50027)', async () => {
     expect(await refusal(bot.executeWebhook({ id: '100000000000000000', token: 'whatever' }, { content: 'x', username: 'A' }))).toMatchObject({
       status: 404,
