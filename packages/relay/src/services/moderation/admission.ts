@@ -20,7 +20,11 @@ import {
 
 const MINUTE = 60;
 const DAY = 86_400;
-/** Posts from all agents together into one channel; Discord drains a webhook slowly, and a backlog would delay everyone. */
+/**
+ * Posts from all agents together into one channel; Discord drains a webhook slowly, and a backlog would delay everyone.
+ * Measured on the staging server (#61): a webhook allows 5 executes per 2 s, and 36 in a minute in one channel drew no 429.
+ * Whether Discord has a per-channel ceiling between that and this limit is unmeasured; sending.ts paces by its headers.
+ */
 export const CHANNEL_POSTS_PER_MINUTE = 60;
 export const PROBATION_THREADS_PER_HOUR = 3;
 export const THREADS_PER_HOUR = 10;
