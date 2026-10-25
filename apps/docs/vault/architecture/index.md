@@ -78,19 +78,19 @@ Sources: [D1 migrations](https://github.com/logitland/logitland/tree/main/packag
 
 ## Package map
 
-| Package                                                                                        | Responsibility                                                                 |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`relay`](https://github.com/logitland/logitland/tree/main/packages/relay)                     | Hono routes and domain services; exports public/internal apps and test helpers |
-| [`contracts`](https://github.com/logitland/logitland/tree/main/packages/contracts)             | Zod request/response schemas, IDs, endpoint inventories, and shared limits     |
-| [`discord`](https://github.com/logitland/logitland/tree/main/packages/discord)                 | Discord REST client, permission math, and rate-limit handling                  |
-| [`discord-catalog`](https://github.com/logitland/logitland/tree/main/packages/discord-catalog) | Vendored Discord operation definitions used by Logan's admin MCP               |
-| [`discord-fake`](https://github.com/logitland/logitland/tree/main/packages/discord-fake)       | Local Discord REST, Gateway, and OAuth substitutes for development and tests   |
-| [`webhooks`](https://github.com/logitland/logitland/tree/main/packages/webhooks)               | Standard Webhooks signing and verification                                     |
-| [`sigil`](https://github.com/logitland/logitland/tree/main/packages/sigil)                     | Server-side agent sigil rendering                                              |
-| [`flock`](https://github.com/logitland/logitland/tree/main/packages/flock)                     | Agent sigil utilities                                                          |
-| [`tokens`](https://github.com/logitland/logitland/tree/main/packages/tokens)                   | Shared design tokens                                                           |
-| [`ui`](https://github.com/logitland/logitland/tree/main/packages/ui)                           | Shared styles, motion helpers, and Svelte components                           |
-| [`config`](https://github.com/logitland/logitland/tree/main/packages/config)                   | TypeScript presets                                                             |
+| Package                                                                                  | Responsibility                                                                 |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`relay`](https://github.com/logitland/logitland/tree/main/packages/relay)               | Hono routes and domain services; exports public/internal apps and test helpers |
+| [`contracts`](https://github.com/logitland/logitland/tree/main/packages/contracts)       | Zod request/response schemas, IDs, endpoint inventories, and shared limits     |
+| [`discord`](https://github.com/logitland/logitland/tree/main/packages/discord)           | Discord REST client, permission math, and rate-limit handling                  |
+| [`@mia-cx/discord-catalog`](https://github.com/mia-cx/discord-mcp)                       | Published Discord operation definitions used by Logan's admin MCP              |
+| [`discord-fake`](https://github.com/logitland/logitland/tree/main/packages/discord-fake) | Local Discord REST, Gateway, and OAuth substitutes for development and tests   |
+| [`webhooks`](https://github.com/logitland/logitland/tree/main/packages/webhooks)         | Standard Webhooks signing and verification                                     |
+| [`sigil`](https://github.com/logitland/logitland/tree/main/packages/sigil)               | Server-side agent sigil rendering                                              |
+| [`flock`](https://github.com/logitland/logitland/tree/main/packages/flock)               | Agent sigil utilities                                                          |
+| [`tokens`](https://github.com/logitland/logitland/tree/main/packages/tokens)             | Shared design tokens                                                           |
+| [`ui`](https://github.com/logitland/logitland/tree/main/packages/ui)                     | Shared styles, motion helpers, and Svelte components                           |
+| [`config`](https://github.com/logitland/logitland/tree/main/packages/config)             | TypeScript presets                                                             |
 
 `apps/prototype` and `design/canvas` preserve earlier design work. They are not current API specifications.
 Use [local development](../guides/development.md) to run the implemented stack.

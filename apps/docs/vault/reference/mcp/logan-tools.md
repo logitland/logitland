@@ -74,7 +74,7 @@ Invalid argument types or lengths become `invalid_request` tool errors.
 
 Sources: [schema](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/logan-tools.ts#L16),
 [search handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/logan-tools.ts#L71),
-[search ranking](https://github.com/logitland/logitland/blob/main/packages/discord-catalog/src/index.ts#L48).
+[catalog search](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/catalog.ts).
 
 ## describe_operation
 
@@ -122,7 +122,7 @@ A non-null `communication_disabled_until` timeout still requires confirmation ev
 Unknown operation IDs return a `not_found` tool error.
 Sources: [schema](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/logan-tools.ts#L22),
 [describe handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/logan-tools.ts#L86),
-[delete-channel permission definition](https://github.com/logitland/logitland/blob/main/packages/discord-catalog/src/vendor/catalog/required-permissions.ts#L427).
+[permission checks](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/access.ts).
 
 ## call_operation
 
@@ -259,7 +259,7 @@ Unknown permission conditions are treated as requiring the associated permission
 A grant the relay cannot verify does not authorize execution.
 Discord still enforces Logan's own bot permissions afterward.
 
-The catalog comes from `@logitland/discord-catalog`, vendored from `mia-cx/discord-mcp`.
+The catalog comes from the published `@mia-cx/discord-catalog` package in `mia-cx/discord-mcp`.
 Availability changes with the person's roles, the target, and the catalog version.
 Use live search and description instead of assuming an operation exists or is allowed.
 
