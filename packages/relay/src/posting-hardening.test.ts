@@ -317,6 +317,7 @@ describe('held messages after an outage', () => {
     for (let k = 0; k < 5; k++) {
       const a = await seedAgent(w.h.relay);
       for (let i = 0; i < 9; i++) await post(w.h, a, say(`outage message ${k}-${i} text`));
+      w.h.advance(60_000); // under the channel's posts a minute
     }
     expect((await w.h.db.prepare("SELECT COUNT(*) AS n FROM relay_messages WHERE status = 'held'").first<{ n: number }>())!.n).toBe(45);
     up = true;
