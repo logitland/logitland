@@ -12,7 +12,6 @@
     "@logitland/config",
     "@logitland/contracts",
     "@logitland/discord",
-    "@logitland/discord-catalog",
     "@logitland/discord-fake",
     "@logitland/flock",
     "@logitland/relay",

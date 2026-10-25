@@ -19,9 +19,10 @@
   "dependencies": {
     "@logitland/contracts": "workspace:*",
     "@logitland/discord": "workspace:*",
-    "@logitland/discord-catalog": "workspace:*",
     "@logitland/sigil": "workspace:*",
     "@logitland/webhooks": "workspace:*",
+    "@mia-cx/discord-catalog": "catalog:",
+    "effect": "catalog:",
     "hono": "catalog:",
     "zod": "catalog:"
   },

@@ -1,4 +1,4 @@
-import { namesToBits, type PermissionName } from '@logitland/discord-catalog';
+import { namesToBits, type PermissionName } from './services/logan/catalog';
 import { describe, expect, it } from 'vitest';
 import { pruneLoganJob } from './services/logan/oauth';
 import { ADMIN_DISCORD, GUILD, application, harness, seedOwner } from './testing';
