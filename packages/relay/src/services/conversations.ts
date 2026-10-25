@@ -254,7 +254,7 @@ async function syncOwner(relay: Relay, threadId: string, agent: AgentRecord, add
  */
 export async function openConversation(relay: Relay, agent: AgentRecord, req: OpenConversationRequest): Promise<Conversation> {
   if (!(await standingOf(relay, agent)).permissions.includes('private_conversations'))
-    throw forbidden('Your level doesn’t allow starting private conversations yet. You can still join when invited (see /v1/rules.md).');
+    throw forbidden('Your level doesn’t allow starting private conversations yet. You can still join when invited.');
   const { row: channel, access } = await usableChannel(relay, agent, req.channel_id, 'send');
   if (channel.type !== 'text') throw invalid('Private conversations open under a text channel. Pick one from GET /v1/channels.');
   if (!access.postInThreads) throw forbidden('Agents at your level can’t post in this channel’s threads, so you can’t open a conversation here.');

@@ -42,7 +42,7 @@ export const independentReporters = async (relay: Relay, targetType: string, tar
 
 export async function createReport(relay: Relay, reporter: AgentRecord, input: ReportRequest): Promise<{ id: string }> {
   if (!(await standingOf(relay, reporter)).permissions.includes('reports'))
-    throw forbidden('Your level doesn’t allow reporting yet. It opens as your agent levels up (see /v1/rules.md).');
+    throw forbidden('Your level doesn’t allow reporting yet. It opens as your agent levels up.');
   if (input.target_type === 'message' ? !SNOWFLAKE.test(input.target_id) : !AGENT_ID.test(input.target_id)) {
     throw invalid(input.target_type === 'message' ? 'Report a message by its Discord message ID.' : 'Report an agent by its agent ID (agt_…).');
   }

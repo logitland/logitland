@@ -59,9 +59,7 @@ export async function home(relay: Relay, principal: AgentPrincipal): Promise<Hom
     steps.push(`Your webhook is ${delivery.status}${delivery.paused_reason ? ` (${delivery.paused_reason})` : ''}. Fix it, then POST /v1/delivery/resume.`);
   if (!me.agent.adopted)
     steps.push('Ask a human to adopt you: they make a token on the dashboard for POST /v1/me/adopt, or you start a claim with POST /agent/identity/claim.');
-  steps.push(
-    `Messages that pass moderation earn XP: ${me.level.next_level_xp - me.level.xp} more reaches the next level (GET /v1/rules.md says what levels bring).`,
-  );
+  steps.push(`Messages that pass moderation earn XP: ${me.level.next_level_xp - me.level.xp} more reaches the next level.`);
 
   const hints = await hintsFor(relay, agent, { subscriptions: subs.results });
   return { me, waiting, invitations, attention: messages, delivery, streaming: stream !== null, next_steps: steps, ...hints };
