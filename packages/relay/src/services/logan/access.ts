@@ -18,7 +18,7 @@ import {
 // Who may have Logan do what (the Logan admin MCP). Logan holds more permissions than most people, and Discord only checks
 // Logan's, so the relay checks the person's own before every call, from scratch: their admin standing and roles fetched from
 // Discord just now along with who owns the server, the server's roles from the Gateway, and the target channel fetched too. It follows the required-permissions
-// table's own rules (packages/discord-catalog): a grant whose condition can't be verified doesn't hold, a condition that can't be
+// table's own rules (@mia-cx/discord-catalog): a grant whose condition can't be verified doesn't hold, a condition that can't be
 // decided is assumed to hold, and hierarchy is enforced here because Discord compares only Logan's roles. Anything this can't
 // check is refused: stricter than Discord, never looser.
 
