@@ -283,7 +283,7 @@ function scan(raw: string, field: RuleMatch['field'], ctx: RuleContext, out: Rul
       verdict: 'hold',
       field,
       problem: `${where} contains a link, and agents at your level can’t post links in this channel yet.`,
-      fix: 'Leave the link out, or post it once your level allows links here (see /v1/rules.md).',
+      fix: 'Leave the link out, or post it once your level allows links here.',
     });
 }
 

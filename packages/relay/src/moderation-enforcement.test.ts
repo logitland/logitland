@@ -1,5 +1,5 @@
-import { APPEAL_MESSAGE_CHARS, LIMITS, newId } from '@logitland/contracts';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { LIMITS, newId } from '@logitland/contracts';
+import { describe, expect, it, vi } from 'vitest';
 import { decideAppeal } from './services/moderation/admin';
 import { OUTAGE_BACKOFF_MINUTES, RULE_BLOCKS_PER_STRIKE, explain, outageGiveUpMinutes, outageRecheckDue } from './services/moderation/policy';
 import { evaluateRules, judge } from './services/moderation/rules';
@@ -7,7 +7,7 @@ import { RECHECK_BUDGET_MS, reviewHeldJob } from './services/review';
 import { sweepStuckJob } from './services/sending';
 import { activeStrikeCount, addStrike } from './services/strikes';
 import { converse, down, json, mod, patch, pass, post, row, say, world } from './posting-fixtures';
-import { ADMIN_DISCORD, LOUNGE, harness, seedAgent, seedOwner, type Harness } from './testing';
+import { ADMIN_DISCORD, LOUNGE, seedAgent, seedOwner, type Harness } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -358,48 +358,5 @@ describe('deciding an appeal', () => {
     expect(await activeStrikeCount(w.h.relay, w.a.id)).toBe(1);
     expect(await count(w.h, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'appeal.upheld'")).toBe(1);
     await expect(decideAppeal(w.h.relay, adminId, filed.id, { decision: 'overturn', response: 'Changed my mind.' })).rejects.toMatchObject({ status: 409 });
-  });
-});
-
-describe('the community rules document', () => {
-  let doc: string;
-  beforeAll(async () => {
-    doc = await (await harness().call('GET', '/v1/rules.md')).text();
-  });
-
-  it('has a valid policy table, and no rows for codes that are never sent', () => {
-    expect(doc).toContain('| Code | Meaning |\n|---|---|\n| `control_chars` |');
-    expect(doc).not.toContain('| `length` |');
-    expect(doc).not.toContain('| `probation` |');
-    expect(doc).toMatch(/Other refusals carry none/);
-    expect(doc).toMatch(/refused with a 400 `invalid_request`[^.]*carries no policy code/);
-  });
-
-  it('describes probation as level 0, ended by XP including adoption’s award', () => {
-    expect(doc).toContain('Level 0 is probation.');
-    expect(doc).toContain("Probation ends when your XP reaches level 1, which adoption's XP may do.");
-  });
-
-  it('gives agents plain duties about people’s messages and their own key', () => {
-    for (const phrase of [
-      '## People and their messages',
-      'Not go looking for people',
-      '`message.deleted` or `message.bulk_deleted`',
-      "Not train models on people's messages",
-      'Not bulk-export the server',
-      'Not fetch links from chat blindly',
-      'POST /oauth2/revoke',
-    ]) {
-      expect(doc, phrase).toContain(phrase);
-    }
-  });
-
-  it('states the repeat-block strike rule, the outage schedule and the refusal limits from the constants', () => {
-    expect(doc).toContain(`${RULE_BLOCKS_PER_STRIKE} messages or edits blocked for`);
-    expect(doc).toContain('checks again after 1 minute, then after a further 1, 2, 5, 10 and 30 minutes, and then every 60 minutes');
-    expect(doc).toContain('after about 7 hours');
-    expect(doc).toContain(`message\` is ${APPEAL_MESSAGE_CHARS.min} to ${APPEAL_MESSAGE_CHARS.max} characters`);
-    expect(doc).toContain(`${LIMITS.messageChars.toLocaleString('en-US')} characters`);
-    expect(doc).toContain(`stay \`queued\``);
   });
 });
