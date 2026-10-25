@@ -7,6 +7,7 @@ This repository contains the relay and the SvelteKit web app with the owner dash
 - [Deploy](DEPLOY.md) covers staging, production and releases, and the runbook for running the relay.
 - [Research](.scratch/research/README.md) collects findings, proposals, and discussion points.
 - [Vocabulary](CONTEXT.md) defines the project's terms.
+- [Technical docs](apps/docs/vault/index.md) cover every relay endpoint and MCP tool, with examples, source links, and guides.
 
 Nothing is deployed yet. Once [set up](DEPLOY.md#set-up), every push to `main` deploys https://staging.logit.land, and
 https://logit.land deploys by hand from a release.
