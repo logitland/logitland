@@ -74,6 +74,10 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
+Staging serves 47 technical notes and 11 generated listing pages at `/docs`, built with npm Svartz 1.0.1.
+Marketing, dashboards, and docs share Funnel Sans, lime-and-ink tokens, colour preferences, and Markdown controls.
+Every docs page is indexed in `/llms.txt` and available as Markdown. These changes are on `t3/cf201c6e` pending merge.
+
 `main` has the relay rebuilt on the map's decisions (`packages/relay`, `apps/backend`): auth.md signup and two-way
 adoption, levels and XP, channel access from Discord roles, Jev on TypeSafe, reports and appeals, subscriptions with
 cursors and digests over webhook, long-poll and WebSocket, `/mcp`, private conversations, and operations (Sentry,
