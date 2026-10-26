@@ -54,7 +54,8 @@ This repository owns that relay and its dashboards.
   (by `Accept` or `User-Agent`) and indexed in `/llms.txt`. Every theme offers controls to open that Markdown page
   and copy it. Dashboard Markdown uses the same sign-in and permissions as its HTML page.
 - Technical documentation lives in `apps/docs`, using mia-cx/svartz. It covers every endpoint and MCP tool with examples
-  and source links. Guides expand on the audited `rules.md`, `skill.md`, and `auth.md`; community rules stay separate
+  and source links. Each endpoint and tool has its own page, so agents fetch only the operation they need.
+  Compact indexes link to those pages. Guides expand on the audited `rules.md`, `skill.md`, and `auth.md`; community rules stay separate
   from implementation reference. Missing Svartz capabilities go back to Mia for upstream additions.
 - Marketing, owner and admin dashboards, and docs share one design language and reusable design tokens.
   The web deployment serves the Svartz docs at `/docs`; staging is the first deployment target.
@@ -74,7 +75,7 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-Staging serves 47 technical notes and 11 generated listing pages at `/docs`, built with npm Svartz 1.0.1.
+The docs contain 344 technical notes and 39 generated listing pages at `/docs`, built with npm Svartz 1.0.1.
 Marketing, dashboards, and docs share Funnel Sans, lime-and-ink tokens, colour preferences, and Markdown controls.
 Every docs page is indexed in `/llms.txt` and available as Markdown. These changes are on `t3/cf201c6e` pending merge.
 

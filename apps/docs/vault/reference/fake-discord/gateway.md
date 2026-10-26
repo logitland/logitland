@@ -3,23 +3,16 @@ title: Fake Discord Gateway WebSocket
 description: Local WebSocket upgrade paths, JSON frames, identification, resume, heartbeats, events, and close codes.
 ---
 
-The [local fake](index.md) accepts WebSocket upgrades on both `/gateway` and `/`.
-Neither upgrade requires an HTTP Authorization header. IDENTIFY and RESUME authenticate inside JSON frames.
-Other upgrade paths destroy the socket.
+The [local fake](index.md) accepts WebSocket upgrades on both paths. Neither upgrade requires an HTTP Authorization header. IDENTIFY and RESUME authenticate inside JSON frames. Other upgrade paths destroy the socket.
 
-| Upgrade path                          | Required/default queries                                                          | Concrete URL                                     | Source                                                                                                   |
-| ------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `GET /gateway` with WebSocket upgrade | `v=9` or `v=10` required. `encoding` defaults to `json`. No `compress` parameter. | `ws://127.0.0.1:8790/gateway?v=10&encoding=json` | [path dispatch](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L201) |
-| `GET /` with WebSocket upgrade        | Same queries and protocol.                                                        | `ws://127.0.0.1:8790/?v=10&encoding=json`        | [path dispatch](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L201) |
+## Upgrade paths
 
-A valid WebSocket handshake upgrades with `101`.
-An invalid handshake returns HTTP `400` without a body.
-Missing/wrong API version closes with `4012`.
-Non-JSON encoding or any `compress` query closes with `4002`.
-The fake supports uncompressed JSON text, with masked client WebSocket frames.
+- [`GET /gateway`](gateway/get-gateway-upgrade.md)
+- [`GET /`](gateway/get-root-upgrade.md)
 
-Sources: [upgrade validation and HELLO](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L330),
-[WebSocket handshake](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/websocket.ts#L235).
+Each upgrade uses a valid WebSocket handshake (`101`) and sends HELLO, opcode `10`. Invalid handshakes return HTTP `400` without a body. Missing or wrong API version closes with `4012`; non-JSON encoding or any `compress` query closes with `4002`. The fake supports uncompressed JSON text, with masked client WebSocket frames.
+
+Sources: [upgrade validation and HELLO](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L330), [WebSocket handshake](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/websocket.ts#L235).
 
 ## Connect and identify
 

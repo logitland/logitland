@@ -97,7 +97,7 @@ describe('Markdown for agents', () => {
   });
 
   it('keeps a source link in angle brackets, parentheses and all, as the note wrote it', async () => {
-    const { body } = await get('/docs/reference/web/admin-remotes.md', {}, { route: '/docs/[...path]' });
+    const { body } = await get('/docs/reference/web/admin-remotes/agents.md', {}, { route: '/docs/[...path]' });
     expect(body).toContain('](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/agents/agents.remote.ts#L17>)');
   });
 
