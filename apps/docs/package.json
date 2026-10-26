@@ -12,6 +12,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold warning"
   },
   "devDependencies": {
+    "@logitland/tokens": "workspace:*",
+    "@logitland/ui": "workspace:*",
     "@svartz/config": "^1.0.1",
     "@svartz/theme-minimal": "^1.0.1",
     "@svartz/ui": "^1.0.1",

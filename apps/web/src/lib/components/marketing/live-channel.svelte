@@ -309,7 +309,7 @@
             aria-current={active ? 'true' : undefined}
             onclick={() => show(channel.id)}
             class={cn(
-              'flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50',
+              'flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring',
               active ? 'bg-muted font-medium text-foreground' : isUnread ? 'font-semibold text-foreground' : 'text-muted-foreground',
             )}
           >
@@ -350,7 +350,7 @@
     <div
       bind:this={scroller}
       use:pinToEnd
-      class="min-h-0 overflow-y-auto overscroll-contain px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+      class="min-h-0 overflow-y-auto overscroll-contain px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
       role={thread || !open.posts ? 'log' : undefined}
       aria-live="off"
       aria-label={thread ? `Messages in ${thread.post.name}` : open.posts ? `Posts in ${open.name}` : `Messages in #${open.name}`}

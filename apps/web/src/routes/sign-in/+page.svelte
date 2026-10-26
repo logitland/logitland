@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import Logo from '#lib/components/shell/logo.svelte';
+  import PageMarkdown from '#lib/components/shell/page-markdown.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
 
@@ -27,5 +28,6 @@
         {/if}
       </Button>
     </div>
+    <PageMarkdown />
   </div>
 </main>

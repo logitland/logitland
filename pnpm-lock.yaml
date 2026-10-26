@@ -336,6 +336,12 @@ importers:
 
   apps/docs:
     devDependencies:
+      '@logitland/tokens':
+        specifier: workspace:*
+        version: link:../../packages/tokens
+      '@logitland/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@svartz/config':
         specifier: ^1.0.1
         version: 1.0.1(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
@@ -393,15 +399,18 @@ importers:
 
   apps/web:
     devDependencies:
-      '@fontsource-variable/funnel-sans':
-        specifier: 'catalog:'
-        version: 5.3.0
       '@internationalized/date':
         specifier: 'catalog:'
         version: 3.12.4
       '@logitland/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@logitland/tokens':
+        specifier: workspace:*
+        version: link:../../packages/tokens
+      '@logitland/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@lucide/svelte':
         specifier: 'catalog:'
         version: 1.52.0(svelte@5.57.1)
@@ -633,6 +642,10 @@ importers:
         version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@24.19.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
 
   packages/tokens:
+    dependencies:
+      '@fontsource-variable/funnel-sans':
+        specifier: 'catalog:'
+        version: 5.3.0
     devDependencies:
       '@logitland/config':
         specifier: workspace:*
@@ -649,6 +662,9 @@ importers:
       '@logitland/tokens':
         specifier: workspace:*
         version: link:../tokens
+      '@lucide/svelte':
+        specifier: 'catalog:'
+        version: 1.52.0(svelte@5.57.1)
       torph:
         specifier: 'catalog:'
         version: 0.1.3(svelte@5.57.1)

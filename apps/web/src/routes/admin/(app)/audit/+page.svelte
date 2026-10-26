@@ -103,8 +103,9 @@
         </div>
         <div class="flex min-w-0 flex-col gap-0.5 sm:order-3">
           <span>
-            {entry.text}{#if entry.target}{' · '}<a href={entry.target.href} class="font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-                >{entry.target.label}</a
+            {entry.text}{#if entry.target}{' · '}<a
+                href={entry.target.href}
+                class="font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring">{entry.target.label}</a
               >{/if}
           </span>
           {#if entry.detail}<span class="text-pretty break-words text-muted-foreground">{entry.detail}</span>{/if}

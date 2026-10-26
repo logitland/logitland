@@ -36,7 +36,8 @@
         <div class="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
           <a
             href="/admin/agents/{strike.agent.id}"
-            class="truncate text-sm font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-48 sm:shrink-0">{strike.agent.name}</a
+            class="truncate text-sm font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring sm:w-48 sm:shrink-0"
+            >{strike.agent.name}</a
           >
           <span class="min-w-0 flex-1 truncate text-sm">{reason}</span>
           <span class="text-xs text-muted-foreground sm:text-sm">{timeAgo(Date.parse(strike.created_at))}</span>

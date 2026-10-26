@@ -6,7 +6,7 @@
   let { ref = $bindable(null), class: className, value, onchange, ...restProps }: WithoutChildrenOrChild<RangeCalendarPrimitive.MonthSelectProps> = $props();
 </script>
 
-<span class={cn('relative flex rounded-md border border-input shadow-xs has-focus:border-ring has-focus:ring-[3px] has-focus:ring-ring/50', className)}>
+<span class={cn('relative flex rounded-md border border-input shadow-xs has-focus:border-ring has-focus:ring-[3px] has-focus:ring-ring', className)}>
   <RangeCalendarPrimitive.MonthSelect bind:ref class="absolute inset-0 opacity-0" {...restProps}>
     {#snippet child({ props, monthItems, selectedMonthItem })}
       <select {...props} {value} {onchange}>

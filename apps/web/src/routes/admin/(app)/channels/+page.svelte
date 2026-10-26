@@ -83,7 +83,7 @@
                   type="button"
                   aria-expanded={open}
                   onclick={() => toggle(group.id!)}
-                  class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                  class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium tracking-wide text-muted-foreground uppercase outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
                 >
                   <ChevronDownIcon class={cn('size-3.5 transition-transform', !open && '-rotate-90')} aria-hidden="true" />
                   {group.name}

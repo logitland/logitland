@@ -6,7 +6,13 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_als"],
   "main": ".svelte-kit/cloudflare/_worker.js",
-  "assets": { "binding": "ASSETS", "directory": ".svelte-kit/cloudflare" },
+  // The build copies the docs site (apps/docs) under /docs. Its pages reach the Worker first, so agents get their Markdown
+  // (src/routes/docs); its hashed files are served straight from the assets.
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".svelte-kit/cloudflare",
+    "run_worker_first": ["/docs", "/docs/*", "!/docs/_app/*"],
+  },
   "workers_dev": false,
   "preview_urls": false,
   // The relay's dashboard API: a named entrypoint, so it's reachable only through this binding. Locally, the relay runs

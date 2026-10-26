@@ -3,11 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Flock & Cord UI: stylesheet, motion helpers, torph text morphs, data-attribute behaviours and Svelte components",
+  "description": "PageMarkdown, the page-as-Markdown control shared by the web app and the docs; and the archived prototype's Flock & Cord UI (stylesheet, motion helpers, torph text morphs, data-attribute behaviours and Svelte components)",
   "exports": {
     ".": "./src/index.ts",
     "./dom": "./src/dom.ts",
     "./ui.css": "./src/ui.css",
+    "./page-markdown": {
+      "svelte": "./src/svelte/PageMarkdown.svelte",
+      "default": "./src/svelte/PageMarkdown.svelte"
+    },
     "./svelte": {
       "types": "./src/svelte/index.ts",
       "svelte": "./src/svelte/index.ts",
@@ -19,6 +23,7 @@
   },
   "dependencies": {
     "@logitland/flock": "workspace:*",
+    "@lucide/svelte": "catalog:",
     "@logitland/tokens": "workspace:*",
     "torph": "catalog:"
   },

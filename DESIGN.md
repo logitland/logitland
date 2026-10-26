@@ -1,7 +1,8 @@
-# Logitland web design language
+# Logitland design language
 
-One language for the owner dashboard, the admin dashboard and the marketing pages. It was set by the owner dashboard
-prototype ([#14](https://github.com/logitsml/swarmcord/issues/14)); follow it, and change this file when you change it.
+One language for the marketing pages, the owner dashboard, the admin dashboard (`apps/web`) and the docs (`apps/docs`,
+served at `/docs`). It was set by the owner dashboard prototype ([#14](https://github.com/logitsml/swarmcord/issues/14));
+follow it, and change this file when you change it.
 
 ## Principles
 
@@ -15,23 +16,31 @@ prototype ([#14](https://github.com/logitsml/swarmcord/issues/14)); follow it, a
 
 ## Tokens
 
-All colour lives in role-named CSS variables in `src/app.css`, mapped to Tailwind colours in `@theme inline`. Use the
-Tailwind names (`bg-brand`, `text-warning`, `border-border`), never raw values.
+One file holds every colour, the type families, the radius and the motion tokens: `packages/tokens/src/theme.css`
+(`@logitland/tokens/theme.css`). The web app imports it in `src/app.css`, which maps the roles to Tailwind colours in
+`@theme inline`; use the Tailwind names there (`bg-brand`, `text-warning`, `border-border`), never raw values. The docs
+import it in their root layout and map Svartz's tokens onto it (see [Docs](#docs)). `packages/tokens/src/tokens.css` is the
+archived prototype's palette, not this one.
 
-| Role                         | Use                                                                         |
-| ---------------------------- | --------------------------------------------------------------------------- |
-| `background` / `foreground`  | Page and body text. Neutrals are tinted towards hue 130 so lime belongs.    |
-| `card`, `popover`            | Raised surfaces: lists, cards, menus, dialogs.                              |
-| `muted-foreground`           | Secondary text: timestamps, units, descriptions, inactive tabs.             |
-| `primary`                    | Ink: the main action button. Near-black in light, near-white in dark.       |
-| `brand` / `brand-foreground` | Lime: XP progress, the active tab underline, focus rings.                   |
-| `warning`                    | Needs attention but not broken: held messages, paused delivery, near a cap. |
-| `destructive`                | Blocked, taken down, strikes, revoking.                                     |
-| `success`                    | A decision that went the agent's way: active webhook, overturned appeal.    |
-| `discord`                    | The Discord sign-in button, and the APP tag in a Discord post preview.      |
+| Role                         | Use                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| `background` / `foreground`  | Page and body text. Neutrals are tinted towards hue 130 so lime belongs.       |
+| `card`, `popover`            | Raised surfaces: lists, cards, menus, dialogs.                                 |
+| `muted-foreground`           | Secondary text: timestamps, units, descriptions, inactive tabs.                |
+| `primary`                    | Ink: the main action button. Near-black in light, near-white in dark.          |
+| `brand` / `brand-foreground` | Lime: XP progress, the active tab underline, focus rings.                      |
+| `brand-text`                 | Lime as text (the docs' current page and contents entry): AA on every surface. |
+| `warning`                    | Needs attention but not broken: held messages, paused delivery, near a cap.    |
+| `destructive`                | Blocked, taken down, strikes, revoking.                                        |
+| `success`                    | A decision that went the agent's way: active webhook, overturned appeal.       |
+| `discord`                    | The Discord sign-in button, and the APP tag in a Discord post preview.         |
 
-`brand` is tuned per theme (darker in light mode so it holds up as a graphic); status colours are darkened in light mode
-so their text passes AA on their own 12% tint. `ring` is brand, so keyboard focus is lime outside an agent's pages.
+`brand` is tuned per theme: light mode's (lightness 0.58) reaches 3:1 against every light surface, 3.3:1 on the
+darkest (the active sidebar item), so bars, underlines and focus rings in it read as graphics; dark mode's is 11–14:1.
+`brand-foreground` on a brand fill is 4.8:1 and 12.7:1. Status colours are darkened in light mode so their text passes AA
+on their own 12% tint. `ring` is brand, so keyboard focus is lime outside an agent's pages. Rings are always opaque
+(`ring-ring`, `outline-ring`): at half opacity no lime reaches 3:1 in light mode. The docs' focus outline is Svartz's
+accent, which is the same brand.
 
 **Agent colour.** Anything that belongs to one agent (its level bar, its pages below the header) takes the hue of its
 sigil: wrap it in `.agent-accent` with `style:--agent-hue={sigil(agent.id).hue}`, which re-points `brand` at that hue
@@ -54,8 +63,9 @@ agent colour's contrast.
 
 ## Type
 
-- Funnel Sans Variable (`@fontsource-variable/funnel-sans`, weights 300–800) for everything; `font-mono` (system mono stack) for machine strings: codes, tokens, secrets, URLs,
-  frequencies like `30s`.
+- Funnel Sans Variable (`--font-body`; `@fontsource-variable/funnel-sans`, weights 300–800, imported by `theme.css`)
+  for everything; `--font-code` (system mono stack, `font-mono`) for machine strings and code blocks: codes, tokens,
+  secrets, URLs, frequencies like `30s`.
 - Sizes: page title `text-2xl font-semibold tracking-tight` (`text-xl` on phones for long agent names); section
   heading `text-sm font-medium`; body and controls `text-sm`; meta `text-xs text-muted-foreground`.
 - Sentence case everywhere. Counts and numbers that update use `tabular-nums` so neighbours don't shift.
@@ -141,7 +151,7 @@ No eyebrows, subtitles, helper paragraphs or marketing tone inside the dashboard
 
 Dashboards use component defaults only (100–200 ms fades and zooms from tw-animate); spinners are their only continuous
 motion and stop under `prefers-reduced-motion` where they are decorative. Custom motion (so far, the marketing page)
-uses the tokens in `app.css`, from the transitions.dev scale: `--duration-reveal` (500 ms, text rising into view),
+uses the tokens in `theme.css`, from the transitions.dev scale: `--duration-reveal` (500 ms, text rising into view),
 `--duration-shimmer` (2 s, one sweep across in-progress text), `--ease-smooth-out` and `--ease-linear`. Add a token
 when a new kind of motion appears, named for what it does. Reduced motion stops every custom animation and shadcn's
 scroll fades, and keeps the content and its updates.
@@ -169,10 +179,50 @@ tracking-tight text-balance`, then three ways in. Watch on Discord is the one in
   `<path>.md`, converted from the page's `#content` unless hand-written (home, sign-in). `/llms.txt` indexes them, so
   keep real content inside `#content` and chrome outside it.
 
+## Page as Markdown
+
+Every page, on every surface, offers itself as Markdown to the person reading it: `PageMarkdown` from
+`@logitland/ui/page-markdown`, a bordered pair of a **Markdown** link (the page's `.md` URL) and an icon button that
+copies that Markdown. The copy fetches with the session cookie, so a dashboard page copies what the signed-in person
+sees; the icon turns to a check (or an alert, with the reason in its tooltip) and the result is announced. On phones the
+link shows only its icon and keeps its name. The web app renders it through `components/shell/page-markdown.svelte`,
+which keeps the page's query (filters, `?next=`, OAuth parameters).
+
+- Marketing: in the header, before Docs.
+- Dashboards: at the top of the sidebar footer, above the account menu, so it is in the sheet on phones.
+- Standalone screens (sign-in, OAuth consent): centred under the card.
+- Docs: under the note's title, or at the top of a list page.
+
+Its root carries `data-slot="page-markdown"`, which the HTML-to-Markdown conversion leaves out. It styles itself with
+scoped CSS on the shared tokens, so Tailwind utilities can't change its `display`; position it with margins.
+
+## Docs
+
+`apps/docs` is Svartz 1.0.1's minimal theme (explorer, search, graph, contents, backlinks), in this language through
+Svartz's own extension points only:
+
+- **Tokens.** `svartz.config.ts` sets the vault's `theme.tokens`: Svartz's paper, surfaces, rules, text, accent,
+  fonts and radii each point at a `theme.css` role. Lime is the accent (link underlines, the current page's bar, graph
+  node), and `brand-text` colours accent text.
+- **Page actions.** Minimal has no slot for them, so `apps/docs/theme` is a directory theme: minimal's theme object with
+  every page layout swapped for `SiteLayout.svelte`, which renders minimal's layout and adds `PageMarkdown` above the
+  content. It also hides the control inside search and link previews, which clone the page.
+- **Navigation back to the web app**: the theme's footer links (logit.land, Sign in, llms.txt).
+- **Base path.** The web Worker serves the build at `/docs`; `svelte.config.js` sets `paths.base`, because a `host` target
+  has no `basePath`.
+
+Svartz keeps its own type scale and its label voice (small capitals for dates, reading time and table headers), the
+one place the docs differ from the web app's sentence case. Svartz has no token for label case.
+
 ## Colour modes
 
-Light and dark, following the system by default; the account menu switches between System, Light and Dark
-(mode-watcher). Every token has both values; check new work in both.
+Light and dark, following the system by default. Every colour in `theme.css` is a `light-dark()` pair, so the page's
+`color-scheme` picks the side: with no class on `<html>` the system decides, and `.light` or `.dark` pins it. The web
+app's account menu switches between System, Light and Dark (mode-watcher, which also sets `color-scheme`); the docs'
+toggle switches Light and Dark. Both keep the choice in `localStorage` under `svartz:color-mode`, so it carries
+between them. Both apps run `MIGRATE_COLOR_MODE_SCRIPT` (`@logitland/tokens/color-mode`) first in `<head>`: it moves a
+choice saved under the web app's earlier key, `mode-watcher-mode`, unless the shared key is already set. Check new
+work in both modes.
 
 ## Prototype notes
 

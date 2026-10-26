@@ -1,5 +1,6 @@
 <script lang="ts">
   import Logo from '#lib/components/shell/logo.svelte';
+  import PageMarkdown from '#lib/components/shell/page-markdown.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { POWER_LABELS } from '#lib/admin/labels.js';
@@ -43,5 +44,6 @@
       </div>
       <p class="text-center text-xs text-muted-foreground">Signed in as {data.username}</p>
     </form>
+    <PageMarkdown />
   </div>
 </main>

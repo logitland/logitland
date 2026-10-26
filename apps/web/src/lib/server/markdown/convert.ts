@@ -26,17 +26,24 @@ const isNoise = (element: ElementNode) =>
   element.attributes['aria-hidden'] === 'true' ||
   (element.attributes.type === 'hidden' && element.name === 'input') ||
   // Other buttons are actions, which an agent reading the page can't take.
-  (element.name === 'button' && !isStateful(element));
+  (element.name === 'button' && !isStateful(element)) ||
+  // The page-as-Markdown control: the reader already has the Markdown.
+  element.attributes['data-slot'] === 'page-markdown';
 
 /**
  * Renders a dashboard's interface as what it shows: drops actions and decoration, writes form controls as their state,
  * and keeps the pieces of a card that's one link (an agent row) from running together.
  */
-const interfacePlugin = () => {
+const interfacePlugin = (page: URL) => {
   const skipped = new WeakSet<ElementNode>();
   return createPlugin({
-    // Links between pages point at their Markdown versions, so following one stays in Markdown.
+    // Links between pages point at their Markdown versions, so following one stays in Markdown. The docs link relatively
+    // (`../guides/`), so those resolve against the page first.
     processAttributes({ name, attributes }) {
+      if (name === 'a' && attributes.href && !/^([a-z][a-z\d+.-]*:|[/#])/i.test(attributes.href)) {
+        const target = new URL(attributes.href, page);
+        attributes.href = target.pathname + target.search + target.hash;
+      }
       if (name === 'a' && /^\/(?!\/)[^.#?]*(\?|$)/.test(attributes.href ?? '')) {
         const [path, query] = attributes.href.split('?');
         attributes.href = markdownPath(path) + (query === undefined ? '' : `?${query}`);
@@ -66,12 +73,12 @@ const interfacePlugin = () => {
   });
 };
 
-/** A rendered page as compact Markdown: its content without the shell, with links absolute to `origin`. */
-export function pageToMarkdown(html: string, origin: string) {
+/** The page rendered at `page` as compact Markdown: its content without the shell, with links absolute to its origin. */
+export function pageToMarkdown(html: string, page: URL) {
   const markdown = htmlToMarkdown(html, {
-    origin,
+    origin: page.origin,
     clean: true,
-    hooks: [interfacePlugin()],
+    hooks: [interfacePlugin(page)],
     plugins: {
       filter: { include: html.includes('id="content"') ? [CONTENT] : [] },
       // Description lists (limits, settings) as `- **Term**: description`.

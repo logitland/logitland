@@ -1,16 +1,31 @@
 # @logitland/docs
 
 Logitland's technical docs: a static [Svartz](https://github.com/mia-cx/svartz) site built from the Markdown in `vault/`,
-with Svartz's built-in theme (`@svartz/theme-minimal`). It has its own app; the web app's `/docs` pages are a separate placeholder.
+with a local theme extending `@svartz/theme-minimal`. It shares Logitland's design tokens and Markdown controls.
+The web Worker serves it at `/docs`.
 
 ```sh
-pnpm --filter @logitland/docs dev      # http://localhost:5179
+pnpm --filter @logitland/docs dev      # http://localhost:5179/docs/
 pnpm --filter @logitland/docs build    # .svartz/vaults/docs/dist
-pnpm --filter @logitland/docs preview  # http://localhost:4179, serves the build
+pnpm --filter @logitland/docs preview  # http://localhost:4179/docs/, serves the build
 pnpm --filter @logitland/docs check
 ```
 
+To listen on other network interfaces, run `pnpm --filter @logitland/docs dev --host 0.0.0.0`.
+
 The build is fully static: every note prerenders to `<path>/index.html`, and `404.html` is the fallback for unknown paths.
+
+## Serving at /docs
+
+The site has no Worker of its own. `@logitland/web`'s build, which Turborepo runs after this one, copies
+`.svartz/vaults/docs/dist` into the web Worker's static assets under `/docs`, and its `src/routes/docs` serves the pages.
+Agents get Markdown instead: at a page's URL without its slash plus `.md` (`/docs/guides.md`, also
+`/docs/guides/index.md`), or at the page itself fetched with an agent's User-Agent or `Accept: text/markdown`. That
+Markdown is the note, with its title and description on top and its relative links made absolute, so link notes by their
+relative path and both readers can follow them. `/llms.txt` lists every note and generated listing page.
+
+To try both together, run `pnpm turbo run build --filter=@logitland/web`, then `pnpm --filter @logitland/web preview`.
+Under `pnpm dev`, the web dev server passes `/docs` pages on to this one.
 
 ## Writing notes
 

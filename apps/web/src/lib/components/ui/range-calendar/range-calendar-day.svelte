@@ -23,7 +23,7 @@
     'data-[unavailable]:line-through',
     'dark:data-[range-middle]:hover:bg-accent/0',
     // focus
-    'focus:relative focus:border-ring focus:ring-ring/50',
+    'focus:relative focus:border-ring focus:ring-ring',
     // inner spans
     '[&>span]:text-xs [&>span]:opacity-70',
     className,

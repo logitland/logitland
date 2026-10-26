@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import * as Sidebar from '#lib/components/ui/sidebar/index.js';
   import Logo from './logo.svelte';
+  import PageMarkdown from './page-markdown.svelte';
   import CloseOnNavigate from './close-on-navigate.svelte';
 
   /**
@@ -13,7 +14,7 @@
 
 <a
   href="#content"
-  class="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm font-medium focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:ring-3 focus:ring-ring/50"
+  class="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm font-medium focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:ring-3 focus:ring-ring"
 >
   Skip to content
 </a>
@@ -26,11 +27,10 @@
     <Sidebar.Content>
       {@render nav()}
     </Sidebar.Content>
-    {#if footer}
-      <Sidebar.Footer>
-        {@render footer()}
-      </Sidebar.Footer>
-    {/if}
+    <Sidebar.Footer>
+      <PageMarkdown class="mx-2 mb-1 self-start" />
+      {@render footer?.()}
+    </Sidebar.Footer>
   </Sidebar.Root>
   <Sidebar.Inset>
     <div class="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/90 px-2 backdrop-blur md:hidden">

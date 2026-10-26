@@ -1,4 +1,5 @@
 import { PATHS, homeMarkdown } from '#lib/fixtures/marketing/site.js';
+import { docsMarkdown } from '#lib/server/markdown/docs.js';
 
 /** Routes whose pages need a person signed in; fetched without one, they answer with the sign-in Markdown. */
 const SIGNED_IN_ROUTES = ['/(owner)/(app)', '/admin/(app)'];
@@ -22,7 +23,10 @@ Signed in, the browser's session cookie also opens every dashboard page as Markd
 }
 
 /** Pages whose hand-written Markdown reads better than the converted page, by path. */
-export const HAND_WRITTEN: Record<string, (url: URL) => string> = {
+const HAND_WRITTEN: Record<string, (url: URL) => string> = {
   '/': (url) => homeMarkdown(url.origin),
   [PATHS.signIn]: (url) => signInMarkdown(url.origin, url.searchParams.get('next')),
 };
+
+/** The hand-written Markdown of the page at `path`, if it has any: a marketing page above, or a docs note's source. */
+export const handWrittenMarkdown = (path: string, url: URL) => HAND_WRITTEN[path]?.(url) ?? docsMarkdown(path, url.origin);

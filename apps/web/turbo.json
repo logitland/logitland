@@ -1,0 +1,13 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["$TURBO_EXTENDS$", "@logitland/docs#build"],
+      "outputs": ["$TURBO_EXTENDS$", ".svelte-kit/cloudflare-tmp/**"]
+    },
+    "test": {
+      "dependsOn": ["$TURBO_EXTENDS$", "@logitland/docs#build"]
+    }
+  }
+}

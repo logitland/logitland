@@ -1,0 +1,83 @@
+/*
+ * Logitland theme: the one source of colour, type, shape and motion for the web app (marketing, owner and admin
+ * dashboards) and the docs. See DESIGN.md at the repository root for the reasoning behind each role.
+ *
+ * Neutrals carry a faint lime tint (hue 130) so the brand colour belongs to them. Colour is reserved for meaning:
+ * brand marks progress and place, warning and destructive mark moderation states, success marks a decision in the
+ * agent's favour.
+ *
+ * Colour mode: every colour is a `light-dark()` pair, so `color-scheme` picks the side. With no class on <html>
+ * the system decides; `.light` or `.dark` pins it. mode-watcher (web) also sets `color-scheme` inline, and Svartz
+ * (docs) adds the class. Both store the choice under `svartz:color-mode`, so it carries between them.
+ */
+@import '@fontsource-variable/funnel-sans';
+
+:root {
+  color-scheme: light dark;
+
+  --font-body: 'Funnel Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-code: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  --radius: 0.5rem;
+
+  /* A new line of text rising into view: a post arriving in the live channel. */
+  --duration-reveal: 500ms;
+  /* One sweep of the highlight across in-progress text ("Quill is typing…"). */
+  --duration-shimmer: 2000ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-linear: linear;
+
+  --background: light-dark(oklch(0.99 0.002 130), oklch(0.16 0.006 130));
+  --foreground: light-dark(oklch(0.2 0.01 130), oklch(0.95 0.006 130));
+  --card: light-dark(oklch(1 0 0), oklch(0.19 0.007 130));
+  --card-foreground: var(--foreground);
+  --popover: light-dark(oklch(1 0 0), oklch(0.2 0.007 130));
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(oklch(0.22 0.012 130), oklch(0.95 0.006 130));
+  --primary-foreground: light-dark(oklch(0.98 0.006 130), oklch(0.18 0.01 130));
+  --secondary: light-dark(oklch(0.955 0.004 130), oklch(0.24 0.007 130));
+  --secondary-foreground: light-dark(oklch(0.22 0.012 130), oklch(0.95 0.006 130));
+  --muted: light-dark(oklch(0.955 0.004 130), oklch(0.24 0.007 130));
+  --muted-foreground: light-dark(oklch(0.49 0.012 130), oklch(0.7 0.012 130));
+  --accent: light-dark(oklch(0.945 0.006 130), oklch(0.26 0.008 130));
+  --accent-foreground: light-dark(oklch(0.22 0.012 130), oklch(0.95 0.006 130));
+  --destructive: light-dark(oklch(0.52 0.2 27), oklch(0.7 0.17 25));
+  --warning: light-dark(oklch(0.5 0.11 65), oklch(0.8 0.13 75));
+  --success: light-dark(oklch(0.48 0.12 150), oklch(0.78 0.14 150));
+  /*
+   * Lime is a mark (bars, underlines, focus rings). Light mode's is dark enough for 3:1 against every light surface
+   * (3.3:1 on the active sidebar item, the darkest), so a ring or bar in it reads at full opacity. It is still too light
+   * for text: text in brand uses brand-text.
+   */
+  --brand: light-dark(oklch(0.58 0.16 134), oklch(0.87 0.2 128));
+  /* Text on a brand fill (the brand badge, a level's disc): 4.8:1 in light mode, 12.7:1 in dark. */
+  --brand-foreground: light-dark(oklch(0.16 0.04 132), oklch(0.2 0.05 132));
+  --brand-text: light-dark(oklch(0.48 0.13 135), oklch(0.87 0.2 128));
+  --discord: oklch(0.59 0.2 277);
+  --discord-foreground: oklch(1 0 0);
+  --border: light-dark(oklch(0.915 0.005 130), oklch(1 0 0 / 9%));
+  --input: light-dark(oklch(0.88 0.006 130), oklch(1 0 0 / 14%));
+  /* Focus rings draw it opaque (`ring-ring`, never `ring-ring/50`): at half opacity no lime reaches 3:1 in light mode. */
+  --ring: var(--brand);
+  --chart-1: var(--brand);
+  --chart-2: var(--warning);
+  --chart-3: var(--destructive);
+  --chart-4: var(--muted-foreground);
+  --chart-5: var(--primary);
+  --sidebar: light-dark(oklch(0.972 0.004 130), oklch(0.135 0.006 130));
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: light-dark(oklch(0.93 0.008 130), oklch(0.22 0.008 130));
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: light-dark(oklch(0.915 0.005 130), oklch(1 0 0 / 8%));
+  --sidebar-ring: var(--brand);
+}
+
+:root.light {
+  color-scheme: light;
+}
+
+:root.dark {
+  color-scheme: dark;
+}
