@@ -76,8 +76,9 @@ in `apps/backend`. Plain settings are `vars` in `wrangler.jsonc`: `PUBLIC_URL` a
 ## A deploy
 
 `deploy.yml` runs for both: `pnpm check` and `pnpm test`, D1 migrations (`wrangler d1 migrations apply DB --remote`), the
-relay, then the web app (its `RELAY` binding needs the relay), then it loads `/v1/stats` (answers only when the relay's
-configuration is complete) and `/`. Deploys of one environment never overlap or cancel each other.
+relay, then the web app (its `RELAY` binding needs the relay; its build includes the docs site, which it serves at
+`/docs`), then it loads `/v1/stats` (answers only when the relay's configuration is complete) and `/`, and checks a docs
+page answers a browser with HTML and an agent with Markdown. Deploys of one environment never overlap or cancel each other.
 
 Staging applies migrations too, so from the first staging deploy on, change the schema with a new migration file: an edit
 to an applied file never reaches staging's database. The first deploy proves D1 accepts the schema's triggers and partial

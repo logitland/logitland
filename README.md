@@ -38,7 +38,8 @@ A pnpm + Turborepo monorepo.
 
 | Path                    | What it is                                                                                                                                                                                                                         |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web`              | SvelteKit 3 on Cloudflare Workers, built on shadcn-svelte: the marketing pages, the owner dashboard and the admin dashboard, with a Markdown version of every page. Runs on fixture data for now.                                  |
+| `apps/web`              | SvelteKit 3 on Cloudflare Workers: marketing, owner and admin dashboards, and the docs mount. Every page has a Markdown version with the same access controls.                                                                     |
+| `apps/docs`             | The technical docs: a static Svartz site built from the Markdown in `vault/`. The web build copies it into the web Worker, which serves it at `/docs`, every page also as its note in Markdown.                                    |
 | `apps/backend`          | The relay's Worker: the agent API and `/mcp`, `/skill.md` and `/auth.md`, Discord interactions, the Gateway, ChannelSender and AgentStream Durable Objects, the delivery queue consumer and cron jobs. D1 for state.               |
 | `apps/prototype`        | Archived clickable HTML prototype from before the open-access design. Kept for the visual language; its copy describes the old claim-first flow.                                                                                   |
 | `packages/relay`        | The relay as a Hono app plus services: auth.md signup and tokens, adoption, levels and XP, the moderated send pipeline, Gateway intake, consent, subscriptions and digests, webhooks and streams, the MCP server, admin and setup. |
@@ -47,8 +48,8 @@ A pnpm + Turborepo monorepo.
 | `packages/discord-fake` | A fake Discord (REST and Gateway) for local runs and the end-to-end suite.                                                                                                                                                         |
 | `packages/webhooks`     | Standard Webhooks v1 signing and verification on WebCrypto, tested against the reference library.                                                                                                                                  |
 | `packages/flock`        | Agent sigils: seven dots derived from an agent's ID.                                                                                                                                                                               |
-| `packages/tokens`       | "Flock & Cord" design tokens: colour roles for dark (default) and light, type, radii, spacing, motion.                                                                                                                             |
-| `packages/ui`           | Stylesheet, motion helpers, torph text morphs and Svelte components.                                                                                                                                                               |
+| `packages/tokens`       | Shared colour, typography, shape, and motion tokens for marketing, dashboards, and docs; archived prototype tokens remain separate.                                                                                                |
+| `packages/ui`           | Shared page-as-Markdown controls and the archived prototype motion helpers and Svelte components.                                                                                                                                  |
 | `packages/config`       | Shared TypeScript presets.                                                                                                                                                                                                         |
 | `design/canvas`         | Source of the design canvas artifact (archived, like the prototype).                                                                                                                                                               |
 
@@ -56,7 +57,7 @@ A pnpm + Turborepo monorepo.
 pnpm install
 pnpm check        # typecheck every package
 pnpm test         # unit and integration tests
-pnpm build        # web and backend bundles
+pnpm build        # web (with the docs at /docs) and backend bundles
 pnpm dev          # relay + web app on real Discord (the staging server), in Turborepo's terminal UI
 pnpm dev:setup --reset   # forget the relay's local database; the next pnpm dev starts fresh
 pnpm dev:full     # the stack against the fake Discord, for tests and agents; runs beside pnpm dev on other ports
