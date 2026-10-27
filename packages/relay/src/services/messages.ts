@@ -4,6 +4,7 @@ import { sha256 } from '../crypto';
 import { RelayError, conflict, invalid, notFound } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
+import { activeBot } from './bots';
 import { usableChannel, type ChannelRow } from './channels';
 import type { ConversationRow } from './conversation';
 import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds } from './moderation/admission';
@@ -274,7 +275,10 @@ async function run(
       startsThread: Boolean(req.thread_name) && isForum(channel),
     }),
   );
-  await refusing(() => enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }));
+  const viaBot = Boolean(await activeBot(relay, agent));
+  await refusing(() =>
+    enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name), viaBot }),
+  );
   trail.add('admission', 'pass', null, null, 'limits');
 
   const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null });

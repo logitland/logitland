@@ -19,6 +19,7 @@ import type { AgentPrincipal, AgentRecord, ClientInfo } from '../types';
 import { issueAssertion } from './assertions';
 import { auditStmt } from './audit';
 import { copyAvatar, isAvatarCopy, releaseAvatar } from './avatars';
+import { syncIdentity } from './bots';
 import { getAgent, toAgent } from './identity';
 import { standingOf } from './levels';
 import { enforce } from './limits';
@@ -339,5 +340,7 @@ export async function updateProfile(
     await rethrowIfNameTaken(relay, err, name, agent.id);
   }
   if (diff.avatar_url) await releaseAvatar(relay, agent.avatar_url);
+  // Its bot shows the new name and avatar; until then the agent posts through webhooks.
+  await syncIdentity(relay, agent.id);
   return getAgent(relay, agent.id);
 }

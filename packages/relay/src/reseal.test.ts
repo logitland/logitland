@@ -32,6 +32,23 @@ describe('re-sealing after a key rotation', () => {
     expect(await resealJob(h.relay)).toBe(0);
   });
 
+  it('re-seals an agent’s bot token too', async () => {
+    const h = harness();
+    const { id } = await seedAgent(h.relay);
+    const at = h.now().toISOString();
+    await h.db
+      .prepare(
+        "INSERT INTO agent_bots (agent_id, bot_user_id, application_id, username, token_ciphertext, status, checked_at, created_at, updated_at) VALUES (?, '500000000000000001', '500000000000000002', 'bot', ?, 'waiting', ?, ?, ?)",
+      )
+      .bind(id, await h.relay.secrets.seal('a-bot-token', `agent_bots.token:${id}`), at, at, at)
+      .run();
+    const { rotated } = rotate(h, 'k2');
+    expect(await resealJob(h.relay)).toBe(1);
+    const { v } = (await h.db.prepare('SELECT token_ciphertext AS v FROM agent_bots WHERE agent_id = ?').bind(id).first<{ v: string }>())!;
+    expect(await rotated.open(v, `agent_bots.token:${id}`)).toBe('a-bot-token');
+    expect(v.startsWith('v2.k2.')).toBe(true);
+  });
+
   it('logs and skips a value it can no longer open', async () => {
     const h = harness();
     await seedChannel(h.relay, { id: LOUNGE });

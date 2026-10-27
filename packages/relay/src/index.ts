@@ -1,6 +1,6 @@
 import { DiscordRest } from '@logitland/discord';
 import { ConfigError, buildConfig, checkConfig, parseOldKeys, type RelayBindings } from './config';
-import type { ChannelSenderClient, GatewayClient, Relay, ShowcaseHub, StreamHub } from './context';
+import type { ChannelSenderClient, GatewayClient, Relay, ShowcaseHub, SocketOpener, StreamHub } from './context';
 import { SecretBox } from './crypto';
 import { consoleLogger, type Logger } from './log';
 import { dohResolver, type Resolver } from './services/destinations';
@@ -21,6 +21,7 @@ export type {
   Relay,
   RelayConfig,
   ShowcaseHub,
+  SocketOpener,
   Stmt,
   StreamHub,
 } from './context';
@@ -48,6 +49,7 @@ export interface RelayOverrides {
   gateway?: GatewayClient | null;
   streams?: StreamHub | null;
   showcase?: ShowcaseHub | null;
+  openSocket?: SocketOpener | null;
   log?: Logger;
 }
 
@@ -80,6 +82,7 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     gateway: overrides.gateway ?? null,
     streams: overrides.streams ?? null,
     showcase: overrides.showcase ?? null,
+    openSocket: overrides.openSocket ?? null,
     fetch: f,
     now: overrides.now ?? (() => new Date()),
     log: overrides.log ?? consoleLogger({ service: 'relay' }),

@@ -143,6 +143,8 @@ interface Context {
   turnedAway: TurnedAway[];
   /** Every channel the relay has a row for, closed ones too: deletes are applied there, quietly, so text removed in Discord never comes back. */
   known: Map<string, Relayed & { id: string }>;
+  /** Agents' own bots (bots.ts), by bot user ID: what they post through the relay is their agent's. */
+  agentBots: Map<string, string>;
   history: boolean;
 }
 
@@ -227,11 +229,13 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
     .all<Relayed & { id: string; overwrites: string; hidden: number }>();
   // Only channels some agent can see are relayed (#9): a staff channel's messages are never stored.
   const visible = await anyAgentAccess(relay);
+  const { results: bots } = await relay.db.prepare('SELECT bot_user_id, agent_id FROM agent_bots').all<{ bot_user_id: string; agent_id: string }>();
   const ctx: Context = {
     relayed: new Map(results.filter((c) => visible(c).view).map((c) => [c.id, c])),
     talkChannelId: (await getSettings(relay)).talk_channel_id,
     turnedAway: [],
     known: new Map(results.map((c) => [c.id, c])),
+    agentBots: new Map(bots.map((b) => [b.bot_user_id, b.agent_id])),
     history: history ?? false,
   };
   for (const part of chunk(messages, EVENTS_PER_ROUND)) {
@@ -297,7 +301,9 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
     for (const r of results) known.set(r.id, { edited_at: r.edited_at, deleted: r.deleted_at !== null });
   }
   const ours = keyed.flatMap(({ e, key }) =>
-    e.kind === 'message_create' && e.author.webhook_id && e.author.webhook_id === relayed.get(e.channel_id)?.webhook_id && !seen.has(key!)
+    e.kind === 'message_create' &&
+    !seen.has(key!) &&
+    (e.author.webhook_id ? e.author.webhook_id === relayed.get(e.channel_id)?.webhook_id : ctx.agentBots.has(e.author.id))
       ? [e.message_id]
       : [],
   );
@@ -388,9 +394,11 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         const tags = e.applied_tags ? JSON.stringify(e.applied_tags) : null;
         const now = iso(relay.now());
         const created = e.created_at ?? snowflakeTime(e.thread_id);
-        // A title is the words of whoever named the thread, so it is kept only when the relay's webhook (an agent's forum
-        // post) or the bot (a thread started from an agent's message) made the thread. A person's title is never stored.
-        const named = Number(e.owner_id == null || e.owner_id === ch.webhook_id || e.owner_id === relay.config.discord.applicationId);
+        // A title is the words of whoever named the thread, so it is kept only when the relay's webhook or an agent's bot (an
+        // agent's forum post) or the relay's bot (a thread started from an agent's message) made the thread. A person's title is never stored.
+        const named = Number(
+          e.owner_id == null || e.owner_id === ch.webhook_id || e.owner_id === relay.config.discord.applicationId || ctx.agentBots.has(e.owner_id),
+        );
         // A thread the relay hasn't seen is announced (#11), before the insert that makes it known.
         if (!closed && !ctx.history) {
           const creator = agentMessages.get(e.thread_id) ?? null;
@@ -487,7 +495,13 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         const cursorKey = e.thread_id ?? e.channel_id;
         cursors.set(cursorKey, bigger(cursors.get(cursorKey), e.message_id));
         const repliesToAgent = e.reply_to != null && agentMessages.has(e.reply_to);
-        const who = await resolveAuthor(relay, ch, e, sent, agreedAt, repliesToAgent, e.thread_id ? privateOwners.get(e.thread_id) : undefined);
+        const who = await resolveAuthor(relay, ch, e, {
+          sent,
+          agentBots: ctx.agentBots,
+          agreedAt,
+          repliesToAgent,
+          owners: e.thread_id ? privateOwners.get(e.thread_id) : undefined,
+        });
         if (!who) {
           // A person's message their agreement doesn't cover: dropped, not stored. One written live in the talk channel, by
           // someone who hasn't agreed to every message being relayed, is also removed from Discord.
@@ -669,6 +683,9 @@ interface Who {
   reply_to: string | null;
 }
 
+/** How a bot's messages are told apart without keeping its Discord ID. */
+const botRef = async (relay: Relay, botUserId: string) => `b_${(await hmac(relay.config.hashKey, `bot:${botUserId}`)).slice(0, 20)}`;
+
 /** Who isn't a person: no Discord username or avatar is kept. */
 const NOT_A_PERSON = { username: null, avatar: null };
 
@@ -681,26 +698,30 @@ async function resolveAuthor(
   relay: Relay,
   channel: Relayed,
   e: Create,
-  sent: Map<string, Sent>,
-  agreedAt: Map<string, Agreement>,
-  repliesToAgent: boolean,
-  owners: ReadonlySet<string> | undefined,
+  round: {
+    sent: Map<string, Sent>;
+    agentBots: Map<string, string>;
+    agreedAt: Map<string, Agreement>;
+    repliesToAgent: boolean;
+    owners: ReadonlySet<string> | undefined;
+  },
 ): Promise<Who | null> {
+  const { sent, agentBots, agreedAt, repliesToAgent, owners } = round;
   const a = e.author;
+  const asAgent = (agent: Sent): Who => ({
+    kind: 'agent',
+    agent_id: agent.agent_id,
+    author_ref: agent.agent_id,
+    discord_user_id: null,
+    display_name: agent.name,
+    ...NOT_A_PERSON,
+    relay_message_id: agent.id,
+    reply_to: agent.reply_to,
+  });
   if (a.webhook_id) {
     // One of our channel webhooks is an agent; any other webhook is just a webhook.
     const agent = channel.webhook_id && a.webhook_id === channel.webhook_id ? (sent.get(e.message_id) ?? (await settleSend(relay, e))) : null;
-    if (agent)
-      return {
-        kind: 'agent',
-        agent_id: agent.agent_id,
-        author_ref: agent.agent_id,
-        discord_user_id: null,
-        display_name: agent.name,
-        ...NOT_A_PERSON,
-        relay_message_id: agent.id,
-        reply_to: agent.reply_to,
-      };
+    if (agent) return asAgent(agent);
     return {
       kind: 'webhook',
       agent_id: null,
@@ -713,11 +734,18 @@ async function resolveAuthor(
     };
   }
   const display_name = a.global_name ?? a.username;
+  // An agent's own bot is the agent when the relay posted the message; anything else it posts is just a bot's message.
+  const botAgent = a.bot ? agentBots.get(a.id) : undefined;
+  if (botAgent) {
+    const known = sent.get(e.message_id);
+    const agent = known ? (known.agent_id === botAgent ? known : null) : await settleSend(relay, e, { agentId: botAgent, botUserId: a.id });
+    if (agent) return asAgent(agent);
+  }
   if (a.bot)
     return {
       kind: 'bot',
       agent_id: null,
-      author_ref: `b_${(await hmac(relay.config.hashKey, `bot:${a.id}`)).slice(0, 20)}`,
+      author_ref: await botRef(relay, a.id),
       discord_user_id: null,
       display_name,
       ...NOT_A_PERSON,
@@ -792,15 +820,23 @@ function identityStmt(relay: Relay, who: Who, at: string): Stmt {
  * matches). A send in flight is preferred to one the relay was unsure about. Claiming the row with a compare-and-set also
  * settles sends the relay was unsure about, the way the sender does: Discord's own timestamp is when the post was confirmed
  * (edits are allowed for 24 hours from it), and the reason the send was in doubt no longer applies.
+ *
+ * A message from an agent's own bot (`bot`) is matched to that agent's sends through that bot instead, on the text alone: the
+ * bot shows no reply line.
  */
-async function settleSend(relay: Relay, e: Create): Promise<Sent | null> {
+async function settleSend(relay: Relay, e: Create, bot?: { agentId: string; botUserId: string }): Promise<Sent | null> {
+  const since = iso(new Date(relay.now().getTime() - ATTRIBUTION_WINDOW_MS));
+  const hash = await contentHash(e.content);
+  const by = bot
+    ? { sql: 'm.agent_id = ? AND m.bot_user_id = ? AND m.text_hash = ?', args: [bot.agentId, bot.botUserId, hash] }
+    : { sql: 'm.bot_user_id IS NULL AND m.content_hash = ? AND lower(a.name) = lower(?)', args: [hash, e.author.username] };
   const { results } = await relay.db
     .prepare(
       `SELECT m.id, m.agent_id, a.name, m.reply_to FROM relay_messages m JOIN agents a ON a.id = m.agent_id
-       WHERE m.channel_id = ? AND m.status IN ('sending', 'uncertain') AND m.discord_message_id IS NULL AND m.content_hash = ? AND lower(a.name) = lower(?) AND m.updated_at >= ?
+       WHERE m.channel_id = ? AND m.status IN ('sending', 'uncertain') AND m.discord_message_id IS NULL AND ${by.sql} AND m.updated_at >= ?
        ORDER BY m.status = 'sending' DESC, m.created_at LIMIT 3`,
     )
-    .bind(e.channel_id, await contentHash(e.content), e.author.username, iso(new Date(relay.now().getTime() - ATTRIBUTION_WINDOW_MS)))
+    .bind(e.channel_id, ...by.args, since)
     .all<Sent>();
   for (const candidate of results) {
     const claimed = await relay.db
@@ -830,6 +866,8 @@ export interface AgentPost {
   /** The Discord message this one answers. Webhooks can't reply natively, so only the relay knows. (`reply_to` is accepted too.) */
   replyTo?: string | null;
   reply_to?: string | null;
+  /** The agent's own bot that posted it, or null for the channel's webhook. */
+  botUserId?: string | null;
 }
 
 /** Called by the posting pipeline once Discord confirms an agent's post, so agent messages never depend on the Gateway. */
@@ -846,9 +884,11 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
     .prepare("SELECT observed_at, json_extract(payload, '$.data.removed_by') AS removed_by FROM events WHERE source_key = ?")
     .bind(`delete:${post.discordMessageId}`)
     .first<{ observed_at: string; removed_by: RemovedBy | null }>();
+  // What the Gateway may have stored the message as, before it knew the post was the agent's: a generic webhook's, or its bot's.
+  const before = post.botUserId ? await botRef(relay, post.botUserId) : null;
   const stmts: Stmt[] = [
-    // The Gateway may have stored this message as a generic webhook first. Upgrade that, and add what only the relay knows
-    // (the reply) to an agent's row; never downgrade an agent, human or bot.
+    // The Gateway may have stored this message as a generic webhook (or the agent's bot) first. Upgrade that, and add what only
+    // the relay knows (the reply) to an agent's row; never downgrade an agent, human or another bot.
     relay.db
       .prepare(
         `INSERT INTO conversation (message_id, channel_id, thread_id, author_kind, agent_id, author_ref, discord_user_id, display_name, content, relay_message_id, created_at, deleted_at, removed_by, reply_to)
@@ -861,7 +901,8 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
            display_name = excluded.display_name,
            relay_message_id = COALESCE(conversation.relay_message_id, excluded.relay_message_id),
            reply_to = COALESCE(conversation.reply_to, excluded.reply_to)
-         WHERE conversation.author_kind = 'webhook' OR (conversation.author_kind = 'agent' AND conversation.agent_id = excluded.agent_id)`,
+         WHERE conversation.author_kind = 'webhook' OR (conversation.author_kind = 'agent' AND conversation.agent_id = excluded.agent_id)
+           OR (conversation.author_kind = 'bot' AND conversation.author_ref = ?)`,
       )
       .bind(
         post.discordMessageId,
@@ -876,6 +917,7 @@ export async function recordAgentPost(relay: Relay, post: AgentPost): Promise<vo
         tomb?.observed_at ?? null,
         tomb ? (tomb.removed_by ?? 'discord') : null,
         replyTo,
+        before,
       ),
     cursorStmt(relay, post.threadId ?? post.channelId, post.discordMessageId),
   ];

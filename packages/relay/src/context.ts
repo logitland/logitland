@@ -1,6 +1,7 @@
 import type { ShowcaseFrame } from '@logitland/contracts';
 import type { DiscordRest } from '@logitland/discord';
 import type { SecretBox } from './crypto';
+import type { GatewaySocket, SocketEvents } from './gateway/protocol';
 import type { Logger } from './log';
 import type { Resolver } from './services/destinations';
 import type { Moderator } from './services/moderation/classifier';
@@ -58,6 +59,9 @@ export interface AvatarBucket {
   delete(key: string): Promise<void>;
 }
 
+/** Opens an outbound WebSocket: open when the promise resolves, its frames and close go to `events`. */
+export type SocketOpener = (url: string, events: SocketEvents) => Promise<GatewaySocket>;
+
 /** The Discord Gateway Durable Object, as cron and the admin health page see it. */
 export interface GatewayClient {
   ensure(): Promise<void>;
@@ -100,6 +104,8 @@ export interface Relay {
   gateway: GatewayClient | null;
   streams: StreamHub | null;
   showcase: ShowcaseHub | null;
+  /** How the relay connects an agent's bot to the Gateway once (services/bots.ts). Null where bots can't be connected. */
+  openSocket: SocketOpener | null;
   fetch: typeof fetch;
   now: () => Date;
   log: Logger;

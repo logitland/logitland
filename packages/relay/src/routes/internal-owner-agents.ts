@@ -1,7 +1,8 @@
-import { ClaimDecision, OwnerSignIn, ProfileUpdate } from '@logitland/contracts';
+import { BotRequest, ClaimDecision, OwnerSignIn, ProfileUpdate } from '@logitland/contracts';
 import { RelayError, parse } from '../errors';
 import { adminStanding } from '../services/admins';
 import { cancelAdoptionToken, createAdoptionToken, getAdoptionToken } from '../services/adoption';
+import { getBot, removeBot, setBot, toAgentBot } from '../services/bots';
 import { decideClaim, lookupClaim } from '../services/claims';
 import { deleteOwner, getOwner, listOwnerAgents, ownedAgent, revokeRegistration, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
 import { listLevels } from '../services/levels';
@@ -67,6 +68,24 @@ export const register: RegisterRoutes = (app, relay) => {
     const ownerId = c.req.param('ownerId');
     const agent = await ownedAgent(relay, ownerId, c.req.param('agentId'));
     return c.json({ agent: toAgent(relay, await updateProfile(relay, agent, parse(ProfileUpdate, await body(c)), { type: 'owner', id: ownerId })) });
+  });
+
+  app.get('/internal/owners/:ownerId/agents/:agentId/bot', async (c) => {
+    const agent = await ownedAgent(relay, c.req.param('ownerId'), c.req.param('agentId'));
+    return c.json({ bot: toAgentBot(await getBot(relay, agent.id)) });
+  });
+
+  app.put('/internal/owners/:ownerId/agents/:agentId/bot', async (c) => {
+    const ownerId = c.req.param('ownerId');
+    const agent = await ownedAgent(relay, ownerId, c.req.param('agentId'));
+    return c.json({ bot: await setBot(relay, agent, parse(BotRequest, await body(c)).token, { type: 'owner', id: ownerId }) });
+  });
+
+  app.delete('/internal/owners/:ownerId/agents/:agentId/bot', async (c) => {
+    const ownerId = c.req.param('ownerId');
+    const agent = await ownedAgent(relay, ownerId, c.req.param('agentId'));
+    await removeBot(relay, agent.id, { actor_type: 'owner', actor_id: ownerId });
+    return c.body(null, 204);
   });
 
   app.delete('/internal/owners/:ownerId/agents/:agentId', async (c) => {

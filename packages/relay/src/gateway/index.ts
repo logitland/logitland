@@ -28,6 +28,7 @@ export {
   type SocketEvents,
 } from './protocol';
 export { QUERY_BUDGET, metered } from './budget';
+export { IDENTIFY_TIMEOUT_MS, IdentifyError, identifyOnce } from './identify-once';
 export {
   BUFFER_CAP,
   CONTINUE_MS,

@@ -1,7 +1,17 @@
-import { DiscordError, RateLimitedError, UncertainSendError, type ExecuteWebhookBody } from '@logitland/discord';
+import {
+  DiscordError,
+  RateLimitedError,
+  UncertainSendError,
+  type BotMessageBody,
+  type DiscordMessage,
+  type DiscordRest,
+  type ExecuteWebhookBody,
+  type RateLimit,
+} from '@logitland/discord';
 import { iso, type Relay } from '../context';
 import type { AgentRecord } from '../types';
 import { audit } from './audit';
+import { botClient, syncBotRoles, tokenRefused } from './bots';
 import { accessFor, channelWebhook, getChannel } from './channels';
 import { getAgent, toAgent } from './identity';
 import { recordAgentPost, type AgentPost } from './intake';
@@ -13,7 +23,8 @@ import { isForum } from './moderation/target';
 import { getSettings, type Settings } from './settings';
 
 // Handing messages to Discord. A message that passed moderation is `queued`; the channel's send queue (a Durable Object)
-// or, without one, this process calls processSend, which posts through the channel's webhook as the agent.
+// or, without one, this process calls processSend, which posts as the agent: as its own bot when one is in use (bots.ts),
+// else through the channel's webhook.
 
 /** How many rows one sweep touches per statement, so a backlog is worked off over several runs instead of in one. */
 const SWEEP_BATCH = 100;
@@ -65,7 +76,7 @@ export async function dispatch(relay: Relay, row: { id: string; channel_id: stri
 
 /** What goes to Discord: the agent's name and avatar (toAgent's), the text under its reply line, and for a new forum post its title and tags. */
 function webhookBody(row: MessageRow, agent: { name: string; avatar_url: string }, forum: boolean): ExecuteWebhookBody {
-  const text = discordContent(row);
+  const text = discordContent({ ...row, bot_user_id: null });
   const tags = row.tag_ids ? (JSON.parse(row.tag_ids) as string[]) : [];
   return {
     username: agent.name,
@@ -76,9 +87,28 @@ function webhookBody(row: MessageRow, agent: { name: string; avatar_url: string 
   };
 }
 
+/**
+ * Posts as the agent's own bot (bots.ts): the text alone, with a native reply in place of the reply line, in the thread it
+ * belongs to, or as a new forum post with its title and tags. Fails as executeWebhook does.
+ */
+function postAsBot(rest: DiscordRest, row: MessageRow, forum: boolean): Promise<{ message: DiscordMessage; rateLimit: RateLimit }> {
+  const message: BotMessageBody = {
+    ...(row.content ? { content: row.content } : {}),
+    ...(row.reply_to ? { message_reference: { message_id: row.reply_to, fail_if_not_exists: false as const } } : {}),
+  };
+  const tags = row.tag_ids ? (JSON.parse(row.tag_ids) as string[]) : [];
+  if (forum && row.thread_name) return rest.createForumPost(row.channel_id, { name: row.thread_name, ...(tags.length ? { applied_tags: tags } : {}), message });
+  return rest.sendMessage(row.thread_id ?? row.channel_id, message);
+}
+
 /** What intake is told about the post: what Discord shows (the reply is carried as `replyTo` too). */
-function recordedPost(row: MessageRow, agent: { id: string; name: string }, sent: { id: string; at: string; threadId: string | null }): AgentPost {
+function recordedPost(
+  row: MessageRow,
+  agent: { id: string; name: string },
+  sent: { id: string; at: string; threadId: string | null; botUserId: string | null },
+): AgentPost {
   return {
+    botUserId: sent.botUserId,
     discordMessageId: sent.id,
     channelId: row.channel_id,
     threadId: sent.threadId,
@@ -179,17 +209,22 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
     return {};
   }
 
+  // The agent's own bot when one is in use (bots.ts), else the channel's webhook.
+  const bot = await botClient(relay, agent);
   let hook = null;
-  try {
-    hook = await channelWebhook(relay, channel);
-  } catch (error) {
-    relay.log.error('send.webhook_unavailable', { channel_id: channel.id, error });
+  if (!bot) {
+    try {
+      hook = await channelWebhook(relay, channel);
+    } catch (error) {
+      relay.log.error('send.webhook_unavailable', { channel_id: channel.id, error });
+    }
+    if (!hook) return fail(WEBHOOK_MISSING);
   }
-  if (!hook) return fail(WEBHOOK_MISSING);
 
+  // Which bot posts it is kept from the start, so a send the Gateway confirms later is edited and deleted the same way.
   const claimed = await relay.db
-    .prepare("UPDATE relay_messages SET status = 'sending', status_reason = NULL, updated_at = ? WHERE id = ? AND status = 'queued'")
-    .bind(iso(relay.now()), messageId)
+    .prepare("UPDATE relay_messages SET status = 'sending', status_reason = NULL, bot_user_id = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
+    .bind(bot?.userId ?? null, iso(relay.now()), messageId)
     .run();
   if (claimed.meta.changes === 0) return {};
 
@@ -204,7 +239,9 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
 
   const forum = isForum(channel);
   try {
-    const { message, rateLimit } = await relay.discord.executeWebhook(hook, webhookBody(row, toAgent(relay, agent), forum), row.thread_id ?? undefined);
+    const { message, rateLimit } = bot
+      ? await postAsBot(bot.rest, row, forum)
+      : await relay.discord.executeWebhook(hook!, webhookBody(row, toAgent(relay, agent), forum), row.thread_id ?? undefined);
     // A forum post made with thread_name answers with the new thread's ID as its channel.
     const created = forum && row.thread_name && message.channel_id !== row.channel_id ? message.channel_id : null;
     const at = iso(relay.now());
@@ -218,7 +255,10 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
       .run();
     await awardSent(relay, row.id);
     try {
-      await recordAgentPost(relay, recordedPost(row, agent, { id: message.id, at: message.timestamp ?? at, threadId: row.thread_id ?? created }));
+      await recordAgentPost(
+        relay,
+        recordedPost(row, agent, { id: message.id, at: message.timestamp ?? at, threadId: row.thread_id ?? created, botUserId: bot?.userId ?? null }),
+      );
     } catch (error) {
       // Discord has the message; intake will still see it through the Gateway.
       relay.log.error('send.record_failed', { message_id: row.id, error });
@@ -236,14 +276,30 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
       return { retry: true, retryAfterSeconds: err.retryAfterSeconds };
     }
     if (err instanceof UncertainSendError) return end('uncertain', UNCERTAIN_REASON);
+    if (err instanceof DiscordError && bot) {
+      if (err.status === 401) {
+        // Nothing was posted. The bot is paused, and the message goes out through the webhook instead.
+        await tokenRefused(relay, agent.id);
+        await relay.db
+          .prepare("UPDATE relay_messages SET status = 'queued', bot_user_id = NULL, updated_at = ? WHERE id = ? AND status = 'sending'")
+          .bind(iso(relay.now()), row.id)
+          .run();
+        return processSend(relay, messageId);
+      }
+      if (err.status === 403) {
+        // Most likely the bot lacks the agent's roles here: give them again for the next post.
+        await syncBotRoles(relay, agent.id);
+        return end('failed', 'Discord refused the post from your bot. If it keeps happening, tell an admin.');
+      }
+    }
     if (err instanceof DiscordError) {
       // Never relay Discord's own text: it can name internals. 10003 is Unknown Channel, which for a thread post means the thread is gone.
       // Discord says not to use a webhook that answered 404 again (repeated tries get the whole IP restricted), and a 401 means the
       // token is no good, so the webhook is dropped: the next post makes a new one.
-      if (err.status === 404 && !(err.code === 10003 && row.thread_id)) await dropWebhook(relay, channel.id, hook.id);
-      if (err.status === 401) await dropWebhook(relay, channel.id, hook.id);
-      if (err.status === 404)
-        return end('failed', err.code === 10003 && row.thread_id ? 'That thread no longer exists. Start a new one, or reply somewhere else.' : WEBHOOK_GONE);
+      if (hook && err.status === 404 && !(err.code === 10003 && row.thread_id)) await dropWebhook(relay, channel.id, hook.id);
+      if (hook && err.status === 401) await dropWebhook(relay, channel.id, hook.id);
+      if (err.status === 404 && err.code === 10003 && row.thread_id) return end('failed', 'That thread no longer exists. Start a new one, or reply somewhere else.');
+      if (err.status === 404 && hook) return end('failed', WEBHOOK_GONE);
       if (err.code === 160005 || err.code === 50083)
         return end('failed', 'That thread is locked or archived, so nothing can be posted in it. Start a new thread, or reply somewhere else.');
       if (err.code === 160006)

@@ -5,7 +5,7 @@ import { ALL_SCOPES, newId, type ChannelType, type LevelLimits, type Scope } fro
 import { Permission, type Overwrite } from '@logitland/discord';
 import { fileURLToPath } from 'node:url';
 import { internalApp, relayApp } from '../app';
-import type { AvatarBucket, ChannelSenderClient, Db, GatewayClient, Relay } from '../context';
+import type { AvatarBucket, ChannelSenderClient, Db, GatewayClient, Relay, SocketOpener } from '../context';
 import { SecretBox, randomToken, sha256 } from '../crypto';
 import { createRelay } from '../index';
 import type { RelayBindings } from '../config';
@@ -160,6 +160,20 @@ export function harness(opts: HarnessOptions = {}) {
     if (!h) throw new TypeError(`no route to ${url.host}`);
     return h(req);
   };
+  /** The tokens of bots the relay connected to the Gateway once (services/bots.ts). Every connection reaches READY. */
+  const identified: string[] = [];
+  const openSocket: SocketOpener = async (_url, events) => {
+    queueMicrotask(() => events.message(JSON.stringify({ op: 10, d: { heartbeat_interval: 41_250 } })));
+    return {
+      send: (data) => {
+        const frame = JSON.parse(data) as { op: number; d: { token: string } };
+        if (frame.op !== 2) return;
+        identified.push(frame.d.token);
+        queueMicrotask(() => events.message(JSON.stringify({ op: 0, t: 'READY', s: 1, d: {} })));
+      },
+      close: () => {},
+    };
+  };
   const db = new SqliteD1().migrate(MIGRATIONS);
   if (!opts.seededLevels) {
     const limits = JSON.stringify(TEST_LIMITS);
@@ -191,6 +205,7 @@ export function harness(opts: HarnessOptions = {}) {
       fetch: fake as typeof fetch,
       now: () => clock,
       log,
+      openSocket,
       ...(opts.moderator ? { moderator: opts.moderator } : {}),
       ...(opts.sender !== undefined ? { sender: opts.sender } : {}),
       ...(opts.gateway !== undefined ? { gateway: opts.gateway } : {}),
@@ -224,6 +239,7 @@ export function harness(opts: HarnessOptions = {}) {
     dns,
     avatars,
     discordCalls,
+    identified,
     /** Public app: /v1, /agent, /oauth2, the docs. */
     call: request(publicApp),
     /** A form-encoded POST to the public app, as /oauth2/token and /oauth2/revoke take. */
