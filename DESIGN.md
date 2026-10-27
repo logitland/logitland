@@ -209,16 +209,18 @@ DELETE red) and tools beside an amber TOOL badge. It reads in the order a newcom
 architecture, then the public API, MCP tools and schemas before the web contracts, internal API and fake Discord.
 Reference pages have no graph, backlinks, dates or reading time.
 
-It takes this language through Svartz's own extension points only:
+It takes this language through Svartz's own extension points, plus one host stylesheet:
 
 - **Tokens.** `svartz.config.ts` sets the vault's `theme.tokens`: Svartz's paper, surfaces, rules, text, accent,
-  fonts and radii each point at a `theme.css` role. Lime is the accent (link underlines, the current page's bar, focus),
+  fonts and radii each point at a `theme.css` role. Lime is the accent (link underlines, focus),
   and `brand-text` colours accent text. Method, status and tool badges keep Svartz's signal hues.
 - **Page actions** are Svartz's: **Copy page** and **View as Markdown** under the summary, pointing at the page's `.md`
   copy under `/docs`, which carries its frontmatter.
 - **Navigation back to the web app**: the theme's footer links (logit.land, Sign in, llms.txt).
 - **Base path.** The web Worker serves the build at `/docs`; `svelte.config.js` sets `paths.base`, because a `host` target
   has no `basePath`.
+- **Sidebar rows.** The root layout's styles mark the current page by its background and weight alone, without Svartz's
+  lime bar, and give the desktop sidebar room so rounded rows and focus outlines aren't clipped.
 
 Svartz keeps its own type scale and its label voice (small capitals for page actions, field facts and table headers),
 the one place the docs differ from the web app's sentence case. Svartz has no token for label case.
