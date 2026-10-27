@@ -80,8 +80,9 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-The docs contain 366 notes and 43 generated listing pages at `/docs`, built with npm Svartz 1.2.0.
+The docs contain 366 notes and 43 generated listing pages at `/docs`, built with npm Svartz 1.2.1.
 API and MCP renderers share one reference theme, with coloured method badges, schema trees, and request examples.
+Its sidebar has nested collapsible folders. Minimal-based theme composition, guide-only ToC, and previous/next navigation remain upstream work.
 Marketing, dashboards, and docs share Funnel Sans, lime-and-ink tokens, colour preferences, and Markdown controls.
 Every docs page is indexed in `/llms.txt` and available as Markdown. These changes are on `t3/cf201c6e` pending merge.
 
