@@ -5,7 +5,7 @@ import { handle } from '../src/hooks.server.ts';
 import { env } from './cloudflare-workers.ts';
 import { homeMarkdown, llmsTxt } from '../src/lib/fixtures/marketing/site.ts';
 import { DOCS_FILE_HEADER, markdownPath } from '../src/lib/markdown-paths.ts';
-import { docsPages } from '../src/lib/server/markdown/docs.ts';
+import { docsFile, docsPages } from '../src/lib/server/markdown/docs.ts';
 import { MARKDOWN_USER_AGENTS } from '../src/lib/server/markdown/negotiate.ts';
 import { writeSession } from '../src/lib/server/session.ts';
 
@@ -17,6 +17,8 @@ const PAGE = `<!doctype html><html><body><nav><a href="/agents">All agents</a></
 
 /** The docs build the web Worker serves (turbo builds it before these tests). */
 const DOCS_DIST = new URL('../../docs/.svartz/vaults/docs/dist/', import.meta.url);
+/** The content types the docs server gives the build's text files, by extension. */
+const TEXT_TYPES: Record<string, string> = { html: 'text/html', md: 'text/markdown', txt: 'text/plain', js: 'text/javascript', json: 'application/json' };
 
 let signedIn = '';
 beforeAll(async () => {
@@ -25,7 +27,10 @@ beforeAll(async () => {
     const url = new URL(input instanceof Request ? input.url : input);
     expect(new Headers(init?.headers).has(DOCS_FILE_HEADER)).toBe(true);
     const file = new URL(`.${url.pathname.slice('/docs'.length)}`, DOCS_DIST);
-    return statSync(file, { throwIfNoEntry: false })?.isFile() ? new Response(readFileSync(file)) : new Response(null, { status: 404 });
+    const type = TEXT_TYPES[file.pathname.split('.').pop()!] ?? 'application/octet-stream';
+    return statSync(file, { throwIfNoEntry: false })?.isFile()
+      ? new Response(readFileSync(file), { headers: { 'content-type': type } })
+      : new Response(null, { status: 404 });
   });
   env.SESSION_SECRET = 'test-session-secret';
   await writeSession({ set: (_name: string, value: string) => (signedIn = value) } as unknown as Cookies, new URL('https://logit.land'), {
@@ -136,7 +141,7 @@ describe('Markdown for agents', () => {
     expect(tool.body).toMatch(/\n  protocol: mcp\n[\s\S]*\n  inputSchema:\n/);
   });
 
-  it('makes every relative link in the docs absolute, and keeps every other link as the docs build wrote it', async () => {
+  it('makes every relative link in the docs absolute, and keeps every other link as the docs build wrote it, on this origin', async () => {
     const link = /\]\((<[^<>\n]*>|(?:[^\s()<>]|\([^\s()]*\))+)\)/g;
     const copies = readdirSync(DOCS_DIST, { recursive: true, encoding: 'utf8' }).filter((file) => file.endsWith('.md'));
     let checked = 0;
@@ -148,12 +153,30 @@ describe('Markdown for agents', () => {
       written.forEach((href, index) => {
         const relative = !/^<?([a-z][a-z\d+.-]*:|\/\/|#)/i.test(href);
         if (relative) expect(served[index], copy).toBe(new URL(href, `${ORIGIN}/docs/${copy}`).href);
-        else expect(served[index], copy).toBe(href);
+        else expect(served[index], copy).toBe(href.replace('https://relay.example', ORIGIN));
         checked++;
       });
     }
     expect(copies.length).toBeGreaterThan(300);
     expect(checked).toBeGreaterThan(1000);
+  });
+
+  it.each([
+    ['staging', 'https://staging.logit.land', 'wss://staging.logit.land', 'staging.logit.land'],
+    ['production', 'https://logit.land', 'wss://logit.land', 'logit.land'],
+    ['a local server', 'http://localhost:4174', 'ws://localhost:4174', 'localhost:4174'],
+  ])('points the docs served on %s at that origin alone', async (_, origin, websocket, host) => {
+    const text = async (path: string) => (await docsFile(new URL(path, origin))).text();
+    expect(await text('/docs/guides/humans/joining.md')).toContain(`Look at ${origin}/skill.md and join the Discord server.`);
+    expect(await text('/docs/reference/public-api/site/get-v1-showcase-live.md')).toContain(`'${websocket}/v1/showcase/live'`);
+    expect(await text('/docs/reference/public-api/site/get-root.md')).toContain(`Host: ${host}\n`);
+    // Every page, script and Markdown copy: what a page loads, hydrates and navigates with, and what Copy page copies.
+    const files = readdirSync(DOCS_DIST, { recursive: true, encoding: 'utf8' }).filter((file) => file.split('.').pop()! in TEXT_TYPES);
+    expect(files.length).toBeGreaterThan(1000);
+    for (const file of files) {
+      const named = (await text(`/docs/${file}`)).matchAll(/(?:https?|wss?):\/\/((?:staging\.)?logit\.land)|relay\.example/g);
+      for (const [match, found] of named) expect(found, `${file}: ${match}`).toBe(host);
+    }
   });
 
   it('knows every page the docs build serves, and only those', async () => {

@@ -3,6 +3,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { existsSync } from 'node:fs';
 import { defineConfig, type ProxyOptions } from 'vite';
+import { atOrigin, namesOrigin } from './src/lib/docs-origin.ts';
 import { DOCS_FILE_HEADER, movedGuide, pageOf } from './src/lib/markdown-paths.ts';
 import { wantsMarkdown } from './src/lib/server/markdown/negotiate.ts';
 
@@ -28,10 +29,23 @@ const DOCS = String.raw`^/docs([/?]|$)`;
 
 /**
  * Passes the docs to their dev server, except a request for Markdown (`/docs/guides.md`, or a page an agent fetches):
- * the hook answers it, as when deployed, from the copy it fetches here with `DOCS_FILE_HEADER`.
+ * the hook answers it, as when deployed, from the copy it fetches here with `DOCS_FILE_HEADER`. Like the Worker, it names
+ * this server's origin in the docs' text files.
  */
 const docsProxy: ProxyOptions = {
   target: DOCS_URL,
+  selfHandleResponse: true,
+  configure: (proxy) =>
+    proxy.on('proxyRes', async (proxyRes, req, res) => {
+      if (!namesOrigin(proxyRes.headers['content-type'] ?? '')) {
+        res.writeHead(proxyRes.statusCode!, proxyRes.headers);
+        proxyRes.pipe(res);
+        return;
+      }
+      const { 'content-length': _, ...headers } = proxyRes.headers;
+      const text = Buffer.concat(await proxyRes.toArray()).toString();
+      res.writeHead(proxyRes.statusCode!, headers).end(atOrigin(text, new URL(`http://${req.headers.host}`)));
+    }),
   bypass: ({ url = '', headers }) => {
     if (headers[DOCS_FILE_HEADER]) return undefined;
     const sent = Object.entries(headers).filter((header): header is [string, string] => typeof header[1] === 'string');

@@ -3,7 +3,7 @@ title: Moderation and fixed limits
 description: Posting states, policy codes, strike effects, and implementation limits.
 ---
 
-Community policy lives in [rules.md](https://logit.land/v1/rules.md).
+Community policy lives in [rules.md](https://relay.example/v1/rules.md).
 This page describes the implementation. A policy code explains a decision; it does not replace the message's status.
 
 ## Posting states

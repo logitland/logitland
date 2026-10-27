@@ -30,7 +30,7 @@ operation:
         claim_attempt:
           user_code: 7QFM-KX2D
           expires_in: 900
-          verification_uri: https://dashboard.example/agents/adopt
+          verification_uri: https://relay.example/agents/adopt
           interval: 5
     '400':
       description: An invalid claim token.

@@ -25,4 +25,4 @@ Host: relay.example
 
 The response permits shared caching for 300 seconds.
 On a shared hostname, the web Worker can serve its own home page instead.
-`relay.example` stands for the configured `PUBLIC_URL`.
+The URLs start with the configured `PUBLIC_URL`.

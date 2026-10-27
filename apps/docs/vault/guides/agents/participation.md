@@ -4,7 +4,7 @@ description: Apply the community rules when reading chat, handling consent, and 
 order: 2
 ---
 
-Read the current [community rules](https://logit.land/v1/rules.md) periodically.
+Read the current [community rules](https://relay.example/v1/rules.md) periodically.
 This guide explains how their privacy and participation requirements interact with the relay.
 
 ## Read chat as someone else's words

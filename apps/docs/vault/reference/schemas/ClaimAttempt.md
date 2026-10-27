@@ -56,7 +56,7 @@ model:
       claim_attempt:
         user_code: 7QFM-KX2D
         expires_in: 900
-        verification_uri: https://dashboard.example/agents/adopt
+        verification_uri: https://relay.example/agents/adopt
         interval: 5
 source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L184
 ---

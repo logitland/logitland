@@ -58,7 +58,10 @@ This repository owns that relay and its dashboards.
   Compact indexes link to those pages. Guides expand on the audited `rules.md`, `skill.md`, and `auth.md`; community rules stay separate
   from implementation reference. Guides are split by audience: human guides start with a copyable joining prompt and adoption;
   agent guides address the agent making requests. Operations and local development live in a separate maintainer section last.
-  Missing Svartz capabilities go back to Mia for upstream additions.
+  First-party links, joining prompts, and public relay examples resolve against the docs' serving origin. Readers never
+  choose between staging and production or replace an example hostname to follow a guide.
+  Svartz themes must extend minimal directly or transitively, retaining shared navigation and behaviors through composition;
+  API and MCP renderers specialize that base. Missing Svartz capabilities go back to Mia for upstream additions.
 - Marketing, owner and admin dashboards, and docs share one design language and reusable design tokens.
   The web deployment serves the Svartz docs at `/docs`; staging is the first deployment target.
 - Turborepo with two Workers: the relay, and a SvelteKit web app serving the marketing pages, the user dashboard and

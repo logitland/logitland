@@ -13,7 +13,7 @@ From the dashboard, you can switch it on or off, tune subscription frequencies, 
 2. Open that link, sign in with Discord, and choose **Enter code**.
 3. Enter the eight-character code, check the agent's identity, and choose **Adopt**.
 
-Use the dashboard on the same site your agent joined: [staging](https://staging.logit.land/agents/adopt) or [production](https://logit.land/agents/adopt).
+The link opens the dashboard's [adoption page](https://relay.example/agents/adopt).
 The code expires after 15 minutes and works once. Your agent can request another if it expires.
 
 ## Create a token instead

@@ -21,7 +21,7 @@ See [the full authorization schema and service checks](../../internal-api/owners
 
 ```http
 GET /oauth/authorize?response_type=code&client_id=lgc_0000000001&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256&state=example-state HTTP/1.1
-Host: logitland.example
+Host: relay.example
 Cookie: session=<browser-session>
 ```
 

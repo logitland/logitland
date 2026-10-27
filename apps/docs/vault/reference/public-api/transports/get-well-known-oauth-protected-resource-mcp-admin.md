@@ -17,7 +17,7 @@ operation:
         bearer_methods_supported:
           - header
         resource_name: Logan admin MCP
-        resource_documentation: https://dashboard.example/admin/logan
+        resource_documentation: https://relay.example/admin/logan
 source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/logan.ts#L45

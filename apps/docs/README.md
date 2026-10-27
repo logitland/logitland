@@ -38,6 +38,11 @@ Under `pnpm dev`, the web dev server passes `/docs` pages on to this one.
 - A folder's note titles its sidebar group, so a note needs no "back to section" link.
 - Link notes with relative Markdown paths, such as `[Public API](../public-api/index.md#errors)`. They resolve from the
   linking note, and the build fails on a link to an anchor that doesn't exist.
+- Write `https://relay.example` for the site the docs are on, in links, prompts and examples alike:
+  `[skill.md](https://relay.example/skill.md)`. Whatever serves the docs (the web Worker, or its dev server under
+  `pnpm dev`) names its own origin there in every page, script and Markdown copy, so staging's docs point at staging,
+  production's at production, and a local server's at itself. `wss://relay.example` becomes the matching WebSocket
+  origin and a bare `relay.example` the host. Readers never have to pick an environment to follow a page.
 
 ## Reference pages
 
@@ -46,7 +51,7 @@ A note's frontmatter picks how it renders. The upstream format is Svartz's
 
 - `operation` with `method` and `path` (`/v1/messages/{id}`): an HTTP endpoint. Parameters, request body and responses
   render on the left, generated cURL, JavaScript and Python requests and each response's example on the right.
-  Requests go to the relay origin the docs write, `https://relay.example`; an endpoint elsewhere names its origin in
+  Requests go to the site's own origin, `https://relay.example`; an endpoint elsewhere names its origin in
   `operation.server` (`http://127.0.0.1:8790` for the fake Discord, `https://relay` for the internal API's binding).
 - `operation` with `protocol: mcp`: an MCP tool. Its `inputSchema` and `annotations` are the relay's own `tools/list`
   entries; examples show each `tools/call` request and result.

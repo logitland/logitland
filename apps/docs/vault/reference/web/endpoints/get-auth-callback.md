@@ -20,7 +20,7 @@ There is no JSON success response.
 
 ```http
 GET /auth/callback?code=example-code&state=example-state HTTP/1.1
-Host: logitland.example
+Host: relay.example
 Cookie: oauth=example-state%20%2Fagents
 ```
 

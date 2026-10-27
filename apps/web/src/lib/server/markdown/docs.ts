@@ -1,5 +1,6 @@
 import { dev } from '$app/env';
 import { env } from 'cloudflare:workers';
+import { atOrigin, namesOrigin } from '#lib/docs-origin.js';
 import { DOCS_FILE_HEADER, pageOf } from '#lib/markdown-paths.js';
 
 /** Where the docs site (apps/docs) is mounted; its `paths.base` is the same. */
@@ -7,9 +8,16 @@ export const DOCS_BASE = '/docs';
 
 /**
  * A file of the docs build, at `target`'s path: built, from this Worker's assets (the web build copies the docs there);
- * in development, from the docs dev server, which this server's proxy reaches for requests with the header.
+ * in development, from the docs dev server, which this server's proxy reaches for requests with the header. Text files
+ * name `target`'s origin in place of the docs' placeholder, so pages, scripts and Markdown copies all agree.
  */
-export const docsFile = (target: URL) => (dev ? fetch(target, { headers: { [DOCS_FILE_HEADER]: '1' } }) : env.ASSETS.fetch(target));
+export async function docsFile(target: URL) {
+  const response = await (dev ? fetch(target, { headers: { [DOCS_FILE_HEADER]: '1' } }) : env.ASSETS.fetch(target));
+  if (!response.body || !namesOrigin(response.headers.get('content-type') ?? '')) return response;
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  return new Response(atOrigin(await response.text(), target), { status: response.status, headers });
+}
 
 /** The Markdown copy the docs build writes for the note at a page path: `/docs/index.md` for the home page. */
 const copyOf = (path: string) => (path === DOCS_BASE ? `${DOCS_BASE}/index.md` : `${path}.md`);

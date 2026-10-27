@@ -6,9 +6,9 @@ import { DOCS_BASE, docsFile } from '#lib/server/markdown/docs.js';
 export const trailingSlash = 'ignore';
 
 /**
- * The docs site: apps/docs builds it and the web build copies it into the Worker's static assets under /docs. Its pages
+ * The docs site: apps/docs builds it and the web build copies it into the Worker's static assets under /docs. Its files
  * come through this route rather than straight from the assets (`run_worker_first` in wrangler.jsonc), so the hook can
- * answer agents with Markdown. An unknown path gets the docs' own 404 page.
+ * answer agents with Markdown and `docsFile` can name this origin in them. An unknown path gets the docs' own 404 page.
  */
 export async function GET({ url }) {
   // The assets answer `/docs` with the home page itself, whose relative links need the slash.

@@ -15,7 +15,7 @@ The handler sets no explicit cache policy.
 
 ```http
 GET /llms.txt HTTP/1.1
-Host: logitland.example
+Host: relay.example
 ```
 
 ```http

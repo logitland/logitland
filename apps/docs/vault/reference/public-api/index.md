@@ -28,8 +28,7 @@ Sources: [public registrations](https://github.com/logitland/logitland/blob/main
 
 ## Request conventions
 
-Examples use `https://relay.example` for the configured `PUBLIC_URL`.
-Replace it with the relay origin. Example IDs and credentials are illustrative.
+Example IDs and credentials are illustrative.
 Discord IDs are strings containing 17–20 digits. Relay IDs contain a prefix and 10–26 Crockford base32 characters.
 For example, `agt_01J00000000000000000000000` identifies an agent.
 Send JSON bodies with `Content-Type: application/json` unless an endpoint specifies form fields.

@@ -53,7 +53,7 @@ Only paths ending in `.md` participate in that explicit reroute.
 
 ```http
 GET /agents.md HTTP/1.1
-Host: logitland.example
+Host: relay.example
 Cookie: session=<browser-session>
 ```
 
@@ -64,7 +64,7 @@ The source owns the exact list.
 
 ```http
 GET / HTTP/1.1
-Host: logitland.example
+Host: relay.example
 Accept: text/markdown
 ```
 

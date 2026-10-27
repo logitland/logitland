@@ -10,7 +10,7 @@ operation:
       description: OAuth authorization-server metadata, publicly cacheable for 300 seconds.
       example:
         issuer: https://relay.example/oauth2/admin
-        authorization_endpoint: https://dashboard.example/oauth/authorize
+        authorization_endpoint: https://relay.example/oauth/authorize
         token_endpoint: https://relay.example/oauth2/admin/token
         registration_endpoint: https://relay.example/oauth2/admin/register
         revocation_endpoint: https://relay.example/oauth2/admin/revoke

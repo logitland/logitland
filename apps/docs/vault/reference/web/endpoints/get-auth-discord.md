@@ -20,7 +20,7 @@ The callback URI is the current request origin plus `/auth/callback`.
 
 ```http
 GET /auth/discord?next=%2Fagents HTTP/1.1
-Host: logitland.example
+Host: relay.example
 ```
 
 ```http

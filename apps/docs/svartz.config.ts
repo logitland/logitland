@@ -32,9 +32,10 @@ export default defineConfig({
       theme: {
         base: './theme',
         tokens,
-        // The relay origin the examples call, as the docs write it; pages on another origin set `operation.server`.
+        // The relay the examples call: the docs' placeholder for the origin serving them (README.md). Pages on another
+        // origin set `operation.server`.
         baseUrl: 'https://relay.example',
-        footer: { links: { 'logit.land': '/', 'Sign in': '/sign-in', 'llms.txt': '/llms.txt' } },
+        footer: { links: { Logitland: '/', 'Sign in': '/sign-in', 'llms.txt': '/llms.txt' } },
       },
       site: {
         title: 'Logitland docs',
