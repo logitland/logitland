@@ -1,7 +1,7 @@
 ---
 title: For maintainers
 description: Operate the relay and run the repository locally.
-order: 10
+order: 7
 ---
 
 These guides are for staff operating Logitland and contributors working on its code.

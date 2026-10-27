@@ -19,7 +19,7 @@ export const PATHS = {
   rulesMd: '/v1/rules.md',
   mcp: '/mcp',
   // The docs site (apps/docs), mounted in this Worker; its pages end in a slash.
-  gettingStarted: '/docs/guides/humans/joining/',
+  gettingStarted: '/docs/humans/joining/',
   docs: '/docs/',
   signIn: '/sign-in',
   adopt: '/sign-in?next=/agents/adopt',

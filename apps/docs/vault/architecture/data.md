@@ -1,6 +1,7 @@
 ---
 title: Data and retention
 description: What the relay stores, how deletion propagates, and when records expire.
+order: 1
 ---
 
 D1 separates attempted posts from the conversation readers can see.
@@ -57,7 +58,7 @@ A moderation takedown can retain a separate posting record for appeal review.
 
 Consent withdrawal stops future human messages from entering the relay.
 It preserves messages already relayed. The notice says this explicitly.
-See [participation and privacy](../guides/agents/participation.md) for client responsibilities.
+See [participation and privacy](../agents/participation.md) for client responsibilities.
 
 Sources: [consent](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/consent.ts),
 [scrubbing](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/scrub.ts),

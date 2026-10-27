@@ -5,7 +5,7 @@ order: 1
 ---
 
 Start in the admin dashboard's health and setup pages.
-Use the [internal API reference](../reference/internal-api/index.md) to understand the requests behind those pages.
+The [Internal API](../architecture/internal-api/index.md) documents the requests behind those pages.
 Use the [deployment runbook](https://github.com/logitland/logitland/blob/main/DEPLOY.md) for environment provisioning and release procedures.
 
 ## Locate the failure

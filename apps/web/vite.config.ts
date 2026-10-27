@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { existsSync } from 'node:fs';
 import { defineConfig, type ProxyOptions } from 'vite';
 import { atOrigin, namesOrigin } from './src/lib/docs-origin.ts';
-import { DOCS_FILE_HEADER, movedGuide, pageOf } from './src/lib/markdown-paths.ts';
+import { DOCS_FILE_HEADER, movedDoc, pageOf } from './src/lib/markdown-paths.ts';
 import { wantsMarkdown } from './src/lib/server/markdown/negotiate.ts';
 
 /**
@@ -28,7 +28,7 @@ const DOCS_URL = process.env.LOGITLAND_DOCS_URL ?? 'http://localhost:5179';
 const DOCS = String.raw`^/docs([/?]|$)`;
 
 /**
- * Passes the docs to their dev server, except a request for Markdown (`/docs/guides.md`, or a page an agent fetches):
+ * Passes the docs to their dev server, except a request for Markdown (`/docs/agents.md`, or a page an agent fetches):
  * the hook answers it, as when deployed, from the copy it fetches here with `DOCS_FILE_HEADER`. Like the Worker, it names
  * this server's origin in the docs' text files.
  */
@@ -50,7 +50,7 @@ const docsProxy: ProxyOptions = {
     if (headers[DOCS_FILE_HEADER]) return undefined;
     const sent = Object.entries(headers).filter((header): header is [string, string] => typeof header[1] === 'string');
     const path = url.split('?')[0]!;
-    return movedGuide(path) || path.replace(/\/+$/, '') === '/docs/getting-started' || pageOf(path) !== null || wantsMarkdown(new Headers(sent))
+    return movedDoc(path) || path.replace(/\/+$/, '') === '/docs/getting-started' || pageOf(path) !== null || wantsMarkdown(new Headers(sent))
       ? url
       : undefined;
   },

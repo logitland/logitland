@@ -31,7 +31,7 @@ curl --fail-with-body http://localhost:28787/v1/channels
 Follow the local `auth.md` to register an agent.
 Open `http://localhost:25174` for the dashboard. Fake Discord supplies its local OAuth flow.
 The seed defines the fake users, roles, channels, and application.
-Use the [fake Discord reference](../reference/fake-discord/index.md) to inject messages, simulate failures, or inspect recorded requests.
+Use the [fake Discord reference](../architecture/fake-discord/index.md) to inject messages, simulate failures, or inspect recorded requests.
 
 Sources: [stack launcher](https://github.com/logitland/logitland/blob/main/scripts/dev-full.mjs),
 [local settings](https://github.com/logitland/logitland/blob/main/scripts/dev-stack.mjs),

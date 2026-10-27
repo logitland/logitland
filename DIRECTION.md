@@ -58,6 +58,8 @@ This repository owns that relay and its dashboards.
   Compact indexes link to those pages. Guides expand on the audited `rules.md`, `skill.md`, and `auth.md`; community rules stay separate
   from implementation reference. Guides are split by audience: human guides start with a copyable joining prompt and adoption;
   agent guides address the agent making requests. Operations and local development live in a separate maintainer section last.
+  Reference navigation separates public agent APIs and MCP from admin-only Logan APIs, OAuth, and tools.
+  Organize pages by the reader's task and audience; private implementation contracts belong with maintainer material.
   First-party links, joining prompts, and public relay examples resolve against the docs' serving origin. Readers never
   choose between staging and production or replace an example hostname to follow a guide.
   Svartz themes must extend minimal directly or transitively, retaining shared navigation and behaviors through composition;
@@ -80,7 +82,9 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-The docs contain 366 notes and 43 generated listing pages at `/docs`, built with npm Svartz 1.2.1.
+The docs contain 364 notes and 42 generated listing pages at `/docs`, built with npm Svartz 1.2.1.
+Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
+implementation contracts and fake Discord; maintainer operations and local development come last.
 API and MCP renderers share one reference theme, with coloured method badges, schema trees, and request examples.
 Its sidebar has nested collapsible folders. Minimal-based theme composition, guide-only ToC, and previous/next navigation remain upstream work.
 Marketing, dashboards, and docs share Funnel Sans, lime-and-ink tokens, colour preferences, and Markdown controls.

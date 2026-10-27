@@ -19,8 +19,8 @@ The build is fully static: every note prerenders to `<path>/index.html`, and `40
 
 The site has no Worker of its own. `@logitland/web`'s build, which Turborepo runs after this one, copies
 `.svartz/vaults/docs/dist` into the web Worker's static assets under `/docs`, and its `src/routes/docs` serves the pages.
-Agents get Markdown instead: at a page's URL without its slash plus `.md` (`/docs/guides.md`, also
-`/docs/guides/index.md`), or at the page itself fetched with an agent's User-Agent or `Accept: text/markdown`. That
+Agents get Markdown instead: at a page's URL without its slash plus `.md` (`/docs/agents.md`, also
+`/docs/agents/index.md`), or at the page itself fetched with an agent's User-Agent or `Accept: text/markdown`. That
 Markdown is the copy Svartz writes beside each page: the note's frontmatter, operation and tool metadata included, then
 its title and body. The web Worker makes its relative links absolute, so link notes by their relative path and both
 readers can follow them. The page's **Copy page** and **View as Markdown** actions use the same copy. `/llms.txt` lists
@@ -29,15 +29,37 @@ every note, from the build's own `/docs/llms.txt`, and every generated listing p
 To try both together, run `pnpm turbo run build --filter=@logitland/web`, then `pnpm --filter @logitland/web preview`.
 Under `pnpm dev`, the web dev server passes `/docs` pages on to this one.
 
+## Where a note goes
+
+Each top-level folder is a sidebar section, in reading order. Put a note where its reader would look for it:
+
+| Folder          | Section         | For                                                                  |
+| --------------- | --------------- | -------------------------------------------------------------------- |
+| `humans/`       | For humans      | People bringing an agent in: the joining prompt and adoption         |
+| `agents/`       | For agents      | Guides addressed to the agent making requests                        |
+| `api/`          | Agent API       | Public HTTP endpoints, one folder per task, plus `schemas/`          |
+| `mcp/`          | Agent MCP       | The agent MCP endpoint and its tools                                 |
+| `admin/`        | Admin API       | Logan, the staff-only MCP server, its tools, and `oauth/`            |
+| `architecture/` | Architecture    | Backend bindings, internal routes, web contracts, and fake Discord |
+| `maintainers/`  | For maintainers | Operations, then local development                                   |
+
+Moving or renaming a published note breaks its URL. Add the move to `DOCS_MOVES` in
+`apps/web/src/lib/markdown-paths.ts`, which redirects the old page, its Markdown copy, and its folder listing.
+Bookmarks keep their `#heading` across that redirect, so when a heading moves or goes, map it in
+`src/lib/legacy-anchors.ts` to where its content lives now; the page follows it there.
+
 ## Writing notes
 
 - Frontmatter `title` is the page heading, and search and the sidebar use it; endpoints and tools list there by path or
   name. `description` is the summary.
 - Leave out a `# Title` line: the theme already prints `title` as the heading, so the page would show it twice.
 - A folder's `index.md` is that folder's page, at `/<folder>/`.
-- A folder's note titles its sidebar group, so a note needs no "back to section" link.
-- Link notes with relative Markdown paths, such as `[Public API](../public-api/index.md#errors)`. They resolve from the
-  linking note, and the build fails on a link to an anchor that doesn't exist.
+- A folder's note titles its sidebar group, so a note needs no "back to section" link. The sidebar lists it as the
+  folder's **Overview**, so give it something its pages don't already say: the rules they share and a compact table
+  linking each page, which agents reading the Markdown copy need.
+- Link notes with relative Markdown paths, such as `[Agent API](../api/index.md#errors)`. They resolve from the
+  linking note, and the build fails on a link to an anchor that doesn't exist. Link a page, not a heading in its
+  folder's note.
 - Write `https://relay.example` for the site the docs are on, in links, prompts and examples alike:
   `[skill.md](https://relay.example/skill.md)`. Whatever serves the docs (the web Worker, or its dev server under
   `pnpm dev`) names its own origin there in every page, script and Markdown copy, so staging's docs point at staging,
@@ -55,7 +77,7 @@ A note's frontmatter picks how it renders. The upstream format is Svartz's
   `operation.server` (`http://127.0.0.1:8790` for the fake Discord, `https://relay` for the internal API's binding).
 - `operation` with `protocol: mcp`: an MCP tool. Its `inputSchema` and `annotations` are the relay's own `tools/list`
   entries; examples show each `tools/call` request and result.
-- `model`: a schema. `reference/schemas` holds the contracts that responses name with `$ref`.
+- `model`: a schema. `api/schemas` holds the contracts that responses name with `$ref`.
 - Neither: a guide, such as a WebSocket upgrade, a method rejection, a browser route, or a remote function.
 
 `auth` takes `bearer`, `basic` or `none`; only `bearer` and `basic` put an `Authorization` header in the examples. Other
@@ -67,8 +89,10 @@ The examples read each success response by what it holds, so a success with neit
 sets `empty: true`, except 204, which needs nothing. OAuth token and revocation bodies set
 `requestBody.contentType: application/x-www-form-urlencoded`, so the examples send form fields.
 
-A folder note's `order` places its sidebar section or group, lowest first. Every folder note in a family shares its
-parent's number (all of `reference/public-api` is `1`), so nested groups stay together in path order. Move curl examples,
+`order` places a note in the sidebar, lowest first: a folder note's places its whole folder among its siblings, a page's
+places it among the pages beside it. Without one, folders sort by title and pages by path or tool name, after the ordered
+ones. Number pages in the order a reader uses them (challenge before registration, list before create), and leave a
+folder unordered only when its paths already read that way. A folder's pages always list before its subfolders. Move curl examples,
 request and response JSON, and source links into the metadata (`source` lists the source links); the body keeps what
 the metadata can't say.
 
