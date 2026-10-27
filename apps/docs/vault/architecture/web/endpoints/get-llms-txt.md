@@ -1,6 +1,15 @@
 ---
 title: 'GET /llms.txt'
 description: Lists the Markdown copy of every page, for agents.
+operation:
+  method: GET
+  path: /llms.txt
+  auth: { scheme: none }
+  responses:
+    '200': { description: Markdown index with absolute URLs on the serving origin., contentType: text/markdown }
+source:
+  - https://github.com/logitland/logitland/blob/main/apps/web/src/routes/llms.txt/+server.ts#L3
+  - https://github.com/logitland/logitland/blob/main/apps/web/src/lib/fixtures/marketing/site.ts#L1
 ---
 
 No session, body, or query is required.
@@ -17,5 +26,3 @@ Host: relay.example
 HTTP/1.1 200 OK
 Content-Type: text/markdown; charset=utf-8
 ```
-
-[Handler](https://github.com/logitland/logitland/blob/main/apps/web/src/routes/llms.txt/+server.ts#L3) · [Text generator](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/fixtures/marketing/site.ts#L1)

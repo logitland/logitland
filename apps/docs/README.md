@@ -79,7 +79,11 @@ A note's frontmatter picks how it renders. The upstream format is Svartz's
 - `operation` with `protocol: mcp`: an MCP tool. Its `inputSchema` and `annotations` are the relay's own `tools/list`
   entries; examples show each `tools/call` request and result.
 - `model`: a schema. `api/schemas` holds the contracts that responses name with `$ref`.
-- Neither: a guide, such as a WebSocket upgrade, a method rejection, a browser route, or a remote function.
+- `operation` with `protocol: websocket`: a WebSocket upgrade, with handshake `responses`, directional `messages`, and
+  `close` codes. Examples connect with websocat, JavaScript, or Python and show text/JSON frames.
+- `operation` with `client: browser`: a browser endpoint or form action. Examples show raw HTTP and, for POST, an HTML
+  form; put redirect headers in `responses.<status>.headers` and session parameters in `in: cookie`.
+- Neither: a guide, such as a layout load, a method rejection, or a remote function.
 
 `auth` takes `bearer`, `basic` or `none`; only `bearer` and `basic` put an `Authorization` header in the examples. Other
 credentials (internal headers, `Bot` tokens, signatures, cookies) are header or cookie parameters. Give a response a

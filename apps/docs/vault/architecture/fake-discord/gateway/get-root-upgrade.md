@@ -1,6 +1,39 @@
 ---
 title: 'GET / WebSocket upgrade'
 description: Fake Discord Gateway WebSocket upgrade path at the root URL.
+operation:
+  protocol: websocket
+  path: /
+  server: http://127.0.0.1:8790
+  auth: { scheme: none, description: IDENTIFY and RESUME authenticate in frames after the upgrade. }
+  parameters:
+    - { name: v, in: query, required: true, description: API version 9 or 10., example: 10 }
+    - { name: encoding, in: query, description: Only json is supported; defaults to json., example: json }
+  responses:
+    '101': { description: Switching Protocols; the server sends HELLO. }
+    '400': { description: Invalid WebSocket handshake., empty: true }
+  messages:
+    - direction: receive
+      name: HELLO
+      description: Opcode 10 announces the configured heartbeat interval in milliseconds.
+      example: { op: 10, d: { heartbeat_interval: 41250 } }
+      schema:
+        type: object
+        required: [op, d]
+        properties:
+          op: { type: integer, const: 10 }
+          d:
+            type: object
+            required: [heartbeat_interval]
+            properties:
+              heartbeat_interval: { type: number, description: Configured interval in milliseconds. }
+  close:
+    '4012': Missing or unsupported API version.
+    '4002': Non-JSON encoding, a compress query parameter, or an invalid frame.
+source:
+  - https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L201
+  - https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L330
+  - https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/websocket.ts#L235
 ---
 
 [Fake Discord](../index.md) / [Gateway](index.md)
@@ -22,5 +55,3 @@ A valid WebSocket handshake upgrades with `101`. An invalid handshake returns HT
 Missing or wrong API version closes with `4012`. Non-JSON encoding or any `compress` query closes with `4002`.
 
 The fake supports uncompressed JSON text, with masked client WebSocket frames.
-
-Sources: [path dispatch](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L201), [upgrade validation and HELLO](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L330), [WebSocket handshake](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/websocket.ts#L235).

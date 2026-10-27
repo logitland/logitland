@@ -82,12 +82,13 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-The docs contain 364 notes and 42 generated listing pages at `/docs`, built with npm Svartz 2.0.0.
+The docs contain 364 notes and 42 generated listing pages at `/docs`, built with npm Svartz 2.1.0.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
 implementation contracts and fake Discord; maintainer operations and local development come last.
 API and MCP renderers share one reference theme, with coloured method badges, schema trees, and request examples.
 Its sidebar has nested collapsible folders. Both themes inherit minimal, giving guides a right-hand ToC and every page
 previous/next navigation; API and MCP pages keep their examples column.
+WebSocket and browser/form endpoints use reference layouts with protocol-appropriate examples; layout loads remain guides.
 Marketing, dashboards, and docs share Funnel Sans, lime-and-ink tokens, colour preferences, and Markdown controls.
 Every docs page is indexed in `/llms.txt` and available as Markdown. These changes are on `t3/cf201c6e` pending merge.
 
