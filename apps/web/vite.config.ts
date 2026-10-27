@@ -3,6 +3,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { existsSync } from 'node:fs';
 import { defineConfig, type ProxyOptions } from 'vite';
+import { DOCS_FILE_HEADER, pageOf } from './src/lib/markdown-paths.ts';
 import { wantsMarkdown } from './src/lib/server/markdown/negotiate.ts';
 
 /**
@@ -22,20 +23,24 @@ const RELAY_URL = process.env.LOGITLAND_RELAY_URL ?? 'http://localhost:8787';
 
 /** The docs dev server (apps/docs, which `pnpm dev` also starts). Built, the docs are this Worker's assets under /docs. */
 const DOCS_URL = process.env.LOGITLAND_DOCS_URL ?? 'http://localhost:5179';
-/** Docs pages and their files, but not their Markdown (`/docs/guides.md`), which the hook answers from the vault. */
-const DOCS_PAGES = String.raw`^/docs(?![^?]*\.md(\?|$))([/?]|$)`;
+/** Docs pages and their files. */
+const DOCS = String.raw`^/docs([/?]|$)`;
 
-/** Passes the docs to their dev server, except a request that wants Markdown: the hook answers it, as when deployed. */
+/**
+ * Passes the docs to their dev server, except a request for Markdown (`/docs/guides.md`, or a page an agent fetches):
+ * the hook answers it, as when deployed, from the copy it fetches here with `DOCS_FILE_HEADER`.
+ */
 const docsProxy: ProxyOptions = {
   target: DOCS_URL,
-  bypass: ({ url, headers }) => {
+  bypass: ({ url = '', headers }) => {
+    if (headers[DOCS_FILE_HEADER]) return undefined;
     const sent = Object.entries(headers).filter((header): header is [string, string] => typeof header[1] === 'string');
-    return wantsMarkdown(new Headers(sent)) ? url : undefined;
+    return pageOf(url.split('?')[0]!) !== null || wantsMarkdown(new Headers(sent)) ? url : undefined;
   },
 };
 
 export default defineConfig({
-  server: { proxy: { '/v1': { target: RELAY_URL, ws: true }, [DOCS_PAGES]: docsProxy } },
+  server: { proxy: { '/v1': { target: RELAY_URL, ws: true }, [DOCS]: docsProxy } },
   plugins: [
     tailwindcss(),
     sveltekit({

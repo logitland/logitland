@@ -1,33 +1,22 @@
 ---
-title: 'GET /_fake/interactions'
-description: Fake Discord control actions endpoint GET /_fake/interactions.
+title: List interactions
+description: Return the fake Discord interaction log.
+operation:
+  method: GET
+  path: /_fake/interactions
+  server: http://127.0.0.1:8790
+  auth: none
+  responses:
+    '200':
+      contentType: application/json
+      description: Interaction records.
+    '400':
+      description: Invalid input or a world error.
+      example:
+        error: message
+source:
+  - label: interaction log
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L274
 ---
-
-[Fake Discord](../index.md) / [Fake Discord control actions](../control-actions.md)
-
-Implements `GET /_fake/interactions`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `GET /_fake/interactions`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs and result: No inputs. Returns `{interactions: InteractionRecord[]}`.
-
-## Response
-
-Success returns `200` JSON.
-
-No inputs. Returns `{interactions: InteractionRecord[]}`.
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`GET /_fake/interactions`
-
-## Source
-
-[interaction log](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L274)
 
 Each record contains `id`, `token`, `type`, `user`, `payload`, numeric `createdAt`, `acknowledged`, `response`, and `followUps`.

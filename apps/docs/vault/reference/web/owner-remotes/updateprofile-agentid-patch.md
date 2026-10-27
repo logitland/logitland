@@ -2,7 +2,7 @@
 title: 'updateProfile({ agentId, patch })'
 ---
 
-See [owner remote-function overview](../owner-remotes.md). Requires a verified owner session; missing sessions return `401`. The owner identity comes from the session and is not an input.
+See [owner remote-function overview](index.md). Requires a verified owner session; missing sessions return `401`. The owner identity comes from the session and is not an input.
 
 ### updateProfile({ agentId, patch })
 
@@ -18,4 +18,4 @@ const agent = await updateProfile({
 });
 ```
 
-[Command](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/owner/owner.remote.ts#L100) · [Profile rules](../../internal-api/owners.md#agent-reads-and-profile-changes)
+[Command](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/owner/owner.remote.ts#L100) · [Profile rules](../../internal-api/owners/index.md#agent-reads-and-profile-changes)

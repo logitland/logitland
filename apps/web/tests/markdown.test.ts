@@ -1,11 +1,11 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import type { Cookies, RequestEvent } from '@sveltejs/kit';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { handle } from '../src/hooks.server.ts';
 import { env } from './cloudflare-workers.ts';
 import { homeMarkdown, llmsTxt } from '../src/lib/fixtures/marketing/site.ts';
-import { markdownPath } from '../src/lib/markdown-paths.ts';
-import { DOCS_PAGES } from '../src/lib/server/markdown/docs.ts';
+import { DOCS_FILE_HEADER, markdownPath } from '../src/lib/markdown-paths.ts';
+import { docsPages } from '../src/lib/server/markdown/docs.ts';
 import { MARKDOWN_USER_AGENTS } from '../src/lib/server/markdown/negotiate.ts';
 import { writeSession } from '../src/lib/server/session.ts';
 
@@ -15,8 +15,18 @@ const BROWSER_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/
 const PAGE = `<!doctype html><html><body><nav><a href="/agents">All agents</a></nav>
   <div id="content"><h1>Health</h1><ul><li><a href="/admin/moderation">Held queue</a> 5</li></ul></div></body></html>`;
 
+/** The docs build the web Worker serves (turbo builds it before these tests). */
+const DOCS_DIST = new URL('../../docs/.svartz/vaults/docs/dist/', import.meta.url);
+
 let signedIn = '';
 beforeAll(async () => {
+  // The docs files the server fetches in development, from the docs dev server; here, from the build.
+  vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : input);
+    expect(new Headers(init?.headers).has(DOCS_FILE_HEADER)).toBe(true);
+    const file = new URL(`.${url.pathname.slice('/docs'.length)}`, DOCS_DIST);
+    return statSync(file, { throwIfNoEntry: false })?.isFile() ? new Response(readFileSync(file)) : new Response(null, { status: 404 });
+  });
   env.SESSION_SECRET = 'test-session-secret';
   await writeSession({ set: (_name: string, value: string) => (signedIn = value) } as unknown as Cookies, new URL('https://logit.land'), {
     id: 'own_ada',
@@ -84,7 +94,9 @@ describe('Markdown for agents', () => {
   ])('serves a docs page at %s as its note, linking notes by their Markdown URL', async (_, path, headers) => {
     const { type, body } = await get(path, headers, { route: '/docs/[...path]' });
     expect(type).toContain('text/markdown');
-    expect(body).toMatch(/^# Guides\n\n> Worked paths through joining, posting, delivery, privacy, and local development\.\n\n/);
+    expect(body).toMatch(
+      /^---\ntitle: Guides\ndescription: [\s\S]*Worked paths through joining, posting, delivery, privacy, and local[\s\S]*\n---\n\n# Guides\n\n/,
+    );
     // Written against the vault as `first-conversation.md`, beside the folder's index.md.
     expect(body).toContain(`[Your first conversation](${ORIGIN}/docs/guides/first-conversation.md)`);
   });
@@ -101,28 +113,40 @@ describe('Markdown for agents', () => {
     expect(body).toContain('](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/agents/agents.remote.ts#L17>)');
   });
 
-  it('keeps every link that leaves the docs as each note wrote it', async () => {
-    const leaving = /\]\((<[a-z][a-z\d+.-]*:[^>]*>|[a-z][a-z\d+.-]*:[^\s)]*)\)/gi;
-    let checked = 0;
-    for (const page of DOCS_PAGES.filter((page) => 'file' in page)) {
-      const source = readFileSync(new URL(`../../docs/vault/${page.file}`, import.meta.url), 'utf8');
-      const { body } = await get(markdownPath(page.path), {}, { route: '/docs/[...path]' });
-      for (const [link] of source.matchAll(leaving)) {
-        expect(body, page.file).toContain(link);
-        checked++;
-      }
-    }
-    expect(checked).toBeGreaterThan(30);
+  it("keeps a reference page's metadata, which the page renders from", async () => {
+    const { body } = await get('/docs/reference/public-api/messages/post-v1-messages.md', {}, { route: '/docs/[...path]' });
+    expect(body).toMatch(/^---\ntitle: Send a message\n[\s\S]*\noperation:\n  method: POST\n  path: \/v1\/messages\n[\s\S]*\n---\n\n# Send a message\n/);
+    const tool = await get('/docs/reference/mcp/agent-tools/send_message.md', {}, { route: '/docs/[...path]' });
+    expect(tool.body).toMatch(/\n  protocol: mcp\n[\s\S]*\n  inputSchema:\n/);
   });
 
-  it('knows every page the docs build serves, and only those', () => {
-    // The build the web Worker serves (turbo builds it before these tests): each page is a `<path>/index.html`.
-    const dist = new URL('../../docs/.svartz/vaults/docs/dist/', import.meta.url);
-    const served = readdirSync(dist, { recursive: true, encoding: 'utf8' })
+  it('makes every relative link in the docs absolute, and keeps every other link as the docs build wrote it', async () => {
+    const link = /\]\((<[^<>\n]*>|(?:[^\s()<>]|\([^\s()]*\))+)\)/g;
+    const copies = readdirSync(DOCS_DIST, { recursive: true, encoding: 'utf8' }).filter((file) => file.endsWith('.md'));
+    let checked = 0;
+    for (const copy of copies) {
+      const { body } = await get(`/docs/${copy}`, {}, { route: '/docs/[...path]' });
+      const written = [...readFileSync(new URL(copy, DOCS_DIST), 'utf8').matchAll(link)].map(([, href]) => href!);
+      const served = [...body.matchAll(link)].map(([, href]) => href!);
+      expect(served, copy).toHaveLength(written.length);
+      written.forEach((href, index) => {
+        const relative = !/^<?([a-z][a-z\d+.-]*:|\/\/|#)/i.test(href);
+        if (relative) expect(served[index], copy).toBe(new URL(href, `${ORIGIN}/docs/${copy}`).href);
+        else expect(served[index], copy).toBe(href);
+        checked++;
+      });
+    }
+    expect(copies.length).toBeGreaterThan(300);
+    expect(checked).toBeGreaterThan(1000);
+  });
+
+  it('knows every page the docs build serves, and only those', async () => {
+    // Each page is a `<path>/index.html` in the build.
+    const served = readdirSync(DOCS_DIST, { recursive: true, encoding: 'utf8' })
       .filter((file) => file === 'index.html' || file.endsWith('/index.html'))
       .map((file) => `/docs/${file}`.replace(/\/?index\.html$/, ''));
     expect(served).toContain('/docs/folders/reference/web');
-    expect(DOCS_PAGES.map((page) => page.path).sort()).toEqual(served.sort());
+    expect((await docsPages(new URL(ORIGIN))).map((page) => page.path).sort()).toEqual(served.sort());
   });
 
   it('advertises a docs page by its Markdown URL without the slash', async () => {
@@ -130,7 +154,7 @@ describe('Markdown for agents', () => {
     expect(link).toContain('</docs/guides.md>; rel="alternate"; type="text/markdown"');
   });
 
-  it('lists every page in llms.txt by its Markdown URL', () => {
+  it('lists every page in llms.txt by its Markdown URL', async () => {
     const routes = Object.keys(import.meta.glob('../src/routes/**/+page.svelte'));
     const paths = routes
       .map(
@@ -142,9 +166,10 @@ describe('Markdown for agents', () => {
             .replace(/\[(\w+)\]/g, '{$1}') || '/',
       )
       .filter((path) => !path.startsWith('/dev/'));
-    const index = llmsTxt(ORIGIN, DOCS_PAGES);
+    const pages = await docsPages(new URL(ORIGIN));
+    const index = llmsTxt(ORIGIN, pages);
     expect(paths).toContain('/agents/{id}/delivery');
-    const docs = DOCS_PAGES.map((page) => page.path);
+    const docs = pages.map((page) => page.path);
     expect(docs).toContain('/docs/reference/public-api');
     for (const path of docs) expect(index).toContain(`${ORIGIN}${markdownPath(path)}`);
     for (const path of paths) expect(index).toContain(`${ORIGIN}${markdownPath(path)}`);

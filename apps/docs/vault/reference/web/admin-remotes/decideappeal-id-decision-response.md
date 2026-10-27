@@ -2,7 +2,7 @@
 title: 'decideAppeal({ id, decision, response })'
 ---
 
-See [admin remote-function overview](../admin-remotes.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
+See [admin remote-function overview](index.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
 
 ### decideAppeal({ id, decision, response })
 
@@ -19,4 +19,4 @@ await decideAppeal({
 });
 ```
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L120>) · [Appeal effects](../../internal-api/moderation.md#post-internaladminappealsappealid)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L120>) · [Appeal effects](../../internal-api/moderation/index.md#post-internaladminappealsappealid)

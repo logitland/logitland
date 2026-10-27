@@ -1,31 +1,35 @@
 ---
-title: 'POST /_fake/gateway/next-resume'
-description: Fake Discord Gateway controls endpoint POST /_fake/gateway/next-resume.
+title: Set next resume result
+description: Set the result applied to the next valid authenticated RESUME.
+operation:
+  method: POST
+  path: /_fake/gateway/next-resume
+  server: http://127.0.0.1:8790
+  auth: none
+  requestBody:
+    schema:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          enum:
+            - ok
+            - invalid
+            - invalid-resumable
+    example:
+      mode: invalid-resumable
+  responses:
+    '200':
+      description: Returns the configured mode.
+      example:
+        mode: invalid-resumable
+    '400':
+      description: Invalid input or world error.
+source:
+  - label: next resume
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L375
 ---
 
-[Fake Discord](../index.md) / [Fake Discord Gateway controls](../control-gateway.md)
-
-Implements `POST /_fake/gateway/next-resume`. It steers the Gateway WebSocket.
-
-## Request
-
-- Method and path: `POST /_fake/gateway/next-resume`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs: Required string `mode`: `ok`, `invalid`, or `invalid-resumable`. Applies once to the next well-formed, correctly authenticated RESUME. Other values return `400`.
-
-## Response
-
-Success returns `200` JSON. An action with no connected clients still succeeds.
-
-`{mode}`
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`{"mode":"invalid-resumable"}`
-
-## Source
-
-[next resume](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L375)
+`mode` is required and must be `ok`, `invalid`, or `invalid-resumable`. The setting applies once to the next well-formed, correctly authenticated RESUME.

@@ -2,11 +2,11 @@
 title: 'setFrequency({ agentId, subscriptionId, frequency })'
 ---
 
-See [owner remote-function overview](../owner-remotes.md). Requires a verified owner session; missing sessions return `401`. The owner identity comes from the session and is not an input.
+See [owner remote-function overview](index.md). Requires a verified owner session; missing sessions return `401`. The owner identity comes from the session and is not an input.
 
 ### setFrequency({ agentId, subscriptionId, frequency })
 
-Requires `AgentId`, `SubscriptionId`, and a valid [frequency](../../internal-api/owners.md#subscriptions-and-deliveries).
+Requires `AgentId`, `SubscriptionId`, and a valid [frequency](../../internal-api/owners/index.md#subscriptions-and-deliveries).
 PATCHes `/subscriptions/:subscriptionId` with `{ frequency }`.
 Refreshes `getSubscriptions(agentId)` and returns `undefined`.
 `agentId` chooses the refreshed query; the subscription service independently checks ownership.

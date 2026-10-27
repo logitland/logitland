@@ -2,7 +2,7 @@
   "name": "@logitland/docs-theme",
   "private": true,
   "type": "module",
-  "description": "Svartz minimal with Logitland's page Markdown control. A directory theme: svartz.config.ts points at it.",
+  "description": "Svartz reference shell with the API theme REST and MCP theme tool renderers. A directory theme: svartz.config.ts points at it.",
   "exports": {
     ".": "./index.js",
     "./runtime": "./runtime.js"

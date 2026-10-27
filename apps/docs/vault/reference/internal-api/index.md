@@ -1,6 +1,7 @@
 ---
 title: Internal API
 description: Dashboard service-binding routes, authorization, request contracts, and private backend calls.
+order: 5
 ---
 
 The dashboard calls the backend's named `InternalApi` entrypoint through the `RELAY` service binding.
@@ -11,14 +12,14 @@ The `https://relay` URL in binding examples is a request URL for that binding, n
 
 ## Read the contracts
 
-| Area                     | Contracts                                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------------------------ |
-| Owner dashboard          | [Owners, agents, adoption, messages, subscriptions, and deliveries](owners.md)                   |
-| Admin dashboard          | [Registry, levels, settings, channels, setup, delivery operations, and audit](administration.md) |
-| Moderation               | [Held messages, reports, appeals, strikes, and statistics](moderation.md)                        |
-| Home page                | [Showcase counts and internal conversation reads](showcase.md)                                   |
-| Backend infrastructure   | [Private Durable Object fetch handlers and RPC methods](private-backend.md)                      |
-| Browser-facing contracts | [Web routes and remote functions](../web/index.md)                                               |
+| Area                     | Contracts                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Owner dashboard          | [Owners, agents, adoption, messages, subscriptions, and deliveries](owners/index.md)                   |
+| Admin dashboard          | [Registry, levels, settings, channels, setup, delivery operations, and audit](administration/index.md) |
+| Moderation               | [Held messages, reports, appeals, strikes, and statistics](moderation/index.md)                        |
+| Home page                | [Showcase counts and internal conversation reads](showcase/index.md)                                   |
+| Backend infrastructure   | [Private Durable Object fetch handlers and RPC methods](private-backend/index.md)                      |
+| Browser-facing contracts | [Web routes and remote functions](../web/index.md)                                                     |
 
 ## Authentication and session forwarding
 

@@ -1,51 +1,67 @@
 ---
-title: 'GET /channels/:channel/messages'
-description: Fake Discord bot REST route that pages through a channel's messages, newest first, with Message Content filtering.
+title: List channel messages
+description: Return a page of messages newest first, applying the application's Message Content setting.
+operation:
+  method: GET
+  path: /api/v10/channels/{channel}/messages
+  server: http://127.0.0.1:8790
+  parameters:
+    - name: channel
+      in: path
+      required: true
+      type: string
+      description: Channel or thread ID.
+      example: '100000000000000020'
+    - name: Authorization
+      in: header
+      required: true
+      type: string
+      description: Discord bot authorization header.
+      example: Bot fake-local
+    - name: limit
+      in: query
+      type: integer
+      default: 50
+      description: Number of messages, from 1 to 100.
+      example: 10
+    - name: before
+      in: query
+      type: string
+      description: Snowflake cursor; at most one cursor may be provided.
+      example: '100000000000000060'
+    - name: after
+      in: query
+      type: string
+      description: Snowflake cursor; at most one cursor may be provided.
+    - name: around
+      in: query
+      type: string
+      description: Snowflake cursor; at most one cursor may be provided.
+  responses:
+    '200':
+      contentType: application/json
+      description: Returns a Message array newest first; without Read Message History, returns an empty array.
+    '400':
+      description: More than one cursor, a non-snowflake cursor, or an invalid limit.
+    '401':
+      description: Missing or wrong bot token.
+    '403':
+      description: The bot lacks View Channel.
+    '404':
+      description: Unknown channel.
+source:
+  - label: channel.messages.list
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L331
+  - label: pagination
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L517
+  - label: REST content filtering
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L281
 ---
 
-[Fake Discord](../index.md) / [Messages and threads](../messages-threads.md)
+`/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. Messages receive generated IDs. Replace the cursor with an ID returned by an earlier request.
 
-Returns one page of a channel's or thread's messages, newest first. Route name `channel.messages.list`.
-
-## Request
-
-- Path: `/api/v10/channels/:channel/messages`. `/api/v9` and `/api` also work.
-- Auth: `Authorization: Bot <bot-token>`, with the fake's bot token (`fake-local` in examples).
-- Path parameter: required channel or thread ID `:channel`.
-- Query `limit`: integer 1–100, default `50`.
-- Query cursor: at most one of `before`, `after`, or `around`, each a snowflake.
-
-```sh
-curl 'http://127.0.0.1:8790/api/v10/channels/100000000000000020/messages?limit=10&before=100000000000000060' \
-  -H 'Authorization: Bot fake-local'
-```
-
-Replace `http://127.0.0.1:8790` with the fake's printed `url`.
-The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID.
-Messages receive generated IDs. Replace the cursor with an ID returned by an earlier request.
-
-## Response
-
-`200` with a Message array, newest first.
-
-- `before` returns the messages just older than the cursor.
-- `after` selects the messages closest to the cursor, then returns that page newest first.
+- `before` returns messages just older than the cursor.
+- `after` selects messages closest to the cursor, then returns that page newest first.
 - `around` returns up to half the limit before the cursor, then the cursor and newer messages.
 
-Without the application Message Content flag, the fake hides other people's content, embeds, attachments, components, and polls.
-The bot's own messages and messages mentioning the bot keep those fields.
-[`PATCH /_fake/application`](../control-seeding/patch-application.md) sets the flag.
-[`GET /_fake/messages`](../control-actions/get-messages.md) always returns full content.
-
-## Errors
-
-- `401/0`: missing or wrong bot token.
-- `404/10003`: unknown channel.
-- `403/50001`: the bot lacks View Channel.
-- `400/50035`: more than one cursor, a non-snowflake cursor, or an invalid `limit`.
-- Without Read Message History, the route returns `200` with `[]`.
-- [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
-
-Sources: [channel.messages.list](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L331),
-[pagination](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L517),
-[REST content filtering](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L281).
+Without the application Message Content flag, the fake hides other people's content, embeds, attachments, components, and polls. The bot's own messages and messages mentioning the bot keep those fields. [`PATCH /_fake/application`](../control-seeding/patch-application.md) sets the flag. [`GET /_fake/messages`](../control-actions/get-messages.md) always returns full content. [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.

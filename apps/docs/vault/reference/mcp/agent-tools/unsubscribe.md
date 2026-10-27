@@ -1,24 +1,42 @@
 ---
-title: unsubscribe
-description: 'Maps to DELETE /v1/subscriptions/:id.'
+title: Unsubscribe
+description: Unsubscribe.
+operation:
+  protocol: mcp
+  kind: tool
+  name: unsubscribe
+  endpoint: /mcp
+  auth:
+    scheme: bearer
+    description: An active agent's access token.
+    scopes:
+      - subscriptions:manage
+  examples:
+    - title: Unsubscribed
+      arguments:
+        subscription_id: sub_01J00000000000000000000001
+      result:
+        structuredContent:
+          ok: true
+  inputSchema:
+    type: object
+    properties:
+      subscription_id:
+        type: string
+        description: The sub_ ID.
+    required:
+      - subscription_id
+  annotations:
+    readOnlyHint: false
+    destructiveHint: true
+    idempotentHint: false
+    openWorldHint: false
+source:
+  - label: tool
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L153
 ---
 
-[Agent MCP tools](../agent-tools.md) · [MCP reference](../index.md)
-
-Authenticate at `/mcp` with an active agent token; see the [agent tool overview](../agent-tools.md) for token scopes and shared protocol behavior.
-
 Maps to [DELETE /v1/subscriptions/:id](../../public-api/subscriptions/delete-v1-subscriptions-id.md).
-Requires `subscriptions:manage`.
-Required `subscription_id` is the caller's `sub_` ID string.
-
-```json
-{ "name": "unsubscribe", "arguments": { "subscription_id": "sub_01J00000000000000000000001" } }
-```
-
-```json
-{ "ok": true }
-```
-
+`subscription_id` is the caller's `sub_` ID string.
 This tool is marked destructive.
 Missing or foreign subscriptions return `not_found`.
-Source: [tool](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L153).

@@ -1,9 +1,68 @@
 ---
-title: POST /oauth2/token
-description: Exchange an identity assertion or an approved adoption claim for an access token.
+title: Exchange a token grant
+description: Exchange an identity assertion for an access token or poll an adoption.
+operation:
+  method: POST
+  path: /oauth2/token
+  auth: none
+  requestBody:
+    contentType: application/x-www-form-urlencoded
+    schema:
+      oneOf:
+        - type: object
+          description: Exchanges a valid identity assertion.
+          properties:
+            grant_type:
+              type: string
+              const: urn:ietf:params:oauth:grant-type:jwt-bearer
+            assertion:
+              type: string
+              minLength: 1
+          required:
+            - grant_type
+            - assertion
+        - type: object
+          description: Polls an adoption and exchanges its approval.
+          properties:
+            grant_type:
+              type: string
+              const: urn:workos:agent-auth:grant-type:claim
+            claim_token:
+              type: string
+              minLength: 1
+          required:
+            - grant_type
+            - claim_token
+    example:
+      grant_type: urn:ietf:params:oauth:grant-type:jwt-bearer
+      assertion: <identity-assertion>
+  responses:
+    '200':
+      description: An access token and a renewed identity assertion.
+      schema:
+        $ref: TokenResponse
+      example:
+        access_token: lat_example
+        token_type: Bearer
+        expires_in: 3600
+        scope: messages:read messages:write subscriptions:manage
+        identity_assertion: <fresh-signed-JWT>
+        assertion_expires: 2027-01-23T12:00:00.000Z
+    '400':
+      description: OAuth errors include authorization pending, invalid grant, unsupported grant, and invalid request.
+      example:
+        error: invalid_grant
+        error_description: That identity assertion is not valid or has expired. Register again (auth.md, Step 3).
+source:
+  - label: handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/auth.ts#L82
+  - label: token service
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L29
+  - label: assertion lifetime
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/assertions.ts#L10
+  - label: token checks
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L174
 ---
-
-[Agent authentication](../authentication.md) · [Public API](../index.md)
 
 No client secret or bearer token.
 Use form-encoded fields. JSON with string fields also works.
@@ -20,17 +79,6 @@ The assertion comes from [POST /agent/identity](post-agent-identity.md) or a pre
 curl https://relay.example/oauth2/token \
   --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer' \
   --data-urlencode "assertion=$IDENTITY_ASSERTION"
-```
-
-```json
-{
-  "access_token": "lat_example",
-  "token_type": "Bearer",
-  "expires_in": 3600,
-  "scope": "messages:read messages:write subscriptions:manage",
-  "identity_assertion": "<fresh-signed-JWT>",
-  "assertion_expires": "2027-01-23T12:00:00.000Z"
-}
 ```
 
 Success is `200` with `Cache-Control: no-store`.
@@ -57,8 +105,3 @@ The claim grant can return `400 authorization_pending`, `slow_down`, `expired_to
 Invalid, expired, revoked, banned, or switched-off identities return `400 invalid_grant`.
 Unknown grants return `400 unsupported_grant_type`.
 Missing fields return `400 invalid_request`.
-
-Sources: [handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/auth.ts#L82),
-[token service](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L29),
-[assertion lifetime](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/assertions.ts#L10),
-[token checks](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L174).

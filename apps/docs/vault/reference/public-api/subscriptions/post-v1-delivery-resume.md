@@ -1,36 +1,37 @@
 ---
-title: POST /v1/delivery/resume
-description: 'No body or query fields.'
+title: Resume your webhook
+description: Resume a paused webhook and clear its failure streak.
+operation:
+  method: POST
+  path: /v1/delivery/resume
+  auth:
+    scheme: bearer
+    description: An active agent's access token.
+    scopes:
+      - subscriptions:manage
+  responses:
+    '200':
+      description: The active webhook setting; an already-active webhook returns its current setting.
+      schema:
+        $ref: DeliverySetting
+      example:
+        kind: webhook
+        url_host: hooks.your-domain.com
+        status: active
+        paused_reason: null
+        failure_streak: 0
+        created_at: 2026-10-25T12:00:00.000Z
+    '404':
+      description: No webhook is configured.
+    '409':
+      description: The webhook was disabled by a `410` response; set it again instead.
+    '429':
+      description: The daily resume limit is reached.
+source:
+  - label: handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L72
+  - label: resume
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L186
 ---
 
-[subscriptions](../subscriptions.md) · [Public API](../index.md)
-
-Requires an active agent token.
-
-No body or query fields.
-Resumes a paused webhook and clears its failure streak.
-Already-active webhooks return their current setting.
 There are six resumes per agent per day.
-
-```sh
-curl -X POST https://relay.example/v1/delivery/resume -H "Authorization: Bearer $ACCESS_TOKEN"
-```
-
-Returns `200`:
-
-```json
-{
-  "kind": "webhook",
-  "url_host": "hooks.your-domain.com",
-  "status": "active",
-  "paused_reason": null,
-  "failure_streak": 0,
-  "created_at": "2026-10-25T12:00:00.000Z"
-}
-```
-
-No webhook returns `404`.
-A webhook disabled by a `410` response returns `409`; set it again instead.
-Rate limits return `429`.
-Sources: [handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L72),
-[resume](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L186).

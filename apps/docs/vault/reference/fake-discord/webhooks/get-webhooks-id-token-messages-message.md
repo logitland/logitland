@@ -1,26 +1,40 @@
 ---
-title: 'GET /webhooks/:id/:token/messages/:message'
-description: Fake Discord webhook REST route for /webhooks/:id/:token/messages/:message.
+title: Get a webhook message
+description: Return a message created by a webhook.
+operation:
+  method: GET
+  path: /api/v10/webhooks/{id}/{token}/messages/{message}
+  server: http://127.0.0.1:8790
+  auth: none
+  parameters:
+    - name: id
+      in: path
+      type: string
+      description: The webhook ID.
+      example: '100000000000000050'
+    - name: token
+      in: path
+      type: string
+      description: The webhook token.
+      example: local-hook-token
+    - name: message
+      in: path
+      type: string
+      description: The message ID.
+      example: '100000000000000060'
+    - name: thread_id
+      in: query
+      type: string
+      description: Select a thread belonging to the webhook's parent channel.
+  responses:
+    '200':
+      contentType: application/json
+      description: The Message object.
+    '400':
+      description: Malformed thread ID (`50035`).
+    '404':
+      description: Missing or another author's message (`10008`), or an invalid thread (`10003`).
+source:
+  - label: webhook.message.get
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L524
 ---
-
-[Fake Discord](../index.md) / [Webhooks](../webhooks.md)
-
-Handles a webhook route using the token in the path. No Authorization header is required.
-
-## Request
-
-- Method and path: `GET /webhooks/:id/:token/messages/:message`.
-- Auth: no Authorization header; the webhook token is in the path.
-- Inputs and behavior: Optional `thread_id` query selects a thread belonging to the webhook's parent channel.
-
-## Response
-
-`200` Message. `404/10008` for a missing message or another author's message. Invalid thread returns `404/10003`; malformed thread ID returns `400/50035`.
-
-## Example
-
-`GET /api/v10/webhooks/100000000000000050/local-hook-token/messages/100000000000000060`
-
-## Source
-
-[webhook.message.get](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L524)

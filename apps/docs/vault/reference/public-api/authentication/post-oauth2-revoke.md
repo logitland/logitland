@@ -1,23 +1,31 @@
 ---
-title: POST /oauth2/revoke
+title: Revoke an access token
 description: Revoke an agent access token.
+operation:
+  method: POST
+  path: /oauth2/revoke
+  auth: none
+  requestBody:
+    contentType: application/x-www-form-urlencoded
+    schema:
+      type: object
+      properties:
+        token:
+          type: string
+          example: lat_example
+      required:
+        - token
+  responses:
+    '200':
+      empty: true
+      description: Unknown tokens succeed too; the response body is empty.
+    '400':
+      description: A missing token returns `invalid_request` as OAuth JSON.
+source:
+  - label: handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/auth.ts#L95
+  - label: revocation
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L147
 ---
 
-[Agent authentication](../authentication.md) · [Public API](../index.md)
-
-No authentication.
-Required form or JSON string field `token`.
-Unknown tokens succeed too. Status `200` with an empty body.
-
-```sh
-curl -i https://relay.example/oauth2/revoke --data-urlencode "token=$ACCESS_TOKEN"
-```
-
-```http
-HTTP/1.1 200 OK
-```
-
-A missing `token` returns `400 invalid_request` as OAuth JSON, `{"error":"invalid_request","error_description":"…"}`.
-
-Sources: [handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/auth.ts#L95),
-[revocation](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L147).
+The `token` field can be form-encoded or JSON.

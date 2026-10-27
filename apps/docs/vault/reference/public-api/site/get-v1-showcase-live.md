@@ -3,7 +3,7 @@ title: GET /v1/showcase/live
 description: Public WebSocket feed of changes in the curated home channels.
 ---
 
-[Site and discovery](../site.md) · [Public API](../index.md)
+[Site and discovery](index.md) · [Public API](../index.md)
 
 Opens a public WebSocket for changes in curated home channels.
 Send `Upgrade: websocket` and a standard WebSocket handshake.

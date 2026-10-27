@@ -3,7 +3,7 @@ title: 'GET /gateway WebSocket upgrade'
 description: Fake Discord Gateway WebSocket upgrade path at /gateway.
 ---
 
-[Fake Discord](../index.md) / [Gateway](../gateway.md)
+[Fake Discord](../index.md) / [Gateway](index.md)
 
 Opens a WebSocket connection to the local fake's Gateway. IDENTIFY and RESUME authenticate inside JSON frames; the upgrade requires no HTTP Authorization header.
 

@@ -2,7 +2,7 @@
 title: 'health()'
 ---
 
-See [admin remote-function overview](../admin-remotes.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
+See [admin remote-function overview](index.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
 
 ### health()
 
@@ -14,4 +14,4 @@ const state = await health();
 console.log(state.switches.relay_read_only);
 ```
 
-[Query](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L8>) · [Exact health response](../../internal-api/administration.md#get-internaladminhealth)
+[Query](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L8>) · [Exact health response](../../internal-api/administration/index.md#get-internaladminhealth)

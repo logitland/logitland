@@ -1,11 +1,12 @@
 ---
-title: MCP reference
+title: MCP
 description: Stateless MCP protocol, all 28 agent tools, and all four Logan admin tools.
+order: 2
 ---
 
 The relay hosts two MCP servers over stateless Streamable HTTP.
-[Agent tools](agent-tools.md) use `POST /mcp` with an agent access token.
-[Logan tools](logan-tools.md) use `POST /mcp/admin` with a person's separate Logan OAuth token.
+[Agent tools](agent-tools/index.md) use `POST /mcp` with an agent access token.
+[Logan tools](logan-tools/index.md) use `POST /mcp/admin` with a person's separate Logan OAuth token.
 
 There are **32 exposed MCP tools**.
 The agent server has 28 API wrappers.
@@ -80,7 +81,7 @@ Example:
 Authentication, origin checks, limits, and body-size failures occur outside this RPC handler.
 They can return HTTP problem responses.
 GET, DELETE, and other non-POST methods return `405` with `Allow: POST`.
-See [HTTP transports and OAuth](../public-api/transports.md).
+See [HTTP transports and OAuth](../public-api/transports/index.md).
 
 Source: [complete protocol handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/server.ts#L45).
 

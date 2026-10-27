@@ -1,31 +1,21 @@
 ---
-title: 'DELETE /_fake/failures'
-description: Fake Discord control diagnostics endpoint DELETE /_fake/failures.
+title: Clear failure rules
+description: Remove all configured failure rules.
+operation:
+  method: DELETE
+  path: /_fake/failures
+  server: http://127.0.0.1:8790
+  auth: none
+  responses:
+    '200':
+      description: All failure rules were cleared.
+      example:
+        ok: true
+    '400':
+      description: Invalid input or a world error.
+      example:
+        error: message
+source:
+  - label: clear rules
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L315
 ---
-
-[Fake Discord](../index.md) / [Fake Discord control diagnostics](../control-diagnostics.md)
-
-Implements `DELETE /_fake/failures`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `DELETE /_fake/failures`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs and behavior: No inputs. Removes every rule.
-
-## Response
-
-Success returns `200` JSON.
-
-`{"ok":true}`
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`DELETE /_fake/failures`
-
-## Source
-
-[clear rules](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L315)

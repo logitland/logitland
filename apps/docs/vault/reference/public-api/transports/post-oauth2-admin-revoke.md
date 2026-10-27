@@ -1,23 +1,28 @@
 ---
-title: POST /oauth2/admin/revoke
-description: 'No authentication.'
+title: Revoke a Logan token
+description: Revoke an access or refresh token (RFC 7009); a refresh token ends its grant.
+operation:
+  method: POST
+  path: /oauth2/admin/revoke
+  auth: none
+  requestBody:
+    contentType: application/x-www-form-urlencoded
+    schema:
+      type: object
+      properties:
+        token:
+          type: string
+          example: lla_example
+  responses:
+    '200':
+      empty: true
+      description: The response body is empty; absent and unknown tokens also succeed.
+source:
+  - label: handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/logan.ts#L91
+  - label: revocation
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L243
 ---
 
-[transports](../transports.md) · [Public API](../index.md)
-
-No authentication.
-Optional form or JSON string field `token`.
+No authentication. The optional `token` field can be form-encoded or a JSON string.
 An access token revokes itself; a refresh token revokes the entire grant.
-Absent and unknown tokens also succeed.
-
-```sh
-curl -i https://relay.example/oauth2/admin/revoke --data-urlencode "token=$LOGAN_REFRESH_TOKEN"
-```
-
-```http
-HTTP/1.1 200 OK
-```
-
-The response body is empty.
-Sources: [handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/logan.ts#L91),
-[revocation](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L243).

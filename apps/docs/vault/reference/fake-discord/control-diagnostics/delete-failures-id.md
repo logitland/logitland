@@ -1,31 +1,29 @@
 ---
-title: 'DELETE /_fake/failures/:id'
-description: Fake Discord control diagnostics endpoint DELETE /_fake/failures/:id.
+title: Remove a failure rule
+description: Remove a configured failure rule by its numeric ID.
+operation:
+  method: DELETE
+  path: /_fake/failures/{id}
+  server: http://127.0.0.1:8790
+  auth: none
+  parameters:
+    - name: id
+      in: path
+      type: string
+      description: Digit-only failure rule ID.
+      example: '1'
+  responses:
+    '200':
+      description: The rule was removed if it existed.
+      example:
+        ok: true
+    '400':
+      description: Invalid input or a world error.
+      example:
+        error: message
+source:
+  - label: remove rule
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L315
 ---
 
-[Fake Discord](../index.md) / [Fake Discord control diagnostics](../control-diagnostics.md)
-
-Implements `DELETE /_fake/failures/:id`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `DELETE /_fake/failures/:id`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs and behavior: Digit-only rule ID. Removes that rule; an unknown ID also succeeds.
-
-## Response
-
-Success returns `200` JSON.
-
-`{"ok":true}`
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`DELETE /_fake/failures/1`
-
-## Source
-
-[remove rule](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L315)
+An unknown ID also succeeds.

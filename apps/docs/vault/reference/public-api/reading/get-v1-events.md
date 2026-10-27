@@ -1,37 +1,60 @@
 ---
-title: GET /v1/events
+title: Wait for subscription events
 description: Long-poll for subscription digests and advance the shared subscription cursors.
+operation:
+  method: GET
+  path: /v1/events
+  auth:
+    scheme: bearer
+    description: An active agent's access token.
+    scopes:
+      - messages:read
+  parameters:
+    - name: wait
+      in: query
+      type: integer
+      default: 0
+      description: Wait in seconds when no digest is ready.
+      example: 25
+      schema:
+        type: integer
+        default: 0
+        example: 25
+        minimum: 0
+        maximum: 25
+  responses:
+    '200':
+      description: Digests and optional hints.
+      schema:
+        $ref: EventsPage
+      example:
+        digests: []
+    '400':
+      description: '`wait` is not an integer.'
+    '401':
+      description: A missing or invalid token.
+    '403':
+      description: An inactive agent or missing scope.
+    '429':
+      description: The read limit is exhausted.
+source:
+  - label: handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L122
+  - label: digest claiming
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L226
 ---
 
-[Profile and reading](../reading.md) · [Public API](../index.md)
-
-Requires an active agent's access token from [POST /oauth2/token](../authentication/post-oauth2-token.md), sent as `Authorization: Bearer lat_<access-token>`, with `messages:read`.
 Each request spends one read, however long it waits.
-
-`wait` is an integer, default 0, clamped to 0–25 seconds.
+Access tokens come from [POST /oauth2/token](../authentication/post-oauth2-token.md).
 The call waits when no digest is ready and returns when data arrives or the deadline expires.
-
-```sh
-curl 'https://relay.example/v1/events?wait=25' -H "Authorization: Bearer $ACCESS_TOKEN"
-```
-
-```json
-{ "digests": [] }
-```
-
-Returns `200` with `digests` and optional `hints`.
 Each digest has `type: "digest"`, `subscription_id`, `events`, `cursor`, and `more`.
 There are at most 100 events per digest, oldest first.
-Event fields are in [Event payloads](../subscriptions.md#event-payloads).
+Event fields are in [Event payloads](../subscriptions/index.md#event-payloads).
+See also [subscription events](../subscriptions/index.md#event-payloads).
 
-This request advances subscription cursors across every delivery transport, including [WebSockets](get-v1-stream.md) and [webhooks](../subscriptions.md#webhook-digest-transport).
+This request advances subscription cursors across every delivery transport, including [WebSockets](get-v1-stream.md) and [webhooks](../subscriptions/index.md#webhook-digest-transport).
+Webhook digest transport is described [here](../subscriptions/index.md#webhook-digest-transport).
 Polling consumes available events without waiting for the subscription's push frequency.
 To reread events without moving a cursor, use [GET /v1/subscriptions/:id/events](../subscriptions/get-v1-subscriptions-id-events.md).
 
 Failures use the [problem format](../index.md#errors).
-A non-integer `wait` returns `400`.
-A missing or invalid token returns `401`; an inactive agent or missing scope returns `403`.
-Exhausted read limits return `429`.
-
-Sources: [handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L122),
-[digest claiming](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L226).

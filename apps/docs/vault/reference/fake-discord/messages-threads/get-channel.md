@@ -1,39 +1,38 @@
 ---
-title: 'GET /channels/:channel'
-description: Fake Discord bot REST route that returns one channel or thread.
+title: Get a channel
+description: Return a channel or thread by ID.
+operation:
+  method: GET
+  path: /api/v10/channels/{channel}
+  server: http://127.0.0.1:8790
+  parameters:
+    - name: channel
+      in: path
+      required: true
+      type: string
+      description: Channel or thread ID.
+      example: '100000000000000020'
+    - name: Authorization
+      in: header
+      required: true
+      type: string
+      description: Discord bot authorization header.
+      example: Bot fake-local
+  responses:
+    '200':
+      contentType: application/json
+      description: Returns the Channel, including IDs, type, name, parent, position, overwrites, and optional thread metadata or forum tags.
+    '401':
+      description: Missing or wrong bot token.
+    '404':
+      description: Unknown channel.
+source:
+  - label: channel.get
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L316
+  - label: Channel object
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L138
 ---
 
-[Fake Discord](../index.md) / [Messages and threads](../messages-threads.md)
+`/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. `--seed dev` generates different IDs.
 
-Returns one channel or thread. Route name `channel.get`.
-
-## Request
-
-- Path: `/api/v10/channels/:channel`. `/api/v9` and `/api` also work.
-- Auth: `Authorization: Bot <bot-token>`, with the fake's bot token (`fake-local` in examples).
-- Path parameter: required channel or thread ID `:channel`.
-- Body and query: none.
-
-```sh
-curl http://127.0.0.1:8790/api/v10/channels/100000000000000020 \
-  -H 'Authorization: Bot fake-local'
-```
-
-Replace `http://127.0.0.1:8790` with the fake's printed `url`.
-The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID.
-`--seed dev` generates different IDs.
-
-## Response
-
-`200` with the Channel: IDs, type, name, parent, position, overwrites, and optional thread metadata or forum tags.
-
-## Errors
-
-- `401/0`: missing or wrong bot token.
-- `404/10003`: unknown channel.
-- [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
-
-This route does not check the bot's channel permissions.
-
-Sources: [channel.get](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L316),
-[Channel object](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L138).
+This route does not check the bot's channel permissions. [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.

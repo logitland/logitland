@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "PageMarkdown, the page-as-Markdown control shared by the web app and the docs; and the archived prototype's Flock & Cord UI (stylesheet, motion helpers, torph text morphs, data-attribute behaviours and Svelte components)",
+  "description": "PageMarkdown, the web app's page-as-Markdown control; and the archived prototype's Flock & Cord UI (stylesheet, motion helpers, torph text morphs, data-attribute behaviours and Svelte components)",
   "exports": {
     ".": "./src/index.ts",
     "./dom": "./src/dom.ts",

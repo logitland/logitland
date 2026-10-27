@@ -1,26 +1,26 @@
 ---
-title: 'DELETE /webhooks/:id/:token'
-description: Fake Discord webhook REST route for /webhooks/:id/:token.
+title: Delete a webhook
+description: Remove a webhook by its ID and token.
+operation:
+  method: DELETE
+  path: /api/v10/webhooks/{id}/{token}
+  server: http://127.0.0.1:8790
+  auth: none
+  parameters:
+    - name: id
+      in: path
+      type: string
+      description: The webhook ID.
+      example: '100000000000000050'
+    - name: token
+      in: path
+      type: string
+      description: The webhook token.
+      example: local-hook-token
+  responses:
+    '204':
+      description: Webhook removed without a response body.
+source:
+  - label: webhook.delete
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L452
 ---
-
-[Fake Discord](../index.md) / [Webhooks](../webhooks.md)
-
-Handles a webhook route using the token in the path. No Authorization header is required.
-
-## Request
-
-- Method and path: `DELETE /webhooks/:id/:token`.
-- Auth: no Authorization header; the webhook token is in the path.
-- Inputs and behavior: Removes the webhook. No body.
-
-## Response
-
-`204` without a body.
-
-## Example
-
-`DELETE /api/v10/webhooks/100000000000000050/local-hook-token`
-
-## Source
-
-[webhook.delete](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L452)

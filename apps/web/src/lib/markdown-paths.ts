@@ -9,3 +9,9 @@ export function pageOf(path: string) {
   if (!path.endsWith('.md')) return null;
   return path.slice(0, -'.md'.length).replace(/(\/index|\/)+$/, '') || '/';
 }
+
+/**
+ * Marks the web server's own development request for a docs file (`/docs/guides.md`), which the dev server's proxy then
+ * sends to the docs dev server rather than back to the hook that answers `.md` requests (vite.config.ts).
+ */
+export const DOCS_FILE_HEADER = 'x-logitland-docs-file';

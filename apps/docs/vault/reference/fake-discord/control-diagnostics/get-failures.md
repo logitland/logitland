@@ -1,31 +1,22 @@
 ---
-title: 'GET /_fake/failures'
-description: Fake Discord control diagnostics endpoint GET /_fake/failures.
+title: List failure rules
+description: List configured failure rules and their current hit counts.
+operation:
+  method: GET
+  path: /_fake/failures
+  server: http://127.0.0.1:8790
+  auth: none
+  responses:
+    '200':
+      contentType: application/json
+      description: Failure rules with their match, behavior, remaining configuration, and hits.
+    '400':
+      description: Invalid input or a world error.
+      example:
+        error: message
+source:
+  - label: list rules
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L300
 ---
 
-[Fake Discord](../index.md) / [Fake Discord control diagnostics](../control-diagnostics.md)
-
-Implements `GET /_fake/failures`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `GET /_fake/failures`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs and behavior: No inputs. Lists rules, including their match, behavior, remaining configuration, and hits.
-
-## Response
-
-Success returns `200` JSON.
-
-`{failures: [{id,match,behaviour,times,hits}]}`. Infinite `times` appears as `"forever"`.
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`GET /_fake/failures`
-
-## Source
-
-[list rules](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L300)
+Infinite `times` appears as `"forever"`.

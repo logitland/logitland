@@ -1,38 +1,43 @@
 ---
-title: 'GET /guilds/:guild/channels'
-description: Fake Discord bot REST route that lists a guild's non-thread channels by position.
+title: List guild channels
+description: List a guild's non-thread channels in position order.
+operation:
+  method: GET
+  path: /api/v10/guilds/{guild}/channels
+  server: http://127.0.0.1:8790
+  parameters:
+    - name: guild
+      in: path
+      type: string
+      description: The guild ID.
+      example: '100000000000000010'
+    - name: Authorization
+      in: header
+      required: true
+      type: string
+      description: The fake bot token.
+      example: Bot fake-local
+  responses:
+    '200':
+      contentType: application/json
+      description: A Channel array.
+    '401':
+      description: Missing or wrong bot token (`0`).
+    '403':
+      description: The bot is not a member of the guild (`50001`).
+    '404':
+      description: Unknown guild (`10004`).
+source:
+  - label: guild.channels
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L228
+  - label: Channel object
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L124
 ---
 
-[Fake Discord](../index.md) / [Bot REST](../bot-rest.md)
-
-Lists a guild's channels, excluding threads, sorted by `position`. Route name `guild.channels`.
-
-## Request
-
-- Path: `/api/v10/guilds/:guild/channels`. `/api/v9` and `/api` also work.
-- Auth: `Authorization: Bot <bot-token>`, with the fake's bot token (`fake-local` in examples).
-- Path parameter: required guild ID `:guild`.
-- Body and query: none.
-
-```sh
-curl http://127.0.0.1:8790/api/v10/guilds/100000000000000010/channels \
-  -H 'Authorization: Bot fake-local'
-```
-
-Replace `http://127.0.0.1:8790` with the fake's printed `url`.
+Route name `guild.channels`. The route excludes threads and sorts channels by `position`.
+A Channel contains IDs, type, name, parent, position, overwrites, and optional forum tags.
+The `/api/v9` and `/api` prefixes also work.
 The example guild comes from [`POST /_fake/guilds`](../control-seeding/post-guilds.md) with an explicit ID.
 `--seed dev` generates different IDs.
 
-## Response
-
-`200` with a Channel array. A Channel contains IDs, type, name, parent, position, overwrites, and optional forum tags.
-
-## Errors
-
-- `401/0`: missing or wrong bot token.
-- `404/10004`: unknown guild.
-- `403/50001`: the bot is not a member of the guild.
 - [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
-
-Sources: [guild.channels](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L228),
-[Channel object](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L124).

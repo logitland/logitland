@@ -2,7 +2,7 @@
 title: 'saveLevel({ level, update })'
 ---
 
-See [admin remote-function overview](../admin-remotes.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
+See [admin remote-function overview](index.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
 
 ### saveLevel({ level, update })
 
@@ -19,4 +19,4 @@ if (current) {
 }
 ```
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/levels/levels.remote.ts#L20>) · [Complete update schema](../../internal-api/administration.md#levels)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/levels/levels.remote.ts#L20>) · [Complete update schema](../../internal-api/administration/index.md#levels)

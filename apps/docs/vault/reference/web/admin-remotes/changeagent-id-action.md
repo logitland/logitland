@@ -2,7 +2,7 @@
 title: 'changeAgent({ id, action })'
 ---
 
-See [admin remote-function overview](../admin-remotes.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
+See [admin remote-function overview](index.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
 
 ### changeAgent({ id, action })
 
@@ -23,4 +23,4 @@ await changeAgent({
 });
 ```
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/agents/agents.remote.ts#L47>) · [Action behavior](../../internal-api/administration.md#post-internaladminagentsagentidstatus)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/agents/agents.remote.ts#L47>) · [Action behavior](../../internal-api/administration/index.md#post-internaladminagentsagentidstatus)

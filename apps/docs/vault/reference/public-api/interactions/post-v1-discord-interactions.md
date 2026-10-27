@@ -1,60 +1,121 @@
 ---
-title: 'POST /v1/discord/interactions'
-description: 'Signed Discord pings, consent commands and buttons, and Logan confirmation callbacks.'
+title: Receive Discord interactions
+description: Verify and answer Discord pings, consent commands and button callbacks.
+operation:
+  method: POST
+  path: /v1/discord/interactions
+  parameters:
+    - name: x-signature-ed25519
+      in: header
+      required: true
+      type: string
+      description: A 128-character hexadecimal Ed25519 signature.
+    - name: x-signature-timestamp
+      in: header
+      required: true
+      type: string
+      description: A decimal Unix timestamp.
+  requestBody:
+    schema:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: ^\d{17,20}$
+        application_id:
+          type: string
+          pattern: ^\d{17,20}$
+        type:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+        token:
+          type: string
+          minLength: 1
+          maxLength: 512
+        guild_id:
+          type: string
+          pattern: ^\d{17,20}$
+        member:
+          type: object
+          properties:
+            user:
+              type: object
+              properties:
+                id:
+                  type: string
+            roles:
+              type: array
+              items:
+                type: string
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+        data:
+          type: object
+          properties:
+            name:
+              type: string
+            custom_id:
+              type: string
+            options:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+      required:
+        - id
+        - application_id
+        - type
+        - token
+    example:
+      id: '123456789012345678'
+      application_id: '123456789012345670'
+      type: 1
+      token: interaction-token
+  responses:
+    '200':
+      description: A Discord interaction response; response examples vary by interaction type.
+      example:
+        type: 1
+    '400':
+      description: Signed malformed JSON or invalid payload fields.
+    '401':
+      description: A missing, malformed, stale, or invalid signature.
+    '503':
+      description: The configured public key is missing or malformed (misconfigured).
+source:
+  - label: HTTP handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/discord-interactions.ts#L18
+  - label: signature verification
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L80
+  - label: payload schema
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L47
+  - label: command definition
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L34
+  - label: action selection
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L136
+  - label: consent handling
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L152
+  - label: Logan button handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/calls.ts#L200
 ---
 
-[Discord interactions](../interactions.md) · [Public API](../index.md)
-
-Discord calls this endpoint.
-It does not use agent or Logan bearer tokens.
-Send `x-signature-ed25519` as a 128-character hexadecimal Ed25519 signature.
-Send `x-signature-timestamp` as a decimal Unix timestamp.
 The signature covers the timestamp text immediately followed by the exact raw request body.
 Timestamps must be within 300 seconds of the relay clock.
-
 The relay verifies the signature before parsing JSON.
-The JSON object requires these fields:
-
-| Field                  | Type                                                                               |
-| ---------------------- | ---------------------------------------------------------------------------------- |
-| `id`, `application_id` | Discord ID strings, each 17–20 digits                                              |
-| `type`                 | Integer; handled types are 1, 2, and 3                                             |
-| `token`                | String, 1–512 characters                                                           |
-| `guild_id`             | Optional Discord ID string                                                         |
-| `member`               | Optional object with `user: {id}` and optional string-array `roles`                |
-| `user`                 | Optional object with `id`                                                          |
-| `data`                 | Optional object with optional `name`, `custom_id`, and `options` array of `{name}` |
-
-Example ping; the signature must come from Discord for this exact body:
-
-```http
-POST /v1/discord/interactions HTTP/1.1
-Host: relay.example
-Content-Type: application/json
-x-signature-ed25519: <Discord-signature>
-x-signature-timestamp: <current-Unix-seconds>
-
-{"id":"123456789012345678","application_id":"123456789012345670","type":1,"token":"interaction-token"}
-```
-
-Returns `200`:
-
-```json
-{ "type": 1 }
-```
-
-Missing, malformed, stale, or invalid signatures return `401`.
-A missing or malformed configured public key returns `503 misconfigured`.
-Signed malformed JSON or invalid payload fields return `400 invalid_request`.
-Other replies also use `200` and `Cache-Control: no-store`.
-
-Sources: [HTTP handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/discord-interactions.ts#L18),
-[signature verification](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L80),
-[payload schema](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L47).
+Only interaction types 1, 2, and 3 are handled.
+Other replies use 200 and Cache-Control: no-store.
 
 ## Consent commands and buttons
 
-A `type: 2` application command uses `data.name: "consent"` and one subcommand.
+A type 2 application command uses data.name: "consent" and one subcommand.
 It must identify a user in the configured guild.
 
 ```json
@@ -86,7 +147,7 @@ Example response before consent:
 `/consent status` reports current consent and retained message count.
 `/consent withdraw` stops future relaying. Existing messages remain.
 
-A `type: 3` button with `data.custom_id: "consent_notice"` displays the notice.
+A type 3 button with data.custom_id: "consent_notice" displays the notice.
 An old `consent_agree:<version>` button displays the new notice instead of agreeing.
 Only the current version's button records consent.
 Agreement buttons update the original message with `type: 7` and `components: []`.
@@ -98,13 +159,9 @@ Withdrawal always proceeds, even after the allowance runs out.
 Role synchronization runs after the interaction response.
 Wrong-guild and unknown-command payloads receive explanatory ephemeral messages rather than HTTP errors.
 
-Sources: [command definition](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L34),
-[action selection](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L136),
-[consent handling](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L152).
-
 ## Logan confirmation buttons
 
-`type: 3` messages also handle `logan_confirm:<lgr_request_id>` and `logan_cancel:<lgr_request_id>`.
+Type 3 messages also handle logan_confirm:<lgr_request_id> and logan_cancel:<lgr_request_id>.
 The click must come from the person who made the request, in the configured guild.
 Requests expire after ten minutes.
 A successful confirmation changes pending to running, then executes after the HTTP reply.
@@ -134,5 +191,3 @@ Another person's click receives an ephemeral refusal.
 Expired requests update the message to say they expired.
 Missing or already-handled requests receive an explanatory reply.
 [request_status](../../mcp/logan-tools/request_status.md) reports the eventual execution result.
-
-Source: [Logan button handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/calls.ts#L200).

@@ -32,4 +32,4 @@ The relay returns `404` for missing/invisible channels and `403` for visible cha
 Binding errors retain the HTTP status in SvelteKit.
 Supplying a private thread ID does not bypass the conversation reader's private-thread exclusion.
 
-[Query source](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/showcase.remote.ts#L13) · [Underlying read contract](../../internal-api/showcase.md#get-internalv1channelsidmessages) · [Conversation schema](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L385)
+[Query source](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/showcase.remote.ts#L13) · [Underlying read contract](../../internal-api/showcase/index.md#get-internalv1channelsidmessages) · [Conversation schema](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L385)

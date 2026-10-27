@@ -1,31 +1,31 @@
 ---
-title: 'POST /_fake/gateway/session-limit'
-description: Fake Discord Gateway controls endpoint POST /_fake/gateway/session-limit.
+title: Configure session start limit
+description: Update the remaining session starts and reset time.
+operation:
+  method: POST
+  path: /_fake/gateway/session-limit
+  server: http://127.0.0.1:8790
+  auth: none
+  requestBody:
+    schema:
+      type: object
+      properties:
+        remaining:
+          type: number
+        reset_after_ms:
+          type: number
+    example:
+      remaining: 0
+      reset_after_ms: 1000
+  responses:
+    '200':
+      contentType: application/json
+      description: Returns `{total,remaining,resetAt,maxConcurrency}`; `resetAt` is epoch milliseconds.
+    '400':
+      description: Invalid input or world error.
+source:
+  - label: session limit
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L412
 ---
 
-[Fake Discord](../index.md) / [Fake Discord Gateway controls](../control-gateway.md)
-
-Implements `POST /_fake/gateway/session-limit`. It steers the Gateway WebSocket.
-
-## Request
-
-- Method and path: `POST /_fake/gateway/session-limit`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs: Optional numeric `remaining`; optional `reset_after_ms` sets `resetAt` relative to the current clock. Omitted fields stay unchanged.
-
-## Response
-
-Success returns `200` JSON. An action with no connected clients still succeeds.
-
-`{total,remaining,resetAt,maxConcurrency}`. `resetAt` is epoch milliseconds.
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`{"remaining":0,"reset_after_ms":1000}`
-
-## Source
-
-[session limit](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L412)
+`reset_after_ms` sets `resetAt` relative to the current clock. Omitted fields stay unchanged. The fake does not automatically refill remaining sessions.

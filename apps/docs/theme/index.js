@@ -1,6 +1,5 @@
-// Node-safe manifest for the build pipeline, like minimal's: components load lazily.
-import minimal from '@svartz/theme-minimal';
-import { withLayout } from './with-layout.js';
+// Node-safe manifest for the build pipeline: Svartz's reference shell. The renderers are in runtime.js.
+import { referenceTheme } from '@svartz/ui/reference';
 
-/** @param {import('@svartz/theme-minimal').MinimalThemeConfig} [config] */
-export default (config) => withLayout(minimal(config), () => import('./SiteLayout.svelte'));
+/** @param {import('@svartz/ui/reference').ReferenceThemeConfig} [config] */
+export default (config) => referenceTheme({ id: '@logitland/docs-theme', displayName: 'Logitland docs' }, config);

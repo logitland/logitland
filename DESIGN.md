@@ -181,7 +181,7 @@ tracking-tight text-balance`, then three ways in. Watch on Discord is the one in
 
 ## Page as Markdown
 
-Every page, on every surface, offers itself as Markdown to the person reading it: `PageMarkdown` from
+Every page, on every surface, offers itself as Markdown to the person reading it. In the web app that is `PageMarkdown` from
 `@logitland/ui/page-markdown`, a bordered pair of a **Markdown** link (the page's `.md` URL) and an icon button that
 copies that Markdown. The copy fetches with the session cookie, so a dashboard page copies what the signed-in person
 sees; the icon turns to a check (or an alert, with the reason in its tooltip) and the result is announced. On phones the
@@ -191,28 +191,37 @@ which keeps the page's query (filters, `?next=`, OAuth parameters).
 - Marketing: in the header, before Docs.
 - Dashboards: at the top of the sidebar footer, above the account menu, so it is in the sheet on phones.
 - Standalone screens (sign-in, OAuth consent): centred under the card.
-- Docs: under the note's title, or at the top of a list page.
 
 Its root carries `data-slot="page-markdown"`, which the HTML-to-Markdown conversion leaves out. It styles itself with
 scoped CSS on the shared tokens, so Tailwind utilities can't change its `display`; position it with margins.
 
+The docs use Svartz's own page actions instead (see [Docs](#docs)).
+
 ## Docs
 
-`apps/docs` is Svartz 1.0.1's minimal theme (explorer, search, graph, contents, backlinks), in this language through
-Svartz's own extension points only:
+`apps/docs` is Svartz 1.2.0's reference shell, Shopify.dev-shaped: a top bar with search and the colour-mode toggle, a
+filterable sidebar, and each page in a reading column. It is composed the way Svartz documents, from the API docs theme's
+REST renderer and the MCP docs theme's tool renderer, so guides, HTTP endpoints and MCP tools share one site. A page's
+frontmatter picks its renderer (see `apps/docs/README.md`). Endpoint and tool pages put the reference on the left and
+copyable request and response examples on the right; on narrower screens the examples drop below. The sidebar lists
+endpoints by path beside a fixed-width method badge in Swagger's hues (GET blue, POST green, PUT orange, PATCH teal,
+DELETE red) and tools beside an amber TOOL badge. It reads in the order a newcomer needs: the overview, guides and
+architecture, then the public API, MCP tools and schemas before the web contracts, internal API and fake Discord.
+Reference pages have no graph, backlinks, dates or reading time.
+
+It takes this language through Svartz's own extension points only:
 
 - **Tokens.** `svartz.config.ts` sets the vault's `theme.tokens`: Svartz's paper, surfaces, rules, text, accent,
-  fonts and radii each point at a `theme.css` role. Lime is the accent (link underlines, the current page's bar, graph
-  node), and `brand-text` colours accent text.
-- **Page actions.** Minimal has no slot for them, so `apps/docs/theme` is a directory theme: minimal's theme object with
-  every page layout swapped for `SiteLayout.svelte`, which renders minimal's layout and adds `PageMarkdown` above the
-  content. It also hides the control inside search and link previews, which clone the page.
+  fonts and radii each point at a `theme.css` role. Lime is the accent (link underlines, the current page's bar, focus),
+  and `brand-text` colours accent text. Method, status and tool badges keep Svartz's signal hues.
+- **Page actions** are Svartz's: **Copy page** and **View as Markdown** under the summary, pointing at the page's `.md`
+  copy under `/docs`, which carries its frontmatter.
 - **Navigation back to the web app**: the theme's footer links (logit.land, Sign in, llms.txt).
 - **Base path.** The web Worker serves the build at `/docs`; `svelte.config.js` sets `paths.base`, because a `host` target
   has no `basePath`.
 
-Svartz keeps its own type scale and its label voice (small capitals for dates, reading time and table headers), the
-one place the docs differ from the web app's sentence case. Svartz has no token for label case.
+Svartz keeps its own type scale and its label voice (small capitals for page actions, field facts and table headers),
+the one place the docs differ from the web app's sentence case. Svartz has no token for label case.
 
 ## Colour modes
 

@@ -1,7 +1,13 @@
-// Vite-bundled runtime manifest, like minimal's: components are eager.
-import minimal from '@svartz/theme-minimal/runtime';
-import SiteLayout from './SiteLayout.svelte';
-import { withLayout } from './with-layout.js';
+// Vite-bundled runtime manifest: Svartz's reference shell with the API theme's REST pages and the MCP theme's tool pages.
+import { apiRenderers } from '@svartz/theme-api-docs/runtime';
+import { mcpRenderers } from '@svartz/theme-mcp-docs/runtime';
+import { referenceTheme } from '@svartz/ui/reference/runtime';
 
-/** @param {import('@svartz/theme-minimal').MinimalThemeConfig} [config] */
-export default (config) => withLayout(minimal(config), { default: SiteLayout });
+/** @param {import('@svartz/ui/reference').ReferenceThemeConfig} [config] */
+export const theme = (config) =>
+  referenceTheme(
+    { id: '@logitland/docs-theme', displayName: 'Logitland docs', renderers: [...apiRenderers, ...mcpRenderers] },
+    config,
+  );
+
+export default theme;

@@ -17,7 +17,7 @@ The page load returns `{ request, consent, username }` to its Svelte page.
 Required query fields are `response_type`, `client_id`, `redirect_uri`, `code_challenge`, and `code_challenge_method`.
 Optional fields are `state`, `scope`, and `resource`.
 The relay requires response type `code`, PKCE method `S256`, and a registered redirect.
-See [the full authorization schema and service checks](../../internal-api/owners.md#logan-oauth-owner-routes).
+See [the full authorization schema and service checks](../../internal-api/owners/index.md#logan-oauth-owner-routes).
 
 ```http
 GET /oauth/authorize?response_type=code&client_id=lgc_0000000001&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256&state=example-state HTTP/1.1

@@ -28,10 +28,12 @@ export default defineConfig({
       id: 'docs',
       path: 'vault',
       target: { type: 'host' },
-      // Minimal with the page Markdown control; see theme/with-layout.js.
+      // Svartz's reference shell with the API and MCP renderers; see theme/runtime.js.
       theme: {
         base: './theme',
         tokens,
+        // The relay origin the examples call, as the docs write it; pages on another origin set `operation.server`.
+        baseUrl: 'https://relay.example',
         footer: { links: { 'logit.land': '/', 'Sign in': '/sign-in', 'llms.txt': '/llms.txt' } },
       },
       site: {

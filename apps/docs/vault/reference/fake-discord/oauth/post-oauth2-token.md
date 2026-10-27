@@ -1,45 +1,51 @@
 ---
-title: 'POST /api/v10/oauth2/token'
-description: Fake Discord OAuth endpoint that exchanges a local authorization code for a Bearer token.
+title: Exchange an authorization code
+description: Exchange a local authorization code for a Bearer token.
+operation:
+  method: POST
+  path: /api/v10/oauth2/token
+  server: http://127.0.0.1:8790
+  auth: none
+  requestBody:
+    contentType: application/x-www-form-urlencoded
+    schema:
+      type: object
+      properties:
+        grant_type:
+          type: string
+          const: authorization_code
+        code:
+          type: string
+          description: The code from the authorization redirect.
+        redirect_uri:
+          type: string
+          description: The exact redirect URI used during authorization.
+      required:
+        - grant_type
+        - code
+        - redirect_uri
+    example:
+      grant_type: authorization_code
+      code: code-from-location
+      redirect_uri: http://127.0.0.1:5173/callback
+  responses:
+    '200':
+      description: A generated Bearer token. The code is consumed.
+      example:
+        access_token: generated-access-token
+        token_type: Bearer
+        expires_in: 604800
+        scope: identify
+    '400':
+      description: A wrong grant type, an absent, unknown, or reused code, or a mismatched redirect URI.
+      example:
+        error: invalid_grant
+        error_description: Invalid "code" in request.
+source:
+  - label: exchange
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/oauth.ts#L66
 ---
 
-[Fake Discord](../index.md) / [OAuth](../oauth.md)
+The `/api/v9` and `/api` prefixes also work. Client ID and secret fields have no effect.
 
-Exchanges an authorization code for a Bearer token. This handler requires no authentication.
-
-## Request
-
-- Path: `/api/v10/oauth2/token`; `/api/v9` or `/api` also work.
-- Body: URL-encoded `grant_type=authorization_code`, `code`, and the exact `redirect_uri` used during authorization. Client ID and secret fields have no effect.
-- Auth: none.
-
-```sh
-curl http://127.0.0.1:8790/api/v10/oauth2/token \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode 'grant_type=authorization_code' \
-  --data-urlencode 'code=code-from-location' \
-  --data-urlencode 'redirect_uri=http://127.0.0.1:5173/callback'
-```
-
-## Response
-
-Success is `200 application/json`; the access token is generated:
-
-```json
-{
-  "access_token": "generated-access-token",
-  "token_type": "Bearer",
-  "expires_in": 604800,
-  "scope": "identify"
-}
-```
-
-The code is consumed on successful exchange. Codes and tokens live in memory. Token responses advertise a week, but the fake does not enforce token expiry.
-
-A wrong grant type, absent, unknown, or reused code, or mismatched redirect URI returns `400`:
-
-```json
-{ "error": "invalid_grant", "error_description": "Invalid \"code\" in request." }
-```
-
-Source: [exchange](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/oauth.ts#L66).
+Codes and tokens live in memory. Token responses advertise a week, but the fake does not enforce token expiry.

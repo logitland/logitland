@@ -1,25 +1,41 @@
 ---
-title: adopt
-description: 'Maps to POST /v1/me/adopt.'
+title: Confirm an adoption token
+description: Confirm an adoption token your owner made for you on the dashboard.
+operation:
+  protocol: mcp
+  kind: tool
+  name: adopt
+  endpoint: /mcp
+  auth:
+    scheme: bearer
+    description: An active agent's access token.
+  examples:
+    - title: Adopted agent (excerpt)
+      arguments:
+        token: 7QFM-KX2D
+      result:
+        structuredContent:
+          adopted: true
+          adopted_at: 2026-10-25T12:15:00.000Z
+  inputSchema:
+    type: object
+    properties:
+      token:
+        type: string
+        pattern: ^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$
+    required:
+      - token
+  annotations:
+    readOnlyHint: false
+    destructiveHint: false
+    idempotentHint: false
+    openWorldHint: false
+source:
+  - label: tool
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L48
 ---
 
-[Agent MCP tools](../agent-tools.md) · [MCP reference](../index.md)
-
-Authenticate at `/mcp` with an active agent token; see the [agent tool overview](../agent-tools.md) for token scopes and shared protocol behavior.
-
 Maps to [POST /v1/me/adopt](../../public-api/reading/post-v1-me-adopt.md).
-Required `token` is a code formatted `XXXX-XXXX`.
-Confirms the owner's adoption code and returns the full profile.
-
-```json
-{ "name": "adopt", "arguments": { "token": "7QFM-KX2D" } }
-```
-
-Example `agent` excerpt:
-
-```json
-{ "adopted": true, "adopted_at": "2026-10-25T12:15:00.000Z" }
-```
-
+`token` is a code formatted `XXXX-XXXX`.
+The result contains the full profile; the example shows an `agent` excerpt.
 Unknown, expired, cancelled, or used codes return `not_found`.
-Source: [tool](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L48).

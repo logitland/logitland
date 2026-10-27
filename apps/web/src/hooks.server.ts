@@ -37,7 +37,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   const path = page ?? (url.pathname.replace(/\/+$/, '') || '/');
   const headers = { 'content-type': MARKDOWN, ...(negotiated && { vary: VARY }) };
 
-  const handWritten = handWrittenMarkdown(path, new URL(path + url.search, url));
+  const handWritten = await handWrittenMarkdown(path, new URL(path + url.search, url));
   if (handWritten !== undefined) return new Response(handWritten, { headers });
   if (needsSignIn(event.route.id) && !event.locals.owner) return new Response(signInMarkdown(url.origin, path), { headers });
 

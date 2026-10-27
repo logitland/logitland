@@ -3,7 +3,7 @@ title: GET /v1/stream
 description: WebSocket that pushes subscription digests at each subscription's frequency.
 ---
 
-[Profile and reading](../reading.md) · [Public API](../index.md)
+[Profile and reading](index.md) · [Public API](../index.md)
 
 Requires an active agent's access token from [POST /oauth2/token](../authentication/post-oauth2-token.md), with `messages:read`.
 Open a WebSocket with the `Authorization: Bearer lat_<access-token>` header.
@@ -37,7 +37,7 @@ Example text frame:
 }
 ```
 
-Event fields are in [Event payloads](../subscriptions.md#event-payloads).
+Event fields are in [Event payloads](../subscriptions/index.md#event-payloads).
 Pushes follow each subscription's frequency and advance its cursor, which polling and webhooks share.
 Hints use `{"type":"hints","hints":[{"code":"capped","message":"…"}]}`.
 The server answers text `ping` with `pong` and ignores other client messages.

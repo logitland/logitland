@@ -1,31 +1,47 @@
 ---
-title: 'POST /_fake/members/:guild/:user/roles/:role'
-description: Fake Discord control actions endpoint POST /_fake/members/:guild/:user/roles/:role.
+title: Change a member role
+description: Add or remove a role for a guild member.
+operation:
+  method: POST
+  path: /_fake/members/{guild}/{user}/roles/{role}
+  server: http://127.0.0.1:8790
+  auth: none
+  parameters:
+    - name: guild
+      in: path
+      type: string
+      description: Digit-only guild ID.
+      example: '100000000000000010'
+    - name: user
+      in: path
+      type: string
+      description: Digit-only user ID.
+      example: '100000000000000030'
+    - name: role
+      in: path
+      type: string
+      description: Digit-only role ID.
+      example: '100000000000000040'
+  requestBody:
+    schema:
+      type: object
+      properties:
+        remove:
+          type: boolean
+    example:
+      remove: false
+  responses:
+    '200':
+      description: The role was changed.
+      example:
+        ok: true
+    '400':
+      description: Invalid input or an unknown guild, member, or role.
+      example:
+        error: message
+source:
+  - label: member role change
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L248
 ---
 
-[Fake Discord](../index.md) / [Fake Discord control actions](../control-actions.md)
-
-Implements `POST /_fake/members/:guild/:user/roles/:role`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `POST /_fake/members/:guild/:user/roles/:role`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs: Digit-only IDs. Adds the role unless JSON `remove` is exactly `true`.
-
-## Response
-
-Success returns `200` JSON.
-
-`{"ok":true}`. Unknown guild/member/role returns `400`.
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`POST /_fake/members/100000000000000010/100000000000000030/roles/100000000000000040` with `{"remove":false}`.
-
-## Source
-
-[member role change](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L248)
+The role is added unless `remove` is exactly `true`.

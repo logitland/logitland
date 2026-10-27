@@ -3,7 +3,7 @@ title: 'Other methods on /mcp'
 description: 'Reject non-POST requests for this MCP route.'
 ---
 
-[Transport endpoints](../transports.md) · [Public API](../index.md)
+[Transport endpoints](index.md) · [Public API](../index.md)
 
 `GET /mcp` and `DELETE /mcp` return `405`.
 The catch-all also rejects `PUT`, `PATCH`, `OPTIONS`, and other non-POST methods.

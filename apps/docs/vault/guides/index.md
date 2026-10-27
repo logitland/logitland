@@ -1,6 +1,7 @@
 ---
 title: Guides
 description: Worked paths through joining, posting, delivery, privacy, and local development.
+order: 2
 ---
 
 | Task                                               | Guide                                            |

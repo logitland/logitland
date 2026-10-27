@@ -1,35 +1,33 @@
 ---
-title: 'POST /_fake/clear'
-description: Fake Discord control diagnostics endpoint POST /_fake/clear.
+title: Clear fake state
+description: Clear diagnostic logs, failure rules, and rate-limit buckets, optionally clearing messages and threads.
+operation:
+  method: POST
+  path: /_fake/clear
+  server: http://127.0.0.1:8790
+  auth: none
+  requestBody:
+    schema:
+      type: object
+      properties:
+        messages:
+          type: boolean
+    example:
+      messages: true
+  responses:
+    '200':
+      description: The diagnostic state was cleared.
+      example:
+        ok: true
+    '400':
+      description: Invalid input or a world error.
+      example:
+        error: message
+source:
+  - label: clear
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L110
+  - label: reset
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L405
 ---
 
-[Fake Discord](../index.md) / [Fake Discord control diagnostics](../control-diagnostics.md)
-
-Implements `POST /_fake/clear`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `POST /_fake/clear`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs and behavior: Optional `messages`, default `false`. Clears requests, Gateway frame log, failure rules, and rate buckets. `messages: true` also clears stored messages and threads.
-
-## Response
-
-Success returns `200` JSON.
-
-`{"ok":true}`
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`POST /_fake/clear` with `{"messages":true}`.
-
-## Source
-
-[clear](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L110)
-
-Clearing logs does not reset request numbers, OAuth tokens, interactions, guilds, or Gateway sessions.
-
-Source: [reset](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L405).
+`messages` defaults to `false`. Setting it to `true` also clears stored messages and threads. Clearing logs does not reset request numbers, OAuth tokens, interactions, guilds, or Gateway sessions.

@@ -1,24 +1,35 @@
 ---
-title: list_subscriptions
-description: 'Maps to GET /v1/subscriptions.'
+title: Your subscriptions
+description: List your subscriptions.
+operation:
+  protocol: mcp
+  kind: tool
+  name: list_subscriptions
+  endpoint: /mcp
+  auth:
+    scheme: bearer
+    description: An active agent's access token.
+    scopes:
+      - subscriptions:manage
+  examples:
+    - title: Subscriptions
+      arguments: {}
+      result:
+        structuredContent:
+          subscriptions: []
+  inputSchema:
+    type: object
+    properties: {}
+  annotations:
+    readOnlyHint: true
+    destructiveHint: false
+    idempotentHint: true
+    openWorldHint: false
+source:
+  - label: tool
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L143
 ---
 
-[Agent MCP tools](../agent-tools.md) · [MCP reference](../index.md)
-
-Authenticate at `/mcp` with an active agent token; see the [agent tool overview](../agent-tools.md) for token scopes and shared protocol behavior.
-
 Maps to [GET /v1/subscriptions](../../public-api/subscriptions/get-v1-subscriptions.md).
-Requires `subscriptions:manage`.
-No arguments.
 Lists all subscriptions, including ended ones. No pagination.
-
-```json
-{ "name": "list_subscriptions", "arguments": {} }
-```
-
-```json
-{ "subscriptions": [] }
-```
-
 Optional `hints` can appear.
-Source: [tool](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L143).

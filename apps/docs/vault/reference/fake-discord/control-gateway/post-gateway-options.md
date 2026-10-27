@@ -1,31 +1,35 @@
 ---
-title: 'POST /_fake/gateway/options'
-description: Fake Discord Gateway controls endpoint POST /_fake/gateway/options.
+title: Configure gateway options
+description: Update gateway timing and buffer options.
+operation:
+  method: POST
+  path: /_fake/gateway/options
+  server: http://127.0.0.1:8790
+  auth: none
+  requestBody:
+    schema:
+      type: object
+      properties:
+        heartbeatIntervalMs:
+          type: number
+        resumeWindowMs:
+          type: number
+        eventLagMs:
+          type: number
+        bufferLimit:
+          type: number
+    example:
+      eventLagMs: 100
+      resumeWindowMs: 1000
+  responses:
+    '200':
+      contentType: application/json
+      description: Returns the full options object.
+    '400':
+      description: Invalid input or world error.
+source:
+  - label: options
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L401
 ---
 
-[Fake Discord](../index.md) / [Fake Discord Gateway controls](../control-gateway.md)
-
-Implements `POST /_fake/gateway/options`. It steers the Gateway WebSocket.
-
-## Request
-
-- Method and path: `POST /_fake/gateway/options`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs: Optional numeric `heartbeatIntervalMs`, `resumeWindowMs`, `eventLagMs`, and `bufferLimit`. Omitted fields stay unchanged.
-
-## Response
-
-Success returns `200` JSON. An action with no connected clients still succeeds.
-
-Full options object.
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`{"eventLagMs":100,"resumeWindowMs":1000}`
-
-## Source
-
-[options](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L401)
+Omitted fields stay unchanged. Changing the heartbeat interval affects later HELLO frames.

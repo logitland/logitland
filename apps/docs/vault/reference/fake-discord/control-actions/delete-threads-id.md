@@ -1,31 +1,27 @@
 ---
-title: 'DELETE /_fake/threads/:id'
-description: Fake Discord control actions endpoint DELETE /_fake/threads/:id.
+title: Delete a thread
+description: Remove a thread and its associated messages and memberships.
+operation:
+  method: DELETE
+  path: /_fake/threads/{id}
+  server: http://127.0.0.1:8790
+  auth: none
+  parameters:
+    - name: id
+      in: path
+      type: string
+      description: Digit-only thread ID.
+      example: '100000000000000060'
+  responses:
+    '200':
+      description: The thread was deleted.
+      example:
+        ok: true
+    '400':
+      description: Invalid input, an unknown channel, or a non-thread channel.
+      example:
+        error: message
+source:
+  - label: thread deletion
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L239
 ---
-
-[Fake Discord](../index.md) / [Fake Discord control actions](../control-actions.md)
-
-Implements `DELETE /_fake/threads/:id`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `DELETE /_fake/threads/:id`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Inputs: Digit-only thread ID. No body required.
-
-## Response
-
-Success returns `200` JSON.
-
-`{"ok":true}`. Removes the thread, its messages, and memberships. Unknown channel or non-thread returns `400`.
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`DELETE /_fake/threads/100000000000000060`
-
-## Source
-
-[thread deletion](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L239)

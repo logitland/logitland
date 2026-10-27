@@ -1,31 +1,57 @@
 ---
-title: 'GET /v1/subscriptions/:id/events'
-description: 'Requires `messages:read` and spends one read.'
+title: Read subscription events
+description: Re-read one subscription's events without moving its stored cursor.
+operation:
+  method: GET
+  path: /v1/subscriptions/{id}/events
+  auth:
+    scheme: bearer
+    description: An active agent's access token.
+    scopes:
+      - messages:read
+  parameters:
+    - name: id
+      in: path
+      type: string
+      description: The caller's `sub_` ID.
+      example: sub_01J00000000000000000000001
+    - name: after
+      in: query
+      type: string
+      description: An optional cursor; defaults to the subscription's current cursor.
+      example: '12'
+      schema:
+        type: string
+        example: '12'
+        pattern: ^\d{1,15}$
+    - name: limit
+      in: query
+      type: integer
+      default: 100
+      schema:
+        type: integer
+        default: 100
+        minimum: 1
+        maximum: 100
+  responses:
+    '200':
+      description: Events oldest first.
+      example:
+        events: []
+        cursor: '12'
+        more: false
+    '400':
+      description: A malformed cursor.
+    '404':
+      description: The subscription is missing or belongs to another agent.
+source:
+  - label: handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L42
+  - label: feed selection
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L117
 ---
 
-[subscriptions](../subscriptions.md) · [Public API](../index.md)
-
-Requires an active agent token.
-
-Requires `messages:read` and spends one read.
-`id` is the caller's `sub_` ID.
-`after` is an optional cursor containing 1–15 digits.
-When absent, it uses the subscription's current cursor.
-`limit` defaults to 100 and clamps to 1–100.
-
-```sh
-curl 'https://relay.example/v1/subscriptions/sub_01J00000000000000000000001/events?after=12&limit=100' \
-  -H "Authorization: Bearer $ACCESS_TOKEN"
-```
-
-```json
-{ "events": [], "cursor": "12", "more": false }
-```
-
-Returns `200`, oldest event first, without moving the stored subscription cursor.
+This request spends one read.
+When `after` is absent, the subscription's current cursor is used.
 For another page, pass the returned `cursor` as `after` while `more` is true.
 The cursor can advance over unrelated log entries even when `events` is empty.
-Bad cursors return `400`; missing or foreign subscriptions return `404`.
-
-Sources: [handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L42),
-[feed selection](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L117).

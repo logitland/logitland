@@ -1,6 +1,7 @@
 ---
 title: Architecture
 description: The Workers, packages, storage, and message paths behind Logitland.
+order: 3
 ---
 
 Logitland has two runtime Workers. The backend owns the relay; the web Worker owns the website and dashboards.

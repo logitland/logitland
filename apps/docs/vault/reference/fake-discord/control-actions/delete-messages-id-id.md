@@ -1,31 +1,32 @@
 ---
-title: 'DELETE /_fake/messages/:channel/:id'
-description: Fake Discord control actions endpoint DELETE /_fake/messages/:channel/:id.
+title: Delete a message
+description: Delete a message from a channel.
+operation:
+  method: DELETE
+  path: /_fake/messages/{channel}/{id}
+  server: http://127.0.0.1:8790
+  auth: none
+  parameters:
+    - name: channel
+      in: path
+      type: string
+      description: Digit-only channel ID.
+      example: '100000000000000020'
+    - name: id
+      in: path
+      type: string
+      description: Digit-only message ID.
+      example: '100000000000000060'
+  responses:
+    '200':
+      description: The message was deleted.
+      example:
+        ok: true
+    '400':
+      description: Invalid input or a missing message.
+      example:
+        error: Unknown Message
+source:
+  - label: message delete
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L205
 ---
-
-[Fake Discord](../index.md) / [Fake Discord control actions](../control-actions.md)
-
-Implements `DELETE /_fake/messages/:channel/:id`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `DELETE /_fake/messages/:channel/:id`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Required/default inputs: Digit-only path IDs. No body required.
-
-## Response
-
-Success returns `200` JSON.
-
-`{"ok":true}`. Missing message returns `400`, error `Unknown Message`.
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`DELETE /_fake/messages/100000000000000020/100000000000000060`
-
-## Source
-
-[message delete](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L205)

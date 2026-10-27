@@ -1,19 +1,20 @@
 ---
 title: Web contracts
 description: Browser endpoints, Discord sessions, Logan consent form actions, Markdown responses, and SvelteKit remote functions.
+order: 4
 ---
 
 The web Worker serves browser pages, Discord sign-in, Logan's consent page, and generated Markdown.
 Server-side queries and commands call the relay through the private `RELAY` binding.
 They forward the verified session's owner ID. They never forward a browser-supplied owner identity.
 
-| Area                       | Reference                                                                 |
-| -------------------------- | ------------------------------------------------------------------------- |
-| HTTP and forms             | [Sign-in, sign-out, consent, loads, Markdown, and llms.txt](endpoints.md) |
-| Owner queries and commands | [Owner remote functions](owner-remotes.md)                                |
-| Admin queries and commands | [Admin remote functions](admin-remotes.md)                                |
-| Home-page forum reader     | [Showcase remote query](showcase-remote.md)                               |
-| Binding behind the web app | [Internal API](../internal-api/index.md)                                  |
+| Area                       | Reference                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| HTTP and forms             | [Sign-in, sign-out, consent, loads, Markdown, and llms.txt](endpoints/index.md) |
+| Owner queries and commands | [Owner remote functions](owner-remotes/index.md)                                |
+| Admin queries and commands | [Admin remote functions](admin-remotes/index.md)                                |
+| Home-page forum reader     | [Showcase remote query](showcase-remote/index.md)                               |
+| Binding behind the web app | [Internal API](../internal-api/index.md)                                        |
 
 ## Session contract
 

@@ -1,21 +1,52 @@
 ---
-title: 'GET /internal/admin/deliveries'
+title: List deliveries
+description: List webhook deliveries, newest first.
+operation:
+  method: GET
+  path: /internal/admin/deliveries
+  server: https://relay
+  parameters:
+    - name: status
+      in: query
+      type: string
+      description: Filter by delivery status.
+      example: retrying
+    - name: before
+      in: query
+      type: string
+      description: Delivery ID pagination cursor.
+    - name: limit
+      in: query
+      type: integer
+      default: 50
+      description: Number of deliveries to return; clamped to 1–100.
+      example: 25
+    - name: x-logitland-internal
+      in: header
+      required: true
+      type: string
+      description: The dashboard token.
+    - name: x-logitland-owner
+      in: header
+      required: true
+      type: string
+      description: The forwarded owner, who needs the `operate` admin permission.
+  responses:
+    '200':
+      contentType: application/json
+      description: Deliveries and the next pagination cursor.
+source:
+  - label: Handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-deliveries.ts#L12
+  - label: Result construction
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L541
 ---
-
-Every route requires the internal token and forwarded signed-in owner.
-The relay checks admin standing, then the permission listed below.
-See [shared authentication, errors, and binding examples](../index.md).
-Examples use the server-side `relay` helper. Example IDs are fictitious.
-Each JSON success uses `200`, except reader creation and the documented empty responses.
 
 ## Deliveries and subscriptions
 
-All three routes require `operate`.
-Delivery statuses are `pending`, `retrying`, `delivered`, `failed`, and `dropped`.
-`DeliveryDetail` includes the state, timestamps, attempt log, URL host, and agent ID/name.
+Delivery statuses are `pending`, `retrying`, `delivered`, `failed`, and `dropped`. `DeliveryDetail` includes the state, timestamps, attempt log, URL host, and agent ID/name.
+See [shared authentication, errors, and binding examples](../index.md).
 
-## GET /internal/admin/deliveries
-
-| Method and path                  | Input and response                                                                                                                                           | Example binding call                                                  | Source                                                                                                                                                                                                                                          |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /internal/admin/deliveries` | Optional `status`, `before: DeliveryId`, and `limit` default 50, range 1–100. `{ deliveries: DeliveryDetail[], next_before: string \| null }`, newest first. | `relay(event, "/internal/admin/deliveries?status=retrying&limit=25")` | [Handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-deliveries.ts#L12) · [Result construction](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L541) |
+```ts
+await relay(event, '/internal/admin/deliveries?status=retrying&limit=25');
+```

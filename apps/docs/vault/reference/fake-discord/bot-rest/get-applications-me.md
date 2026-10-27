@@ -1,30 +1,34 @@
 ---
-title: GET /applications/@me
-description: Fake Discord bot REST route that returns the expanded application object.
+title: Get the application
+description: Return the fake application's expanded object.
+operation:
+  method: GET
+  path: /api/v10/applications/@me
+  server: http://127.0.0.1:8790
+  parameters:
+    - name: Authorization
+      in: header
+      required: true
+      type: string
+      description: The fake bot token.
+      example: Bot fake-local
+  responses:
+    '200':
+      contentType: application/json
+      description: The application object.
+    '401':
+      description: Missing or wrong bot token (`0`).
+source:
+  - label: applications.me
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L224
+  - label: application object
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L254
 ---
 
-[Fake Discord](../index.md) / [Bot REST](../bot-rest.md)
+Route name `applications.me`. The `/api/v9` and `/api` prefixes also work.
 
-Returns the fake application's identity, bot, verification key, owner, team, flags, interaction URL, and install parameters.
-Route name `applications.me`.
-
-## Request
-
-- Path: `/api/v10/applications/@me`. `/api/v9` and `/api` also work.
-- Auth: `Authorization: Bot <bot-token>`, with the fake's bot token (`fake-local` in examples).
-- Body and query: none.
-
-```sh
-curl http://127.0.0.1:8790/api/v10/applications/@me \
-  -H 'Authorization: Bot fake-local'
-```
-
-Replace `http://127.0.0.1:8790` with the fake's printed `url`.
-
-## Response
-
-`200` with `id`, `name`, `icon: null`, `description: ""`, `bot_public: false`, and `bot_require_code_grant: false`.
-It adds the bot User as `bot`, the signing public key as `verify_key`, `owner`, `team`, `flags`, `flags_new`, `interactions_endpoint_url`, and `install_params`.
+The object has `id`, `name`, `icon: null`, `description: ""`, `bot_public: false`, and `bot_require_code_grant: false`.
+It includes the bot User as `bot`, the signing public key as `verify_key`, `owner`, `team`, `flags`, `flags_new`, `interactions_endpoint_url`, and `install_params`.
 
 - `flags_new` is the string form of `flags`.
 - `install_params` has scopes `bot` and `applications.commands`, with permissions `"0"`.
@@ -34,10 +38,4 @@ It adds the bot User as `bot`, the signing public key as `verify_key`, `owner`, 
 [`PATCH /_fake/application`](../control-seeding/patch-application.md) changes the endpoint URL, team, and Message Content flags.
 That control route returns the fake's smaller stored object instead.
 
-## Errors
-
-- `401/0`: missing or wrong bot token.
 - [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
-
-Sources: [applications.me](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L224),
-[application object](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L254).

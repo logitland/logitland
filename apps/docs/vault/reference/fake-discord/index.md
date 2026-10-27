@@ -1,6 +1,7 @@
 ---
 title: Fake Discord
 description: Every endpoint in the local, in-memory Discord fake used by development and tests.
+order: 6
 ---
 
 `@logitland/discord-fake` runs a local Discord replacement for development and tests.
@@ -34,17 +35,17 @@ One control handler accepts both `DELETE /_fake/failures` and `DELETE /_fake/fai
 OAuth adds three handlers, including a Bearer-token variant of REST's `GET /users/@me`.
 The Gateway accepts WebSocket upgrades at `/gateway` and `/`.
 
-| Reference                                     | Coverage                                                                                     |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| [Bot REST](bot-rest.md)                       | Discovery, bot identity, application, guilds, roles, and commands. 11 routes.                |
-| [Messages and threads](messages-threads.md)   | Channels, bot messages, webhook creation, and thread management. Nine routes.                |
-| [Webhook REST](webhooks.md)                   | Six routes, including interaction follow-up branches.                                        |
-| [Control seeding](control-seeding.md)         | State, guilds, channels, roles, members, webhooks, and application settings. Seven handlers. |
-| [Control actions](control-actions.md)         | People, messages, threads, member roles, and signed interactions. 11 handlers.               |
-| [Control diagnostics](control-diagnostics.md) | Logs, failure injection, clearing, and rate limits. Eight request forms.                     |
-| [Control Gateway](control-gateway.md)         | Gateway inspection and fault controls. 11 handlers.                                          |
-| [OAuth](oauth.md)                             | Local user selection, code exchange, and user identity.                                      |
-| [Gateway WebSocket](gateway.md)               | Upgrade paths, client opcodes, events, authentication, and close codes.                      |
+| Reference                                           | Coverage                                                                                     |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [Bot REST](bot-rest/index.md)                       | Discovery, bot identity, application, guilds, roles, and commands. 11 routes.                |
+| [Messages and threads](messages-threads/index.md)   | Channels, bot messages, webhook creation, and thread management. Nine routes.                |
+| [Webhook REST](webhooks/index.md)                   | Six routes, including interaction follow-up branches.                                        |
+| [Control seeding](control-seeding/index.md)         | State, guilds, channels, roles, members, webhooks, and application settings. Seven handlers. |
+| [Control actions](control-actions/index.md)         | People, messages, threads, member roles, and signed interactions. 11 handlers.               |
+| [Control diagnostics](control-diagnostics/index.md) | Logs, failure injection, clearing, and rate limits. Eight request forms.                     |
+| [Control Gateway](control-gateway/index.md)         | Gateway inspection and fault controls. 11 handlers.                                          |
+| [OAuth](oauth/index.md)                             | Local user selection, code exchange, and user identity.                                      |
+| [Gateway WebSocket](gateway/index.md)               | Upgrade paths, client opcodes, events, authentication, and close codes.                      |
 
 ## Example conventions
 
@@ -63,7 +64,7 @@ curl http://127.0.0.1:8790/_fake/guilds \
   -d '{"id":"100000000000000010","name":"Test server"}'
 ```
 
-Use [control seeding](control-seeding.md) to create the example guild, channel, member, role, and webhook.
+Use [control seeding](control-seeding/index.md) to create the example guild, channel, member, role, and webhook.
 Messages and threads receive generated IDs. Substitute those IDs in later requests.
 
 ## REST authentication and responses
@@ -118,7 +119,7 @@ Sources: [error definitions](https://github.com/logitland/logitland/blob/main/pa
 
 Matched REST routes return rate-limit headers, including authentication and validation failures.
 Default limits are five requests per two seconds per webhook, and 50 per second for other buckets.
-Enforcement defaults to `false`; [control diagnostics](control-diagnostics.md) can enable it or inject failures.
+Enforcement defaults to `false`; [control diagnostics](control-diagnostics/index.md) can enable it or inject failures.
 An exhausted enforced bucket returns `429` with `retry_after`, `global: false`, and `Retry-After`.
 Injected failures run before authentication and can replace the documented route result.
 

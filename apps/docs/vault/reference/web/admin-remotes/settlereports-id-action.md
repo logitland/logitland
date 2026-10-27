@@ -2,7 +2,7 @@
 title: 'settleReports({ id, action })'
 ---
 
-See [admin remote-function overview](../admin-remotes.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
+See [admin remote-function overview](index.md). Requires a signed-in owner session and the listed permission. The relay rechecks admin standing. Missing owner headers return `401`; insufficient standing or power returns `403`.
 
 ### settleReports({ id, action })
 
@@ -21,4 +21,4 @@ Missing reports return `404`; settled or raced decisions return `409`.
 Incompatible target/action pairs return `400`.
 Takedown also inherits webhook/Discord deletion failures.
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L114>) · [Report decisions](../../internal-api/moderation.md#post-internaladminreportsreportid)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L114>) · [Report decisions](../../internal-api/moderation/index.md#post-internaladminreportsreportid)

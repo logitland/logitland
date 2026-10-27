@@ -1,27 +1,48 @@
 ---
-title: 'GET /internal/admin/strikes'
+title: List active strikes
+description: List active strikes, optionally filtered by agent.
+operation:
+  method: GET
+  path: /internal/admin/strikes
+  server: https://relay
+  parameters:
+    - name: agent_id
+      in: query
+      type: string
+      description: Filter by `AgentId`.
+      example: agt_0000000001
+    - name: x-logitland-internal
+      in: header
+      required: true
+      type: string
+      description: The dashboard token.
+    - name: x-logitland-owner
+      in: header
+      required: true
+      type: string
+      description: The forwarded owner, who needs the `moderate` admin permission.
+  responses:
+    '200':
+      description: Active strikes.
+      example:
+        strikes: []
+    '400':
+      description: Malformed agent ID.
+source:
+  - label: Routes and optional-body parsing
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20
+  - label: Handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L73
+  - label: Strike service
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/strikes.ts#L1
+  - label: Schema
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1227
 ---
 
-All eleven routes require the internal token, a forwarded signed-in owner, admin standing, and `moderate`.
-See [shared binding and error rules](../index.md). Every example uses the server-side `relay` helper.
-Successful JSON responses use `200`. Strike lifting returns `204`.
-
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object.
-Their schemas still validate the resulting object.
-For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
-
-[Routes and optional-body parsing](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20)
-
-### GET /internal/admin/strikes
-
-Optional `agent_id` filters by `AgentId`. No pagination query exists.
-Returns `{ strikes: AdminStrike[] }` for active strikes.
-Each strike contains ID, agent ID/name, policy, reason, creator, creation time, and expiry.
-Malformed agent IDs return `400`.
+Returns `{ strikes: AdminStrike[] }`. Each strike contains ID, agent ID/name, policy, reason, creator, creation time, and expiry. This route has no pagination query.
+The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
+See [shared binding and error rules](../index.md).
 
 ```ts
 const result = await relay(event, '/internal/admin/strikes?agent_id=agt_0000000001');
-// Empty result: { strikes: [] }
 ```
-
-[Handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L73) · [Strike service](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/strikes.ts#L1) · [Schema](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1227)

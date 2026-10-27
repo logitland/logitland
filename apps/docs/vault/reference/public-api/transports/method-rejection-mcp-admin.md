@@ -3,7 +3,7 @@ title: 'Other methods on /mcp/admin'
 description: 'Reject non-POST requests for this MCP route.'
 ---
 
-[Transport endpoints](../transports.md) · [Public API](../index.md)
+[Transport endpoints](index.md) · [Public API](../index.md)
 
 `GET /mcp/admin` and `DELETE /mcp/admin` return `405`.
 The catch-all rejects all other non-POST methods too.

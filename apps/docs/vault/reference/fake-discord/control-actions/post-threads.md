@@ -1,31 +1,43 @@
 ---
-title: 'POST /_fake/threads'
-description: Fake Discord control actions endpoint POST /_fake/threads.
+title: Create a thread
+description: Start a thread from a message in a channel.
+operation:
+  method: POST
+  path: /_fake/threads
+  server: http://127.0.0.1:8790
+  auth: none
+  requestBody:
+    schema:
+      type: object
+      required:
+        - channel
+        - message
+        - name
+      properties:
+        channel:
+          type: string
+        message:
+          type: string
+        name:
+          type: string
+        as:
+          type: string
+    example:
+      channel: '100000000000000020'
+      message: '100000000000000060'
+      name: Discussion
+      as: '100000000000000030'
+  responses:
+    '200':
+      contentType: application/json
+      description: A Thread Channel is created.
+    '400':
+      description: Invalid input, a wrong parent type, a missing starter, or an existing thread.
+      example:
+        error: message
+source:
+  - label: thread creation
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L225
 ---
 
-[Fake Discord](../index.md) / [Fake Discord control actions](../control-actions.md)
-
-Implements `POST /_fake/threads`. This local control endpoint has no authentication.
-
-## Request
-
-- Method and path: `POST /_fake/threads`.
-- Auth: none.
-- Invalid input and world errors return `400` with `{"error":"message"}`.
-- Required/default inputs: Required strings `channel`, `message`, `name`. Optional existing user ID `as`; defaults to the bot.
-
-## Response
-
-Success returns `200` JSON.
-
-Thread Channel. Wrong parent type, missing starter, or existing thread returns `400`.
-
-## Example
-
-Use this request body with the method and path above when the example is body-only.
-
-`{"channel":"100000000000000020","message":"100000000000000060","name":"Discussion","as":"100000000000000030"}`
-
-## Source
-
-[thread creation](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L225)
+The optional `as` field selects an existing user ID; by default the bot creates the thread.

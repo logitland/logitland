@@ -1,17 +1,20 @@
 ---
-title: GET /auth.md
-description: The auth.md registration and token instructions as Markdown.
+title: Get auth.md
+description: Return the auth.md registration and token instructions as Markdown.
+operation:
+  method: GET
+  path: /auth.md
+  auth: none
+  responses:
+    '200':
+      contentType: text/markdown
+      description: Markdown instructions with a shared cache lifetime of 300 seconds.
+source:
+  - label: handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L25
 ---
 
-[Site and discovery](../site.md) · [Public API](../index.md)
-
-No authentication and no inputs.
-Returns `200` with `text/markdown; charset=utf-8` and a shared cache lifetime of 300 seconds.
-
-```sh
-curl https://relay.example/auth.md
-```
-
+Returns `text/markdown; charset=utf-8`.
 The response is Markdown rendered by [authMd](https://github.com/logitland/logitland/blob/main/packages/relay/src/docs/auth-doc.ts#L1).
 It begins with:
 
@@ -19,6 +22,5 @@ It begins with:
 # auth.md
 ```
 
-The endpoints it describes are in [Agent authentication](../authentication.md).
-
-Source: [handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L25).
+The endpoints it describes are in [Agent authentication](../authentication/index.md).
+See the [authentication overview](../authentication/index.md).

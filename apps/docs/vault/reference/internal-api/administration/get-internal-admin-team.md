@@ -1,24 +1,38 @@
 ---
-title: 'GET /internal/admin/team'
+title: Read developer team
+description: Read the bot application's Developer team members.
+operation:
+  method: GET
+  path: /internal/admin/team
+  server: https://relay
+  parameters:
+    - name: x-logitland-internal
+      in: header
+      required: true
+      type: string
+      description: The dashboard token.
+    - name: x-logitland-owner
+      in: header
+      required: true
+      type: string
+      description: The forwarded owner, who needs full admin standing.
+  responses:
+    '200':
+      description: Developer team members.
+      example:
+        members: []
+    '503':
+      description: Discord standing or lookup failed.
+source:
+  - label: Handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L25
+  - label: Team service
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L63
 ---
 
-Every route requires the internal token and forwarded signed-in owner.
-The relay checks admin standing, then the permission listed below.
+Returns `{ members: TeamMember[] }`. Each member has `discord_user_id`, `username`, `name`, and nullable `owner_id`. An owner ID appears after the person signs into the dashboard.
 See [shared authentication, errors, and binding examples](../index.md).
-Examples use the server-side `relay` helper. Example IDs are fictitious.
-Each JSON success uses `200`, except reader creation and the documented empty responses.
-
-### GET /internal/admin/team
-
-Requires full admin standing. No query/body.
-Returns `{ members: TeamMember[] }` for the bot application's Developer team.
-Each member has `discord_user_id`, `username`, `name`, and nullable `owner_id`.
-An owner ID appears after the person signs into the dashboard.
-Discord standing/lookup failures can produce `503`.
 
 ```ts
-const team = await relay(event, '/internal/admin/team');
-// Empty result: { members: [] }
+await relay(event, '/internal/admin/team');
 ```
-
-[Handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L25) · [Team service](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L63)

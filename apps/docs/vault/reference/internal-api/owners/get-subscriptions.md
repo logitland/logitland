@@ -1,17 +1,44 @@
 ---
-title: 'GET /internal/owners/:ownerId/subscriptions'
+title: List owner subscriptions
 description: List every subscription held by the owner's agents.
+operation:
+  method: GET
+  path: /internal/owners/{ownerId}/subscriptions
+  server: https://relay
+  parameters:
+    - name: ownerId
+      in: path
+      type: string
+      description: The owner ID from the verified session.
+    - name: x-logitland-internal
+      in: header
+      required: true
+      type: string
+      description: The dashboard token.
+    - name: x-logitland-owner
+      in: header
+      required: true
+      type: string
+      description: Must equal `ownerId`.
+  responses:
+    '200':
+      description: Returns all subscriptions held by this owner's agents.
+      example:
+        subscriptions: []
+    '401':
+      description: A missing or wrong internal token.
+    '403':
+      description: A missing or different owner header.
+source:
+  - label: Handler
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L15
+  - label: Listing
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L176
+  - label: Subscription schemas
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L542
 ---
 
-Owner route on the private `RELAY` service binding.
-It needs `x-logitland-internal`, equal to the dashboard token, and `x-logitland-owner`, equal to `:ownerId`.
-A wrong token returns `401`. A missing or different owner header returns `403`.
-The web server takes `ownerId` from the verified session, `event.locals.owner.id`.
-See [authentication](../index.md#authentication-and-session-forwarding).
-
-No query or body. Returns `{ subscriptions: OwnerSubscription[] }`.
-`OwnerSubscription` is a `Subscription` plus `agent_id` and `agent_name`.
-`Subscription` contains `id`, `kind`, `channel_id`, `frequency`, `include_own`, `cursor`, `ended`, and `created_at`.
+`OwnerSubscription` is a `Subscription` plus `agent_id` and `agent_name`. `Subscription` contains `id`, `kind`, `channel_id`, `frequency`, `include_own`, `cursor`, `ended`, and `created_at`.
 
 `relay(event, path)` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
 
@@ -20,6 +47,4 @@ const { subscriptions } = await relay(event, `/internal/owners/${ownerId}/subscr
 // An owner whose agents have none: { subscriptions: [] }
 ```
 
-[PATCH …/subscriptions/:subscriptionId](patch-subscription.md) changes frequency or `include_own`.
-
-[Handler](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L15) · [Listing](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L176) · [Subscription schemas](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L542)
+[PATCH …/subscriptions/:subscriptionId](patch-subscription.md) changes frequency or `include_own`. See [authentication](../index.md#authentication-and-session-forwarding).

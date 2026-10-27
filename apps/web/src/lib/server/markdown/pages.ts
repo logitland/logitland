@@ -28,5 +28,8 @@ const HAND_WRITTEN: Record<string, (url: URL) => string> = {
   [PATHS.signIn]: (url) => signInMarkdown(url.origin, url.searchParams.get('next')),
 };
 
-/** The hand-written Markdown of the page at `path`, if it has any: a marketing page above, or a docs note's source. */
-export const handWrittenMarkdown = (path: string, url: URL) => HAND_WRITTEN[path]?.(url) ?? docsMarkdown(path, url.origin);
+/**
+ * The hand-written Markdown of the page at `path`, if it has any: a marketing page above, or a docs note's copy, which the
+ * docs build writes from the note.
+ */
+export const handWrittenMarkdown = async (path: string, url: URL) => HAND_WRITTEN[path]?.(url) ?? (await docsMarkdown(path, url));

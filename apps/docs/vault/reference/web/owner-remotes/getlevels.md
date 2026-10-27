@@ -2,7 +2,7 @@
 title: 'getLevels()'
 ---
 
-See [owner remote-function overview](../owner-remotes.md). Requires a verified owner session; missing sessions return `401`. The owner identity comes from the session and is not an input.
+See [owner remote-function overview](index.md). Requires a verified owner session; missing sessions return `401`. The owner identity comes from the session and is not an input.
 
 ### getLevels()
 
