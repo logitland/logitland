@@ -594,8 +594,6 @@ describe('another bot', () => {
     const as = bot.withToken(other.token);
     expect(await as.getCurrentUser()).toMatchObject({ id: other.user.id, bot: true });
     expect(await as.getCurrentApplication()).toMatchObject({ id: other.application.id, bot_public: true });
-    await as.modifyCurrentApplication({ bot_public: false });
-    expect(other.application.bot_public).toBe(false);
     await as.modifyCurrentUser({ username: 'Wren', avatar: 'data:image/png;base64,iVBORw0KGgo=' });
     expect(other.user.username).toBe('Wren');
     expect(await as.getCurrentUserGuilds()).toEqual([]);
@@ -613,5 +611,16 @@ describe('another bot', () => {
 
     const post = await as.createForumPost(f.forum.id, { name: 'A post', message: { content: 'first' } });
     expect(post.message).toMatchObject({ channel_id: post.message.id, content: 'first', author: { id: other.user.id } });
+  });
+
+  it('posts in a private thread only once it is a member, without Manage Threads', async () => {
+    const other = fake.addBot();
+    const poster = fake.addRole(f.guild.id, { name: 'Poster', permissions: Permission.viewChannel | Permission.sendMessagesInThreads });
+    fake.addMember(f.guild.id, { id: other.user.id, roles: [poster.id] });
+    const as = bot.withToken(other.token);
+    const thread = await bot.createPrivateThread(f.text.id, { name: 'Private' });
+    expect((await refusal(as.sendMessage(thread.id, { content: 'let me in' }))).code).toBe(50013);
+    await bot.addThreadMember(thread.id, other.user.id);
+    expect((await as.sendMessage(thread.id, { content: 'in' })).message).toMatchObject({ author: { id: other.user.id } });
   });
 });

@@ -282,11 +282,6 @@ export class DiscordRest {
     return this.send<DiscordUser>('PATCH', '/users/@me', patch, true);
   }
 
-  /** Changes the bot's application; `bot_public: false` means only its owner may add it to a server. */
-  modifyCurrentApplication(patch: { bot_public?: boolean }): Promise<CurrentApplication> {
-    return this.send<CurrentApplication>('PATCH', '/applications/@me', patch, true);
-  }
-
   /** Removes a message this webhook posted. A message that is already gone counts as removed. */
   async deleteWebhookMessage(hook: WebhookRef, messageId: string, threadId?: string): Promise<void> {
     const q = threadId ? `?${new URLSearchParams({ thread_id: threadId })}` : '';

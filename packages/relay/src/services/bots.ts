@@ -19,11 +19,12 @@ import { webhookThread, type MessageRow } from './moderation/rows';
 // every post, and only the relay uses the token: to post, to edit and delete what it posted, and to give the bot the agent's
 // name and avatar.
 //
-// The bot must be in no other server. The relay makes it private (only its owner may add it anywhere), connects it to the
-// Gateway once (Discord wants that before a bot sends anything) and gives it the agent's identity. Staff add it to the server
-// (#83); until then it is `waiting` and the agent posts through webhooks. botsJob sees it join and makes it `active`, with the
-// agent's roles. Joining another server, or a token Discord stops accepting, pauses it: the agent posts through webhooks again
-// until a token is given again.
+// The bot must be private (only its owner may add it anywhere) and in no other server. The relay connects it to the Gateway
+// once (Discord wants that before a bot sends anything) and gives it the agent's identity. Staff add it to the server (#83);
+// until then it is `waiting` and the agent posts through webhooks. botsJob sees it join and makes it `active`, with the
+// agent's roles. Turning public, joining another server, or a token Discord stops accepting pauses it: the agent posts
+// through webhooks again until a token is given again. What the relay gave the bot in Discord (roles, private threads) is
+// kept in bot_grants and taken back once the bot no longer warrants it (revokeGrants).
 
 export interface BotRow {
   agent_id: string;
@@ -50,6 +51,8 @@ const CHECKS_PER_RUN = 25;
 
 const OTHER_SERVER =
   'Your bot joined another server, so the relay posts through webhooks again. Remove the bot from every other server, then give the relay its token again.';
+const MADE_PUBLIC =
+  'Your bot became public, so the relay posts through webhooks again. Turn off Public Bot on its Bot page in the Developer Portal, then give the relay its token again.';
 const TOKEN_REFUSED =
   'Discord no longer accepts your bot’s token, so the relay posts through webhooks again. Reset the token in the Developer Portal and give the new one to the relay.';
 
@@ -123,8 +126,8 @@ async function ask<T>(call: () => Promise<T>): Promise<T> {
 
 /**
  * Gives the relay an adopted agent's bot (#84), replacing any it had. The token must be a bot's, not the relay's own nor one
- * another agent gave, and the bot in no server but this one. The relay makes it private, connects it once and gives it the
- * agent's name and avatar. It is `active` at once when staff already added it, and `waiting` until they do.
+ * another agent gave, and the bot private and in no server but this one. The relay connects it once and gives it the agent's
+ * name and avatar. It is `active` at once when staff already added it, and `waiting` until they do.
  */
 export async function setBot(relay: Relay, agent: AgentRecord, token: string, actor: { type: 'agent' | 'owner'; id: string }): Promise<AgentBot> {
   if (!agent.owner_id) throw forbidden('Only adopted agents can post as their own bot. Ask a person to adopt you first (see /auth.md, adoption).');
@@ -151,10 +154,12 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
       'invalid_request',
       `Your bot is in ${others === 1 ? 'another server' : `${others} other servers`}. The relay only posts as a bot that is in no other server: remove it from ${others === 1 ? 'that server' : 'them'}, then try again.`,
     );
-  if (app.bot_public)
-    await ask(() => rest.modifyCurrentApplication({ bot_public: false })).catch(() => {
-      throw unavailable('Discord didn’t let the relay make your bot private. Turn off Public Bot on its Bot page in the Developer Portal, then try again.');
-    });
+  if (app.bot_public !== false)
+    throw new RelayError(
+      422,
+      'invalid_request',
+      'Your bot is public, so anyone could add it to another server. Turn off Public Bot on its Bot page in the Developer Portal, then try again.',
+    );
   const { url } = await ask(() => rest.getGatewayBot());
   try {
     await identifyOnce(open, url, token);
@@ -185,18 +190,17 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
     }),
   ]);
   relay.log.info('bots.set', { agent_id: agent.id, status });
-  // A bot this one replaces keeps none of the agent's roles.
-  if (previous && previous.bot_user_id !== user.id) await syncRolesOf(relay, previous.bot_user_id, null);
+  // A bot this one replaces keeps none of the agent's roles or threads.
+  if (previous && previous.bot_user_id !== user.id) await revokeGrants(relay, previous.bot_user_id);
   await syncIdentity(relay, agent.id);
   if (status === 'active') await syncBotRoles(relay, agent.id);
   return toAgentBot(await getBot(relay, agent.id))!;
 }
 
-/** Stops posting as the agent's bot and forgets its token. The bot loses the agent's roles; the agent posts through webhooks. */
+/** Stops posting as the agent's bot and forgets its token. The bot loses the agent's roles and threads; the agent posts through webhooks. */
 export async function removeBot(relay: Relay, agentId: string, actor: Pick<AuditInput, 'actor_type' | 'actor_id'>): Promise<void> {
   const bot = await getBot(relay, agentId);
   if (!bot) return;
-  await syncRolesOf(relay, bot.bot_user_id, null);
   await relay.db.batch([
     relay.db.prepare('DELETE FROM agent_bots WHERE agent_id = ? AND bot_user_id = ?').bind(agentId, bot.bot_user_id),
     auditStmt(relay, {
@@ -207,6 +211,7 @@ export async function removeBot(relay: Relay, agentId: string, actor: Pick<Audit
       diff: { bot_user_id: { from: bot.bot_user_id, to: null } },
     }),
   ]);
+  await revokeGrants(relay, bot.bot_user_id);
 }
 
 /** After agents lose their owner (or their registration): only adopted agents post as their own bots. */
@@ -250,24 +255,40 @@ export async function syncIdentity(relay: Relay, agentId: string): Promise<void>
     .run();
 }
 
+const UNKNOWN_CHANNEL = 10003;
 const UNKNOWN_MEMBER = 10007;
+/** bot_grants.thread_id for the agent's roles; any other value is a private conversation's thread. */
+const ROLES = '';
+/** Grants revokeGrants takes back in one go; more wait for the next botsJob. */
+const REVOKES_PER_RUN = 10;
+
+const grant = (relay: Relay, botUserId: string, threadId: string) =>
+  relay.db
+    .prepare('INSERT INTO bot_grants (bot_user_id, thread_id, created_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING')
+    .bind(botUserId, threadId, iso(relay.now()))
+    .run();
 
 /**
  * Makes the bot hold the agent roles an agent at `level` counts as holding (`@agents` and its level roles), or none for null,
- * and no other agent role. Failures are logged, never thrown: the next check tries again.
+ * and no other agent role. Says whether Discord confirmed it. Failures are logged, never thrown: the next check tries again.
  */
-async function syncRolesOf(relay: Relay, botUserId: string, level: number | null): Promise<void> {
+async function syncRolesOf(relay: Relay, botUserId: string, level: number | null): Promise<boolean> {
   const guildId = relay.config.discord.guildId;
-  if (!guildId) return;
+  if (!guildId) return true;
   const roles = await agentRoles(relay);
   const want = level === null ? [] : agentRoleIds(roles, { level });
+  // Recorded before Discord is asked, so roles given are always taken back (revokeGrants).
+  if (want.length) await grant(relay, botUserId, ROLES);
   let held: string[];
   try {
     held = (await relay.discord.getGuildMember(guildId, botUserId)).roles;
   } catch (error) {
-    if (!(error instanceof DiscordError && error.code === UNKNOWN_MEMBER)) relay.log.warn('bots.roles_failed', { bot_user_id: botUserId, error });
-    return;
+    // A bot that isn't in the server holds no roles.
+    if (error instanceof DiscordError && error.code === UNKNOWN_MEMBER) return !want.length;
+    relay.log.warn('bots.roles_failed', { bot_user_id: botUserId, error });
+    return false;
   }
+  let confirmed = true;
   for (const role of anyAgentRoleIds(roles)) {
     const should = want.includes(role);
     if (should === held.includes(role)) continue;
@@ -276,15 +297,77 @@ async function syncRolesOf(relay: Relay, botUserId: string, level: number | null
       else await relay.discord.removeMemberRole(guildId, botUserId, role, 'Logitland: an agent’s bot holds its roles');
     } catch (error) {
       relay.log.warn('bots.roles_failed', { bot_user_id: botUserId, error });
+      confirmed = false;
     }
   }
+  return confirmed;
 }
 
 /** The agent's roles on its bot while the relay posts as it, none otherwise. Called when the agent's level changes. */
 export async function syncBotRoles(relay: Relay, agentId: string): Promise<void> {
   const bot = await getBot(relay, agentId);
   if (!bot) return;
-  await syncRolesOf(relay, bot.bot_user_id, bot.status === 'active' ? (await getAgent(relay, agentId)).level : null);
+  if (bot.status === 'active') await syncRolesOf(relay, bot.bot_user_id, (await getAgent(relay, agentId)).level);
+  else await revokeGrants(relay, bot.bot_user_id);
+}
+
+/**
+ * Before the agent's bot posts in a thread: a private conversation's thread takes it as a member first, since a bot without
+ * Manage Threads sees only the private threads it was added to. Says whether the bot can post there; if not, the message goes
+ * through the webhook. revokeGrants takes the bot out again once the agent leaves or the bot stops being used.
+ */
+export async function readyForThread(relay: Relay, botUserId: string, threadId: string): Promise<boolean> {
+  const thread = await relay.db.prepare('SELECT private FROM threads WHERE id = ?').bind(threadId).first<{ private: number }>();
+  if (!thread?.private) return true;
+  await grant(relay, botUserId, threadId);
+  try {
+    await relay.discord.addThreadMember(threadId, botUserId);
+    return true;
+  } catch (error) {
+    relay.log.warn('bots.thread_join_failed', { bot_user_id: botUserId, thread_id: threadId, error });
+    return false;
+  }
+}
+
+/** Takes the bot out of a private conversation's thread, opening an archived one for the moment. Says whether it is out. */
+async function leaveThread(relay: Relay, botUserId: string, threadId: string): Promise<boolean> {
+  const archived = (await relay.db.prepare('SELECT archived FROM threads WHERE id = ?').bind(threadId).first<{ archived: number }>())?.archived;
+  try {
+    if (archived) await relay.discord.setThreadArchived(threadId, false);
+    await relay.discord.removeThreadMember(threadId, botUserId);
+    if (archived) await relay.discord.setThreadArchived(threadId, true);
+    return true;
+  } catch (error) {
+    if (error instanceof DiscordError && (error.code === UNKNOWN_CHANNEL || error.code === UNKNOWN_MEMBER)) return true;
+    relay.log.warn('bots.thread_leave_failed', { bot_user_id: botUserId, thread_id: threadId, error });
+    return false;
+  }
+}
+
+/** A grant its bot no longer warrants: the roles of a bot that isn't active, or a thread its active bot's agent isn't in. */
+const UNWARRANTED = `NOT EXISTS (
+  SELECT 1 FROM agent_bots b WHERE b.bot_user_id = g.bot_user_id AND b.status = 'active' AND (g.thread_id = '' OR EXISTS (
+    SELECT 1 FROM conversation_members m WHERE m.agent_id = b.agent_id AND m.thread_id = g.thread_id AND m.joined_at IS NOT NULL AND m.left_at IS NULL)))`;
+
+/**
+ * Takes back what bots no longer warrant (one bot's, or any): the roles of a paused, replaced or removed bot, and private
+ * threads its agent left. A grant is forgotten only once Discord confirms the access is gone, so botsJob retries the rest.
+ * It only ever takes away, so it never puts a bot back to work.
+ */
+export async function revokeGrants(relay: Relay, botUserId?: string): Promise<number> {
+  const { results } = await relay.db
+    .prepare(`SELECT g.bot_user_id, g.thread_id FROM bot_grants g WHERE (?1 IS NULL OR g.bot_user_id = ?1) AND ${UNWARRANTED} ORDER BY g.created_at LIMIT ?2`)
+    .bind(botUserId ?? null, REVOKES_PER_RUN)
+    .all<{ bot_user_id: string; thread_id: string }>();
+  for (const g of results) {
+    const gone = g.thread_id === ROLES ? await syncRolesOf(relay, g.bot_user_id, null) : await leaveThread(relay, g.bot_user_id, g.thread_id);
+    if (gone)
+      await relay.db
+        .prepare(`DELETE FROM bot_grants AS g WHERE g.bot_user_id = ? AND g.thread_id = ? AND ${UNWARRANTED}`)
+        .bind(g.bot_user_id, g.thread_id)
+        .run();
+  }
+  return results.length;
 }
 
 async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
@@ -306,7 +389,7 @@ async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
     reason,
     diff: { status: { from: bot.status, to: 'paused' } },
   }).run();
-  await syncRolesOf(relay, bot.bot_user_id, null);
+  await revokeGrants(relay, bot.bot_user_id);
 }
 
 /** Pauses the agent's bot after Discord refused its token mid-send; the message goes out through the webhook instead. */
@@ -315,18 +398,24 @@ export async function tokenRefused(relay: Relay, agentId: string): Promise<void>
   if (bot) await pause(relay, bot, TOKEN_REFUSED);
 }
 
-/** Asks Discord which servers the bot is in, and moves it on: active once staff added it, paused in another server or without a working token. */
+/**
+ * Asks Discord which servers the bot is in and whether it is public, and moves it on: active once staff added it, paused when
+ * public, in another server or without a working token.
+ */
 async function check(relay: Relay, bot: BotRow): Promise<void> {
   const guildId = relay.config.discord.guildId!;
+  const rest = await clientOf(relay, bot);
   let guilds: PartialGuild[];
+  let app: CurrentApplication;
   try {
-    guilds = await (await clientOf(relay, bot)).getCurrentUserGuilds();
+    [guilds, app] = await Promise.all([rest.getCurrentUserGuilds(), rest.getCurrentApplication()]);
   } catch (error) {
     if (error instanceof DiscordError && error.status === 401) return pause(relay, bot, TOKEN_REFUSED);
     relay.log.warn('bots.check_failed', { agent_id: bot.agent_id, error });
     await relay.db.prepare('UPDATE agent_bots SET checked_at = ? WHERE agent_id = ?').bind(iso(relay.now()), bot.agent_id).run();
     return;
   }
+  if (app.bot_public !== false) return pause(relay, bot, MADE_PUBLIC);
   if (guilds.some((g) => g.id !== guildId)) return pause(relay, bot, OTHER_SERVER);
   const status: AgentBotStatus = guilds.some((g) => g.id === guildId) ? 'active' : 'waiting';
   const now = iso(relay.now());
@@ -341,15 +430,19 @@ async function check(relay: Relay, bot: BotRow): Promise<void> {
   if (status === 'active') await syncBotRoles(relay, bot.agent_id);
 }
 
-/** Cron. Checks the bots that are due: waiting ones every run, active ones every quarter hour. Returns how many it checked. */
+/**
+ * Cron. Takes back what bots no longer warrant, then checks the bots that are due: waiting ones every run, active ones every
+ * quarter hour. Returns how many grants and bots it went through.
+ */
 export async function botsJob(relay: Relay, ctx: { deadline: number }): Promise<number> {
   if (!relay.config.discord.guildId) return 0;
+  const revoked = await revokeGrants(relay);
   const now = relay.now().getTime();
   const { results } = await relay.db
     .prepare("SELECT * FROM agent_bots WHERE (status = 'waiting' AND checked_at <= ?) OR (status = 'active' AND checked_at <= ?) ORDER BY checked_at LIMIT ?")
     .bind(iso(new Date(now - WAITING_CHECK_MS)), iso(new Date(now - ACTIVE_CHECK_MS)), CHECKS_PER_RUN)
     .all<BotRow>();
-  let done = 0;
+  let done = revoked;
   for (const bot of results) {
     if (Date.now() >= ctx.deadline) break;
     try {

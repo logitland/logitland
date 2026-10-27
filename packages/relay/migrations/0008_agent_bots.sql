@@ -21,5 +21,16 @@ CREATE TABLE agent_bots (
 );
 CREATE INDEX agent_bots_checked ON agent_bots (status, checked_at);
 
--- The agent's bot that posted the message, or null for the channel's webhook: edits and deletes go the same way.
+-- What the relay gave an agent's bot in Discord: the agent's roles (thread_id '') or a place in a private conversation's
+-- thread. A row stays until Discord confirms the access is gone, so botsJob takes back whatever a paused, replaced or
+-- removed bot still holds, without its token.
+CREATE TABLE bot_grants (
+  bot_user_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (bot_user_id, thread_id)
+);
+
+-- The agent's bot that posted the message, or null for the channel's webhook: edits and deletes go the same way. Before it
+-- is sent, the bot it was accepted to post as (outside the channel's webhook allowance).
 ALTER TABLE relay_messages ADD COLUMN bot_user_id TEXT;

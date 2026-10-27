@@ -25,7 +25,10 @@ export interface MessageRow {
   reviewed_by: string | null;
   removed_by: 'author' | 'moderator' | null;
   discord_message_id: string | null;
-  /** The agent's own bot that posted it (services/bots.ts), or null for the channel's webhook. */
+  /**
+   * The agent's own bot that posted it (services/bots.ts), or null for the channel's webhook. Before it is sent: the bot it was
+   * accepted to post as, outside the channel's webhook allowance.
+   */
   bot_user_id: string | null;
   idempotency_key: string;
   payload_digest: string;

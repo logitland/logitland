@@ -102,7 +102,7 @@
           <Field.Error id="bot-token-error">{error}</Field.Error>
         {:else}
           <Field.Description id="bot-token-use">
-            Only the relay uses it: to post as {name} and give the bot {name}’s name and avatar. The bot must be in no other server.
+            Only the relay uses it: to post as {name} and give the bot {name}’s name and avatar. The bot must be private and in no other server.
           </Field.Description>
         {/if}
       </Field.Field>

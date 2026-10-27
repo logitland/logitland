@@ -11,10 +11,11 @@ import {
 import { iso, type Relay } from '../context';
 import type { AgentRecord } from '../types';
 import { audit } from './audit';
-import { botClient, syncBotRoles, tokenRefused } from './bots';
+import { botClient, readyForThread, syncBotRoles, tokenRefused } from './bots';
 import { accessFor, channelWebhook, getChannel } from './channels';
 import { getAgent, toAgent } from './identity';
 import { recordAgentPost, type AgentPost } from './intake';
+import { chargeChannel } from './moderation/admission';
 import { logStmt } from './moderation/log';
 import { STUCK_AFTER_MS, isOnProbation } from './moderation/policy';
 import { awardSent } from './xp/award';
@@ -209,10 +210,17 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
     return {};
   }
 
-  // The agent's own bot when one is in use (bots.ts), else the channel's webhook.
-  const bot = await botClient(relay, agent);
+  // The agent's own bot when one is in use and can post here (bots.ts), else the channel's webhook.
+  let bot = await botClient(relay, agent);
+  if (bot && row.thread_id && !(await readyForThread(relay, bot.userId, row.thread_id))) bot = null;
   let hook = null;
   if (!bot) {
+    // Accepted as the bot's post, it skipped the channel's webhook allowance: it counts now, or waits until it fits.
+    const wait = row.bot_user_id ? await chargeChannel(relay, channel.id) : null;
+    if (wait) {
+      relay.log.info('send.channel_full', { message_id: row.id, channel_id: channel.id, retry_after: wait });
+      return { retry: true, retryAfterSeconds: wait };
+    }
     try {
       hook = await channelWebhook(relay, channel);
     } catch (error) {
@@ -278,10 +286,11 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
     if (err instanceof UncertainSendError) return end('uncertain', UNCERTAIN_REASON);
     if (err instanceof DiscordError && bot) {
       if (err.status === 401) {
-        // Nothing was posted. The bot is paused, and the message goes out through the webhook instead.
+        // Nothing was posted. The bot is paused, and the message goes out through the webhook instead, within the channel's
+        // allowance: it keeps the bot's ID until then, which is what charges it.
         await tokenRefused(relay, agent.id);
         await relay.db
-          .prepare("UPDATE relay_messages SET status = 'queued', bot_user_id = NULL, updated_at = ? WHERE id = ? AND status = 'sending'")
+          .prepare("UPDATE relay_messages SET status = 'queued', updated_at = ? WHERE id = ? AND status = 'sending'")
           .bind(iso(relay.now()), row.id)
           .run();
         return processSend(relay, messageId);

@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { calls, converse, json, mod, patch, post, remove, row, say } from './posting-fixtures';
 import { botsJob } from './services/bots';
 import { ingest } from './services/intake';
+import { processSend } from './services/sending';
 import { updateSettings } from './services/settings';
-import { ADMIN_DISCORD, GUILD, LOUNGE, application, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
+import { ADMIN_DISCORD, GUILD, LOUNGE, application, harness, seedAgent, seedChannel, seedOwner, type Harness, type HarnessOptions } from './testing';
 
 // An adopted agent's own Discord bot (#84): the relay checks the token, posts as the bot once staff add it, and goes back to
 // the channel's webhook when the bot can't be used.
@@ -16,7 +17,7 @@ const OTHER_SERVER = '100000000000000099';
 
 /** A Discord where the agent's bot (BOT_TOKEN) and the relay's own bot both answer; `bot` is the agent's bot as Discord sees it. */
 function discordWithBot(h: Harness) {
-  const bot = { guilds: [] as string[], roles: [] as string[], public: true, username: 'helper-bot', revoked: false };
+  const bot = { guilds: [] as string[], roles: [] as string[], public: false, username: 'helper-bot', revoked: false, failRoleRemovals: 0 };
   let next = 310000000000000000n;
   const message = (channel_id: string, content = '') => {
     next += 1n;
@@ -34,10 +35,7 @@ function discordWithBot(h: Harness) {
         if (req.method === 'PATCH') bot.username = body.username ?? bot.username;
         return Response.json({ id: BOT_ID, username: bot.username, bot: true });
       }
-      if (path === '/applications/@me') {
-        if (req.method === 'PATCH') bot.public = body.bot_public;
-        return Response.json({ id: APP_ID, name: 'helper', bot_public: bot.public });
-      }
+      if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: bot.public });
       if (path === '/users/@me/guilds') return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
       if (path === '/gateway/bot') return Response.json({ url: 'wss://gateway.discord.gg', shards: 1, session_start_limit: {} });
       const channel = /^\/channels\/(\d+)\/messages/.exec(path)?.[1];
@@ -49,6 +47,7 @@ function discordWithBot(h: Harness) {
       return bot.guilds.includes(GUILD) ? Response.json({ roles: bot.roles }) : Response.json({ message: 'Unknown Member', code: 10007 }, { status: 404 });
     const role = /^\/guilds\/\d+\/members\/\d+\/roles\/(\d+)$/.exec(path)?.[1];
     if (role) {
+      if (req.method === 'DELETE' && bot.failRoleRemovals-- > 0) return new Response('upstream error', { status: 503 });
       bot.roles = req.method === 'PUT' ? [...bot.roles, role] : bot.roles.filter((r) => r !== role);
       return new Response(null, { status: 204 });
     }
@@ -59,8 +58,8 @@ function discordWithBot(h: Harness) {
   return bot;
 }
 
-async function adopted() {
-  const h = harness({ moderator: mod() });
+async function adopted(opts: Pick<HarnessOptions, 'sender'> = {}) {
+  const h = harness({ moderator: mod(), ...opts });
   await seedChannel(h.relay);
   await updateSettings(h.relay, 'own_admin', { agents_role_id: AGENTS_ROLE });
   const owner = await seedOwner(h.relay);
@@ -76,16 +75,26 @@ async function staffAdd(h: Harness, bot: { guilds: string[] }) {
   h.advance(60_000);
   await botsJob(h.relay, { deadline: Date.now() + 10_000 });
 }
+/** The next quarter-hour check of an active bot. */
+async function laterCheck(h: Harness) {
+  h.advance(15 * 60_000);
+  await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+}
+/** The lounge's webhooks have posted their 30 messages this minute. */
+const channelFull = (h: Harness) =>
+  h.db
+    .prepare('INSERT INTO rate_counters (key, window_start, count) VALUES (?, ?, 30)')
+    .bind(`chan:${LOUNGE}:m`, Math.floor(h.now().getTime() / 60_000) * 60)
+    .run();
 
 describe('giving the relay a bot', () => {
-  it('checks the token, makes the bot private, connects it once, gives it the agent’s name and avatar, and keeps the token sealed', async () => {
-    const { h, a, bot } = await adopted();
+  it('checks the token, connects the bot once, gives it the agent’s name and avatar, and keeps the token sealed', async () => {
+    const { h, a } = await adopted();
     const res = await give(h, a);
     expect(res.status).toBe(200);
     expect(await json(res)).toEqual({
       bot: { bot_user_id: BOT_ID, application_id: APP_ID, username: 'Wren', status: 'waiting', paused_reason: null, created_at: h.now().toISOString() },
     });
-    expect(bot.public).toBe(false);
     expect(h.identified).toEqual([BOT_TOKEN]);
     const [identity] = await calls(h, 'PATCH', /\/users\/@me$/);
     expect(identity!.body).toMatchObject({ username: 'Wren', avatar: expect.stringMatching(/^data:image\/png;base64,/) });
@@ -95,13 +104,19 @@ describe('giving the relay a bot', () => {
     expect(await (await h.call('GET', '/v1/me/bot', undefined, h.as(a.token))).text()).not.toContain(BOT_TOKEN);
   });
 
-  it('refuses an orphan, and a bot that is in another server', async () => {
+  it('refuses an orphan, a public bot, and a bot that is in another server', async () => {
     const { h, owner, bot } = await adopted();
     const orphan = await seedAgent(h.relay);
     expect((await give(h, orphan)).status).toBe(403);
 
-    bot.guilds.push(OTHER_SERVER);
     const adoptee = await seedAgent(h.relay, { ownerId: owner.id });
+    bot.public = true;
+    const pub = await give(h, adoptee);
+    expect(pub.status).toBe(422);
+    expect((await json(pub)).detail).toMatch(/Your bot is public/);
+
+    bot.public = false;
+    bot.guilds.push(OTHER_SERVER);
     const res = await give(h, adoptee);
     expect(res.status).toBe(422);
     expect((await json(res)).detail).toMatch(/in another server/);
@@ -165,14 +180,37 @@ describe('posting as the bot', () => {
     await give(h, a);
     await staffAdd(h, bot);
     bot.guilds.push(OTHER_SERVER);
-    h.advance(15 * 60_000);
-    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    await laterCheck(h);
 
     const { bot: status } = await json(await h.call('GET', '/v1/me/bot', undefined, h.as(a.token)));
     expect(status).toMatchObject({ status: 'paused', paused_reason: expect.stringMatching(/joined another server/) });
     expect(bot.roles).toEqual([]);
     expect((await json(await post(h, a, say('Back on the webhook')))).status).toBe('sent');
     expect((await calls(h, 'POST', /\/channels\/\d+\/messages$/)).filter(asBot)).toEqual([]);
+  });
+
+  it('pauses when the bot becomes public', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    bot.public = true;
+    await laterCheck(h);
+
+    const { bot: status } = await json(await h.call('GET', '/v1/me/bot', undefined, h.as(a.token)));
+    expect(status).toMatchObject({ status: 'paused', paused_reason: expect.stringMatching(/became public/) });
+    expect(bot.roles).toEqual([]);
+  });
+
+  it('takes the bot’s roles back at the next run when Discord fails to remove them', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    bot.failRoleRemovals = 1;
+    expect((await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token))).ok).toBe(true);
+    expect(bot.roles).toEqual([AGENTS_ROLE]);
+
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect(bot.roles).toEqual([]);
   });
 
   it('goes out through the webhook when Discord stops accepting the token, and pauses the bot', async () => {
@@ -184,6 +222,42 @@ describe('posting as the bot', () => {
     expect(msg.status).toBe('sent');
     expect((await row(h, msg.id))!.bot_user_id).toBeNull();
     expect((await json(await h.call('GET', '/v1/me/bot', undefined, h.as(a.token)))).bot.status).toBe('paused');
+  });
+
+  it('waits for room in the channel’s webhook allowance when the token stops working mid-send', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    await channelFull(h);
+    bot.revoked = true;
+    const msg = await json(await post(h, a, say('Sent once the channel has room')));
+    expect(msg.status).toBe('queued');
+    expect(await calls(h, 'POST', /\/webhooks\//)).toEqual([]);
+
+    h.advance(60_000);
+    await processSend(h.relay, msg.id);
+    expect(await row(h, msg.id)).toMatchObject({ status: 'sent', bot_user_id: null });
+    expect((await calls(h, 'POST', /\/webhooks\//)).length).toBe(1);
+  });
+
+  it('waits for room in the channel’s webhook allowance when the bot is paused before its queued post goes out', async () => {
+    const { h, a, bot } = await adopted({ sender: { enqueue: async () => {} } });
+    await give(h, a);
+    await staffAdd(h, bot);
+    const msg = await json(await post(h, a, say('Queued while the bot still worked')));
+    expect(msg.status).toBe('queued');
+    bot.guilds.push(OTHER_SERVER);
+    await laterCheck(h);
+    await channelFull(h);
+
+    expect(await processSend(h.relay, msg.id)).toMatchObject({ retry: true });
+    expect((await row(h, msg.id))!.status).toBe('queued');
+    expect(await calls(h, 'POST', /\/webhooks\//)).toEqual([]);
+
+    h.advance(60_000);
+    await processSend(h.relay, msg.id);
+    expect(await row(h, msg.id)).toMatchObject({ status: 'sent', bot_user_id: null });
+    expect((await calls(h, 'POST', /\/webhooks\//)).length).toBe(1);
   });
 });
 

@@ -262,15 +262,6 @@ export function routes(): Route[] {
     ok(bot.other ? otherApplication(bot.other) : fake.applicationObject()),
   );
 
-  // Only `bot_public` is modelled, and only for other bots.
-  add('applications.me.edit', 'PATCH', '/applications/@me', 'any-bot', 'applications', ({ fake, bot, body }) => {
-    const o = objectBody(body);
-    if (o.bot_public !== undefined && typeof o.bot_public !== 'boolean') throw formBody(['bot_public'], 'BASE_TYPE_BOOLEAN', 'Must be either true or false.');
-    if (!bot.other) return ok(fake.applicationObject());
-    if (o.bot_public !== undefined) bot.other.application.bot_public = o.bot_public;
-    return ok(otherApplication(bot.other));
-  });
-
   /* ----- Guilds ----- */
 
   add('guild.channels', 'GET', '/guilds/:guild/channels', 'bot', 'guild', ({ fake, params }) => {
