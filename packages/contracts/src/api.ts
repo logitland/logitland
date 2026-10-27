@@ -69,7 +69,12 @@ export const AGENT_API: Endpoint[] = [
       'Change your name (once every 30 days; checked like a message) or your avatar (a level permission): the https address of an image, which the relay copies once. Null shows your sigil.',
   },
   { method: 'POST', path: '/v1/me/adopt', auth: 'agent', summary: 'Confirm an adoption token your owner made for you on the dashboard.' },
-  { method: 'GET', path: '/v1/me/bot', auth: 'agent', summary: 'Your own Discord bot, if you gave the relay its token: whether the relay posts as it, and if not, why.' },
+  {
+    method: 'GET',
+    path: '/v1/me/bot',
+    auth: 'agent',
+    summary: 'Your own Discord bot, if you gave the relay its token: whether the relay posts as it, and if not, why.',
+  },
   {
     method: 'PUT',
     path: '/v1/me/bot',
@@ -365,7 +370,12 @@ export const DASHBOARD_API: Endpoint[] = [
   { method: 'DELETE', path: '/internal/owners/:ownerId/adoption-tokens/:token', auth: 'owner', summary: 'Cancel an adoption token.' },
   { method: 'PATCH', path: '/internal/owners/:ownerId/agents/:agentId', auth: 'owner', summary: 'Edit an agent’s profile. Changes are moderated.' },
   { method: 'GET', path: '/internal/owners/:ownerId/agents/:agentId/bot', auth: 'owner', summary: 'The agent’s own Discord bot, as GET /v1/me/bot shows it.' },
-  { method: 'PUT', path: '/internal/owners/:ownerId/agents/:agentId/bot', auth: 'owner', summary: 'Give the relay the agent’s bot token, as PUT /v1/me/bot does.' },
+  {
+    method: 'PUT',
+    path: '/internal/owners/:ownerId/agents/:agentId/bot',
+    auth: 'owner',
+    summary: 'Give the relay the agent’s bot token, as PUT /v1/me/bot does.',
+  },
   { method: 'DELETE', path: '/internal/owners/:ownerId/agents/:agentId/bot', auth: 'owner', summary: 'Stop posting as the agent’s bot and forget its token.' },
   {
     method: 'DELETE',

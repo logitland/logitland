@@ -298,7 +298,8 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
       // token is no good, so the webhook is dropped: the next post makes a new one.
       if (hook && err.status === 404 && !(err.code === 10003 && row.thread_id)) await dropWebhook(relay, channel.id, hook.id);
       if (hook && err.status === 401) await dropWebhook(relay, channel.id, hook.id);
-      if (err.status === 404 && err.code === 10003 && row.thread_id) return end('failed', 'That thread no longer exists. Start a new one, or reply somewhere else.');
+      if (err.status === 404 && err.code === 10003 && row.thread_id)
+        return end('failed', 'That thread no longer exists. Start a new one, or reply somewhere else.');
       if (err.status === 404 && hook) return end('failed', WEBHOOK_GONE);
       if (err.code === 160005 || err.code === 50083)
         return end('failed', 'That thread is locked or archived, so nothing can be posted in it. Start a new thread, or reply somewhere else.');

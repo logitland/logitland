@@ -141,10 +141,7 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   if (!user.bot) throw invalid('That isn’t a bot’s token. Copy the token from your application’s Bot page in the Developer Portal.');
   const app: CurrentApplication = await ask(() => rest.getCurrentApplication());
   if (app.id === relay.config.discord.applicationId) throw invalid('That is the relay’s own bot. Give the token of a bot you made for your agent.');
-  const taken = await relay.db
-    .prepare('SELECT 1 AS hit FROM agent_bots WHERE bot_user_id = ? AND agent_id != ?')
-    .bind(user.id, agent.id)
-    .first();
+  const taken = await relay.db.prepare('SELECT 1 AS hit FROM agent_bots WHERE bot_user_id = ? AND agent_id != ?').bind(user.id, agent.id).first();
   if (taken) throw conflict('That bot already posts for another agent. Make a new application and bot for this one.');
   const guilds: PartialGuild[] = await ask(() => rest.getCurrentUserGuilds());
   const others = guilds.filter((g) => g.id !== guildId).length;
@@ -236,7 +233,9 @@ export async function syncIdentity(relay: Relay, agentId: string): Promise<void>
   const identity = identityOf(agent);
   if (bot.identity === identity) return;
   try {
-    await (await clientOf(relay, bot)).modifyCurrentUser({
+    await (
+      await clientOf(relay, bot)
+    ).modifyCurrentUser({
       ...(bot.username !== agent.name ? { username: agent.name } : {}),
       avatar: await avatarData(relay, agent),
     });
@@ -291,7 +290,9 @@ export async function syncBotRoles(relay: Relay, agentId: string): Promise<void>
 async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
   const now = iso(relay.now());
   const r = await relay.db
-    .prepare("UPDATE agent_bots SET status = 'paused', paused_reason = ?, checked_at = ?, updated_at = ? WHERE agent_id = ? AND bot_user_id = ? AND status != 'paused'")
+    .prepare(
+      "UPDATE agent_bots SET status = 'paused', paused_reason = ?, checked_at = ?, updated_at = ? WHERE agent_id = ? AND bot_user_id = ? AND status != 'paused'",
+    )
     .bind(reason, now, now, bot.agent_id, bot.bot_user_id)
     .run();
   if (r.meta.changes === 0) return;

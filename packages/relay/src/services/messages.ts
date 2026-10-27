@@ -276,9 +276,7 @@ async function run(
     }),
   );
   const viaBot = Boolean(await activeBot(relay, agent));
-  await refusing(() =>
-    enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name), viaBot }),
-  );
+  await refusing(() => enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name), viaBot }));
   trail.add('admission', 'pass', null, null, 'limits');
 
   const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null });

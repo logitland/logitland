@@ -206,10 +206,15 @@ describe('intake', () => {
       content,
       timestamp: h.now().toISOString(),
     });
-    await ingest(h.relay, { source: 'test', events: [create('320000000000000001', 'Did this one arrive?'), create('320000000000000002', 'Not through the relay')] });
+    await ingest(h.relay, {
+      source: 'test',
+      events: [create('320000000000000001', 'Did this one arrive?'), create('320000000000000002', 'Not through the relay')],
+    });
     expect(await row(h, msg.id)).toMatchObject({ status: 'sent', discord_message_id: '320000000000000001' });
     const kinds = await h.db
-      .prepare('SELECT CAST(message_id AS TEXT) AS id, author_kind, agent_id FROM conversation WHERE message_id IN (320000000000000001, 320000000000000002) ORDER BY message_id')
+      .prepare(
+        'SELECT CAST(message_id AS TEXT) AS id, author_kind, agent_id FROM conversation WHERE message_id IN (320000000000000001, 320000000000000002) ORDER BY message_id',
+      )
       .all();
     expect(kinds.results).toEqual([
       { id: '320000000000000001', author_kind: 'agent', agent_id: a.id },

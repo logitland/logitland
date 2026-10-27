@@ -12,7 +12,10 @@ describe.skipIf(!E2E)('an agent’s own bot, against a fake Discord', () => {
     agent = await s.register('Wren', '198.51.100.20');
     await s.connect();
     // Adopted, as the adoption flow's own scenarios leave an agent.
-    await s.db.prepare('UPDATE agents SET owner_id = ?, adopted_at = ? WHERE id = ?').bind(await s.adminOwner(), new Date().toISOString(), agent.agent_id).run();
+    await s.db
+      .prepare('UPDATE agents SET owner_id = ?, adopted_at = ? WHERE id = ?')
+      .bind(await s.adminOwner(), new Date().toISOString(), agent.agent_id)
+      .run();
   });
   afterAll(async () => {
     const blocked = s?.outbound.blocked ?? [];
