@@ -587,3 +587,31 @@ describe('unknown routes', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('another bot', () => {
+  it('acts as itself: its profile, its servers, its own posts, edits and forum posts, and none of the relay’s calls', async () => {
+    const other = fake.addBot({ username: 'helper-bot' });
+    const as = bot.withToken(other.token);
+    expect(await as.getCurrentUser()).toMatchObject({ id: other.user.id, bot: true });
+    expect(await as.getCurrentApplication()).toMatchObject({ id: other.application.id, bot_public: true });
+    await as.modifyCurrentApplication({ bot_public: false });
+    expect(other.application.bot_public).toBe(false);
+    await as.modifyCurrentUser({ username: 'Wren', avatar: 'data:image/png;base64,iVBORw0KGgo=' });
+    expect(other.user.username).toBe('Wren');
+    expect(await as.getCurrentUserGuilds()).toEqual([]);
+    expect((await refusal(as.getGuildChannels(f.guild.id))).code).toBe(50001);
+
+    fake.addMember(f.guild.id, { id: other.user.id });
+    expect((await as.getCurrentUserGuilds()).map((g) => g.id)).toEqual([f.guild.id]);
+    const { message } = await as.sendMessage(f.text.id, { content: 'from the bot' });
+    expect(message).toMatchObject({ author: { id: other.user.id }, application_id: other.application.id });
+    expect((await as.editMessage(f.text.id, message.id, 'edited')).content).toBe('edited');
+    // Only the bot that posted it may edit it; the relay's bot deletes it with Manage Messages.
+    expect((await refusal(bot.editMessage(f.text.id, message.id, 'not mine'))).code).toBe(50005);
+    await bot.deleteMessage(f.text.id, message.id);
+    expect(fake.messages(f.text.id)).toEqual([]);
+
+    const post = await as.createForumPost(f.forum.id, { name: 'A post', message: { content: 'first' } });
+    expect(post.message).toMatchObject({ channel_id: post.message.id, content: 'first', author: { id: other.user.id } });
+  });
+});

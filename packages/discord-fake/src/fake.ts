@@ -46,6 +46,20 @@ export interface FakeOptions {
   strictUsernames?: boolean;
 }
 
+/** A bot besides the relay's own, such as an agent's: its user, its token and its application. */
+export interface OtherBot {
+  user: User;
+  token: string;
+  application: { id: string; name: string; bot_public: boolean };
+}
+
+/** Who a bot-authenticated request acts as: the relay's bot (`other` null) or another bot. */
+export interface Acting {
+  user: User;
+  applicationId: string;
+  other: OtherBot | null;
+}
+
 export interface BucketSpec {
   limit: number;
   windowMs: number;
@@ -143,6 +157,8 @@ export class DiscordFake {
   readonly oauth = new OAuth(this);
   readonly requests: RecordedRequest[] = [];
   readonly botToken: string;
+  /** Bots besides the relay's own (addBot), by token. */
+  readonly bots = new Map<string, OtherBot>();
   /** `team`: the user IDs on the Developer Portal team that owns the application, or null when one person (`owner_id`) does. */
   readonly application: { id: string; name: string; flags: number; interactions_endpoint_url: string | null; owner_id: string; team: string[] | null };
   /** Read it freely; change it with setRateLimits so buckets restart. */
@@ -190,7 +206,7 @@ export class DiscordFake {
       {
         world: this.world,
         now: this.clock,
-        botToken: () => this.botToken,
+        userForToken: (token) => (token === this.botToken ? this.world.botUser : (this.bots.get(token)?.user ?? null)),
         application: () => ({ id: this.application.id, flags: this.application.flags }),
         url: () => this.gatewayUrl,
       },
@@ -304,6 +320,25 @@ export class DiscordFake {
 
   addMember(guildId: string, m: { id?: string; username?: string; global_name?: string | null; roles?: string[]; nick?: string | null }): Member {
     return this.world.addMember(guildId, m);
+  }
+
+  /**
+   * A bot of someone else's, such as the one an agent gives the relay: a user with `bot: true`, its own token and application,
+   * public unless `public: false`. It is in no server until added with addMember (as staff adding it would).
+   */
+  addBot(b: { username?: string; public?: boolean } = {}): OtherBot {
+    const user = this.world.addUser({ username: b.username ?? 'agent-bot', bot: true });
+    const token = `${Buffer.from(user.id).toString('base64url')}.${randomBytes(4).toString('base64url')}.${randomBytes(27).toString('base64url')}`;
+    const bot: OtherBot = { user, token, application: { id: user.id, name: user.username, bot_public: b.public ?? true } };
+    this.bots.set(token, bot);
+    return bot;
+  }
+
+  /** Who a request with this Authorization header acts as, if anyone. */
+  actingAs(authorization: string | undefined): Acting | null {
+    if (authorization === `Bot ${this.botToken}`) return { user: this.world.botUser, applicationId: this.application.id, other: null };
+    const other = authorization?.startsWith('Bot ') ? this.bots.get(authorization.slice(4)) : undefined;
+    return other ? { user: other.user, applicationId: other.application.id, other } : null;
   }
 
   /** A webhook on a channel. `url` is the form an admin pastes into the relay; `fakeUrl` is where it really answers. */
@@ -633,11 +668,19 @@ export class DiscordFake {
     let status: number;
     let json: unknown;
     try {
-      if (route.auth === 'bot') {
-        if (headers.authorization !== `Bot ${this.botToken}`) throw errors.unauthorized();
-      }
+      const acting = this.actingAs(headers.authorization);
+      if (route.auth !== 'none' && !acting) throw errors.unauthorized();
+      // Another bot is in none of the relay's business: it reaches only what any bot may call.
+      if (route.auth === 'bot' && acting?.other) throw errors.missingAccess();
       if (bodyError && method !== 'GET' && method !== 'DELETE') throw bodyError;
-      const reply = await route.handler({ fake: this, params, query: url.searchParams, body: parsed, headers: req.headers });
+      const reply = await route.handler({
+        fake: this,
+        params,
+        query: url.searchParams,
+        body: parsed,
+        headers: req.headers,
+        bot: acting ?? { user: this.world.botUser, applicationId: this.application.id, other: null },
+      });
       status = reply.status;
       json = reply.json;
     } catch (err) {

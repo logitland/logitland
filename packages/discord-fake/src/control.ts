@@ -173,6 +173,15 @@ const table: [string, RegExp, Handler][] = [
     },
   ],
 
+  [
+    'POST',
+    /^\/bots$/,
+    (fake, b) => {
+      const bot = fake.addBot({ username: optStr(b, 'username'), public: field<boolean>(b, 'public', 'boolean', false) });
+      return { user_id: bot.user.id, token: bot.token, application_id: bot.application.id };
+    },
+  ],
+
   ['POST', /^\/webhooks$/, (fake, b) => fake.addWebhook(str(b, 'channel'), { id: optStr(b, 'id'), token: optStr(b, 'token'), name: optStr(b, 'name') })],
 
   /* ----- People ----- */
