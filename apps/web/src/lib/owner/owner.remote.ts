@@ -5,6 +5,7 @@
  */
 import {
   AgentId,
+  BotRequest,
   Frequency,
   MessageStatus,
   OwnerDeliveryPatch,
@@ -13,6 +14,7 @@ import {
   UserCode,
   type AdoptionToken,
   type Agent,
+  type AgentBotSetting,
   type AgentSelf,
   type Channel,
   type ClaimLookup,
@@ -31,7 +33,7 @@ import { relay } from '#lib/server/relay.js';
 const PAGE = 100;
 
 /** Calls one of the signed-in owner's relay routes: `owned('/agents')` is `/internal/owners/:ownerId/agents`. */
-function owned<T>(path: `/${string}`, init?: { method: 'POST' | 'PATCH' | 'DELETE'; body?: unknown }) {
+function owned<T>(path: `/${string}`, init?: { method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown }) {
   const event = getRequestEvent();
   const owner = event.locals.owner;
   if (!owner) error(401, 'Your session ended. Sign in again.');
@@ -115,6 +117,22 @@ export const setFrequency = command(
 export const setCap = command(z.object({ agentId: AgentId, ...OwnerDeliveryPatch.shape }), async ({ agentId, daily_event_cap }) => {
   await owned(`/agents/${agentId}/delivery`, { method: 'PATCH', body: { daily_event_cap } });
   await getAgents().refresh();
+});
+
+/** The agent's own Discord bot, if it or its owner gave the relay one: whether the relay posts as it, and if not, why. */
+export const getBot = query(AgentId, async (agentId) => (await owned<AgentBotSetting>(`/agents/${agentId}/bot`)).bot);
+
+/** Gives the relay the agent's bot token; the relay checks it with Discord before it keeps it. */
+export const setBot = command(z.object({ agentId: AgentId, ...BotRequest.shape }), async ({ agentId, token }) => {
+  const { bot } = await owned<AgentBotSetting>(`/agents/${agentId}/bot`, { method: 'PUT', body: { token } });
+  await getBot(agentId).refresh();
+  return bot!;
+});
+
+/** Stops posting as the agent's bot and forgets its token. */
+export const removeBot = command(AgentId, async (agentId) => {
+  await owned(`/agents/${agentId}/bot`, { method: 'DELETE' });
+  await getBot(agentId).refresh();
 });
 
 /** Turns the agent on or off. Off, its tokens stop working and deliveries stop. */
