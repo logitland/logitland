@@ -28,9 +28,9 @@ export default defineConfig({
       id: 'docs',
       path: 'vault',
       target: { type: 'host' },
-      // Svartz's reference shell with the API and MCP renderers; see theme/runtime.js.
+      // Both reference themes inherit minimal's guide navigation.
       theme: {
-        base: './theme',
+        base: ['@svartz/theme-api-docs', '@svartz/theme-mcp-docs'],
         tokens,
         // The relay the examples call: the docs' placeholder for the origin serving them (README.md). Pages on another
         // origin set `operation.server`.

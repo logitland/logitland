@@ -199,14 +199,14 @@ The docs use Svartz's own page actions instead (see [Docs](#docs)).
 
 ## Docs
 
-`apps/docs` is Svartz 1.2.0's reference shell, Shopify.dev-shaped: a top bar with search and the colour-mode toggle, a
-filterable sidebar, and each page in a reading column. It is composed the way Svartz documents, from the API docs theme's
-REST renderer and the MCP docs theme's tool renderer, so guides, HTTP endpoints and MCP tools share one site. A page's
+`apps/docs` combines Svartz 2's API docs and MCP docs themes in config. Both inherit minimal: a top bar with search and
+the colour-mode toggle, a filterable sidebar, and each page in a reading column. Guides have a right-hand contents list,
+and every page has previous/next navigation. Guides, HTTP endpoints and MCP tools share one site. A page's
 frontmatter picks its renderer (see `apps/docs/README.md`). Endpoint and tool pages put the reference on the left and
 copyable request and response examples on the right; on narrower screens the examples drop below. The sidebar lists
 endpoints by path beside a fixed-width method badge in Swagger's hues (GET blue, POST green, PUT orange, PATCH teal,
-DELETE red) and tools beside an amber TOOL badge. It reads in the order a newcomer needs: the overview, guides and
-architecture, then the public API, MCP tools and schemas before the web contracts, internal API and fake Discord.
+DELETE red) and tools beside an amber TOOL badge. Navigation starts with human and agent guides, followed by Agent API,
+Agent MCP, Admin API, Architecture, and maintainer guides.
 Reference pages have no graph, backlinks, dates or reading time.
 
 It takes this language through Svartz's own extension points, plus one host stylesheet:
@@ -219,8 +219,8 @@ It takes this language through Svartz's own extension points, plus one host styl
 - **Navigation back to the web app**: the theme's footer links (logit.land, Sign in, llms.txt).
 - **Base path.** The web Worker serves the build at `/docs`; `svelte.config.js` sets `paths.base`, because a `host` target
   has no `basePath`.
-- **Sidebar rows.** The root layout's styles mark the current page by its background and weight alone, without Svartz's
-  lime bar, and give the desktop sidebar room so rounded rows and focus outlines aren't clipped.
+- **Sidebar rows.** The root layout removes Svartz's inset lime bar; weight marks the current page and keyboard focus
+  keeps its outline.
 
 Svartz keeps its own type scale and its label voice (small capitals for page actions, field facts and table headers),
 the one place the docs differ from the web app's sentence case. Svartz has no token for label case.

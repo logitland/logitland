@@ -1,8 +1,9 @@
 # @logitland/docs
 
 Logitland's technical docs: a static [Svartz](https://github.com/mia-cx/svartz) site built from the Markdown in `vault/`.
-Its theme composes Svartz's reference shell from the API docs theme's REST renderer and the MCP docs theme's tool
-renderer, with Logitland's design tokens. The web Worker serves it at `/docs`.
+Its config combines Svartz's API docs and MCP docs themes, which inherit minimal's navigation, with Logitland's design
+tokens. Guides have a right-hand contents list; reference pages keep their examples column. Every page has previous/next
+navigation. The web Worker serves it at `/docs`.
 
 ```sh
 pnpm --filter @logitland/docs dev      # http://localhost:5179/docs/
@@ -99,8 +100,8 @@ the metadata can't say.
 ## Stack
 
 The app is Svartz's host template: `svartz.config.ts` mounts `vault/` as a host vault, and `src/routes/[...slug]` renders
-each note with `@svartz/ui`. `theme/` is a directory theme: `index.js` is the reference shell's build manifest and
-`runtime.js` lists its renderers. The Svartz CLI runs Vite, so use the package scripts rather than `vite` directly.
+each note with `@svartz/ui`. `theme.base` lists the API docs and MCP docs themes. The Svartz CLI runs Vite, so use the
+package scripts rather than `vite` directly. The config format remains `version: '1.0.0'` under Svartz 2.
 
 It runs SvelteKit 2 (`@sveltejs/kit` 2.70.3, `@sveltejs/adapter-static` 3.0.10), the range Svartz supports, with the
 repo's catalog Vite, vite-plugin-svelte, Svelte, Tailwind and TypeScript 6. The rest of the repo is on SvelteKit 3.

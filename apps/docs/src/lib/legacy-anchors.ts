@@ -193,7 +193,7 @@ export const LEGACY_ANCHORS: Record<string, Record<string, string>> = {
     'seton-agentid-on-': 'seton-agentid-on/',
     revokeagentid: 'revoke-agentid/',
   },
-  '/docs/folders/': { 'section-reference': '#section-api' },
+  '/docs/folders/': { 'section-reference': '/docs/folders/api/' },
   '/docs/mcp/': {
     'tool-result-conventions': 'tools/#tool-results',
     'post-mcp': 'post-mcp/',
