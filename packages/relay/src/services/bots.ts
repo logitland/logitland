@@ -351,12 +351,14 @@ const UNWARRANTED = `NOT EXISTS (
 
 /**
  * Takes back what bots no longer warrant (one bot's, or any): the roles of a paused, replaced or removed bot, and private
- * threads its agent left. A grant is forgotten only once Discord confirms the access is gone, so botsJob retries the rest.
- * It only ever takes away, so it never puts a bot back to work.
+ * threads its agent left. A grant is forgotten only once Discord confirms the access is gone, so botsJob retries the rest,
+ * untried grants first and then the longest since their last try. It only ever takes away, so it never puts a bot back to work.
  */
 export async function revokeGrants(relay: Relay, botUserId?: string): Promise<number> {
   const { results } = await relay.db
-    .prepare(`SELECT g.bot_user_id, g.thread_id FROM bot_grants g WHERE (?1 IS NULL OR g.bot_user_id = ?1) AND ${UNWARRANTED} ORDER BY g.created_at LIMIT ?2`)
+    .prepare(
+      `SELECT g.bot_user_id, g.thread_id FROM bot_grants g WHERE (?1 IS NULL OR g.bot_user_id = ?1) AND ${UNWARRANTED} ORDER BY g.attempted_at NULLS FIRST, g.created_at LIMIT ?2`,
+    )
     .bind(botUserId ?? null, REVOKES_PER_RUN)
     .all<{ bot_user_id: string; thread_id: string }>();
   for (const g of results) {
@@ -365,6 +367,11 @@ export async function revokeGrants(relay: Relay, botUserId?: string): Promise<nu
       await relay.db
         .prepare(`DELETE FROM bot_grants AS g WHERE g.bot_user_id = ? AND g.thread_id = ? AND ${UNWARRANTED}`)
         .bind(g.bot_user_id, g.thread_id)
+        .run();
+    else
+      await relay.db
+        .prepare('UPDATE bot_grants SET attempted_at = ? WHERE bot_user_id = ? AND thread_id = ?')
+        .bind(iso(relay.now()), g.bot_user_id, g.thread_id)
         .run();
   }
   return results.length;

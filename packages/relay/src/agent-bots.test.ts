@@ -213,6 +213,30 @@ describe('posting as the bot', () => {
     expect(bot.roles).toEqual([]);
   });
 
+  it('gets to a later thread’s cleanup while Discord keeps refusing the older ones', async () => {
+    const h = harness();
+    const threads = Array.from({ length: 11 }, (_, i) => String(600000000000000001n + BigInt(i)));
+    // A removed bot's places in 11 private threads; Discord refuses to take it out of the 10 oldest.
+    for (const [i, thread] of threads.entries())
+      await h.db
+        .prepare('INSERT INTO bot_grants (bot_user_id, thread_id, created_at) VALUES (?, ?, ?)')
+        .bind(BOT_ID, thread, new Date(h.now().getTime() + i).toISOString())
+        .run();
+    const stuck = threads.slice(0, 10);
+    h.setDiscord(async (req) =>
+      stuck.some((t) => new URL(req.url).pathname.includes(`/channels/${t}/`))
+        ? Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 })
+        : new Response(null, { status: 204 }),
+    );
+
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect(await calls(h, 'DELETE', new RegExp(`/channels/${threads[10]}/thread-members/${BOT_ID}$`))).toHaveLength(1);
+    const left = await h.db.prepare('SELECT thread_id FROM bot_grants ORDER BY thread_id').all<{ thread_id: string }>();
+    expect(left.results.map((g) => g.thread_id)).toEqual(stuck);
+  });
+
   it('goes out through the webhook when Discord stops accepting the token, and pauses the bot', async () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
@@ -258,6 +282,25 @@ describe('posting as the bot', () => {
     await processSend(h.relay, msg.id);
     expect(await row(h, msg.id)).toMatchObject({ status: 'sent', bot_user_id: null });
     expect((await calls(h, 'POST', /\/webhooks\//)).length).toBe(1);
+  });
+
+  it('drops a post queued in a private conversation the agent has left, without bringing its bot back in', async () => {
+    const { h, a, bot } = await adopted({ sender: { enqueue: async () => {} } });
+    await give(h, a);
+    await staffAdd(h, bot);
+    const other = await seedAgent(h.relay, { level: 3 });
+    const conv = await json(await h.call('POST', '/v1/conversations', { channel_id: LOUNGE, invite: [a.id] }, h.as(other.token)));
+    await h.call('POST', `/v1/conversations/${conv.id}/accept`, undefined, h.as(a.token));
+    const msg = await json(await post(h, a, say('Queued before I left', { thread_id: conv.id })));
+    expect(msg.status).toBe('queued');
+    expect((await h.call('POST', `/v1/conversations/${conv.id}/leave`, undefined, h.as(a.token))).status).toBe(204);
+
+    await processSend(h.relay, msg.id);
+    expect(await row(h, msg.id)).toMatchObject({ status: 'failed', status_reason: 'You left this conversation before the message could be sent.' });
+    expect(await calls(h, 'PUT', new RegExp(`/thread-members/${BOT_ID}$`))).toEqual([]);
+    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM bot_grants WHERE thread_id = ?').bind(conv.id).first()).toEqual({ n: 0 });
+    expect((await calls(h, 'POST', /\/channels\/\d+\/messages$/)).filter(asBot)).toEqual([]);
+    expect(await calls(h, 'POST', /\/webhooks\//)).toEqual([]);
   });
 });
 

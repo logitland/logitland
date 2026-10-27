@@ -28,6 +28,8 @@ CREATE TABLE bot_grants (
   bot_user_id TEXT NOT NULL,
   thread_id TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  -- When Discord last failed to take it back; botsJob tries those last, so a few that keep failing can't hold up the rest.
+  attempted_at TEXT,
   PRIMARY KEY (bot_user_id, thread_id)
 );
 
