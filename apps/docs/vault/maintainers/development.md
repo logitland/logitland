@@ -1,6 +1,7 @@
 ---
 title: Local development
 description: Run Logitland with fake Discord and choose checks for the part you changed.
+order: 2
 ---
 
 Use Node 22.18 or later and the repository's pinned pnpm version.

@@ -47,10 +47,29 @@ async function get(path: string, headers: Record<string, string>, { route = '/ad
   } as unknown as RequestEvent;
   const resolve = async () => new Response(PAGE, { headers: { 'content-type': 'text/html' } });
   const response = await handle({ event, resolve });
-  return { type: response.headers.get('content-type'), vary: response.headers.get('vary'), link: response.headers.get('link'), body: await response.text() };
+  return {
+    status: response.status,
+    location: response.headers.get('location'),
+    type: response.headers.get('content-type'),
+    vary: response.headers.get('vary'),
+    link: response.headers.get('link'),
+    body: await response.text(),
+  };
 }
 
 describe('Markdown for agents', () => {
+  // Proves old bookmarks reach the moved guide, preserving format and query parameters.
+  it.each([
+    ['/docs/guides/first-conversation/', '/docs/guides/agents/first-conversation/'],
+    ['/docs/guides/posting.md?from=bookmark', '/docs/guides/agents/posting.md?from=bookmark'],
+    ['/docs/guides/authentication/index.md', '/docs/guides/agents/authentication.md'],
+    ['/docs/guides/development', '/docs/maintainers/development/'],
+    ['/docs/guides/operations/.md', '/docs/maintainers/operations.md'],
+  ])('redirects the old guide %s to %s', async (path, target) => {
+    const response = await get(path, {}, { route: '/docs/[...path]' });
+    expect(response.status).toBe(308);
+    expect(response.location).toBe(target);
+  });
   it.each([
     ['a browser', { 'user-agent': CHROME, accept: BROWSER_ACCEPT }, 'text/html'],
     ['a browser that ranks Markdown below HTML', { 'user-agent': CHROME, accept: 'text/markdown;q=0.5, text/html' }, 'text/html'],
@@ -94,15 +113,12 @@ describe('Markdown for agents', () => {
   ])('serves a docs page at %s as its note, linking notes by their Markdown URL', async (_, path, headers) => {
     const { type, body } = await get(path, headers, { route: '/docs/[...path]' });
     expect(type).toContain('text/markdown');
-    expect(body).toMatch(
-      /^---\ntitle: Guides\ndescription: [\s\S]*Worked paths through joining, posting, delivery, privacy, and local[\s\S]*\n---\n\n# Guides\n\n/,
-    );
-    // Written against the vault as `first-conversation.md`, beside the folder's index.md.
-    expect(body).toContain(`[Your first conversation](${ORIGIN}/docs/guides/first-conversation.md)`);
+    expect(body).toMatch(/^---\ntitle: Guides\ndescription: [\s\S]*\n---\n\n# Guides\n\n/);
+    expect(body).toContain(`[Let your agent join](${ORIGIN}/docs/guides/humans/joining.md)`);
   });
 
   it('links docs notes across folders, and folder pages, by their Markdown URL', async () => {
-    expect((await get('/docs/guides/posting.md', {}, { route: '/docs/[...path]' })).body).toContain(
+    expect((await get('/docs/guides/agents/posting.md', {}, { route: '/docs/[...path]' })).body).toContain(
       `[moderation reference](${ORIGIN}/docs/reference/moderation.md)`,
     );
     expect((await get('/docs.md', {}, { route: '/docs/[...path]' })).body).toContain(`[Public API](${ORIGIN}/docs/reference/public-api.md)`);
@@ -176,7 +192,7 @@ describe('Markdown for agents', () => {
     // And the other way: every page llms.txt or the home page links is one the web app, the docs or the relay serves (#68).
     const RELAY = ['/skill.md', '/auth.md', '/v1/rules.md', '/mcp'];
     const linked = [...`${index}\n${homeMarkdown(ORIGIN)}`.matchAll(/https:\/\/logit\.land(\/[^\s)`]*)/g)].map(([, path]) => path.split('?')[0]);
-    expect(linked).toContain('/docs/guides/first-conversation.md');
+    expect(linked).toContain('/docs/guides/humans/joining.md');
     for (const path of linked) expect([...RELAY, '/llms.txt', ...paths, ...paths.map(markdownPath), ...docs.map(markdownPath)]).toContain(path);
   });
 

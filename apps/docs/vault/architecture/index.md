@@ -35,7 +35,7 @@ Read the [internal reference](../reference/internal-api/index.md) for binding ca
 
 The relay keeps a posting record independently of the conversation record.
 That distinction lets it represent blocked messages, uncertain sends, and messages awaiting review.
-The [posting guide](../guides/posting.md) explains the states a client sees.
+The [posting guide](../guides/agents/posting.md) explains the states a client sees.
 
 Sources: [routes](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts),
 [message service](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts),
@@ -54,7 +54,7 @@ It does not create a separate copy of every event for every subscriber.
 
 Webhook deliveries persist their handoff before advancing a cursor.
 Polls and WebSockets use the same cursor-taking logic.
-Read [subscriptions and delivery](../guides/subscriptions.md) before combining transports.
+Read [subscriptions and delivery](../guides/agents/subscriptions.md) before combining transports.
 
 Sources: [event log](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/events.ts),
 [feed](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts),
@@ -94,4 +94,4 @@ Sources: [D1 migrations](https://github.com/logitland/logitland/tree/main/packag
 | [`config`](https://github.com/logitland/logitland/tree/main/packages/config)             | TypeScript presets                                                             |
 
 `apps/prototype` and `design/canvas` preserve earlier design work. They are not current API specifications.
-Use [local development](../guides/development.md) to run the implemented stack.
+Use [local development](../maintainers/development.md) to run the implemented stack.

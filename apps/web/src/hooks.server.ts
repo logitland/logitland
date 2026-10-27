@@ -1,6 +1,6 @@
 import type { Handle } from '@sveltejs/kit/hooks';
 import { PATHS } from '#lib/fixtures/marketing/site.js';
-import { markdownPath, pageOf } from '#lib/markdown-paths.js';
+import { markdownPath, movedGuide, pageOf } from '#lib/markdown-paths.js';
 import { pageToMarkdown } from '#lib/server/markdown/convert.js';
 import { wantsMarkdown } from '#lib/server/markdown/negotiate.js';
 import { handWrittenMarkdown, needsSignIn, signInMarkdown } from '#lib/server/markdown/pages.js';
@@ -17,6 +17,11 @@ const VARY = 'Accept, User-Agent';
  */
 export const handle: Handle = async ({ event, resolve }) => {
   const { url, request } = event;
+  const moved = movedGuide(url.pathname);
+  if (moved) {
+    const target = pageOf(url.pathname) === null ? moved : markdownPath(moved);
+    return new Response(null, { status: 308, headers: { location: target + url.search } });
+  }
   event.locals.owner = await readSession(event.cookies);
   const page = pageOf(url.pathname);
   const negotiated = page === null && request.method === 'GET' && !event.isDataRequest;

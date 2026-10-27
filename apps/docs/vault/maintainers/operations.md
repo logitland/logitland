@@ -1,6 +1,7 @@
 ---
 title: Operations
 description: Diagnose configuration, intake, posting, delivery, and scheduled recovery.
+order: 1
 ---
 
 Start in the admin dashboard's health and setup pages.

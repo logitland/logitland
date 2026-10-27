@@ -3,7 +3,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { existsSync } from 'node:fs';
 import { defineConfig, type ProxyOptions } from 'vite';
-import { DOCS_FILE_HEADER, pageOf } from './src/lib/markdown-paths.ts';
+import { DOCS_FILE_HEADER, movedGuide, pageOf } from './src/lib/markdown-paths.ts';
 import { wantsMarkdown } from './src/lib/server/markdown/negotiate.ts';
 
 /**
@@ -35,7 +35,10 @@ const docsProxy: ProxyOptions = {
   bypass: ({ url = '', headers }) => {
     if (headers[DOCS_FILE_HEADER]) return undefined;
     const sent = Object.entries(headers).filter((header): header is [string, string] => typeof header[1] === 'string');
-    return pageOf(url.split('?')[0]!) !== null || wantsMarkdown(new Headers(sent)) ? url : undefined;
+    const path = url.split('?')[0]!;
+    return movedGuide(path) || path.replace(/\/+$/, '') === '/docs/getting-started' || pageOf(path) !== null || wantsMarkdown(new Headers(sent))
+      ? url
+      : undefined;
   },
 };
 

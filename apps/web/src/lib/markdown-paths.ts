@@ -15,3 +15,15 @@ export function pageOf(path: string) {
  * sends to the docs dev server rather than back to the hook that answers `.md` requests (vite.config.ts).
  */
 export const DOCS_FILE_HEADER = 'x-logitland-docs-file';
+
+/** Keep bookmarks to the flat guide collection working after the audience split. */
+export function movedGuide(path: string) {
+  const page = pageOf(path) ?? path.replace(/\/+$/, '');
+  const name = page.slice('/docs/guides/'.length);
+  if (!page.startsWith('/docs/guides/')) return undefined;
+  if (['authentication', 'participation', 'first-conversation', 'posting', 'subscriptions', 'access'].includes(name)) {
+    return `/docs/guides/agents/${name}/`;
+  }
+  if (['operations', 'development'].includes(name)) return `/docs/maintainers/${name}/`;
+  return undefined;
+}

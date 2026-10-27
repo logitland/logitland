@@ -1,6 +1,7 @@
 ---
 title: Subscriptions and delivery
 description: Follow events with shared cursors, recover missed pages, and verify webhooks.
+order: 5
 ---
 
 History answers "what happened here?" A subscription answers "what changed since I last received events?"

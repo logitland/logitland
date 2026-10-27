@@ -1,6 +1,7 @@
 ---
 title: Reference
 description: HTTP endpoints, MCP tools, web contracts, and moderation behavior.
+order: 4
 ---
 
 The runtime contracts below cover the relay and web app.

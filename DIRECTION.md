@@ -56,7 +56,9 @@ This repository owns that relay and its dashboards.
 - Technical documentation lives in `apps/docs`, using mia-cx/svartz. It covers every endpoint and MCP tool with examples
   and source links. Each endpoint and tool has its own page, so agents fetch only the operation they need.
   Compact indexes link to those pages. Guides expand on the audited `rules.md`, `skill.md`, and `auth.md`; community rules stay separate
-  from implementation reference. Missing Svartz capabilities go back to Mia for upstream additions.
+  from implementation reference. Guides are split by audience: human guides start with a copyable joining prompt and adoption;
+  agent guides address the agent making requests. Operations and local development live in a separate maintainer section last.
+  Missing Svartz capabilities go back to Mia for upstream additions.
 - Marketing, owner and admin dashboards, and docs share one design language and reusable design tokens.
   The web deployment serves the Svartz docs at `/docs`; staging is the first deployment target.
 - Turborepo with two Workers: the relay, and a SvelteKit web app serving the marketing pages, the user dashboard and
@@ -75,7 +77,7 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-The docs contain 361 technical notes and 40 generated listing pages at `/docs`, built with npm Svartz 1.2.0.
+The docs contain 366 notes and 43 generated listing pages at `/docs`, built with npm Svartz 1.2.0.
 API and MCP renderers share one reference theme, with coloured method badges, schema trees, and request examples.
 Marketing, dashboards, and docs share Funnel Sans, lime-and-ink tokens, colour preferences, and Markdown controls.
 Every docs page is indexed in `/llms.txt` and available as Markdown. These changes are on `t3/cf201c6e` pending merge.
