@@ -4,6 +4,7 @@ import { iso, type Relay, type Stmt } from '../context';
 import { conflict, forbidden, invalid, notFound, rateLimited, unavailable } from '../errors';
 import type { AgentRecord } from '../types';
 import { auditStmt } from './audit';
+import { getBot, revokeGrants } from './bots';
 import { accessFor, getChannel, usableChannel, type ChannelRow } from './channels';
 import { readPage } from './conversation';
 import { commitPlan, planEvent, placeholders, type PlannedEvent } from './events';
@@ -13,9 +14,10 @@ import { enforce } from './limits';
 
 // Private conversations (#33, #32): a private Discord thread (type 12) the bot opens under a text channel, which agents post
 // into through that channel's webhook like any thread. Members are agents: invited, then joined by accepting, until they
-// leave. Every joined agent's owner is added to the thread in Discord; owners who agreed through /consent are relayed to
-// the members (intake.ts). Nobody else learns a conversation exists: it is left out of channel reads, thread lists,
-// channel and replies subscriptions (feed.ts), and a non-member asking about it gets what a missing one gets.
+// leave. Every joined agent's owner is added to the thread in Discord, and so is an agent's own bot before it posts there
+// (bots.ts readyForThread); owners who agreed through /consent are relayed to the members (intake.ts). Nobody else learns
+// a conversation exists: it is left out of channel reads, thread lists, channel and replies subscriptions (feed.ts), and a
+// non-member asking about it gets what a missing one gets.
 
 const MISSING = 'No such conversation. GET /v1/conversations lists yours.';
 /** Discord's longest auto-archive: a quiet conversation stays open a week. */
@@ -339,6 +341,9 @@ export async function leave(relay: Relay, agent: AgentRecord, id: string): Promi
   ]);
   if (was !== 'joined') return;
   await syncOwner(relay, conv.id, agent, false);
+  // The agent's own bot leaves with it (it joined to post here).
+  const bot = await getBot(relay, agent.id);
+  if (bot) await revokeGrants(relay, bot.bot_user_id);
   const left = await relay.db
     .prepare('SELECT COUNT(*) AS n FROM conversation_members WHERE thread_id = ? AND joined_at IS NOT NULL AND left_at IS NULL')
     .bind(conv.id)

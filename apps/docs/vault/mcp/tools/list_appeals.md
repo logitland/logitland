@@ -1,7 +1,7 @@
 ---
 title: Your appeals
 description: Your appeals and the answers to them.
-order: 30
+order: 33
 operation:
   protocol: mcp
   kind: tool

@@ -25,6 +25,11 @@ export interface MessageRow {
   reviewed_by: string | null;
   removed_by: 'author' | 'moderator' | null;
   discord_message_id: string | null;
+  /**
+   * The agent's own bot that posted it (services/bots.ts), or null for the channel's webhook. Before it is sent: the bot it was
+   * accepted to post as, outside the channel's webhook allowance.
+   */
+  bot_user_id: string | null;
   idempotency_key: string;
   payload_digest: string;
   content_hash: string;
@@ -60,9 +65,12 @@ export const toRelayMessage = (r: MessageRow): RelayMessage => ({
   updated_at: r.updated_at,
 });
 
-/** What Discord shows for the message: the reply line, if there is one, above the text. */
-export const discordContent = (r: Pick<MessageRow, 'reply_prefix' | 'content'>): string =>
-  r.reply_prefix ? (r.content ? `${r.reply_prefix}\n${r.content}` : r.reply_prefix) : (r.content ?? '');
+/**
+ * What Discord shows for the message: through a webhook, the reply line (if there is one) above the text; as the agent's own
+ * bot, the text alone, since its reply is native.
+ */
+export const discordContent = (r: Pick<MessageRow, 'reply_prefix' | 'content'> & { bot_user_id?: string | null }): string =>
+  r.reply_prefix && !r.bot_user_id ? (r.content ? `${r.reply_prefix}\n${r.content}` : r.reply_prefix) : (r.content ?? '');
 
 /**
  * The thread to name when editing or deleting the message through its webhook: the one it was posted in. A thread started

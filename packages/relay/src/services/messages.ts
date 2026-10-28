@@ -4,6 +4,7 @@ import { sha256 } from '../crypto';
 import { RelayError, conflict, invalid, notFound } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
+import { activeBot } from './bots';
 import { usableChannel, type ChannelRow } from './channels';
 import type { ConversationRow } from './conversation';
 import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds } from './moderation/admission';
@@ -67,6 +68,11 @@ interface Draft {
   existing: MessageRow | null;
   /** The agent may post links in this channel (Embed Links, #9). */
   links: boolean;
+  /**
+   * The agent's own bot it is accepted to post as, outside the channel's webhook allowance (bots.ts), or null for the webhook.
+   * Kept on the row, so a send that ends up going through the webhook is charged to the channel then (sending.ts).
+   */
+  botUserId: string | null;
 }
 
 /** Stores the message in the given state. Null means another request got there first (or the sweeper did). */
@@ -88,8 +94,8 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
   const id = newId('message');
   const r = await relay.db
     .prepare(
-      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
+      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, bot_user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
     )
     .bind(
       id,
@@ -111,6 +117,7 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
       d.digest,
       d.hash,
       d.textHash,
+      d.botUserId,
       at,
       at,
     )
@@ -179,14 +186,15 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
     textHash: await contentHash(shape.text ?? ''),
     existing: null,
     links: access.embedLinks,
+    botUserId: (await activeBot(relay, agent))?.bot_user_id ?? null,
   };
   if (!found) return run(relay, principal, channel, settings, draft, null);
   // Only one of several concurrent retries gets to run the message again.
   const claimed = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'moderating', verdict = NULL, policy_code = NULL, status_reason = NULL, held_kind = NULL, review_attempts = 0, next_review_at = NULL, updated_at = ? WHERE id = ? AND status = 'failed'",
+      "UPDATE relay_messages SET status = 'moderating', verdict = NULL, policy_code = NULL, status_reason = NULL, held_kind = NULL, review_attempts = 0, next_review_at = NULL, bot_user_id = ?, updated_at = ? WHERE id = ? AND status = 'failed'",
     )
-    .bind(iso(now), found.id)
+    .bind(draft.botUserId, iso(now), found.id)
     .run();
   if (claimed.meta.changes === 0) return outcome((await getRow(relay, found.id))!);
   return run(relay, principal, channel, settings, { ...draft, existing: (await getRow(relay, found.id))! }, found);
@@ -274,7 +282,17 @@ async function run(
       startsThread: Boolean(req.thread_name) && isForum(channel),
     }),
   );
-  await refusing(() => enforceRates(relay, { agentId: agent.id, limits, probation, channel, net: draft.net, startsThread: Boolean(req.thread_name) }));
+  await refusing(() =>
+    enforceRates(relay, {
+      agentId: agent.id,
+      limits,
+      probation,
+      channel,
+      net: draft.net,
+      startsThread: Boolean(req.thread_name),
+      viaBot: Boolean(draft.botUserId),
+    }),
+  );
   trail.add('admission', 'pass', null, null, 'limits');
 
   const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null });

@@ -12,7 +12,7 @@ import {
   type Relay,
   type RelayBindings,
 } from '@logitland/relay';
-import { DiscordGateway as GatewayObject, gatewayClient } from './gateway';
+import { DiscordGateway as GatewayObject, gatewayClient, openSocket } from './gateway';
 import { reportError, sentryOptions, type SentryBindings } from './sentry';
 import { ChannelSender as SenderObject, senderClient } from './sender';
 import { ShowcaseLive as ShowcaseObject, showcaseHub } from './showcase';
@@ -51,6 +51,7 @@ export function relayFor(env: Bindings) {
       gateway: gatewayClient(env.GATEWAY),
       streams: streamHub(env.AGENT_STREAM),
       showcase: showcaseHub(env.SHOWCASE_LIVE),
+      openSocket,
       log,
     });
     hit = { relay, publicApp: relayApp(relay), internal: internalApp(relay) };

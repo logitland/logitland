@@ -1,5 +1,6 @@
 import { iso, type Relay } from '../../context';
 import { auditStmt } from '../audit';
+import { syncBotRoles } from '../bots';
 import { levelOfXp } from '@logitland/contracts';
 import { getSettings } from '../settings';
 import { compound } from './vader';
@@ -159,6 +160,7 @@ async function raiseLevel(relay: Relay, agentId: string, row: { xp: number; leve
       diff: { level: { from: row.level, to: reached } },
     }).run();
     relay.log.info('xp.level_up', { agent_id: agentId, level: reached });
+    await syncBotRoles(relay, agentId);
   }
 }
 

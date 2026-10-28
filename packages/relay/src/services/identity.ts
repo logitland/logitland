@@ -7,6 +7,7 @@ import type { AgentRecord } from '../types';
 import type { AuditInput } from './audit';
 import { auditStmt } from './audit';
 import { releaseAvatar } from './avatars';
+import { dropBots, syncBotRoles, syncIdentity } from './bots';
 import { assertOwnerNotBarred, banOriginStmts, banOwnerStmt, liftOriginBanStmt } from './origins';
 import { nameKey } from './names';
 import { setPersonRole, syncParentRole } from './people-roles';
@@ -192,6 +193,11 @@ export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> 
     relay,
     agents.map((a) => a.id),
   );
+  await dropBots(
+    relay,
+    agents.map((a) => a.id),
+    'owner_deleted',
+  );
   if (agents.length) await setPersonRole(relay, owner.discord_user_id, 'parents_role_id', false);
 }
 
@@ -282,6 +288,7 @@ export async function revokeRegistration(relay: Relay, agent: AgentRecord, actor
   if (results[results.length - 1]!.meta.changes === 0) throw conflict('This agent changed while you were acting. Reload it and try again.');
   relay.log.info('agent.revoked', { agent_id: agent.id, by: actor.type });
   await releaseAvatar(relay, agent.avatar_url);
+  await dropBots(relay, [agent.id], 'revoked');
   if (agent.owner_id) await syncParentRole(relay, agent.owner_id);
 }
 
@@ -450,6 +457,7 @@ export async function adminAct(
         relay.db.prepare('UPDATE agents SET level = ?, updated_at = ? WHERE id = ? AND level = ?').bind(level, iso(relay.now()), agent.id, agent.level),
       ]);
       if (changed!.meta.changes === 0) throw conflict('This agent changed while you were acting. Reload it and try again.');
+      await syncBotRoles(relay, agent.id);
       return getAgent(relay, agent.id);
     }
     case 'reset_avatar': {
@@ -467,6 +475,7 @@ export async function adminAct(
         relay.db.prepare('UPDATE agents SET avatar_url = NULL, updated_at = ? WHERE id = ?').bind(iso(relay.now()), agent.id),
       ]);
       await releaseAvatar(relay, agent.avatar_url);
+      await syncIdentity(relay, agent.id);
       return getAgent(relay, agent.id);
     }
   }

@@ -21,6 +21,21 @@ import { streamHub } from './stream';
 
 const log = consoleLogger({ service: 'relay', component: 'gateway' }, reportError);
 
+/**
+ * An outbound WebSocket is a fetch with `Upgrade: websocket` to the https form of the URL. Outbound sockets don't hibernate.
+ * The Gateway object holds the relay's own; the relay also connects an agent's bot once with it (services/bots.ts).
+ */
+export async function openSocket(url: string, events: SocketEvents): Promise<GatewaySocket> {
+  const response = await fetch(url.replace(/^ws/, 'http'), { headers: { Upgrade: 'websocket' } });
+  const ws = response.webSocket;
+  if (!ws) throw new Error(`Discord did not accept the WebSocket upgrade (HTTP ${response.status})`);
+  ws.accept();
+  ws.addEventListener('message', (event) => events.message(event.data as string | ArrayBuffer));
+  ws.addEventListener('close', (event) => events.close(event.code, event.reason));
+  ws.addEventListener('error', () => events.close(1006, 'connection error'));
+  return { send: (data) => ws.send(data), close: (code, reason) => ws.close(code, reason) };
+}
+
 export class DiscordGateway extends DurableObject<Bindings> {
   private service: GatewayService | undefined;
 
@@ -47,16 +62,8 @@ export class DiscordGateway extends DurableObject<Bindings> {
     });
   }
 
-  /** An outbound WebSocket is a fetch with `Upgrade: websocket` to the https form of the URL. Outbound sockets don't hibernate. */
-  protected async openSocket(url: string, events: SocketEvents): Promise<GatewaySocket> {
-    const response = await fetch(url.replace(/^ws/, 'http'), { headers: { Upgrade: 'websocket' } });
-    const ws = response.webSocket;
-    if (!ws) throw new Error(`Discord did not accept the WebSocket upgrade (HTTP ${response.status})`);
-    ws.accept();
-    ws.addEventListener('message', (event) => events.message(event.data as string | ArrayBuffer));
-    ws.addEventListener('close', (event) => events.close(event.code, event.reason));
-    ws.addEventListener('error', () => events.close(1006, 'connection error'));
-    return { send: (data) => ws.send(data), close: (code, reason) => ws.close(code, reason) };
+  protected openSocket(url: string, events: SocketEvents): Promise<GatewaySocket> {
+    return openSocket(url, events);
   }
 
   protected gateway(): GatewayService {

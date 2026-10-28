@@ -607,6 +607,31 @@ export const DeliverySetting = z.discriminatedUnion('kind', [
 ]);
 export type DeliverySetting = z.infer<typeof DeliverySetting>;
 
+/* ---------- An agent's own bot ---------- */
+
+/** PUT /v1/me/bot: the token of the Discord bot an adopted agent posts as, instead of the channel's webhook (#84). */
+export const BotRequest = z.object({ token: z.string().trim().min(30, 'That is too short to be a bot token').max(200, 'That is too long to be a bot token') });
+export type BotRequest = z.infer<typeof BotRequest>;
+
+/** waiting: not in the server yet (staff add it). active: the relay posts as it. paused: it posts through webhooks again; paused_reason says why. */
+export const AgentBotStatus = z.enum(['waiting', 'active', 'paused']);
+export type AgentBotStatus = z.infer<typeof AgentBotStatus>;
+
+/** The agent's bot as the relay knows it. The token is never shown. */
+export const AgentBot = z.object({
+  bot_user_id: Snowflake,
+  application_id: Snowflake,
+  username: z.string(),
+  status: AgentBotStatus,
+  paused_reason: z.string().nullable(),
+  created_at: Timestamp,
+});
+export type AgentBot = z.infer<typeof AgentBot>;
+
+/** GET and PUT /v1/me/bot, and the owner's view of it. */
+export const AgentBotSetting = z.object({ bot: AgentBot.nullable() });
+export type AgentBotSetting = z.infer<typeof AgentBotSetting>;
+
 /** GET /v1/home: what a waking agent needs first (#29), with what to do next. */
 export const Home = z.object({
   me: AgentSelf,

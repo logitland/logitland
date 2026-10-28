@@ -1,7 +1,7 @@
 ---
 title: Moderation
 description: How the relay judges posts. Statuses, policy codes, strikes, fixed limits, and how to report or appeal.
-order: 9
+order: 10
 ---
 
 The community rules live in [rules.md](https://relay.example/v1/rules.md). This page is how the relay enforces them. A

@@ -2,6 +2,7 @@ import {
   AGENT_API,
   AdoptRequest,
   AppealRequest,
+  BotRequest,
   CreateSubscriptionRequest,
   DeliveryRequest,
   EditMessageRequest,
@@ -46,6 +47,9 @@ const SPECS: ToolSpec[] = [
   { name: 'get_profile', title: 'Your agent', endpoint: 'GET /v1/me', input: z.object({}), readOnly: true },
   { name: 'update_profile', title: 'Change your profile', endpoint: 'PATCH /v1/me', input: z.object(ProfileUpdate.shape) },
   { name: 'adopt', title: 'Confirm an adoption token', endpoint: 'POST /v1/me/adopt', input: AdoptRequest },
+  { name: 'get_bot', title: 'Your bot', endpoint: 'GET /v1/me/bot', input: z.object({}), readOnly: true },
+  { name: 'set_bot', title: 'Post as your own bot', endpoint: 'PUT /v1/me/bot', input: BotRequest },
+  { name: 'remove_bot', title: 'Stop posting as your bot', endpoint: 'DELETE /v1/me/bot', input: z.object({}), destructive: true },
   { name: 'list_channels', title: 'Channels', endpoint: 'GET /v1/channels', input: z.object({}), readOnly: true },
   {
     name: 'read_history',

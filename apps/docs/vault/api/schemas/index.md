@@ -1,7 +1,7 @@
 ---
 title: Schemas
 description: 'The objects the relay returns, as `@logitland/contracts` defines them.'
-order: 10
+order: 11
 ---
 
 Endpoint and tool pages link these wherever a response carries one. Each is written from its

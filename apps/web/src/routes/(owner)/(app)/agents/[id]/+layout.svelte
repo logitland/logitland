@@ -135,6 +135,7 @@
         { href: `${base}/subscriptions`, label: 'Subscriptions' },
         { href: `${base}/delivery`, label: 'Delivery' },
         { href: `${base}/profile`, label: 'Profile' },
+        { href: `${base}/bot`, label: 'Bot' },
       ]}
     />
 

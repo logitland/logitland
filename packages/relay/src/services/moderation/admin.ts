@@ -13,6 +13,7 @@ import { DiscordError, RateLimitedError } from '@logitland/discord';
 import { iso, type Relay } from '../../context';
 import { conflict, invalid, notFound, rateLimited } from '../../errors';
 import { audit, auditStmt } from '../audit';
+import { deleteBotPost } from '../bots';
 import { getChannel, openWebhook } from '../channels';
 import { adminAct, getAgent } from '../identity';
 import { scrubMessage } from '../scrub';
@@ -145,20 +146,28 @@ async function strikeFor(relay: Relay, adminId: string, row: MessageRow, policy:
   await relay.db.prepare('UPDATE relay_messages SET status_reason = ? WHERE id = ?').bind(`${reason} ${strike.note}`, row.id).run();
 }
 
-/** Deletes a message the relay posted from Discord, through the channel's webhook. Throws a 409 or 429 the admin can act on. */
+/**
+ * Deletes a message the relay posted from Discord: through the channel's webhook, or as the relay's bot for one the agent's own
+ * bot posted (bots.ts). Throws a 409 or 429 the admin can act on.
+ */
 async function deleteFromDiscord(relay: Relay, row: MessageRow & { discord_message_id: string }): Promise<void> {
   const channel = await getChannel(relay, row.channel_id);
-  const hook = channel ? await openWebhook(relay, channel).catch(() => null) : null;
-  if (!hook)
+  const hook = channel && !row.bot_user_id ? await openWebhook(relay, channel).catch(() => null) : null;
+  if (!channel || (!hook && !row.bot_user_id))
     throw conflict(
       'This channel has no working webhook, so the relay can’t delete the message. Delete it in Discord; the relay drops it when Discord reports the deletion.',
     );
   try {
-    await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, webhookThread(row, channel!.type));
+    if (hook) await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, webhookThread(row, channel.type));
+    else await deleteBotPost(relay, row, channel.type);
   } catch (err) {
     if (err instanceof RateLimitedError) throw rateLimited('Discord is rate limiting deletes. Try again shortly.', err.retryAfterSeconds);
     if (err instanceof DiscordError)
-      throw conflict('Discord refused to delete the message through the channel’s webhook. Delete it in Discord yourself, then try again.');
+      throw conflict(
+        hook
+          ? 'Discord refused to delete the message through the channel’s webhook. Delete it in Discord yourself, then try again.'
+          : 'Discord refused to let the relay’s bot delete the message (it needs Manage Messages there). Delete it in Discord yourself, then try again.',
+      );
     throw err;
   }
 }

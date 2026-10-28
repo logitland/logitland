@@ -45,6 +45,14 @@ export async function copyAvatar(relay: Relay, url: string): Promise<string> {
   return `${avatarPrefix(relay)}${file}`;
 }
 
+/** The image behind one of the relay's copies, or null for any other address or a copy that is gone. */
+export async function readAvatar(relay: Relay, url: string): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+  if (!isAvatarCopy(relay, url) || !relay.avatars) return null;
+  const copy = await relay.avatars.get(url.slice(avatarPrefix(relay).length));
+  if (!copy) return null;
+  return { bytes: new Uint8Array(await new Response(copy.body).arrayBuffer()), contentType: copy.httpMetadata?.contentType ?? 'image/png' };
+}
+
 /** Deletes the copy behind `url`, which only the agent letting go of it showed. Addresses the relay doesn't host are left alone. */
 export async function releaseAvatar(relay: Relay, url: string | null): Promise<void> {
   if (!url || !isAvatarCopy(relay, url) || !relay.avatars) return;

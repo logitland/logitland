@@ -4,6 +4,7 @@ import { iso, type Relay } from '../../context';
 import { RelayError, conflict, forbidden, invalid, notFound, rateLimited, unavailable } from '../../errors';
 import type { AgentPrincipal } from '../../types';
 import { audit } from '../audit';
+import { deleteBotPost, postingBot } from '../bots';
 import { getChannel, openWebhook, usableChannel } from '../channels';
 import { hit } from '../limits';
 import { scrubMessage } from '../scrub';
@@ -83,7 +84,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
       throw conflict('The thread this message is in is archived, so it can’t be edited. Post a new message in the thread to reopen it, then edit.');
   }
   if (content === row.content) return toRelayMessage(row);
-  const text = discordContent({ reply_prefix: row.reply_prefix, content });
+  const text = discordContent({ reply_prefix: row.reply_prefix, content, bot_user_id: row.bot_user_id });
   if (text.length > DISCORD_MESSAGE_CHARS) {
     throw invalid(
       `With its reply line the message would be ${text.length} characters; Discord allows ${DISCORD_MESSAGE_CHARS}. Cut ${text.length - DISCORD_MESSAGE_CHARS} characters.`,
@@ -150,11 +151,22 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     await refuse(decision.policy, `${explain(decision.policy, 'edit')}${note}`);
   }
 
-  const { channel, hook } = await reach(relay, row);
-  try {
-    await relay.discord.editWebhookMessage(hook, row.discord_message_id, text, webhookThread(row, channel.type));
-  } catch (err) {
-    discordFailure(err, 'edit');
+  if (row.bot_user_id) {
+    // Only the bot that posted it can change it, and only while the relay still posts as that bot.
+    const bot = await postingBot(relay, agent.id, row.bot_user_id);
+    if (!bot) throw conflict('Your bot posted this message and the relay no longer posts as it, so it can’t be edited. Delete it and post again instead.');
+    try {
+      await bot.editMessage(webhookThread(row, where.type) ?? row.channel_id, row.discord_message_id, text);
+    } catch (err) {
+      discordFailure(err, 'edit');
+    }
+  } else {
+    const { channel, hook } = await reach(relay, row);
+    try {
+      await relay.discord.editWebhookMessage(hook, row.discord_message_id, text, webhookThread(row, channel.type));
+    } catch (err) {
+      discordFailure(err, 'edit');
+    }
   }
   const changed = await relay.db
     .prepare("UPDATE relay_messages SET content = ?, content_hash = ?, text_hash = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
@@ -200,10 +212,17 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
     case 'sent': {
       if (!row.discord_message_id)
         throw conflict('Discord never confirmed this message, so there is nothing to delete. Ask the agent’s owner or an admin to resolve it.');
-      const { channel, hook } = await reach(relay, row);
       try {
-        await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, webhookThread(row, channel.type));
+        if (row.bot_user_id) {
+          const channel = await getChannel(relay, row.channel_id);
+          if (!channel) throw conflict('This channel no longer exists, so the message can’t be deleted.');
+          await deleteBotPost(relay, { ...row, discord_message_id: row.discord_message_id }, channel.type);
+        } else {
+          const { channel, hook } = await reach(relay, row);
+          await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, webhookThread(row, channel.type));
+        }
       } catch (err) {
+        if (err instanceof RelayError) throw err;
         discordFailure(err, 'delete');
       }
       await gone('sent', 'Deleted by its author.');

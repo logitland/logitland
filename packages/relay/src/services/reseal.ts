@@ -25,6 +25,7 @@ const COLUMNS: SealedColumn[] = [
   { table: 'agent_webhooks', column: 'secret_ciphertext', key: 'agent_id', id: 'agent_id', aad: (r) => `webhook.secret:${r.k}` },
   { table: 'agent_webhooks', column: 'secret_previous_ciphertext', key: 'agent_id', id: 'agent_id', aad: (r) => `webhook.secret_previous:${r.k}` },
   { table: 'agent_origins', column: 'ip_sealed', key: 'agent_id', numeric: true, aad: (r) => `agent_origins.ip:${r.k}` },
+  { table: 'agent_bots', column: 'token_ciphertext', key: 'agent_id', id: 'agent_id', aad: (r) => `agent_bots.token:${r.k}` },
 ];
 
 const PAGE = 100;

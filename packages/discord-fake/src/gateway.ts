@@ -5,7 +5,7 @@
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { AppFlag, Intent, VALID_INTENT_MASK, type Channel } from './model.ts';
+import { AppFlag, Intent, VALID_INTENT_MASK, type Channel, type User } from './model.ts';
 import { acceptUpgrade, type WebSocketConnection } from './websocket.ts';
 import type { World } from './world.ts';
 
@@ -154,7 +154,8 @@ export interface RecordedFrame {
 export interface GatewayDeps {
   world: World;
   now: () => number;
-  botToken: () => string;
+  /** The bot a token belongs to: the relay's, or another (DiscordFake.addBot). Null for an unknown token. */
+  userForToken: (token: string) => User | null;
   application: () => { id: string; flags: number };
   /** The URL to hand out as resume_gateway_url. */
   url: () => string;
@@ -401,7 +402,8 @@ export class Gateway {
   private identify(conn: Connection, d: unknown): void {
     if (conn.session) return this.close_(conn, CloseCode.alreadyAuthenticated, 'Already authenticated.');
     if (!isObject(d) || typeof d.token !== 'string' || !isObject(d.properties)) return this.close_(conn, CloseCode.decodeError, 'Decode error');
-    if (d.token !== this.deps.botToken()) return this.close_(conn, CloseCode.authenticationFailed, 'Authentication failed.');
+    const user = this.deps.userForToken(d.token);
+    if (!user) return this.close_(conn, CloseCode.authenticationFailed, 'Authentication failed.');
     let shard: [number, number] | null = null;
     if (d.shard !== undefined) {
       const s = d.shard;
@@ -419,7 +421,9 @@ export class Gateway {
     const intents = d.intents;
     if (typeof intents !== 'number' || !Number.isInteger(intents) || intents < 0 || (intents & ~VALID_INTENT_MASK) !== 0)
       return this.close_(conn, CloseCode.invalidIntents, 'Invalid intent(s).');
-    const flags = this.deps.application().flags;
+    // Another bot (an agent's) has no privileged intents enabled.
+    const relayBot = user.id === this.deps.world.botUser.id;
+    const flags = relayBot ? this.deps.application().flags : 0;
     if (
       (intents & Intent.messageContent && !(flags & AppFlag.messageContent)) ||
       (intents & Intent.guildMembers && !(flags & AppFlag.guildMembers)) ||
@@ -432,22 +436,22 @@ export class Gateway {
     limit.remaining--;
 
     const world = this.deps.world;
-    const session = new Session(world.botUser.id, intents, shard, this.deps.now());
+    const session = new Session(user.id, intents, shard, this.deps.now());
     this.sessions.set(session.id, session);
     session.connection = conn;
     conn.session = session;
-    const guilds = [...world.guilds.values()].filter((g) => g.members.has(world.botUser.id));
+    const guilds = [...world.guilds.values()].filter((g) => g.members.has(user.id));
     this.queue(
       session,
       'READY',
       {
         v: 10,
-        user: { ...world.botUser, verified: true, mfa_enabled: false, flags: 0 },
+        user: { ...user, verified: true, mfa_enabled: false, flags: 0 },
         guilds: guilds.map((g) => ({ id: g.id, unavailable: true })),
         session_id: session.id,
         resume_gateway_url: this.deps.url(),
         ...(shard ? { shard } : {}),
-        application: { id: this.deps.application().id, flags: this.deps.application().flags },
+        application: relayBot ? { id: this.deps.application().id, flags } : { id: user.id, flags: 0 },
         session_type: 'normal',
       },
       false,
@@ -495,8 +499,11 @@ export class Gateway {
     if (conn.session) return this.close_(conn, CloseCode.alreadyAuthenticated, 'Already authenticated.');
     if (!isObject(d) || typeof d.token !== 'string' || typeof d.session_id !== 'string' || !Number.isInteger(d.seq))
       return this.close_(conn, CloseCode.decodeError, 'Decode error');
-    if (d.token !== this.deps.botToken()) return this.close_(conn, CloseCode.authenticationFailed, 'Authentication failed.');
-    const session = this.sessions.get(d.session_id);
+    const user = this.deps.userForToken(d.token);
+    if (!user) return this.close_(conn, CloseCode.authenticationFailed, 'Authentication failed.');
+    const found = this.sessions.get(d.session_id);
+    // A session resumes only with the token of the bot that started it.
+    const session = found?.userId === user.id ? found : undefined;
     const mode = this.nextResume;
     this.nextResume = 'ok';
     const stale = !session || session.expired || (session.disconnectedAt !== null && this.deps.now() - session.disconnectedAt > this.options.resumeWindowMs);

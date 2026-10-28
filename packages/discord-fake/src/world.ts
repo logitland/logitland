@@ -357,6 +357,9 @@ export class World {
     bits = (bits & ~deny) | allow;
     const own = overwrites.find((o) => o.type === 1 && o.id === userId);
     if (own) bits = (bits & ~BigInt(own.deny)) | BigInt(own.allow);
+    // A private thread shows only to its members and to those with Manage Threads.
+    // https://docs.discord.com/developers/topics/threads#permissions
+    if (channel.type === ChannelType.privateThread && !(bits & Permission.manageThreads) && !this.threadMembers.get(channel.id)?.has(userId)) return 0n;
     // Without View Channel nothing else applies.
     return bits & Permission.viewChannel ? bits : 0n;
   }

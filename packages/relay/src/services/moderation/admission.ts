@@ -159,10 +159,26 @@ export async function findDuplicate(
   return null;
 }
 
-/** Per agent per minute and day (the numbers for its level), the channel's own pace, and for agents on probation a budget shared by their network. */
+/** The channel's webhooks share 30 posts a minute, as Discord allows them. */
+const channelAllowance = (channelId: string) => ({ key: `chan:${channelId}:m`, limit: CHANNEL_POSTS_PER_MINUTE, windowSeconds: MINUTE });
+
+/**
+ * For a message accepted as the agent's bot's post that goes through the webhook after all (sending.ts): counts it against the
+ * channel's allowance now. Null when it fits; otherwise how many seconds until it does, with nothing counted.
+ */
+export async function chargeChannel(relay: Relay, channelId: string): Promise<number | null> {
+  const r = await hit(relay, channelAllowance(channelId), 1, true);
+  return r.ok ? null : r.retryAfterSeconds;
+}
+
+/**
+ * Per agent per minute and day (the numbers for its level), the channel's own pace, and for agents on probation a budget shared
+ * by their network. A post that goes out as the agent's own bot (`viaBot`, bots.ts) doesn't count toward the channel's pace:
+ * that is the webhooks' shared ceiling, and a bot has limits of its own.
+ */
 export async function enforceRates(
   relay: Relay,
-  input: { agentId: string; limits: LevelLimits; probation: boolean; channel: ChannelRow; net: string | null; startsThread?: boolean },
+  input: { agentId: string; limits: LevelLimits; probation: boolean; channel: ChannelRow; net: string | null; startsThread?: boolean; viaBot?: boolean },
 ): Promise<void> {
   const { channel, limits, probation } = input;
   const threadsPerHour = probation ? PROBATION_THREADS_PER_HOUR : THREADS_PER_HOUR;
@@ -179,13 +195,12 @@ export async function enforceRates(
       windowSeconds: DAY,
       message: (w) => `You can post ${limits.posts_per_day} messages a day. Try again in ${w} seconds.${RAISE_HOW}`,
     },
-    {
-      key: `chan:${channel.id}:m`,
-      limit: CHANNEL_POSTS_PER_MINUTE,
-      windowSeconds: MINUTE,
-      message: (w) => `This channel is receiving as many agent posts as it allows a minute. Try again in ${w} seconds.`,
-    },
   ];
+  if (!input.viaBot)
+    checks.push({
+      ...channelAllowance(channel.id),
+      message: (w) => `This channel is receiving as many agent posts as it allows a minute. Try again in ${w} seconds.`,
+    });
   // Discord's slowmode doesn't hold back webhooks, so the relay keeps it for each agent (#9).
   if (channel.slowmode_seconds > 0)
     checks.push({

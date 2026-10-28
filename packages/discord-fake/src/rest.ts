@@ -5,6 +5,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 import { isSnowflake } from './ids.ts';
 import {
   ChannelType,
+  DiscordHttpError,
   Permission,
   errors,
   formBody,
@@ -16,7 +17,7 @@ import {
   type Poll,
   type Webhook,
 } from './model.ts';
-import type { DiscordFake } from './fake.ts';
+import type { Acting, DiscordFake, OtherBot } from './fake.ts';
 import type { AllowedMentions } from './world.ts';
 
 export interface RouteRequest {
@@ -25,6 +26,8 @@ export interface RouteRequest {
   query: URLSearchParams;
   body: unknown;
   headers: IncomingHttpHeaders;
+  /** The bot the request acts as: the relay's, or (on `any-bot` routes) another. */
+  bot: Acting;
 }
 
 export interface Reply {
@@ -37,7 +40,8 @@ export interface Route {
   method: string;
   /** The path after /api/v10. */
   path: string;
-  auth: 'bot' | 'none';
+  /** `bot`: the relay's bot only. `any-bot`: any bot's token, the relay's or another's (DiscordFake.addBot). */
+  auth: 'bot' | 'any-bot' | 'none';
   /** Which parameter names the rate-limit bucket ("major parameter"). */
   bucket: string;
   handler: (req: RouteRequest) => Reply | Promise<Reply>;
@@ -175,8 +179,9 @@ function reference(o: Record<string, unknown>): Message['message_reference'] | u
 
 /* ---------- Shared lookups ---------- */
 
-function botCan(fake: DiscordFake, channel: Channel, permission: bigint): void {
-  if (!fake.world.canInChannel(channel.id, fake.world.botUser.id, permission)) throw errors.missingPermissions();
+/** The bot (the relay's unless `as` says otherwise) has this permission in the channel. */
+function botCan(fake: DiscordFake, channel: Channel, permission: bigint, as: string = fake.world.botUser.id): void {
+  if (!fake.world.canInChannel(channel.id, as, permission)) throw errors.missingPermissions();
 }
 
 function webhookFor(fake: DiscordFake, id: string, token: string): Webhook {
@@ -196,6 +201,18 @@ function webhookTarget(fake: DiscordFake, hook: Webhook, threadId: string | null
 
 const presentWebhook = (hook: Webhook, user?: unknown) => ({ ...hook, ...(user ? { user } : {}) });
 
+/** GET /applications/@me for another bot's application. */
+const otherApplication = (other: OtherBot) => ({
+  id: other.application.id,
+  name: other.application.name,
+  icon: null,
+  description: '',
+  bot_public: other.application.bot_public,
+  bot_require_code_grant: false,
+  bot: other.user,
+  flags: 0,
+});
+
 /* ---------- Routes ---------- */
 
 export function routes(): Route[] {
@@ -205,7 +222,7 @@ export function routes(): Route[] {
 
   add('gateway.get', 'GET', '/gateway', 'none', 'gateway', ({ fake }) => ok({ url: fake.gatewayUrl }));
 
-  add('gateway.bot', 'GET', '/gateway/bot', 'bot', 'gateway', ({ fake }) => {
+  add('gateway.bot', 'GET', '/gateway/bot', 'any-bot', 'gateway', ({ fake }) => {
     const limit = fake.gateway.sessionStartLimit;
     return ok({
       url: fake.gatewayUrl,
@@ -219,9 +236,31 @@ export function routes(): Route[] {
     });
   });
 
-  add('users.me', 'GET', '/users/@me', 'bot', 'users', ({ fake }) => ok({ ...fake.world.botUser, verified: true, mfa_enabled: false, flags: 0 }));
+  add('users.me', 'GET', '/users/@me', 'any-bot', 'users', ({ bot }) => ok({ ...bot.user, verified: true, mfa_enabled: false, flags: 0 }));
 
-  add('applications.me', 'GET', '/applications/@me', 'bot', 'applications', ({ fake }) => ok(fake.applicationObject()));
+  // A bot's name (2 to 32 characters) and avatar (a data URI; stored as a hash, as Discord shows it). Discord's limit of a
+  // few changes an hour isn't modelled.
+  add('users.me.edit', 'PATCH', '/users/@me', 'any-bot', 'users', ({ fake, bot, body }) => {
+    const o = objectBody(body);
+    const username = text(o, 'username', { min: 2, max: 32 });
+    if (o.avatar !== undefined && o.avatar !== null && (typeof o.avatar !== 'string' || !/^data:image\/(png|jpeg|gif|webp);base64,/.test(o.avatar)))
+      throw formBody(['avatar'], 'IMAGE_INVALID', 'Invalid image data');
+    if (username !== undefined) bot.user.username = username;
+    if (o.avatar !== undefined) bot.user.avatar = o.avatar === null ? null : fake.world.newId();
+    return ok({ ...bot.user, verified: true, mfa_enabled: false, flags: 0 });
+  });
+
+  add('users.me.guilds', 'GET', '/users/@me/guilds', 'any-bot', 'users', ({ fake, bot }) =>
+    ok(
+      [...fake.world.guilds.values()]
+        .filter((g) => g.members.has(bot.user.id))
+        .map((g) => ({ id: g.id, name: g.name, icon: null, owner: g.owner_id === bot.user.id, permissions: '0', features: [] })),
+    ),
+  );
+
+  add('applications.me', 'GET', '/applications/@me', 'any-bot', 'applications', ({ fake, bot }) =>
+    ok(bot.other ? otherApplication(bot.other) : fake.applicationObject()),
+  );
 
   /* ----- Guilds ----- */
 
@@ -349,9 +388,9 @@ export function routes(): Route[] {
     return ok(page.map((m) => fake.restMessage(m)));
   });
 
-  add('channel.messages.create', 'POST', '/channels/:channel/messages', 'bot', 'channel', ({ fake, params, body }) => {
+  add('channel.messages.create', 'POST', '/channels/:channel/messages', 'any-bot', 'channel', ({ fake, params, body, bot }) => {
     const channel = fake.world.channel(params.channel!);
-    botCan(fake, channel, isThread(channel.type) ? Permission.sendMessagesInThreads : Permission.sendMessages);
+    botCan(fake, channel, isThread(channel.type) ? Permission.sendMessagesInThreads : Permission.sendMessages, bot.user.id);
     if (isForum(channel.type)) throw errors.cannotPostInForum();
     if (channel.type === ChannelType.category) throw errors.wrongChannelType();
     const o = objectBody(body);
@@ -361,9 +400,9 @@ export function routes(): Route[] {
     const pl = poll(fake, o);
     if (!hasBody(o, content, { poll: pl, components: comps, embeds: emb })) throw errors.emptyMessage();
     const message = fake.world.postMessage(channel.id, {
-      author: fake.world.botUser,
+      author: bot.user,
       content,
-      application_id: fake.application.id,
+      application_id: bot.applicationId,
       components: comps,
       embeds: emb,
       poll: pl,
@@ -372,6 +411,26 @@ export function routes(): Route[] {
       tts: o.tts === true,
     });
     return ok(message);
+  });
+
+  // A bot edits only its own messages (50005 otherwise).
+  add('channel.message.edit', 'PATCH', '/channels/:channel/messages/:message', 'any-bot', 'channel', ({ fake, params, body, bot }) => {
+    const channel = fake.world.channel(params.channel!);
+    const message = fake.world.findMessage(channel.id, params.message!);
+    if (message.author.id !== bot.user.id) throw new DiscordHttpError(403, 50005, 'Cannot edit a message authored by another user');
+    const o = objectBody(body);
+    const content = text(o, 'content', { max: 2000 });
+    if (!(content ?? message.content) && !message.poll && !message.embeds.length) throw errors.emptyMessage();
+    return ok(fake.world.editMessage(channel.id, message.id, { content, embeds: embeds(o) }));
+  });
+
+  // Its own message, or anyone's with Manage Messages.
+  add('channel.message.delete', 'DELETE', '/channels/:channel/messages/:message', 'any-bot', 'channel', ({ fake, params, bot }) => {
+    const channel = fake.world.channel(params.channel!);
+    const message = fake.world.findMessage(channel.id, params.message!);
+    if (message.author.id !== bot.user.id) botCan(fake, channel, Permission.manageMessages, bot.user.id);
+    fake.world.deleteMessage(channel.id, message.id);
+    return noContent;
   });
 
   add('channel.messages.thread', 'POST', '/channels/:channel/messages/:message/threads', 'bot', 'channel', ({ fake, params, body }) => {
@@ -392,9 +451,27 @@ export function routes(): Route[] {
     return { status: 201, json: thread };
   });
 
-  add('channel.threads.create', 'POST', '/channels/:channel/threads', 'bot', 'channel', ({ fake, params, body }) => {
+  add('channel.threads.create', 'POST', '/channels/:channel/threads', 'any-bot', 'channel', ({ fake, params, body, bot }) => {
     const channel = fake.world.channel(params.channel!);
     const o = objectBody(body);
+    if (isForum(channel.type)) {
+      // A forum or media post: the thread and its first message, answered as the thread with the message inside it.
+      botCan(fake, channel, Permission.sendMessages, bot.user.id);
+      const name = text(o, 'name', { max: 100, min: 1, required: true })!;
+      const tags = o.applied_tags;
+      if (tags !== undefined && (!Array.isArray(tags) || tags.length > 5 || !tags.every(isSnowflake)))
+        throw formBody(['applied_tags'], 'LIST_TYPE_INVALID', 'Must be a list of up to 5 snowflakes.');
+      if (!isObject(o.message)) throw formBody(['message'], 'BASE_TYPE_REQUIRED', 'This field is required');
+      const content = text(o.message, 'content', { max: 2000 });
+      if (!hasBody(o.message, content, { embeds: embeds(o.message) })) throw errors.emptyMessage();
+      const { thread, message } = fake.world.createForumPost(
+        channel.id,
+        { name, ownerId: bot.user.id, appliedTags: tags as string[] | undefined },
+        { author: bot.user, content, application_id: bot.applicationId, allowed_mentions: allowedMentions(o.message) },
+      );
+      return { status: 201, json: { ...thread, message } };
+    }
+    if (bot.other) throw errors.missingAccess();
     // Discord's default since API v9 is a private thread.
     const type = o.type ?? ChannelType.privateThread;
     if (![ChannelType.announcementThread, ChannelType.publicThread, ChannelType.privateThread].includes(type as 10 | 11 | 12))

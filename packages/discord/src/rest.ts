@@ -1,4 +1,4 @@
-// A small Discord REST client for what the relay needs: execute and edit webhook messages,
+// A small Discord REST client for what the relay needs: execute and edit webhook messages, post as agents' own bots,
 // and read guild members, roles and channels for access checks.
 // https://docs.discord.com/developers/resources/webhook#execute-webhook
 // https://docs.discord.com/developers/topics/rate-limits
@@ -90,11 +90,30 @@ export interface ExecuteWebhookBody {
   applied_tags?: string[];
 }
 
+/** A message a bot posts as itself. A reply is native (`message_reference`); it never pings anyone. */
+export interface BotMessageBody {
+  content?: string;
+  message_reference?: { message_id: string; fail_if_not_exists: false };
+}
+
+/** A new post in a forum or media channel, started by a bot: the thread's title and tags, and its first message. */
+export interface ForumPostBody {
+  name: string;
+  applied_tags?: string[];
+  message: BotMessageBody;
+}
+
 export interface DiscordUser {
   id: string;
   username: string;
   global_name?: string | null;
   bot?: boolean;
+}
+
+/** A server the bot is in, as `GET /users/@me/guilds` lists it. */
+export interface PartialGuild {
+  id: string;
+  name: string;
 }
 
 export interface DiscordMessage {
@@ -160,6 +179,8 @@ export interface CurrentApplication {
   name: string;
   /** GATEWAY_MESSAGE_CONTENT is 1 << 18 (100+ servers), GATEWAY_MESSAGE_CONTENT_LIMITED is 1 << 19 (under 100). */
   flags?: number;
+  /** Whether anyone, not only its owner, may add the bot to a server. */
+  bot_public?: boolean;
   interactions_endpoint_url?: string | null;
   /** The person who owns the application; for a team-owned one, a stand-in user for the team. */
   owner?: DiscordUser;
@@ -215,6 +236,11 @@ export class DiscordRest {
     return this.opts.base ?? DISCORD_API;
   }
 
+  /** The same client, acting as another bot (an agent's own). */
+  withToken(botToken: string): DiscordRest {
+    return new DiscordRest({ ...this.opts, botToken });
+  }
+
   /**
    * Posts as the agent. Always waits for Discord to save the message and never parses mentions.
    * Only a definite refusal (400, 401, 403, 404) is a DiscordError and a 429 is RateLimitedError: neither posted.
@@ -223,7 +249,37 @@ export class DiscordRest {
   async executeWebhook(hook: WebhookRef, body: ExecuteWebhookBody, threadId?: string): Promise<{ message: DiscordMessage; rateLimit: RateLimit }> {
     const q = new URLSearchParams({ wait: 'true' });
     if (threadId) q.set('thread_id', threadId);
-    return this.post<DiscordMessage>(`/webhooks/${hook.id}/${hook.token}?${q}`, { ...body, allowed_mentions: { parse: [] } });
+    return this.post<DiscordMessage>(`/webhooks/${hook.id}/${hook.token}?${q}`, { ...body, allowed_mentions: { parse: [] } }, false);
+  }
+
+  /** Posts as the bot in a channel or thread, never parsing mentions. Fails as executeWebhook does. */
+  sendMessage(channelId: string, body: BotMessageBody): Promise<{ message: DiscordMessage; rateLimit: RateLimit }> {
+    return this.post<DiscordMessage>(`/channels/${channelId}/messages`, { ...body, allowed_mentions: { parse: [] } }, true);
+  }
+
+  /** Starts a forum or media post as the bot. Answers the new thread, whose ID is its first message's. Fails as executeWebhook does. */
+  async createForumPost(channelId: string, post: ForumPostBody): Promise<{ message: DiscordMessage; rateLimit: RateLimit }> {
+    const { message: thread, rateLimit } = await this.post<GuildChannel & { message: DiscordMessage }>(
+      `/channels/${channelId}/threads`,
+      { ...post, message: { ...post.message, allowed_mentions: { parse: [] } } },
+      true,
+    );
+    return { message: thread.message, rateLimit };
+  }
+
+  /** New text for a message the bot posted. Discord does not keep allowed_mentions from the original, so it is sent again. */
+  editMessage(channelId: string, messageId: string, content: string): Promise<DiscordMessage> {
+    return this.send<DiscordMessage>('PATCH', `/channels/${channelId}/messages/${messageId}`, { content, allowed_mentions: { parse: [] } }, true);
+  }
+
+  /** The servers the bot is in (up to 200, more than any agent's bot may be in). */
+  getCurrentUserGuilds(): Promise<PartialGuild[]> {
+    return this.send<PartialGuild[]>('GET', '/users/@me/guilds', undefined, true);
+  }
+
+  /** Changes the bot's name or avatar (a data URI). Discord allows only a few changes an hour. */
+  modifyCurrentUser(patch: { username?: string; avatar?: string | null }): Promise<DiscordUser> {
+    return this.send<DiscordUser>('PATCH', '/users/@me', patch, true);
   }
 
   /** Removes a message this webhook posted. A message that is already gone counts as removed. */
@@ -380,12 +436,20 @@ export class DiscordRest {
     return this.send<T>(method, path, body, true, false, auditReason);
   }
 
-  private async post<T>(path: string, body: unknown): Promise<{ message: T; rateLimit: RateLimit }> {
+  private async post<T>(path: string, body: unknown, bot: boolean): Promise<{ message: T; rateLimit: RateLimit }> {
+    const headers: Record<string, string> = {
+      'user-agent': this.opts.userAgent ?? 'DiscordBot (https://github.com/logitsml/logitland, 0.1)',
+      'content-type': 'application/json',
+    };
+    if (bot) {
+      if (!this.opts.botToken) throw new Error('A bot token is required for this call');
+      headers.authorization = `Bot ${this.opts.botToken}`;
+    }
     let res: Response;
     try {
       res = await this.f(`${this.opts.base ?? DISCORD_API}${path}`, {
         method: 'POST',
-        headers: { 'user-agent': this.opts.userAgent ?? 'DiscordBot (https://github.com/logitsml/logitland, 0.1)', 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(this.opts.timeoutMs ?? 10_000),
       });
