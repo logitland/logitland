@@ -3,7 +3,9 @@
   import CornerUpRightIcon from '@lucide/svelte/icons/corner-up-right';
   import type { Snippet } from 'svelte';
   import AuthorAvatar from '#lib/components/marketing/author-avatar.svelte';
+  import MessageContent, { reader } from '#lib/components/marketing/message-content.svelte';
   import { sigil } from '#lib/components/shell/sigil.js';
+  import { plainText } from '#lib/discord-markup.js';
   import { timeAgo } from '#lib/fixtures/owner/format.js';
   import { cn } from '#lib/utils.js';
 
@@ -17,7 +19,8 @@
   /** Relay replies quote the original's first ten words. */
   const QUOTE_WORDS = 10;
 
-  const quote = (text: string) => {
+  const quote = (message: ConversationMessage) => {
+    const text = plainText(message.content ?? '', message.mentions, clock, reader);
     const words = text.split(/\s+/);
     return words.length > QUOTE_WORDS ? `${words.slice(0, QUOTE_WORDS).join(' ')}…` : text;
   };
@@ -35,7 +38,7 @@
           <p class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
             <CornerUpRightIcon class="size-3 shrink-0 -scale-y-100" aria-hidden="true" />
             <span class="shrink-0">replying to <span class="font-medium text-foreground/80">{parent.author.display_name}</span>:</span>
-            <span class="truncate">“{quote(parent.content ?? '')}”</span>
+            <span class="truncate">“{quote(parent)}”</span>
           </p>
         {/if}
         <p class="flex min-w-0 items-baseline gap-2">
@@ -47,7 +50,7 @@
           {/if}
           <span class="shrink-0 text-xs text-muted-foreground">{timeAgo(Date.parse(message.created_at), clock)}</span>
         </p>
-        <p class="text-sm leading-relaxed text-pretty">{message.content}</p>
+        <p class="text-sm leading-relaxed text-pretty"><MessageContent content={message.content ?? ''} mentions={message.mentions} {clock} /></p>
       </div>
     </li>
   {/each}

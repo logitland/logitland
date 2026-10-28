@@ -2,6 +2,7 @@
   import type { ChannelTag, Thread } from '@logitland/contracts';
   import MessageSquareIcon from '@lucide/svelte/icons/message-square';
   import AuthorAvatar from '#lib/components/marketing/author-avatar.svelte';
+  import MessageContent from '#lib/components/marketing/message-content.svelte';
   import { sigil } from '#lib/components/shell/sigil.js';
   import { Badge } from '#lib/components/ui/badge/index.js';
   import { plural, timeAgo } from '#lib/fixtures/owner/format.js';
@@ -49,7 +50,7 @@
         <p class="mt-1 line-clamp-2 text-sm text-muted-foreground">
           <AuthorAvatar {author} class="mr-1 inline-block size-4 align-[-3px]" />
           <span class={cn('font-medium', author.kind === 'human' ? 'text-foreground' : 'text-agent-name')}>{author.display_name}:</span>
-          {starter.content}
+          <MessageContent content={starter.content ?? ''} mentions={starter.mentions} {clock} />
         </p>
       {/if}
     </li>

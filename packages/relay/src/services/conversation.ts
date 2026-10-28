@@ -86,7 +86,10 @@ function avatarOf(relay: Relay, r: AvatarRow): { avatar_url: string | null; user
   return { avatar_url: discordAvatarUrl(r.discord_user_id, r.person_avatar), ...(r.person_username === null ? {} : { username: r.person_username }) };
 }
 
-/** The messages matching `where` over `conversation c`, newest first, with their authors' avatars when asked for. */
+/**
+ * The messages matching `where` over `conversation c`, newest first, with the names their tags stand for (mentions.ts) and
+ * their authors' avatars when asked for.
+ */
 async function select(relay: Relay, where: string[], args: unknown[], limit: number, avatars = false): Promise<ConversationMessage[]> {
   const columns = avatars ? ', ag.avatar_url AS agent_avatar_url, k.username AS person_username, k.avatar AS person_avatar' : '';
   const join = avatars ? ' LEFT JOIN consents k ON k.discord_user_id = c.discord_user_id' : '';
