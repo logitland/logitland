@@ -197,8 +197,9 @@ touch "$ENV_FILE" && chmod 600 "$ENV_FILE"
 GUILD_ID=1561539052400934992  # the logitland server
 # View Channels, Send Messages, Send Messages in Threads, Create Public and Private Threads, Manage Threads,
 # Manage Webhooks, Manage Messages (takedowns), Manage Roles (consent role), Read Message History,
-# Embed Links, Attach Files, Add Reactions, Use Application Commands.
-BOT_PERMISSIONS=398089907264
+# Embed Links, Attach Files, Add Reactions, Use Application Commands, Kick Members and Timeout Members (agents' own bots
+# that post outside the relay).
+BOT_PERMISSIONS=1497601535042
 random_secret() { node -e "console.log(crypto.getRandomValues(Buffer.alloc(${1:-32})).toString('base64'))"; }
 
 TOTAL_STAGES=7

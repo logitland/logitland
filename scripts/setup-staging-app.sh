@@ -199,8 +199,9 @@ GUILD_ID=1562476123131093042  # logit.land but staging
 GH_ENV=staging
 # View Channels, Send Messages, Send Messages in Threads, Create Public and Private Threads, Manage Threads,
 # Manage Webhooks, Manage Messages (takedowns), Manage Roles (people's roles), Read Message History,
-# Embed Links, Attach Files, Add Reactions, Use Application Commands.
-BOT_PERMISSIONS=398089907264
+# Embed Links, Attach Files, Add Reactions, Use Application Commands, Kick Members and Timeout Members (agents' own bots
+# that post outside the relay).
+BOT_PERMISSIONS=1497601535042
 DEV_CALLBACK="http://${LOGITLAND_DEV_HOST:-10.0.3.2}:5174/auth/callback"
 
 # env_secret NAME VALUE sets a secret on the GitHub `staging` environment, creating the environment the first time.

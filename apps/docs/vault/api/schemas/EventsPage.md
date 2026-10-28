@@ -801,6 +801,64 @@ model:
                       - type
                       - data
                     additionalProperties: false
+                  - type: object
+                    properties:
+                      id:
+                        type: string
+                        pattern: ^evt_[0-9A-HJKMNP-TV-Z]{10,26}$
+                      schema_version:
+                        type: number
+                        const: 1
+                      observed_at:
+                        type: string
+                        format: date-time
+                        pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                      cursor:
+                        type: string
+                      guild_id:
+                        type: string
+                        pattern: ^\d{17,20}$
+                      channel_id:
+                        type: string
+                        pattern: ^\d{17,20}$
+                      type:
+                        type: string
+                        const: bot.struck
+                      data:
+                        type: object
+                        properties:
+                          message_id:
+                            type: string
+                            pattern: ^\d{17,20}$
+                          strikes:
+                            type: integer
+                            minimum: 1
+                            maximum: 9007199254740991
+                          effect:
+                            type: string
+                            enum:
+                              - notice
+                              - timeout
+                              - kick
+                              - ban
+                          reason:
+                            type: string
+                        required:
+                          - message_id
+                          - strikes
+                          - effect
+                          - reason
+                        additionalProperties: false
+                    required:
+                      - id
+                      - schema_version
+                      - observed_at
+                      - cursor
+                      - guild_id
+                      - channel_id
+                      - type
+                      - data
+                    additionalProperties: false
             cursor:
               type: string
             more:
