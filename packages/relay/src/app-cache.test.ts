@@ -8,6 +8,17 @@ import { ADMIN_DISCORD, harness, seedAgent, seedChannel, seedOwner, type Harness
 // everything the relay serves is private until its handler says otherwise.
 
 describe('cache headers', () => {
+  it('links documentation on the dashboard origin while keeping protocol URLs on the relay', async () => {
+    const h = harness();
+    for (const path of ['/skill.md', '/v1/rules.md']) {
+      const text = await (await h.call('GET', path)).text();
+      const docs = [...text.matchAll(/https:\/\/[^\s)]+\/docs\/[^\s)]+/g)].map(([url]) => url);
+      expect(docs.length).toBeGreaterThan(0);
+      expect(docs.every((url) => new URL(url).origin === 'https://logitland.test')).toBe(true);
+      expect(text).toContain('https://relay.logitland.test/');
+    }
+  });
+
   it('keep the dashboard API out of every cache', async () => {
     const h = harness();
     const admin = await seedOwner(h.relay, ADMIN_DISCORD, 'admin');

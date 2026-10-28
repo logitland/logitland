@@ -6,14 +6,15 @@
 //   fake Discord  127.0.0.1:8790   packages/discord-fake, seeded with a small server (text, announcement, forum, media, a consent role, an agents role, an admin)
 //   relay         localhost:8787   apps/backend under `wrangler dev`, pointed at the fake (RELAY_MODE=development + DISCORD_API_BASE)
 //   web           127.0.0.1:5174   apps/web under `vite dev`, bound to the relay, signing in through the fake's OAuth2
+//   docs          127.0.0.1:5180   apps/docs under Svartz, with generated files isolated from pnpm dev
 //
-//   pnpm dev:full [--reset] [--fake-port 8790] [--relay-port 8787] [--web-port 5174]
+//   pnpm dev:full [--reset] [--fake-port 8790] [--relay-port 8787] [--web-port 5174] [--docs-port 5180]
 //
 // --reset forgets the relay's local database first. Ctrl-C stops everything this script started, by process ID.
 // Settings come from scripts/dev-stack.mjs, which `pnpm dev` uses too; they live under apps/backend/.wrangler/dev-full.
 
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,13 +33,18 @@ const option = (name, fallback) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 && args[i + 1] ? Number(args[i + 1]) : fallback;
 };
-const ports = { fake: option('fake-port', DEFAULT_PORTS.fake), relay: option('relay-port', DEFAULT_PORTS.relay), web: option('web-port', DEFAULT_PORTS.web) };
+const ports = {
+  fake: option('fake-port', DEFAULT_PORTS.fake),
+  relay: option('relay-port', DEFAULT_PORTS.relay),
+  web: option('web-port', DEFAULT_PORTS.web),
+  docs: option('docs-port', 5180),
+};
 
 if (flag('help') || flag('h')) {
   console.log(
     readFileSync(fileURLToPath(import.meta.url), 'utf8')
       .split('\n')
-      .slice(1, 13)
+      .slice(1, 14)
       .map((l) => l.replace(/^\/\/ ?/, ''))
       .join('\n'),
   );
@@ -155,6 +161,7 @@ for (const [what, port] of [
   ['the fake Discord', ports.fake],
   ['the relay', ports.relay],
   ['the web app', ports.web],
+  ['the docs', ports.docs],
 ]) {
   if (!(await portFree(port))) {
     console.error(
@@ -223,14 +230,31 @@ const runCron = () => fetch(`${at.relay}/cdn-cgi/handler/scheduled?cron=*+*+*+*+
 cronTimer = setInterval(runCron, CRON_MS);
 await runCron();
 
-/* ---------- 4. The web app ---------- */
+/* ---------- 4. The docs and web app ---------- */
+
+// Svartz and SvelteKit write host registries and generated routes beside the app. Give this stack its own host root,
+// while linking the live vault and source so edits still reload. The real docs server keeps its own generated files.
+const docs = join(root, 'apps/docs');
+const docsHost = join(state, 'docs');
+mkdirSync(docsHost, { recursive: true });
+for (const file of ['package.json', 'svartz.config.ts', 'svelte.config.js', 'vite.config.ts', 'tsconfig.json']) {
+  copyFileSync(join(docs, file), join(docsHost, file));
+}
+for (const dir of ['src', 'vault', 'node_modules']) {
+  if (!existsSync(join(docsHost, dir))) symlinkSync(join(docs, dir), join(docsHost, dir), 'dir');
+}
+const docsUrl = `http://${WEB_HOST}:${ports.docs}`;
+start('docs', 'node', [join(docs, 'node_modules/svartz/dist/index.js'), 'dev', '--vault', 'docs', '--host', WEB_HOST, '--port', String(ports.docs)], {
+  cwd: docsHost,
+});
+await waitFor('the docs to answer', async () => (await fetch(`${docsUrl}/docs/`)).ok);
 
 console.log('Starting the web app…');
 // It finds the relay through the same dev registry, and reads the settings prepareFake wrote in place of apps/web/.dev.vars.
 const web = join(root, 'apps/web');
 start('web', 'node', [join(web, 'node_modules/vite/bin/vite.js'), 'dev', '--host', WEB_HOST, '--port', String(ports.web), '--strictPort'], {
   cwd: web,
-  env: { WRANGLER_REGISTRY_PATH: registry, LOGITLAND_WEB_ENV_FILE: files.web, LOGITLAND_RELAY_URL: at.relay },
+  env: { WRANGLER_REGISTRY_PATH: registry, LOGITLAND_WEB_ENV_FILE: files.web, LOGITLAND_RELAY_URL: at.relay, LOGITLAND_DOCS_URL: docsUrl },
 });
 await waitFor('the web app to answer', async () => (await fetch(`${at.web}/sign-in`)).ok);
 
@@ -246,6 +270,7 @@ Logitland is running against a fake Discord${gateway ? ' (the relay has connecte
 
 Open these:
   ${at.web}/sign-in            the dashboards: sign in as the fake's admin (all admin pages) or its visitor (owner only)
+  ${at.web}/docs/              the docs, with links and examples using this web origin
   ${at.relay}/skill.md          how an agent joins (proof of work, no Discord)
   ${at.fake}/_fake/state      the fake Discord: its server, channels, webhooks, requests
 

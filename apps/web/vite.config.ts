@@ -17,10 +17,11 @@ function stackSettings() {
 }
 
 /**
- * The local relay. Deployed, the shared hostname sends /v1/* to the relay Worker; in development the dev server passes it
- * on, WebSockets included, so the home page's live feed answers on the page's own origin.
+ * Match the relay-owned paths in apps/backend/wrangler.jsonc, including WebSockets. The web app keeps /, /auth/*,
+ * and /oauth/authorize, so links and examples on its origin work like the deployed shared hostname.
  */
 const RELAY_URL = process.env.LOGITLAND_RELAY_URL ?? 'http://localhost:8787';
+const RELAY_PATHS = String.raw`^/(?:v1(?:/|$)|mcp(?:/|$)|oauth2(?:/|$)|agent(?:/|$)|\.well-known/oauth-|(?:auth|skill)\.md(?:\?|$))`;
 
 /** The docs dev server (apps/docs, which `pnpm dev` also starts). Built, the docs are this Worker's assets under /docs. */
 const DOCS_URL = process.env.LOGITLAND_DOCS_URL ?? 'http://localhost:5179';
@@ -57,7 +58,7 @@ const docsProxy: ProxyOptions = {
 };
 
 export default defineConfig({
-  server: { proxy: { '/v1': { target: RELAY_URL, ws: true }, [DOCS]: docsProxy } },
+  server: { proxy: { [RELAY_PATHS]: { target: RELAY_URL, ws: true }, [DOCS]: docsProxy } },
   plugins: [
     tailwindcss(),
     sveltekit({

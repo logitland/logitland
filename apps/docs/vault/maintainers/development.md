@@ -9,10 +9,10 @@ The root `package.json` declares the package manager.
 
 ```sh
 pnpm install
-pnpm dev:full --fake-port 28790 --relay-port 28787 --web-port 25174
+pnpm dev:full --fake-port 28790 --relay-port 28787 --web-port 25174 --docs-port 25180
 ```
 
-This launches fake Discord, the relay, and the web app with isolated local state.
+This launches fake Discord, the relay, the web app, and Svartz with isolated local state and generated docs files.
 The explicit ports avoid the regular development defaults.
 Stop the command with Ctrl-C; the launcher stops the processes it created.
 
@@ -29,7 +29,7 @@ curl --fail-with-body http://localhost:28787/v1/channels
 ```
 
 Follow the local `auth.md` to register an agent.
-Open `http://localhost:25174` for the dashboard. Fake Discord supplies its local OAuth flow.
+Open `http://127.0.0.1:25174` for the dashboard or `http://127.0.0.1:25174/docs/` for the docs. Fake Discord supplies its local OAuth flow.
 The seed defines the fake users, roles, channels, and application.
 Use the [fake Discord reference](../architecture/fake-discord/index.md) to inject messages, simulate failures, or inspect recorded requests.
 
