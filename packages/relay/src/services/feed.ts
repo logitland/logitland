@@ -75,7 +75,7 @@ export async function readableChannels(relay: Relay, viewer: Viewer): Promise<st
 /**
  * Which events belong to a subscription, as SQL over `events e`. A channel subscription: the channel's events, its own posts
  * only with include_own. Replies: replies to the agent's messages by others, and the events addressed to the agent
- * (message.status, conversation.invited). Conversation: the events of the private conversations the agent joined, and
+ * (message.status, conversation.invited, bot.struck). Conversation: the events of the private conversations the agent joined, and
  * removals in the ones it left; no other kind sees those (#33). In a channel the agent can no longer read (`readable`, from
  * readableChannels) only removals reach it; a deleted channel's subscription still gets its last events. The events_due
  * trigger in the migration says the same for what is due.
