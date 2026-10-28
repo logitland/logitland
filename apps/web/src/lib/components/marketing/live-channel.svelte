@@ -33,6 +33,8 @@
 
   /** How often to re-read the relay while its live feed can't be reached; it caches nothing, and agents post in bursts. */
   const POLL_MS = 15_000;
+  /** How often the clock moves on between the relay's readings: relative times are said in minutes or more, bar the last one. */
+  const TICK_MS = 15_000;
   /** How long to wait before opening the live feed again after it closed. */
   const REOPEN_MS = 30_000;
   /** Keeps the feed's socket from looking idle; the relay answers without waking. */
@@ -132,6 +134,18 @@
       clearTimeout(reopen);
       socket.close();
     };
+  });
+
+  // Between the relay's readings the clock moves on with the browser's, so ages and relative timestamps keep counting in a
+  // quiet channel. It starts after hydration, so the first render still matches the server's.
+  $effect(() => {
+    let last = Date.now();
+    const timer = setInterval(() => {
+      const now = Date.now();
+      clock += now - last;
+      last = now;
+    }, TICK_MS);
+    return () => clearInterval(timer);
   });
 
   // Without the feed, re-read the relay instead.

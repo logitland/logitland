@@ -33,6 +33,7 @@ describe('Discord markup', () => {
     ['a custom emoji', '<:blob:123>', [{ kind: 'emoji', name: 'blob', src: 'https://cdn.discordapp.com/emojis/123.webp?size=48' }]],
     ['an animated emoji', '<a:wave:456>', [{ kind: 'emoji', name: 'wave', src: 'https://cdn.discordapp.com/emojis/456.webp?size=48&animated=true' }]],
     ['a timestamp with a style', `<t:${AT}:R>`, [{ kind: 'time', at: AT * 1000, style: 'R' }]],
+    ['a short date-and-time timestamp', `<t:${AT}:S>`, [{ kind: 'time', at: AT * 1000, style: 'S' }]],
     ['a timestamp without one, as date and time', `<t:${AT}>`, [{ kind: 'time', at: AT * 1000, style: 'f' }]],
     ['tags side by side', `<@${LUNA}><#${LOUNGE}>`, [chip('@Luna'), chip('#lounge')]],
     ['lookalikes', '<@abc> <#> <t:soon> <t:1:X> <:x:1> </:1>', [text('<@abc> <#> <t:soon> <t:1:X> <:x:1> </:1>')]],
@@ -52,6 +53,8 @@ describe('Discord markup', () => {
     ['T', '9:20:00 PM'],
     ['d', '10/27/25'],
     ['D', 'October 27, 2025'],
+    ['s', '10/27/25, 9:20 PM'],
+    ['S', '10/27/25, 9:20:00 PM'],
     ['f', 'October 27, 2025 at 9:20 PM'],
     ['F', 'Monday, October 27, 2025 at 9:20 PM'],
   ])('formats style %s as %s', (style, expected) => {

@@ -3,8 +3,11 @@ import type { Mentions } from '@logitland/contracts';
 // Discord's tagging syntax in message content (https://discord.com/developers/docs/reference#message-formatting), read the
 // way Discord shows it. Markdown stays as written: only tags become something else.
 
-/** Discord's timestamp styles: short and long time, short and long date, date and time (the default), with weekday, relative. */
-export type TimestampStyle = 't' | 'T' | 'd' | 'D' | 'f' | 'F' | 'R';
+/**
+ * Discord's timestamp styles: short and long time, short and long date, short date with short or medium time, date and time
+ * (the default), with weekday, relative.
+ */
+export type TimestampStyle = 't' | 'T' | 'd' | 'D' | 's' | 'S' | 'f' | 'F' | 'R';
 
 /** A run of content as Discord shows it: text, a mention's chip text (`@Name`, `#channel`, `/command`), a timestamp, or a custom emoji. */
 export type Segment =
@@ -27,7 +30,7 @@ const TAG = new RegExp(
     String.raw`<@!?(?<user>\d+)>`,
     String.raw`<@&(?<role>\d+)>`,
     String.raw`<#(?<channel>\d+)>`,
-    String.raw`<t:(?<unix>-?\d{1,13})(?::(?<style>[tTdDfFR]))?>`,
+    String.raw`<t:(?<unix>-?\d{1,13})(?::(?<style>[tTdDsSfFR]))?>`,
     String.raw`<(?<animated>a)?:(?<emoji>\w{2,32}):(?<emojiId>\d+)>`,
     String.raw`<\/(?<command>[-_\p{L}\p{N}]{1,32}(?: [-_\p{L}\p{N}]{1,32}){0,2}):\d+>`,
     String.raw`(?<![\w@])@(?<everyone>everyone|here)\b`,
@@ -74,6 +77,8 @@ const DATE_STYLES: Record<Exclude<TimestampStyle, 'R'>, Intl.DateTimeFormatOptio
   T: { timeStyle: 'medium' },
   d: { dateStyle: 'short' },
   D: { dateStyle: 'long' },
+  s: { dateStyle: 'short', timeStyle: 'short' },
+  S: { dateStyle: 'short', timeStyle: 'medium' },
   f: { dateStyle: 'long', timeStyle: 'short' },
   F: { dateStyle: 'full', timeStyle: 'short' },
 };
