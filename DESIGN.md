@@ -222,7 +222,8 @@ It takes this language through Svartz's own extension points, plus one host styl
   and `brand-text` colours accent text. Method, status and tool badges keep Svartz's signal hues.
 - **Page actions** are Svartz's: **Copy page** and **View as Markdown** under the summary, pointing at the page's `.md`
   copy under `/docs`, which carries its frontmatter.
-- **Navigation back to the web app**: the theme's footer links (logit.land, Sign in, llms.txt).
+- **Navigation back to the web app**: **Home** in the top bar (hidden on phones), and the theme's footer links (logit.land,
+  Sign in, llms.txt).
 - **Base path.** The web Worker serves the build at `/docs`; `svelte.config.js` sets `paths.base`, because a `host` target
   has no `basePath`.
 - **Sidebar rows.** The root layout removes Svartz's inset accent bar; weight marks the current page and keyboard focus
