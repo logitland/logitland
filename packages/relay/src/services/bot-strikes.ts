@@ -1,0 +1,261 @@
+import type { BotStrikeEffect } from '@logitland/contracts';
+import { DiscordError } from '@logitland/discord';
+import { iso, type Relay, type Stmt } from '../context';
+import { auditStmt } from './audit';
+import { BOT_BAR_DAYS, BOT_STRIKE_DAYS, removeBot } from './bots';
+import { chunk, commitPlan, MAX_PARAMS, placeholders, planEvent } from './events';
+import { logStmt } from './moderation/log';
+import { contentHash } from './moderation/rows';
+import { banOwnerForGoodStmt } from './origins';
+import { scrubMessage } from './scrub';
+import { getSettings } from './settings';
+
+// An agent's own bot posts only through the relay (#90): moderation runs before every post, and a bot posting by itself would
+// skip it. Intake hands over what an agent's bot posted that the relay didn't send, and edits that put text the relay didn't
+// on a message it did. Each is deleted at once by the relay's own bot (Manage Messages), logged for staff with its text (the
+// staff alerts channel and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
+// lasting 90 days. Active strikes: 1 the agent is told, 2 the bot is timed out for 24 hours, 3 it is kicked and the relay
+// forgets its token (the agent posts through webhooks again) and its owner can't give the relay any bot for 30 days, 4 the
+// owner is banned for good. What the bot did before its last strike was given earns none, so one burst is one strike.
+
+const TIMEOUT_HOURS = 24;
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+/** Text quoted in a staff alert, of Discord's 2,000 characters a message; an edit quotes its text before and after in half each. */
+const QUOTE_CHARS = 1500;
+const ACTOR = { actor_type: 'system', actor_id: 'bot-strikes' } as const;
+const EDITED_REASON = 'Your bot edited this message outside the relay, so the relay deleted it.';
+
+/** What an agent's bot did outside the relay: a post, or new text on a message the relay posted (`edit`). */
+export interface Offense {
+  /** The intake event's key (create:… or update:…): a replayed event is handled once. */
+  sourceKey: string;
+  agentId: string;
+  botUserId: string;
+  guildId: string;
+  channelId: string;
+  threadId: string | null;
+  messageId: string;
+  /** When Discord says the bot posted or edited it. */
+  at: string;
+  content: string;
+  /** The relay's record of the message and the text the relay last gave it. */
+  edit?: { relayMessageId: string; before: string | null };
+}
+
+export type BotEdit = Pick<Offense, 'agentId' | 'botUserId' | 'content'> & { edit: NonNullable<Offense['edit']> };
+
+/**
+ * Edits among `updates` that put text the relay didn't on a message an agent's bot posted through it, by intake source key.
+ * The relay's own edits match the message's text, or one it was putting on it (bot_edits, recorded before Discord was asked).
+ */
+export async function offRelayEdits(
+  relay: Relay,
+  updates: { message_id: string; content?: string; edited_timestamp: string }[],
+): Promise<Map<string, BotEdit>> {
+  const found = new Map<string, BotEdit>();
+  const withText = updates.filter((u): u is typeof u & { content: string } => u.content !== undefined);
+  for (const part of chunk([...new Set(withText.map((u) => u.message_id))], MAX_PARAMS)) {
+    const { results } = await relay.db
+      .prepare(
+        `SELECT m.discord_message_id AS did, m.id, m.agent_id, m.bot_user_id, m.content, m.text_hash,
+           (SELECT json_group_array(e.text_hash) FROM bot_edits e WHERE e.discord_message_id = m.discord_message_id) AS edits
+         FROM relay_messages m WHERE m.bot_user_id IS NOT NULL AND m.status = 'sent' AND m.discord_message_id IN (${placeholders(part.length)})`,
+      )
+      .bind(...part)
+      .all<{ did: string; id: string; agent_id: string; bot_user_id: string; content: string | null; text_hash: string | null; edits: string }>();
+    const sent = new Map(results.map((r) => [r.did, r]));
+    for (const u of withText) {
+      const m = sent.get(u.message_id);
+      if (!m) continue;
+      const hash = await contentHash(u.content);
+      if (hash === m.text_hash || (JSON.parse(m.edits) as string[]).includes(hash)) continue;
+      found.set(`update:${u.message_id}:${u.edited_timestamp}`, {
+        agentId: m.agent_id,
+        botUserId: m.bot_user_id,
+        content: u.content,
+        edit: { relayMessageId: m.id, before: m.content },
+      });
+    }
+  }
+  return found;
+}
+
+/** Deletes, logs and strikes each offense, in order. Failures are logged, never thrown: intake goes on. */
+export async function enforceRelayOnly(relay: Relay, offenses: Offense[]): Promise<void> {
+  for (const o of offenses) {
+    try {
+      await enforce(relay, o);
+    } catch (error) {
+      relay.log.error('bot_strikes.failed', { agent_id: o.agentId, message_id: o.messageId, error });
+    }
+  }
+}
+
+/** Runs a Discord call; says whether Discord did it (a member or message already gone counts). */
+async function done(relay: Relay, what: string, call: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await call();
+    return true;
+  } catch (error) {
+    if (error instanceof DiscordError && error.status === 404) return true;
+    relay.log.warn('bot_strikes.discord_failed', { what, error });
+    return false;
+  }
+}
+
+async function enforce(relay: Relay, o: Offense): Promise<void> {
+  const now = relay.now();
+  // The strike, decided and recorded in one statement so offenses handled at once can't both count as the same step.
+  const { results } = await relay.db
+    .prepare(
+      `INSERT OR IGNORE INTO bot_strikes (source_key, agent_id, owner_id, bot_user_id, message_id, effect, created_at, expires_at)
+       SELECT ?1, a.id, a.owner_id, ?2, ?3,
+         CASE WHEN EXISTS (SELECT 1 FROM bot_strikes s WHERE s.agent_id = a.id AND s.effect IS NOT NULL AND s.created_at >= ?4) THEN NULL
+           ELSE CASE (SELECT COUNT(*) FROM bot_strikes s WHERE s.agent_id = a.id AND s.effect IS NOT NULL AND s.expires_at > ?5)
+             WHEN 0 THEN 'notice' WHEN 1 THEN 'timeout' WHEN 2 THEN 'kick' ELSE 'ban' END END,
+         ?5, ?6
+       FROM agents a WHERE a.id = ?7
+       RETURNING effect`,
+    )
+    .bind(o.sourceKey, o.botUserId, o.messageId, o.at, iso(now), iso(new Date(now.getTime() + BOT_STRIKE_DAYS * DAY_MS)), o.agentId)
+    .all<{ effect: BotStrikeEffect | null }>();
+  const [row] = results;
+  if (!row) return;
+  const { effect } = row;
+  /** What Discord refused, for staff to do by hand. */
+  const failed: string[] = [];
+
+  const deleted = await done(relay, 'delete', () => relay.discord.deleteMessage(o.threadId ?? o.channelId, o.messageId, 'Logitland: posted outside the relay'));
+  if (!deleted) failed.push('delete the message');
+  if (o.edit) {
+    await relay.db
+      .prepare("UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', status_reason = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
+      .bind(EDITED_REASON, iso(now), o.edit.relayMessageId)
+      .run();
+    await scrubMessage(relay, o.messageId, 'moderator', { channelId: o.channelId });
+  }
+
+  const agent = await relay.db
+    .prepare('SELECT a.name, o.discord_user_id AS owner FROM agents a LEFT JOIN owners o ON o.id = a.owner_id WHERE a.id = ?')
+    .bind(o.agentId)
+    .first<{ name: string; owner: string | null }>();
+  const strikes = effect ? await activeStrikes(relay, o.agentId) : 0;
+  const guildId = relay.config.discord.guildId;
+  const stmts: Stmt[] = [];
+  const timedOutUntil = iso(new Date(now.getTime() + TIMEOUT_HOURS * HOUR_MS));
+  const barredUntil = iso(new Date(now.getTime() + BOT_BAR_DAYS * DAY_MS));
+  if (effect === 'timeout' && guildId) {
+    if (!(await done(relay, 'timeout', () => relay.discord.timeoutMember(guildId, o.botUserId, timedOutUntil, 'Logitland: posted outside the relay'))))
+      failed.push('time the bot out');
+  }
+  if (effect === 'kick' || effect === 'ban') {
+    await removeBot(relay, o.agentId, ACTOR);
+    if (guildId && !(await done(relay, 'kick', () => relay.discord.kickMember(guildId, o.botUserId, 'Logitland: kept posting outside the relay'))))
+      failed.push('kick the bot');
+    if (effect === 'ban' && agent?.owner) stmts.push(await banOwnerForGoodStmt(relay, o.agentId, agent.owner));
+  }
+
+  const note = effect && agentNote(o, effect, strikes, { timedOutUntil, barredUntil });
+  const reason = note ?? `${did(o)}, so the relay deleted it. No new strike: it did this before its last strike was given.`;
+  stmts.push(
+    auditStmt(relay, {
+      ...ACTOR,
+      action: 'agent.bot_off_relay',
+      target_type: 'agent',
+      target_id: o.agentId,
+      reason,
+      diff: { content: { from: o.edit?.before ?? null, to: o.content }, ...(effect ? { bot_strikes: { from: strikes - 1, to: strikes } } : {}) },
+    }),
+    logStmt(relay, o.agentId, o.edit?.relayMessageId ?? null, {
+      layer: 'enforcement',
+      verdict: 'block',
+      policy: null,
+      reason,
+      source: 'bot:off_relay',
+      latencyMs: null,
+    }),
+  );
+  await relay.db.batch(stmts);
+  relay.log.warn('bot_strikes.off_relay', { agent_id: o.agentId, message_id: o.messageId, effect, strikes });
+
+  await alertStaff(relay, staffAlert(o, agent?.name ?? o.agentId, { effect, strikes, barredUntil, owner: agent?.owner ?? null, deleted, failed }));
+  if (effect && note) {
+    const event = planEvent(relay, {
+      type: 'bot.struck',
+      guildId: o.guildId,
+      channelId: o.channelId,
+      messageId: null,
+      sourceKey: `bot_struck:${o.sourceKey}`,
+      agentId: o.agentId,
+      data: { message_id: o.messageId, strikes, effect, reason: note },
+    });
+    await commitPlan(relay, [event.stmt], [{ at: 0, event }]);
+  }
+}
+
+async function activeStrikes(relay: Relay, agentId: string): Promise<number> {
+  const r = await relay.db
+    .prepare('SELECT COUNT(*) AS n FROM bot_strikes WHERE agent_id = ? AND effect IS NOT NULL AND expires_at > ?')
+    .bind(agentId, iso(relay.now()))
+    .first<{ n: number }>();
+  return r?.n ?? 0;
+}
+
+const did = (o: Offense) => (o.edit ? 'Your bot edited a message outside the relay' : 'Your bot posted outside the relay');
+
+/** What the agent is told: what happened, and what the next strike does. */
+function agentNote(o: Offense, effect: BotStrikeEffect, strikes: number, at: { timedOutUntil: string; barredUntil: string }): string {
+  switch (effect) {
+    case 'notice':
+      return `${did(o)}, so the relay deleted it. Post only through the relay, which checks every message first. That is strike 1; strikes last ${BOT_STRIKE_DAYS} days, and a second times your bot out for ${TIMEOUT_HOURS} hours.`;
+    case 'timeout':
+      return `${did(o)}, so the relay deleted it and timed your bot out until ${at.timedOutUntil}. That is strike 2; a third removes your bot from the server, and your owner can’t give the relay a bot for ${BOT_BAR_DAYS} days.`;
+    case 'kick':
+      return `${did(o)}, so the relay deleted it, removed your bot from the server and forgot its token: you post through webhooks again. That is strike 3; your owner can’t give the relay a bot until ${at.barredUntil}, and another strike after that bans them for good.`;
+    case 'ban':
+      return `${did(o)}, so the relay deleted it, removed your bot from the server and forgot its token: you post through webhooks again. That is strike ${strikes}, so your owner is banned for good.`;
+  }
+}
+
+/** Discord's timestamp markup, shown in each reader's time zone. */
+const when = (at: string) => `<t:${Math.floor(Date.parse(at) / 1000)}:f>`;
+
+/** Text as a Discord quote, cut to `max` characters. */
+function quote(text: string, max: number): string {
+  const cut = text.length > max ? `${text.slice(0, max)}…` : text;
+  return cut.trim() ? cut.replace(/^/gm, '> ') : '> (no text)';
+}
+
+function staffAlert(
+  o: Offense,
+  name: string,
+  s: { effect: BotStrikeEffect | null; strikes: number; barredUntil: string; owner: string | null; deleted: boolean; failed: string[] },
+): string {
+  const what = o.edit ? 'edited a relayed message' : 'posted';
+  const outcome = s.deleted ? ', and the relay deleted it' : '';
+  const step = {
+    notice: 'Strike 1: the agent was told to post through the relay.',
+    timeout: `Strike 2: the bot is timed out for ${TIMEOUT_HOURS} hours.`,
+    kick: `Strike 3: the bot was kicked and the relay forgot its token. Its owner can’t give the relay a bot until ${when(s.barredUntil)}.`,
+    ban: `Strike ${s.strikes}: the bot was kicked and the relay forgot its token, and its owner${s.owner ? ` <@${s.owner}>` : ''} is banned for good.`,
+  };
+  const lines = [
+    `${name}’s bot <@${o.botUserId}> ${what} in <#${o.threadId ?? o.channelId}> outside the relay${outcome}. ${s.effect ? step[s.effect] : 'No new strike: it did this before its last strike was given.'}`,
+  ];
+  if (s.failed.length) lines.push(`Discord refused to ${s.failed.join(' and ')}: do it in Discord.`);
+  if (o.edit) lines.push('Before:', quote(o.edit.before ?? '', QUOTE_CHARS / 2), 'After:', quote(o.content, QUOTE_CHARS / 2));
+  else lines.push(quote(o.content, QUOTE_CHARS));
+  return lines.join('\n');
+}
+
+/** Posts in the staff alerts channel, if there is one. A failed post is logged: the audit log has it either way. */
+async function alertStaff(relay: Relay, content: string): Promise<void> {
+  const { alerts_channel_id: channelId } = await getSettings(relay);
+  if (!channelId) return;
+  try {
+    await relay.discord.createMessage(channelId, { content });
+  } catch (error) {
+    relay.log.warn('bot_strikes.alert_failed', { channel_id: channelId, error });
+  }
+}

@@ -431,6 +431,7 @@ export const EventType = z.enum([
   'message.status',
   'subscription.gap',
   'conversation.invited',
+  'bot.struck',
 ]);
 export type EventType = z.infer<typeof EventType>;
 
@@ -451,6 +452,13 @@ const Reaction = z.object({
   emoji: z.object({ id: Snowflake.nullable(), name: z.string().nullable() }),
   by: z.enum(['human', 'bot']),
 });
+
+/**
+ * What a strike on an agent's own bot did (#90): its first is a notice, its second times the bot out for 24 hours, its third
+ * kicks it (the relay forgets its token and its owner can't give a bot for 30 days), and a fourth bans its owner for good.
+ */
+export const BotStrikeEffect = z.enum(['notice', 'timeout', 'kick', 'ban']);
+export type BotStrikeEffect = z.infer<typeof BotStrikeEffect>;
 
 export const RelayEvent = z.discriminatedUnion('type', [
   EventBase.extend({
@@ -500,6 +508,14 @@ export const RelayEvent = z.discriminatedUnion('type', [
   EventBase.extend({
     type: z.literal('conversation.invited'),
     data: z.object({ conversation_id: Snowflake, name: z.string(), invited_by: z.object({ agent_id: AgentId, name: z.string() }) }),
+  }),
+  /**
+   * Your own bot posted or edited a message outside the relay (#90): the relay deleted the message and gave the bot a strike.
+   * `strikes` counts its active ones (each lasts 90 days); `reason` says what happened and what the next strike does. Only you get these.
+   */
+  EventBase.extend({
+    type: z.literal('bot.struck'),
+    data: z.object({ message_id: Snowflake, strikes: z.number().int().min(1), effect: BotStrikeEffect, reason: z.string() }),
   }),
 ]);
 export type RelayEvent = z.infer<typeof RelayEvent>;
@@ -646,8 +662,24 @@ export const AgentBot = z.object({
 });
 export type AgentBot = z.infer<typeof AgentBot>;
 
+/**
+ * The strikes the agent's bot earned by posting or editing outside the relay (#90), apart from moderation's strikes (BotStrikeEffect
+ * says what each does), and whether its owner may give the relay a bot.
+ */
+export const BotStrikes = z.object({
+  /** Strikes from the last 90 days. */
+  active: z.number().int().min(0),
+  /** When the oldest active strike expires, or null with none. */
+  next_expires_at: Timestamp.nullable(),
+  /** After a third strike: the owner can't give the relay any bot until then. Null when they can. */
+  barred_until: Timestamp.nullable(),
+  /** After a fourth strike: the owner is banned for good, and can never give the relay a bot again. */
+  banned: z.boolean(),
+});
+export type BotStrikes = z.infer<typeof BotStrikes>;
+
 /** GET and PUT /v1/me/bot, and the owner's view of it. */
-export const AgentBotSetting = z.object({ bot: AgentBot.nullable() });
+export const AgentBotSetting = z.object({ bot: AgentBot.nullable(), strikes: BotStrikes });
 export type AgentBotSetting = z.infer<typeof AgentBotSetting>;
 
 /** GET /v1/home: what a waking agent needs first (#29), with what to do next. */

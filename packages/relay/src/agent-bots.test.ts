@@ -4,6 +4,7 @@ import { botsJob } from './services/bots';
 import { ingest } from './services/intake';
 import { processSend } from './services/sending';
 import { updateSettings } from './services/settings';
+import { asOwner } from './signup.helpers';
 import { ADMIN_DISCORD, GUILD, LOUNGE, application, harness, seedAgent, seedChannel, seedOwner, type Harness, type HarnessOptions } from './testing';
 
 // An adopted agent's own Discord bot (#84): the relay checks the token, posts as the bot once staff add it, and goes back to
@@ -26,6 +27,8 @@ function discordWithBot(h: Harness) {
     failRoleRemovals: 0,
     /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
     holdGateway: 0,
+    /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
+    beforeAnswer: undefined as ((m: { id: string; content: string }) => Promise<unknown>) | undefined,
   };
   const held: (() => void)[] = [];
   const gateway = () =>
@@ -56,13 +59,21 @@ function discordWithBot(h: Harness) {
         await gateway();
         return Response.json({ url: 'wss://gateway.discord.gg', shards: 1, session_start_limit: {} });
       }
-      const channel = /^\/channels\/(\d+)\/messages/.exec(path)?.[1];
-      if (channel) return Response.json(message(channel, body.content));
+      const [, channel, edited] = /^\/channels\/(\d+)\/messages(?:\/(\d+))?/.exec(path) ?? [];
+      if (channel) {
+        const m = edited ? { ...message(channel, body.content), id: edited, edited_timestamp: h.now().toISOString() } : message(channel, body.content);
+        await bot.beforeAnswer?.(m);
+        return Response.json(m);
+      }
       return Response.json({ message: 'Unknown', code: 0 }, { status: 404 });
     }
     // The relay's own bot, and the channel's webhook.
-    if (/^\/guilds\/\d+\/members\/\d+$/.test(path))
-      return bot.guilds.includes(GUILD) ? Response.json({ roles: bot.roles }) : Response.json({ message: 'Unknown Member', code: 10007 }, { status: 404 });
+    if (/^\/guilds\/\d+\/members\/\d+$/.test(path)) {
+      if (!bot.guilds.includes(GUILD)) return Response.json({ message: 'Unknown Member', code: 10007 }, { status: 404 });
+      // A kick.
+      if (req.method === 'DELETE') bot.guilds = bot.guilds.filter((g) => g !== GUILD);
+      return Response.json({ roles: bot.roles });
+    }
     const role = /^\/guilds\/\d+\/members\/\d+\/roles\/(\d+)$/.exec(path)?.[1];
     if (role) {
       if (req.method === 'DELETE' && bot.failRoleRemovals-- > 0) return new Response('upstream error', { status: 503 });
@@ -112,6 +123,7 @@ describe('giving the relay a bot', () => {
     expect(res.status).toBe(200);
     expect(await json(res)).toEqual({
       bot: { bot_user_id: BOT_ID, application_id: APP_ID, username: 'Wren', status: 'waiting', paused_reason: null, created_at: h.now().toISOString() },
+      strikes: { active: 0, next_expires_at: null, barred_until: null, banned: false },
     });
     expect(h.identified).toEqual([BOT_TOKEN]);
     const [identity] = await calls(h, 'PATCH', /\/users\/@me$/);
@@ -357,8 +369,25 @@ describe('posting as the bot', () => {
   });
 });
 
+/** The Gateway's MESSAGE_CREATE for a post by the agent's bot. */
+const botPost = (h: Harness, id: string, content: string) => ({
+  kind: 'message_create',
+  channel_id: LOUNGE,
+  message_id: id,
+  author: { id: BOT_ID, username: 'Wren', bot: true },
+  content,
+  timestamp: h.now().toISOString(),
+});
+/** The agent's bot posts by itself, and the Gateway shows it. */
+const byItself = (h: Harness, id: string, content: string) => ingest(h.relay, { source: 'test', events: [botPost(h, id, content)] });
+const botSetting = async (h: Harness, a: { token: string }) => json(await h.call('GET', '/v1/me/bot', undefined, h.as(a.token)));
+const deletedMessages = async (h: Harness) => (await calls(h, 'DELETE', /\/channels\/\d+\/messages\/\d+$/)).map((c) => c.url.pathname);
+const staffAlerts = async (h: Harness) => (await calls(h, 'POST', new RegExp(`/channels/${STAFF}/messages$`))).map((c) => c.body.content as string);
+const DAY = 86_400_000;
+const STAFF = '110000000000000009';
+
 describe('intake', () => {
-  it('takes the bot’s post as the agent’s when the Gateway shows it before Discord answers, and anything else it posts as a bot’s', async () => {
+  it('takes the bot’s post as the agent’s when the Gateway shows it before Discord answers', async () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
     await staffAdd(h, bot);
@@ -367,28 +396,139 @@ describe('intake', () => {
     const msg = await json(await post(h, a, say('Did this one arrive?')));
     expect(msg.status).toBe('uncertain');
 
-    const author = { id: BOT_ID, username: 'Wren', bot: true };
-    const create = (id: string, content: string) => ({
-      kind: 'message_create',
-      channel_id: LOUNGE,
-      message_id: id,
-      author,
-      content,
-      timestamp: h.now().toISOString(),
-    });
-    await ingest(h.relay, {
-      source: 'test',
-      events: [create('320000000000000001', 'Did this one arrive?'), create('320000000000000002', 'Not through the relay')],
-    });
+    await ingest(h.relay, { source: 'test', events: [botPost(h, '320000000000000001', 'Did this one arrive?')] });
     expect(await row(h, msg.id)).toMatchObject({ status: 'sent', discord_message_id: '320000000000000001' });
-    const kinds = await h.db
-      .prepare(
-        'SELECT CAST(message_id AS TEXT) AS id, author_kind, agent_id FROM conversation WHERE message_id IN (320000000000000001, 320000000000000002) ORDER BY message_id',
-      )
-      .all();
-    expect(kinds.results).toEqual([
-      { id: '320000000000000001', author_kind: 'agent', agent_id: a.id },
-      { id: '320000000000000002', author_kind: 'bot', agent_id: null },
+    const kinds = await h.db.prepare('SELECT CAST(message_id AS TEXT) AS id, author_kind, agent_id FROM conversation').all();
+    expect(kinds.results).toEqual([{ id: '320000000000000001', author_kind: 'agent', agent_id: a.id }]);
+  });
+});
+
+describe('posting outside the relay', () => {
+  it('deletes what the bot posts by itself, logs it for staff and strikes the bot once a burst, but keeps a send the Gateway shows first', async () => {
+    const { h, a, bot } = await adopted();
+    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
+    await h.call('POST', '/v1/subscriptions', { kind: 'replies' }, h.as(a.token));
+    await give(h, a);
+    await staffAdd(h, bot);
+    // While the relay's send is still waiting for Discord's answer, the Gateway shows it with two posts the relay didn't send.
+    bot.beforeAnswer = (m) =>
+      ingest(h.relay, {
+        source: 'test',
+        events: [botPost(h, m.id, m.content), botPost(h, '320000000000000002', 'Not through the relay'), botPost(h, '320000000000000003', 'Nor this')],
+      });
+    const msg = await json(await post(h, a, say('Through the relay')));
+    expect(msg.status).toBe('sent');
+
+    const kept = await h.db.prepare('SELECT CAST(message_id AS TEXT) AS id, author_kind FROM conversation').all();
+    expect(kept.results).toEqual([{ id: msg.discord_message_id, author_kind: 'agent' }]);
+    expect(await deletedMessages(h)).toEqual([
+      `/api/v10/channels/${LOUNGE}/messages/320000000000000002`,
+      `/api/v10/channels/${LOUNGE}/messages/320000000000000003`,
     ]);
+    expect(await staffAlerts(h)).toEqual([
+      `Wren’s bot <@${BOT_ID}> posted in <#${LOUNGE}> outside the relay, and the relay deleted it. Strike 1: the agent was told to post through the relay.\n> Not through the relay`,
+      `Wren’s bot <@${BOT_ID}> posted in <#${LOUNGE}> outside the relay, and the relay deleted it. No new strike: it did this before its last strike was given.\n> Nor this`,
+    ]);
+
+    expect((await botSetting(h, a)).strikes).toEqual({
+      active: 1,
+      next_expires_at: new Date(h.now().getTime() + 90 * DAY).toISOString(),
+      barred_until: null,
+      banned: false,
+    });
+    const page = await json(await h.call('GET', '/v1/events', undefined, h.as(a.token)));
+    const struck = page.digests.flatMap((d: { events: { type: string }[] }) => d.events).filter((e: { type: string }) => e.type === 'bot.struck');
+    expect(struck).toEqual([
+      expect.objectContaining({
+        data: {
+          message_id: '320000000000000002',
+          strikes: 1,
+          effect: 'notice',
+          reason: expect.stringMatching(/^Your bot posted outside the relay, so the relay deleted it\. Post only through the relay/),
+        },
+      }),
+    ]);
+  });
+
+  it('deletes a message the bot edited itself and logs both texts, but not the relay’s own edit that the Gateway shows first', async () => {
+    const { h, a, bot } = await adopted();
+    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
+    await give(h, a);
+    await staffAdd(h, bot);
+    const msg = await json(await post(h, a, say('The first version of this')));
+    const edit = (content: string) => ({
+      kind: 'message_update',
+      channel_id: LOUNGE,
+      message_id: msg.discord_message_id,
+      content,
+      edited_timestamp: h.now().toISOString(),
+    });
+
+    bot.beforeAnswer = (m) => ingest(h.relay, { source: 'test', events: [edit(m.content)] });
+    expect((await patch(h, a, msg.id, { content: 'The second version of this' })).status).toBe(200);
+    bot.beforeAnswer = undefined;
+    expect(await deletedMessages(h)).toEqual([]);
+    expect((await botSetting(h, a)).strikes.active).toBe(0);
+
+    h.advance(60_000);
+    await ingest(h.relay, { source: 'test', events: [edit('Changed behind the relay’s back')] });
+    expect(await deletedMessages(h)).toEqual([`/api/v10/channels/${LOUNGE}/messages/${msg.discord_message_id}`]);
+    expect(await row(h, msg.id)).toMatchObject({ status: 'removed', removed_by: 'moderator' });
+    expect((await botSetting(h, a)).strikes.active).toBe(1);
+    expect(await staffAlerts(h)).toEqual([
+      `Wren’s bot <@${BOT_ID}> edited a relayed message in <#${LOUNGE}> outside the relay, and the relay deleted it. Strike 1: the agent was told to post through the relay.\nBefore:\n> The second version of this\nAfter:\n> Changed behind the relay’s back`,
+    ]);
+  });
+
+  it('times the bot out at a second strike, kicks and forgets it at a third and bars its owner for 30 days, and bans the owner at a fourth', async () => {
+    const { h, a, owner, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    const first = h.now().getTime();
+    await byItself(h, '320000000000000001', 'One');
+
+    h.advance(60_000);
+    await byItself(h, '320000000000000002', 'Two');
+    const member = new RegExp(`/guilds/${GUILD}/members/${BOT_ID}$`);
+    expect((await calls(h, 'PATCH', member)).map((c) => c.body)).toEqual([{ communication_disabled_until: new Date(h.now().getTime() + DAY).toISOString() }]);
+
+    h.advance(DAY + 60_000);
+    await byItself(h, '320000000000000003', 'Three');
+    expect(await calls(h, 'DELETE', member)).toHaveLength(1);
+    const barredUntil = new Date(h.now().getTime() + 30 * DAY).toISOString();
+    expect(await botSetting(h, a)).toEqual({
+      bot: null,
+      strikes: { active: 3, next_expires_at: new Date(first + 90 * DAY).toISOString(), barred_until: barredUntil, banned: false },
+    });
+    const barred = await give(h, a);
+    expect(barred.status).toBe(403);
+    expect((await json(barred)).detail).toContain(barredUntil);
+    expect((await json(await post(h, a, say('Back on the webhook')))).status).toBe('sent');
+    expect((await calls(h, 'POST', /\/webhooks\//)).length).toBe(1);
+
+    h.advance(30 * DAY);
+    expect((await give(h, a)).status).toBe(200);
+    await staffAdd(h, bot);
+    const adopt = () => h.internal('POST', `/internal/owners/${owner.id}/adoption-tokens`, undefined, asOwner(owner.id));
+    expect((await adopt()).status).toBe(201);
+    await byItself(h, '320000000000000004', 'Four');
+    expect((await botSetting(h, a)).strikes).toMatchObject({ active: 4, banned: true });
+    expect(await calls(h, 'DELETE', member)).toHaveLength(2);
+    const banned = await h.internal('PUT', `/internal/owners/${owner.id}/agents/${a.id}/bot`, { token: BOT_TOKEN }, asOwner(owner.id));
+    expect(banned.status).toBe(403);
+    expect((await json(banned)).detail).toMatch(/banned for good/);
+    expect((await adopt()).status).toBe(403);
+  });
+
+  it('counts only strikes from the last 90 days', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000001', 'One');
+
+    h.advance(90 * DAY);
+    await byItself(h, '320000000000000002', 'Two');
+    expect((await botSetting(h, a)).strikes.active).toBe(1);
+    expect(await calls(h, 'PATCH', new RegExp(`/guilds/${GUILD}/members/${BOT_ID}$`))).toEqual([]);
   });
 });

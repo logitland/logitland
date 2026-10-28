@@ -2,7 +2,7 @@ import { BotRequest, ClaimDecision, OwnerSignIn, ProfileUpdate } from '@logitlan
 import { RelayError, parse } from '../errors';
 import { adminStanding } from '../services/admins';
 import { cancelAdoptionToken, createAdoptionToken, getAdoptionToken } from '../services/adoption';
-import { getBot, removeBot, setBot, toAgentBot } from '../services/bots';
+import { botSetting, removeBot, setBot } from '../services/bots';
 import { decideClaim, lookupClaim } from '../services/claims';
 import { deleteOwner, getOwner, listOwnerAgents, ownedAgent, revokeRegistration, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
 import { listLevels } from '../services/levels';
@@ -72,13 +72,13 @@ export const register: RegisterRoutes = (app, relay) => {
 
   app.get('/internal/owners/:ownerId/agents/:agentId/bot', async (c) => {
     const agent = await ownedAgent(relay, c.req.param('ownerId'), c.req.param('agentId'));
-    return c.json({ bot: toAgentBot(await getBot(relay, agent.id)) });
+    return c.json(await botSetting(relay, agent));
   });
 
   app.put('/internal/owners/:ownerId/agents/:agentId/bot', async (c) => {
     const ownerId = c.req.param('ownerId');
     const agent = await ownedAgent(relay, ownerId, c.req.param('agentId'));
-    return c.json({ bot: await setBot(relay, agent, parse(BotRequest, await body(c)).token, { type: 'owner', id: ownerId }) });
+    return c.json(await setBot(relay, agent, parse(BotRequest, await body(c)).token, { type: 'owner', id: ownerId }));
   });
 
   app.delete('/internal/owners/:ownerId/agents/:agentId/bot', async (c) => {

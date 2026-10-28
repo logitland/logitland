@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { iso, type Relay, type Stmt } from '../context';
 import { hmac, sha256 } from '../crypto';
 import { auditStmt } from './audit';
+import { enforceRelayOnly, offRelayEdits, type Offense } from './bot-strikes';
 import { anyAgentAccess } from './channels';
 import { EVERY_MESSAGE_SINCE, SHOWN_PUBLICLY_SINCE } from './consent';
 import { authorRef } from './conversation';
@@ -145,6 +146,8 @@ interface Context {
   known: Map<string, Relayed & { id: string }>;
   /** Agents' own bots (bots.ts), by bot user ID: what they post through the relay is their agent's. */
   agentBots: Map<string, string>;
+  /** What those bots posted or edited outside the relay: deleted and struck after the rounds (bot-strikes.ts), never kept. */
+  offRelay: Offense[];
   history: boolean;
 }
 
@@ -236,6 +239,7 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
     turnedAway: [],
     known: new Map(results.map((c) => [c.id, c])),
     agentBots: new Map(bots.map((b) => [b.bot_user_id, b.agent_id])),
+    offRelay: [],
     history: history ?? false,
   };
   for (const part of chunk(messages, EVENTS_PER_ROUND)) {
@@ -244,6 +248,7 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
     total.ignored += r.ignored;
   }
   if (ctx.turnedAway.length) await turnAway(relay, ctx.turnedAway);
+  if (ctx.offRelay.length) await enforceRelayOnly(relay, ctx.offRelay);
   if (total.invalid) relay.log.warn('intake.invalid_events', { source, count: total.invalid });
   if (total.recorded) relay.log.info('intake.batch', { source, ...total });
   return total;
@@ -317,6 +322,11 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
       .all<Sent & { did: string }>();
     for (const r of results) sent.set(r.did, r);
   }
+  // Edits of what agents' bots posted through the relay, with text the relay didn't give: read before the reply line comes off.
+  const botEdits = await offRelayEdits(
+    relay,
+    events.flatMap((e) => (e.kind === 'message_update' ? [e] : [])),
+  );
   // A person's message is kept only if they had agreed by the time they wrote it: when each person in the round agreed (for
   // those who still have).
   const fromPeople = keyed.flatMap(({ e }) => (e.kind === 'message_create' && !e.author.bot && !e.author.webhook_id ? [e] : []));
@@ -502,6 +512,24 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           repliesToAgent,
           owners: e.thread_id ? privateOwners.get(e.thread_id) : undefined,
         });
+        // An agent's bot is that agent only in what the relay sent. Anything else it posts is deleted and struck, never kept;
+        // a channel's history (a first look) is left as it is.
+        const botAgent = who?.kind === 'bot' && !ctx.history ? ctx.agentBots.get(e.author.id) : undefined;
+        if (botAgent) {
+          ctx.offRelay.push({
+            sourceKey: key!,
+            agentId: botAgent,
+            botUserId: e.author.id,
+            guildId: ch.guild_id,
+            channelId: e.channel_id,
+            threadId: e.thread_id ?? null,
+            messageId: e.message_id,
+            at: e.timestamp,
+            content: e.content,
+          });
+          out.ignored++;
+          break;
+        }
         if (!who) {
           // A person's message their agreement doesn't cover: dropped, not stored. One written live in the talk channel, by
           // someone who hasn't agreed to every message being relayed, is also removed from Discord.
@@ -564,6 +592,21 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           break;
         }
         seen.add(key!);
+        // New text an agent's bot put on a message the relay posted: deleted and struck, and the text never kept.
+        const offRelay = botEdits.get(key!);
+        if (offRelay) {
+          ctx.offRelay.push({
+            ...offRelay,
+            sourceKey: key!,
+            guildId: ch.guild_id,
+            channelId: e.channel_id,
+            threadId: e.thread_id ?? null,
+            messageId: e.message_id,
+            at: e.edited_timestamp,
+          });
+          out.ignored++;
+          break;
+        }
         record(
           planEvent(relay, {
             type: 'message.updated',

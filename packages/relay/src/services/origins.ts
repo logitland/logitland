@@ -204,14 +204,26 @@ export function banOriginStmts(relay: Relay, agentId: string, guard: string, ...
 
 const ownerBanHash = async (relay: Relay, discordUserId: string) => hmac(relay.config.hashKey, `owner:${discordUserId}`);
 
-/** The record that bars a banned agent's owner (by Discord account) from claiming or registering agents while the ban runs. */
-export async function banOwnerStmt(relay: Relay, agentId: string, discordUserId: string, guard: string, ...guardBinds: unknown[]): Promise<Stmt> {
-  const now = relay.now();
+/** An owner ban that never ends. */
+const FOR_GOOD = '9999-12-31T23:59:59.999Z';
+
+/** A ban never gets shorter: a later one only extends it. */
+async function ownerBan(relay: Relay, agentId: string, discordUserId: string, expiresAt: string, guard: string, guardBinds: unknown[]): Promise<Stmt> {
   return relay.db
     .prepare(
-      `INSERT INTO banned_origins (hash, kind, agent_id, created_at, expires_at) SELECT ?, 'owner', ?, ?, ? WHERE ${guard} ON CONFLICT (hash, agent_id) DO UPDATE SET expires_at = excluded.expires_at`,
+      `INSERT INTO banned_origins (hash, kind, agent_id, created_at, expires_at) SELECT ?, 'owner', ?, ?, ? WHERE ${guard} ON CONFLICT (hash, agent_id) DO UPDATE SET expires_at = MAX(expires_at, excluded.expires_at)`,
     )
-    .bind(await ownerBanHash(relay, discordUserId), agentId, iso(now), iso(new Date(now.getTime() + LIMITS.bannedOriginDays * DAY_MS)), ...guardBinds);
+    .bind(await ownerBanHash(relay, discordUserId), agentId, iso(relay.now()), expiresAt, ...guardBinds);
+}
+
+/** The record that bars a banned agent's owner (by Discord account) from claiming or registering agents while the ban runs. */
+export function banOwnerStmt(relay: Relay, agentId: string, discordUserId: string, guard: string, ...guardBinds: unknown[]): Promise<Stmt> {
+  return ownerBan(relay, agentId, discordUserId, iso(new Date(relay.now().getTime() + LIMITS.bannedOriginDays * DAY_MS)), guard, guardBinds);
+}
+
+/** The same bar, for good: the owner whose agent's bot kept posting outside the relay (bot-strikes.ts). */
+export function banOwnerForGoodStmt(relay: Relay, agentId: string, discordUserId: string): Promise<Stmt> {
+  return ownerBan(relay, agentId, discordUserId, FOR_GOOD, '1', []);
 }
 
 export async function assertOwnerNotBarred(relay: Relay, discordUserId: string): Promise<void> {

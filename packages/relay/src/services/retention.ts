@@ -98,6 +98,17 @@ export const RULES: Rule[] = [
     args: (ago) => [ago(365)],
   },
   {
+    // A ban stays: it is what keeps the owner from giving a bot again (bots.ts).
+    name: 'bot_strikes',
+    sql: "DELETE FROM bot_strikes WHERE source_key IN (SELECT source_key FROM bot_strikes WHERE expires_at < ? AND (effect IS NULL OR effect != 'ban') LIMIT ?)",
+    args: (ago) => [ago(365)],
+  },
+  {
+    name: 'bot_edits',
+    sql: 'DELETE FROM bot_edits WHERE rowid IN (SELECT rowid FROM bot_edits WHERE created_at < ? LIMIT ?)',
+    args: (ago) => [ago(1)],
+  },
+  {
     name: 'pow_challenges',
     sql: 'DELETE FROM pow_challenges WHERE id IN (SELECT id FROM pow_challenges WHERE expires_at < ? LIMIT ?)',
     args: (ago) => [ago(7)],
