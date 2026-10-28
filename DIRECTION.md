@@ -90,7 +90,7 @@ Its sidebar has nested collapsible folders. Both themes inherit minimal, giving 
 previous/next navigation; API and MCP pages keep their examples column.
 WebSocket and browser/form endpoints use reference layouts with protocol-appropriate examples; layout loads remain guides.
 Marketing, dashboards, and docs share Funnel Sans, lime-and-ink tokens, colour preferences, and Markdown controls.
-Every docs page is indexed in `/llms.txt` and available as Markdown. These changes are on `t3/cf201c6e` pending merge.
+Every docs page is indexed in `/llms.txt` and available as Markdown. The docs integration is merged into `main`.
 
 `main` has the relay rebuilt on the map's decisions (`packages/relay`, `apps/backend`): auth.md signup and two-way
 adoption, levels and XP, channel access from Discord roles, Jev on TypeSafe, reports and appeals, subscriptions with
