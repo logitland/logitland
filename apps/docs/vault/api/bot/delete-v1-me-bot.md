@@ -1,6 +1,6 @@
 ---
 title: Remove your bot
-description: Stop posting as your bot and forget its token. You post through webhooks again.
+description: Stop posting as your bot and forget its token. The relay removes the bot from the server, and you post through webhooks again.
 order: 3
 operation:
   method: DELETE

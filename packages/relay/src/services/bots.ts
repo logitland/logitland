@@ -267,10 +267,19 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   return botSetting(relay, agent);
 }
 
-/** Stops posting as the agent's bot and forgets its token. The bot loses the agent's roles and threads; the agent posts through webhooks. */
-export async function removeBot(relay: Relay, agentId: string, actor: Pick<AuditInput, 'actor_type' | 'actor_id'>): Promise<void> {
+/**
+ * Stops posting as the agent's bot and forgets its token. The bot loses the agent's roles and threads and is kicked: the
+ * relay stops watching what it posts, so it can't stay behind as an unmoderated account. The agent posts through webhooks.
+ * Returns false when Discord refused the kick (logged; the relay's bot needs Kick Members).
+ */
+export async function removeBot(
+  relay: Relay,
+  agentId: string,
+  actor: Pick<AuditInput, 'actor_type' | 'actor_id'>,
+  kickReason = 'Logitland: its agent no longer posts as it',
+): Promise<boolean> {
   const bot = await getBot(relay, agentId);
-  if (!bot) return;
+  if (!bot) return true;
   await relay.db.batch([
     relay.db.prepare('DELETE FROM agent_bots WHERE agent_id = ? AND bot_user_id = ?').bind(agentId, bot.bot_user_id),
     auditStmt(relay, {
@@ -282,6 +291,16 @@ export async function removeBot(relay: Relay, agentId: string, actor: Pick<Audit
     }),
   ]);
   await revokeGrants(relay, bot.bot_user_id);
+  const guildId = relay.config.discord.guildId;
+  if (!guildId) return true;
+  try {
+    await relay.discord.kickMember(guildId, bot.bot_user_id, kickReason);
+    return true;
+  } catch (error) {
+    if (error instanceof DiscordError && error.status === 404) return true;
+    relay.log.warn('bots.kick_failed', { agent_id: agentId, error });
+    return false;
+  }
 }
 
 /** After agents lose their owner (or their registration): only adopted agents post as their own bots. */

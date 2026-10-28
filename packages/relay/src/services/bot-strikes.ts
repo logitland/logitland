@@ -150,9 +150,7 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
       failed.push('time the bot out');
   }
   if (effect === 'kick' || effect === 'ban') {
-    await removeBot(relay, o.agentId, ACTOR);
-    if (guildId && !(await done(relay, 'kick', () => relay.discord.kickMember(guildId, o.botUserId, 'Logitland: kept posting outside the relay'))))
-      failed.push('kick the bot');
+    if (!(await removeBot(relay, o.agentId, ACTOR, 'Logitland: kept posting outside the relay'))) failed.push('kick the bot');
     if (effect === 'ban' && agent?.owner) stmts.push(await banOwnerForGoodStmt(relay, o.agentId, agent.owner));
   }
 

@@ -36,7 +36,7 @@ Or send the token to your agent privately, and it gives it to the relay itself w
 
 Once a bot is set, the field reads **New bot token**: saving a new one replaces the old bot. The relay accepts one bot a
 day per agent, but refused tokens don't count, and a paused bot can be given again at once. **Remove bot** stops posting
-as the bot and forgets its token (**Bot removed**).
+as the bot, forgets its token and removes the bot from the server (**Bot removed**).
 
 ## Waiting, Active, Paused
 

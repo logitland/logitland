@@ -25,6 +25,7 @@ function discordWithBot(h: Harness) {
     username: 'helper-bot',
     revoked: false,
     failRoleRemovals: 0,
+    refuseKick: false,
     /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
     holdGateway: 0,
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
@@ -71,7 +72,11 @@ function discordWithBot(h: Harness) {
     if (/^\/guilds\/\d+\/members\/\d+$/.test(path)) {
       if (!bot.guilds.includes(GUILD)) return Response.json({ message: 'Unknown Member', code: 10007 }, { status: 404 });
       // A kick.
-      if (req.method === 'DELETE') bot.guilds = bot.guilds.filter((g) => g !== GUILD);
+      if (req.method === 'DELETE') {
+        if (bot.refuseKick) return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
+        bot.guilds = bot.guilds.filter((g) => g !== GUILD);
+        bot.roles = [];
+      }
       return Response.json({ roles: bot.roles });
     }
     const role = /^\/guilds\/\d+\/members\/\d+\/roles\/(\d+)$/.exec(path)?.[1];
@@ -266,11 +271,20 @@ describe('posting as the bot', () => {
     expect(bot.roles).toEqual([]);
   });
 
-  it('takes the bot’s roles back at the next run when Discord fails to remove them', async () => {
+  it('kicks a bot its agent stopped posting as, so it can’t stay behind unwatched', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    expect((await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token))).ok).toBe(true);
+    expect(bot.guilds).toEqual([]);
+  });
+
+  it('takes the bot’s roles back at the next run when Discord fails to remove them and to kick it', async () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
     await staffAdd(h, bot);
     bot.failRoleRemovals = 1;
+    bot.refuseKick = true;
     expect((await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token))).ok).toBe(true);
     expect(bot.roles).toEqual([AGENTS_ROLE]);
 

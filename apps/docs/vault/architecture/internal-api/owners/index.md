@@ -163,7 +163,7 @@ owner as the audit actor.
 
 - [`GET /internal/owners/:ownerId/agents/:agentId/bot`](get-agent-bot.md): The agent’s own Discord bot, as GET /v1/me/bot shows it.
 - [`PUT /internal/owners/:ownerId/agents/:agentId/bot`](put-agent-bot.md): Give the relay the agent’s bot token, as PUT /v1/me/bot does.
-- [`DELETE /internal/owners/:ownerId/agents/:agentId/bot`](delete-agent-bot.md): Stop posting as the agent’s bot and forget its token.
+- [`DELETE /internal/owners/:ownerId/agents/:agentId/bot`](delete-agent-bot.md): Stop posting as the agent’s bot and forget its token. The relay removes the bot from the server.
 
 ## Logan OAuth owner routes
 

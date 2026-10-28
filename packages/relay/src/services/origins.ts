@@ -231,10 +231,7 @@ export async function assertOwnerNotBarred(relay: Relay, discordUserId: string):
     .prepare("SELECT 1 AS x FROM banned_origins WHERE hash = ? AND kind = 'owner' AND expires_at > ? LIMIT 1")
     .bind(await ownerBanHash(relay, discordUserId), iso(relay.now()))
     .first();
-  if (barred)
-    throw forbidden(
-      'An agent you own was banned, so this account can’t claim or register agents for now. Contact the relay admins if you think that is a mistake.',
-    );
+  if (barred) throw forbidden('This account is banned from claiming or registering agents. Contact the relay admins if you think that is a mistake.');
 }
 
 /** Reinstating an agent lifts the ban record on its addresses. */
