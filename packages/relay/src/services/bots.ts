@@ -43,7 +43,10 @@ export interface BotRow {
 /** Sealed to its agent (reseal.ts re-seals it under a new key the same way). */
 export const tokenAad = (agentId: string) => `agent_bots.token:${agentId}`;
 
-const SETS_PER_AGENT_PER_HOUR = 5;
+/** Attempts, refused ones included: each asks Discord about the token. */
+const ATTEMPTS_PER_AGENT_PER_HOUR = 5;
+/** How long after a bot the relay accepted before the agent can give another, unless the relay paused that one. */
+const SET_INTERVAL_SECONDS = 24 * 3600;
 /** How often botsJob asks Discord where a bot is: a waiting one at every run, so it starts soon after staff add it. */
 const WAITING_CHECK_MS = 30_000;
 const ACTIVE_CHECK_MS = 15 * 60_000;
@@ -125,6 +128,21 @@ async function ask<T>(call: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * One accepted bot a day per agent, counted from the audit log so removing the bot doesn't reset it. Refused tokens never
+ * count, and a bot the relay paused can be replaced at once: giving it again is a retry.
+ */
+async function enforceDailySet(relay: Relay, agentId: string): Promise<void> {
+  if ((await getBot(relay, agentId))?.status === 'paused') return;
+  const last = await relay.db
+    .prepare("SELECT MAX(created_at) AS at FROM audit_log WHERE target_type = 'agent' AND target_id = ? AND action = 'agent.bot_set'")
+    .bind(agentId)
+    .first<{ at: string | null }>();
+  if (!last?.at) return;
+  const waitSeconds = Math.ceil((Date.parse(last.at) - relay.now().getTime()) / 1000) + SET_INTERVAL_SECONDS;
+  if (waitSeconds > 0) throw rateLimited('A bot can be given once a day. Tokens the relay refused don’t count. Try again later.', waitSeconds);
+}
+
+/**
  * Gives the relay an adopted agent's bot (#84), replacing any it had. The token must be a bot's, not the relay's own nor one
  * another agent gave, and the bot private and in no server but this one. The relay connects it once and gives it the agent's
  * name and avatar. It is `active` at once when staff already added it, and `waiting` until they do.
@@ -134,10 +152,11 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   const guildId = relay.config.discord.guildId;
   const open = relay.openSocket;
   if (!guildId || !open) throw unavailable('This relay can’t connect bots right now. Try again later.');
+  await enforceDailySet(relay, agent.id);
   await enforce(
     relay,
-    [{ key: `bot:set:${agent.id}:h`, limit: SETS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
-    `A bot can be given ${SETS_PER_AGENT_PER_HOUR} times an hour. Try again later.`,
+    [{ key: `bot:set:${agent.id}:h`, limit: ATTEMPTS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
+    `A bot can be given ${ATTEMPTS_PER_AGENT_PER_HOUR} times an hour. Try again later.`,
   );
   const rest = relay.discord.withToken(token);
   const user: DiscordUser = await ask(() => rest.getCurrentUser());

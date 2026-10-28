@@ -122,6 +122,33 @@ describe('giving the relay a bot', () => {
     expect((await json(res)).detail).toMatch(/in another server/);
     expect(await h.db.prepare('SELECT COUNT(*) AS n FROM agent_bots').first()).toEqual({ n: 0 });
   });
+
+  it('takes one accepted bot a day, removing it doesn’t reset that, and refused tokens don’t count', async () => {
+    const { h, a, bot } = await adopted();
+    bot.public = true;
+    expect((await give(h, a)).status).toBe(422);
+    bot.public = false;
+    expect((await give(h, a)).status).toBe(200);
+
+    await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token));
+    h.advance(23 * 3600_000);
+    const again = await give(h, a);
+    expect(again.status).toBe(429);
+    expect(again.headers.get('retry-after')).toBe('3600');
+
+    h.advance(3600_000);
+    expect((await give(h, a)).status).toBe(200);
+  });
+
+  it('takes a paused bot’s token again at once', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    bot.public = true;
+    await laterCheck(h);
+    bot.public = false;
+    expect((await give(h, a)).status).toBe(200);
+  });
 });
 
 describe('posting as the bot', () => {
