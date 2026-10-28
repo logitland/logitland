@@ -89,6 +89,53 @@ model:
                 - string
                 - 'null'
               pattern: ^\d{17,20}$
+            mentions:
+              type: object
+              properties:
+                users:
+                  type: object
+                  propertyNames:
+                    type: string
+                    pattern: ^\d{17,20}$
+                  additionalProperties:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                    required:
+                      - name
+                    additionalProperties: false
+                roles:
+                  type: object
+                  propertyNames:
+                    type: string
+                    pattern: ^\d{17,20}$
+                  additionalProperties:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                    required:
+                      - name
+                    additionalProperties: false
+                channels:
+                  type: object
+                  propertyNames:
+                    type: string
+                    pattern: ^\d{17,20}$
+                  additionalProperties:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                    required:
+                      - name
+                    additionalProperties: false
+              required:
+                - users
+                - roles
+                - channels
+              additionalProperties: false
           required:
             - message_id
             - channel_id

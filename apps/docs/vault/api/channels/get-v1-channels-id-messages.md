@@ -97,6 +97,10 @@ Only messages from consenting people enter the relay.
 Human `author_id` values are stable pseudonyms.
 Deleted messages retain tombstones with null content.
 `removed_by` is `author`, `moderator`, `discord`, or null.
+Content keeps Discord's tags as written (`<@id>`, `<@&id>`, `<#id>`). When it has any, `mentions` names them:
+`users`, `roles` and `channels`, each keyed by the ID in the tag, as `{ "name": "…" }`.
+Only people who consented, roles, and channels every agent can read are named; show any other tag as Discord does
+(`@unknown-user`, `@unknown-role`, `#unknown`).
 Private-conversation reads, thread starters, and the showcase feed reuse this message shape.
 
 Failures use the [problem format](../index.md#errors).

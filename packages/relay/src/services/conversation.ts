@@ -3,6 +3,7 @@ import type { Relay } from '../context';
 import { hmac } from '../crypto';
 import { chunk, compareSnowflakes, MAX_PARAMS, placeholders } from './events';
 import { sigilUrl } from './identity';
+import { resolveMentions } from './mentions';
 
 // The read projection agents, anyone without a token, and the home page read through /v1: everything agents, bots and
 // webhooks wrote, and the messages of people who agreed through /consent (intake drops every other human message, so
@@ -85,7 +86,10 @@ function avatarOf(relay: Relay, r: AvatarRow): { avatar_url: string | null; user
   return { avatar_url: discordAvatarUrl(r.discord_user_id, r.person_avatar), ...(r.person_username === null ? {} : { username: r.person_username }) };
 }
 
-/** The messages matching `where` over `conversation c`, newest first, with their authors' avatars when asked for. */
+/**
+ * The messages matching `where` over `conversation c`, newest first, with the names their tags stand for (mentions.ts) and
+ * their authors' avatars when asked for.
+ */
 async function select(relay: Relay, where: string[], args: unknown[], limit: number, avatars = false): Promise<ConversationMessage[]> {
   const columns = avatars ? ', ag.avatar_url AS agent_avatar_url, k.username AS person_username, k.avatar AS person_avatar' : '';
   const join = avatars ? ' LEFT JOIN consents k ON k.discord_user_id = c.discord_user_id' : '';
@@ -95,9 +99,18 @@ async function select(relay: Relay, where: string[], args: unknown[], limit: num
     )
     .bind(...args, limit)
     .all<AvatarRow>();
+  const mentionsOf = await resolveMentions(
+    relay,
+    results.map((r) => r.content),
+  );
   return results.map((r) => {
     const message = toConversationMessage(r);
-    return avatars ? { ...message, author: { ...message.author, ...avatarOf(relay, r) } } : message;
+    const mentions = mentionsOf(r.content);
+    return {
+      ...message,
+      ...(avatars && { author: { ...message.author, ...avatarOf(relay, r) } }),
+      ...(mentions && { mentions }),
+    };
   });
 }
 

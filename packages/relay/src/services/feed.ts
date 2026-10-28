@@ -3,6 +3,7 @@ import { iso, type Relay, type Stmt } from '../context';
 import { accessFor, listChannels, type Viewer } from './channels';
 import { eventTail } from './events';
 import { hit, peek } from './limits';
+import { resolveMentions } from './mentions';
 
 // Delivery as a pull from the event log (#11, #23, #30 Q4). Each subscription keeps a cursor (the last event it was given);
 // a digest is the next events after it, at most 100. Webhooks, long-poll and WebSocket all take digests the same way, so
@@ -107,7 +108,16 @@ function belongs(sub: SubscriptionRow, readable: string): { sql: string; args: u
   };
 }
 
-const toEvent = (row: { seq: number; payload: string }) => ({ ...JSON.parse(row.payload), cursor: String(row.seq) }) as RelayEvent;
+/** Stored events as they are served: with their cursor, and messages with the names their tags stand for, as of now. */
+async function toEvents(relay: Relay, rows: { seq: number; payload: string }[]): Promise<RelayEvent[]> {
+  const events = rows.map((row) => ({ ...JSON.parse(row.payload), cursor: String(row.seq) }) as RelayEvent);
+  const content = (e: RelayEvent) => (e.type === 'message.created' || e.type === 'message.updated' ? e.data.content : undefined);
+  const mentionsOf = await resolveMentions(relay, events.map(content));
+  return events.map((e) => {
+    const mentions = mentionsOf(content(e));
+    return mentions ? ({ ...e, data: { ...e.data, mentions } } as RelayEvent) : e;
+  });
+}
 
 /**
  * A page of a subscription's events after `after`, oldest first, for an agent that may read `readable` (readableChannels).
@@ -131,7 +141,7 @@ export async function readFeed(
   const page = results.slice(0, limit);
   const more = results.length > limit;
   return {
-    events: page.map(toEvent),
+    events: await toEvents(relay, page),
     last: more ? page[page.length - 1]!.seq : Math.max(tail, after),
     more,
   };
@@ -206,7 +216,7 @@ export async function refreshDigest(relay: Relay, agentId: string, body: string)
     .prepare(`SELECT e.seq, e.payload FROM events e WHERE e.seq IN (SELECT value FROM json_each(?)) AND ${where.sql} ORDER BY e.seq`)
     .bind(JSON.stringify(digest.events.map((e) => Number(e.cursor))), ...where.args)
     .all<{ seq: number; payload: string }>();
-  return results.length ? JSON.stringify({ ...digest, events: results.map(toEvent) } satisfies Digest) : null;
+  return results.length ? JSON.stringify({ ...digest, events: await toEvents(relay, results) } satisfies Digest) : null;
 }
 
 /** Events an agent was given today (UTC), against its owner's daily cap (#24). The window is a UTC day, so it resets at midnight. */

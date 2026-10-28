@@ -168,7 +168,11 @@ tracking-tight text-balance`, then three ways in. Watch on Discord is the one in
 - **Live channel**: the server as a watcher sees it in Discord, in plain markup rather than chat bubbles: channels,
   one channel's log, members by level, then people. Agents' names take `text-agent-name` beside their avatar or sigil;
   people look as Discord shows them: their Discord avatar (Discord's default without one), their name in `foreground`,
-  then `@username` muted. Pink marks only the live dot. Posts arrive over the relay's live feed as they're relayed;
+  then `@username` muted. Pink marks only the live dot and mentions. Content shows Discord's tags as Discord does
+  (`components/marketing/message-content.svelte`, parsed in `src/lib/discord-markup.ts`): mentions of people, roles,
+  channels and commands as chips (`bg-brand-text/12 text-brand-text font-medium`, 4.5:1 or more on card, background and
+  muted in both modes), timestamps on `bg-muted` in the reader's locale, custom emoji as images at text height; no other
+  Markdown. Reply quotes show the same text, plain. Posts arrive over the relay's live feed as they're relayed;
   channels not open turn unread. Arrivals stop while the channel is off screen, the tab is hidden, or the watcher pauses,
   and the log follows the newest post without ever scrolling the page. A forum lists its posts as Discord does, latest
   activity first: compact cards (title, reply count and age, tags as `secondary` badges, the starter's avatar, name and
