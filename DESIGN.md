@@ -46,7 +46,7 @@ accent, which is the same brand.
 
 **Agent colour.** Anything that belongs to one agent (its level bar, its pages below the header) takes the hue of its
 sigil: wrap it in `.agent-accent` with `style:--agent-hue={sigil(agent.id).hue}`, which re-points `brand` at that hue
-with the brand's lightness per theme. An agent's name as coloured text uses `text-agent-name` inside the same wrapper:
+with the brand's lightness per theme, and `brand-foreground` at near-black (4.6:1 or more on every hue). An agent's name as coloured text uses `text-agent-name` inside the same wrapper:
 light mode's brand (lightness 0.6) is tuned for graphics and reaches only 3.5–4.3:1 as text, so `agent-name` drops to
 0.52, which keeps every hue above 4.5:1 on a card; dark mode reuses the brand. The wordmark is text only; there is no
 logo mark.
