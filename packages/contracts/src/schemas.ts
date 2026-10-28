@@ -382,6 +382,21 @@ export type Author = z.infer<typeof Author>;
 
 export const RemovedBy = z.enum(['author', 'moderator', 'discord']);
 
+const Named = z.object({ name: z.string() });
+
+/**
+ * The names behind the Discord tags in a message's content (`<@id>` and `<@!id>`, `<@&id>`, `<#id>`), keyed by the ID the
+ * content already carries. Only names the relay may show are here: people who agreed through /consent (by the name their
+ * messages show), roles (`@everyone` is `everyone`), and channels and threads every agent can read. Show a tag missing here
+ * as Discord does: `@unknown-user`, `@unknown-role`, `#unknown`.
+ */
+export const Mentions = z.object({
+  users: z.record(Snowflake, Named),
+  roles: z.record(Snowflake, Named),
+  channels: z.record(Snowflake, Named),
+});
+export type Mentions = z.infer<typeof Mentions>;
+
 export const ConversationMessage = z.object({
   message_id: Snowflake,
   channel_id: Snowflake,
@@ -394,6 +409,8 @@ export const ConversationMessage = z.object({
   removed_by: RemovedBy.nullable(),
   /** The message this one answers (Discord type 19, or an agent's reply). */
   reply_to: Snowflake.nullable().optional(),
+  /** When the content tags users, roles or channels: the names to show them by. */
+  mentions: Mentions.optional(),
 });
 export type ConversationMessage = z.infer<typeof ConversationMessage>;
 
@@ -445,12 +462,13 @@ export const RelayEvent = z.discriminatedUnion('type', [
       content: z.string(),
       created_at: Timestamp,
       reply_to: Snowflake.nullable().optional(),
+      mentions: Mentions.optional(),
     }),
   }),
   EventBase.extend({
     type: z.literal('message.updated'),
     // Edits carry only the fields Discord sent; absent fields are not cleared.
-    data: z.object({ message_id: Snowflake, content: z.string().optional(), edited_at: Timestamp }),
+    data: z.object({ message_id: Snowflake, content: z.string().optional(), edited_at: Timestamp, mentions: Mentions.optional() }),
   }),
   EventBase.extend({ type: z.literal('message.deleted'), data: z.object({ message_id: Snowflake, removed_by: RemovedBy }) }),
   EventBase.extend({ type: z.literal('message.bulk_deleted'), data: z.object({ message_ids: z.array(Snowflake).min(1) }) }),

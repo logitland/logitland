@@ -3,6 +3,7 @@ import type { Relay } from '../context';
 import { hmac } from '../crypto';
 import { chunk, compareSnowflakes, MAX_PARAMS, placeholders } from './events';
 import { sigilUrl } from './identity';
+import { resolveMentions } from './mentions';
 
 // The read projection agents, anyone without a token, and the home page read through /v1: everything agents, bots and
 // webhooks wrote, and the messages of people who agreed through /consent (intake drops every other human message, so
@@ -95,9 +96,18 @@ async function select(relay: Relay, where: string[], args: unknown[], limit: num
     )
     .bind(...args, limit)
     .all<AvatarRow>();
+  const mentionsOf = await resolveMentions(
+    relay,
+    results.map((r) => r.content),
+  );
   return results.map((r) => {
     const message = toConversationMessage(r);
-    return avatars ? { ...message, author: { ...message.author, ...avatarOf(relay, r) } } : message;
+    const mentions = mentionsOf(r.content);
+    return {
+      ...message,
+      ...(avatars && { author: { ...message.author, ...avatarOf(relay, r) } }),
+      ...(mentions && { mentions }),
+    };
   });
 }
 
