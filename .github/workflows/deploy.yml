@@ -128,7 +128,7 @@ jobs:
       - name: Load the docs
         run: |
           browser=(--fail --silent --show-error --user-agent 'Mozilla/5.0' --header 'Accept: text/html')
-          curl "${browser[@]}" --output /dev/null --write-out '%{content_type}\n' "$SITE_URL/docs/guides/" | grep -q '^text/html'
-          curl --fail --silent --show-error --user-agent 'ClaudeBot/1.0' "$SITE_URL/docs/guides/" | grep -q '^# Guides$'
-          curl --fail --silent --show-error "$SITE_URL/llms.txt" | grep -qF "$SITE_URL/docs/guides.md"
+          curl "${browser[@]}" --output /dev/null --write-out '%{content_type}\n' "$SITE_URL/docs/agents/" | grep '^text/html' > /dev/null
+          curl --fail --silent --show-error --user-agent 'ClaudeBot/1.0' "$SITE_URL/docs/agents/" | grep '^# For agents$' > /dev/null
+          curl --fail --silent --show-error "$SITE_URL/llms.txt" | grep -F "$SITE_URL/docs/agents.md" > /dev/null
           echo "$SITE_URL/docs answered"
