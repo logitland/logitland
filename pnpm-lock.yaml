@@ -340,20 +340,20 @@ importers:
         specifier: workspace:*
         version: link:../../packages/tokens
       '@svartz/config':
-        specifier: ^2.1.0
-        version: 2.1.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
+        specifier: ^2.1.1
+        version: 2.1.1(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
       '@svartz/theme-api-docs':
-        specifier: ^2.1.0
-        version: 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
+        specifier: ^2.1.1
+        version: 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
       '@svartz/theme-mcp-docs':
-        specifier: ^2.1.0
-        version: 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
+        specifier: ^2.1.1
+        version: 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
       '@svartz/ui':
-        specifier: ^2.1.0
-        version: 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
+        specifier: ^2.1.1
+        version: 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
       '@svartz/vite':
-        specifier: ^2.1.0
-        version: 2.1.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^2.1.1
+        version: 2.1.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
       '@sveltejs/adapter-static':
         specifier: 3.0.10
         version: 3.0.10(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(svelte@5.57.1)(typescript@6.0.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))
@@ -367,8 +367,8 @@ importers:
         specifier: 'catalog:'
         version: 4.3.3(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
       svartz:
-        specifier: ^2.1.0
-        version: 2.1.0(@cloudflare/workers-types@5.20261018.1)(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(@types/node@24.19.1)(supports-color@10.2.2)(svelte@5.57.1)(tailwindcss@4.3.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^2.1.1
+        version: 2.1.1(@cloudflare/workers-types@5.20261018.1)(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(@types/node@24.19.1)(supports-color@10.2.2)(svelte@5.57.1)(tailwindcss@4.3.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
       svelte:
         specifier: 'catalog:'
         version: 5.57.1
@@ -1877,44 +1877,44 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@svartz/config@2.1.0':
-    resolution: {integrity: sha512-QCP3KWv0TL2jEqvh39jUXexvMHH70W2MnwLdCAZnIDEsSWl2GxxCG+Mpt/BDaVlFZFNer1g9vVmKPMBCivxlHw==}
+  '@svartz/config@2.1.1':
+    resolution: {integrity: sha512-GBQ0rX/CrszMmUJMHXpS5d0rucGibvsTM+zbGlbsIQf97hTRf4mkQptv9rOr+61hxS5yCev4HqYoGnWNygnn/w==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
-  '@svartz/core@2.1.0':
-    resolution: {integrity: sha512-bwwWZTLz+8iwr8gJnp5UbZALhbzd7OH48pvX46gQFBC54h+PkPdd1KJTMlao4IgOlqA6PwJ3YhhUWMy408BaTQ==}
+  '@svartz/core@2.1.1':
+    resolution: {integrity: sha512-gyPHbZV91t1OurWBEvoRk5eD46XwE2m2TYElb2hmnI/JYcfq37KMkXJnfui+sk0fa2DKtr/E7kH0AuSROZoqFg==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
-  '@svartz/plugins@2.1.0':
-    resolution: {integrity: sha512-gWVodJ06K3RZ09mmmLLLzCUtSv/heMoH3KlYeJto1raq29d2S4xo97CiLMIp3UIn0c0dUtC4UZxtpVm2MjR3ig==}
+  '@svartz/plugins@2.1.1':
+    resolution: {integrity: sha512-wD00YQ3xFfWFQnzAZzqyWMoGme+F3QOzgIm4xt//pDDRwWncrYJuGiYsiqEFPpVydna3j3cRuaAr8TwsvRSRJA==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
-  '@svartz/theme-api-docs@2.1.0':
-    resolution: {integrity: sha512-WgbvOMpdOY6ltPzgQN4WYNLNh0WdMMn3zhllg0k9On3k/L7/RgecbnJt6hOSlD7clOxOlPs0q45OdqsU/0DgqA==}
-    engines: {node: ^20.19.0 || >=22.12.0}
-    peerDependencies:
-      svelte: ^5.0.0
-
-  '@svartz/theme-mcp-docs@2.1.0':
-    resolution: {integrity: sha512-1NAPLjayayAjaxnHVSQYWPEkTQZyNcEqJSqtKaK9oMSLERg+vbNsbDcyNbmYupCOMwMVVRDrRaXn2tGaVj9AYA==}
+  '@svartz/theme-api-docs@2.1.1':
+    resolution: {integrity: sha512-acCSjNi3S8HHkFluc2JEWNKWUM4tgt7qvI6D+0iw657NWoVCAGLEqgCwX8zPGDjjggn8IfjHBQK+mWf9l6e1sQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       svelte: ^5.0.0
 
-  '@svartz/theme-minimal@2.1.0':
-    resolution: {integrity: sha512-xfZeyEoNX6CSLOmmzCq6QmKsvsslPzhKyrweGN1KN3AjkGGGicNEfkqLwC2BPXvYDr6lMQn0xzGkLOxBqTmoNw==}
+  '@svartz/theme-mcp-docs@2.1.1':
+    resolution: {integrity: sha512-BaQwWPTGnGGfH05CPFWhofVttnla6zTFW9V9a+GOaWpE2AxKACJIcq2H5KRGwX0EysLTzehK68tTuU6+XRTIbw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       svelte: ^5.0.0
 
-  '@svartz/ui@2.1.0':
-    resolution: {integrity: sha512-4D+Tk6fD/JD3WSfkOiprtx5S+DOtIwBL3WwSlXb2IQfS9icCb3Wjalc1+gRI7zkmEifxPWynmPDfzi8A2NM8pQ==}
+  '@svartz/theme-minimal@2.1.1':
+    resolution: {integrity: sha512-37l2mGxsjFz02VyQLCiqHXvkWRSm6R6iL8XY6bbiogHwVY/2oiQd9JAxAedqY7pm4gME4Ylosx7k3K/K++1giw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       svelte: ^5.0.0
 
-  '@svartz/vite@2.1.0':
-    resolution: {integrity: sha512-JhP1I7vEjRtPhnFx5O9GIxxftxKkn//ghg8Go/zJ2OKhvS1sermQXe885gWLzs7HzA0wsqW3LJOQ4jrsHFDTkw==}
+  '@svartz/ui@2.1.1':
+    resolution: {integrity: sha512-nGd78lyzLBHk5cLHB2V/KMTS3PlNPxaL5/TACToxb4fYWIQ/KfK0W0p7YhZcgTGxadtfZp2HxAjE2Qml9Aweqw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    peerDependencies:
+      svelte: ^5.0.0
+
+  '@svartz/vite@2.1.1':
+    resolution: {integrity: sha512-kd13C+D/GPVZSiutob5eTrFzJl/Tr85+H75csd1sNFGl5ieI4BrDSyjh2EGs3exgZ/uSQ81nwzTMnIAMwM/jSw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
       '@sveltejs/vite-plugin-svelte': ^6.2.4 || ^7.0.0
@@ -3853,8 +3853,8 @@ packages:
     resolution: {integrity: sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g==}
     engines: {node: '>=18'}
 
-  svartz@2.1.0:
-    resolution: {integrity: sha512-aaklL9GW2Y7ua/WqrDUhO9DXOfVFfH0JKZDVWPPhpOpzrP+fydfY9K2zL6clNg6pLZOUjzfQh8DwhQqYocNZlw==}
+  svartz@2.1.1:
+    resolution: {integrity: sha512-f1pWKRWUNYdlo0daRSHyq639U1BIVwIVNupHrauuhvFlj5359nfiMOG8WF7EN/MPfzFtCC2/sF/nFiQlO98jNA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -5205,9 +5205,9 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@svartz/config@2.1.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)':
+  '@svartz/config@2.1.1(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)':
     dependencies:
-      '@svartz/core': 2.1.0
+      '@svartz/core': 2.1.1
       effect: 3.22.3
       jiti: 2.7.0
       semver: 7.8.5
@@ -5218,15 +5218,15 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@svartz/core@2.1.0':
+  '@svartz/core@2.1.1':
     dependencies:
       effect: 3.22.3
       unified: 11.0.5
 
-  '@svartz/plugins@2.1.0(supports-color@10.2.2)(svelte@5.57.1)':
+  '@svartz/plugins@2.1.1(supports-color@10.2.2)(svelte@5.57.1)':
     dependencies:
       '@humanwhocodes/ico-to-png': 1.1.0
-      '@svartz/core': 2.1.0
+      '@svartz/core': 2.1.1
       effect: 3.22.3
       github-slugger: 2.0.0
       gray-matter: 4.0.3
@@ -5265,11 +5265,11 @@ snapshots:
       - supports-color
       - svelte
 
-  '@svartz/theme-api-docs@2.1.0(supports-color@10.2.2)(svelte@5.57.1)':
+  '@svartz/theme-api-docs@2.1.1(supports-color@10.2.2)(svelte@5.57.1)':
     dependencies:
-      '@svartz/core': 2.1.0
-      '@svartz/theme-minimal': 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
-      '@svartz/ui': 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
+      '@svartz/core': 2.1.1
+      '@svartz/theme-minimal': 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
+      '@svartz/ui': 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
       svelte: 5.57.1
     transitivePeerDependencies:
       - '@types/react'
@@ -5278,11 +5278,11 @@ snapshots:
       - react
       - supports-color
 
-  '@svartz/theme-mcp-docs@2.1.0(supports-color@10.2.2)(svelte@5.57.1)':
+  '@svartz/theme-mcp-docs@2.1.1(supports-color@10.2.2)(svelte@5.57.1)':
     dependencies:
-      '@svartz/core': 2.1.0
-      '@svartz/theme-minimal': 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
-      '@svartz/ui': 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
+      '@svartz/core': 2.1.1
+      '@svartz/theme-minimal': 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
+      '@svartz/ui': 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
       svelte: 5.57.1
     transitivePeerDependencies:
       - '@types/react'
@@ -5291,11 +5291,11 @@ snapshots:
       - react
       - supports-color
 
-  '@svartz/theme-minimal@2.1.0(supports-color@10.2.2)(svelte@5.57.1)':
+  '@svartz/theme-minimal@2.1.1(supports-color@10.2.2)(svelte@5.57.1)':
     dependencies:
       '@lucide/svelte': 1.52.0(svelte@5.57.1)
-      '@svartz/core': 2.1.0
-      '@svartz/ui': 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
+      '@svartz/core': 2.1.1
+      '@svartz/ui': 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
       d3-force: 3.0.0
       d3-selection: 3.0.0
       d3-zoom: 3.0.0
@@ -5307,15 +5307,15 @@ snapshots:
       - react
       - supports-color
 
-  '@svartz/ui@2.1.0(supports-color@10.2.2)(svelte@5.57.1)':
+  '@svartz/ui@2.1.1(supports-color@10.2.2)(svelte@5.57.1)':
     dependencies:
       '@floating-ui/dom': 1.8.0
       '@fontsource-variable/archivo': 5.3.0
       '@fontsource/monaspace-argon': 5.3.0
       '@lucide/svelte': 1.52.0(svelte@5.57.1)
       '@nanostores/persistent': 1.3.5(nanostores@1.5.5)
-      '@svartz/core': 2.1.0
-      '@svartz/plugins': 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
+      '@svartz/core': 2.1.1
+      '@svartz/plugins': 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
       '@types/d3': 7.4.3
       d3: 7.9.0
       minisearch: 7.2.0
@@ -5329,11 +5329,11 @@ snapshots:
       - react
       - supports-color
 
-  '@svartz/vite@2.1.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))':
+  '@svartz/vite@2.1.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
-      '@svartz/core': 2.1.0
-      '@svartz/plugins': 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
-      '@svartz/theme-minimal': 2.1.0(supports-color@10.2.2)(svelte@5.57.1)
+      '@svartz/core': 2.1.1
+      '@svartz/plugins': 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
+      '@svartz/theme-minimal': 2.1.1(supports-color@10.2.2)(svelte@5.57.1)
       '@sveltejs/vite-plugin-svelte': 7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
       '@tailwindcss/vite': 4.3.3(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
       effect: 3.22.3
@@ -7623,10 +7623,10 @@ snapshots:
 
   supports-color@10.2.2: {}
 
-  svartz@2.1.0(@cloudflare/workers-types@5.20261018.1)(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(@types/node@24.19.1)(supports-color@10.2.2)(svelte@5.57.1)(tailwindcss@4.3.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)):
+  svartz@2.1.1(@cloudflare/workers-types@5.20261018.1)(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(@types/node@24.19.1)(supports-color@10.2.2)(svelte@5.57.1)(tailwindcss@4.3.3)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
-      '@svartz/config': 2.1.0(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
-      '@svartz/vite': 2.1.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
+      '@svartz/config': 2.1.1(@cloudflare/workers-types@5.20261018.1)(@types/node@24.19.1)
+      '@svartz/vite': 2.1.1(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
       '@tailwindcss/forms': 0.5.11(tailwindcss@4.3.3)
       '@tailwindcss/typography': 0.5.20(tailwindcss@4.3.3)
       chokidar: 5.0.0
