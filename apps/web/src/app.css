@@ -26,6 +26,15 @@
   --brand: light-dark(oklch(0.6 var(--level-chroma) var(--level-hue)), oklch(0.86 calc(var(--level-chroma) * 0.87) var(--level-hue)));
 }
 
+/*
+ * Text on an agent's or level's fill (a level disc, a brand badge): near-black keeps 4.6:1 or more on every hue at
+ * both modes' lightness, where the theme's white-on-pink pairing drops to 3.9:1 on light fills.
+ */
+.agent-accent,
+.level-accent {
+  --brand-foreground: oklch(0.12 0 0);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scroll-fade,
   .scroll-fade-x,
