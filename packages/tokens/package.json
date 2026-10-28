@@ -3,13 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Flock & Cord design tokens: colour roles for dark and light, type, radii, spacing and motion",
+  "description": "Logitland's theme (theme.css: colour roles, type, radius and motion shared by the web app and the docs), and the archived prototype's Flock & Cord tokens (tokens.css)",
   "exports": {
     ".": "./src/index.ts",
+    "./theme.css": "./src/theme.css",
+    "./color-mode": "./src/color-mode.ts",
     "./tokens.css": "./src/tokens.css"
   },
   "scripts": {
     "check": "tsc -p ."
+  },
+  "dependencies": {
+    "@fontsource-variable/funnel-sans": "catalog:"
   },
   "devDependencies": {
     "@logitland/config": "workspace:*",

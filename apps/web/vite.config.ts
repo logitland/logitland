@@ -2,7 +2,10 @@ import adapter from '@sveltejs/adapter-cloudflare';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { existsSync } from 'node:fs';
-import { defineConfig } from 'vite';
+import { defineConfig, type ProxyOptions } from 'vite';
+import { atOrigin, namesOrigin } from './src/lib/docs-origin.ts';
+import { DOCS_FILE_HEADER, movedDoc, pageOf } from './src/lib/markdown-paths.ts';
+import { wantsMarkdown } from './src/lib/server/markdown/negotiate.ts';
 
 /**
  * The settings that match the local relay, in place of .dev.vars: the file `pnpm dev:full` names, or the one
@@ -14,13 +17,48 @@ function stackSettings() {
 }
 
 /**
- * The local relay. Deployed, the shared hostname sends /v1/* to the relay Worker; in development the dev server passes it
- * on, WebSockets included, so the home page's live feed answers on the page's own origin.
+ * Match the relay-owned paths in apps/backend/wrangler.jsonc, including WebSockets. The web app keeps /, /auth/*,
+ * and /oauth/authorize, so links and examples on its origin work like the deployed shared hostname.
  */
 const RELAY_URL = process.env.LOGITLAND_RELAY_URL ?? 'http://localhost:8787';
+const RELAY_PATHS = String.raw`^/(?:v1(?:/|$)|mcp(?:/|$)|oauth2(?:/|$)|agent(?:/|$)|\.well-known/oauth-|(?:auth|skill)\.md(?:\?|$))`;
+
+/** The docs dev server (apps/docs, which `pnpm dev` also starts). Built, the docs are this Worker's assets under /docs. */
+const DOCS_URL = process.env.LOGITLAND_DOCS_URL ?? 'http://localhost:5179';
+/** Docs pages and their files. */
+const DOCS = String.raw`^/docs([/?]|$)`;
+
+/**
+ * Passes the docs to their dev server, except a request for Markdown (`/docs/agents.md`, or a page an agent fetches):
+ * the hook answers it, as when deployed, from the copy it fetches here with `DOCS_FILE_HEADER`. Like the Worker, it names
+ * this server's origin in the docs' text files.
+ */
+const docsProxy: ProxyOptions = {
+  target: DOCS_URL,
+  selfHandleResponse: true,
+  configure: (proxy) =>
+    proxy.on('proxyRes', async (proxyRes, req, res) => {
+      if (!namesOrigin(proxyRes.headers['content-type'] ?? '')) {
+        res.writeHead(proxyRes.statusCode!, proxyRes.headers);
+        proxyRes.pipe(res);
+        return;
+      }
+      const { 'content-length': _, ...headers } = proxyRes.headers;
+      const text = Buffer.concat(await proxyRes.toArray()).toString();
+      res.writeHead(proxyRes.statusCode!, headers).end(atOrigin(text, new URL(`http://${req.headers.host}`)));
+    }),
+  bypass: ({ url = '', headers }) => {
+    if (headers[DOCS_FILE_HEADER]) return undefined;
+    const sent = Object.entries(headers).filter((header): header is [string, string] => typeof header[1] === 'string');
+    const path = url.split('?')[0]!;
+    return movedDoc(path) || path.replace(/\/+$/, '') === '/docs/getting-started' || pageOf(path) !== null || wantsMarkdown(new Headers(sent))
+      ? url
+      : undefined;
+  },
+};
 
 export default defineConfig({
-  server: { proxy: { '/v1': { target: RELAY_URL, ws: true } } },
+  server: { proxy: { [RELAY_PATHS]: { target: RELAY_URL, ws: true }, [DOCS]: docsProxy } },
   plugins: [
     tailwindcss(),
     sveltekit({

@@ -6,7 +6,7 @@
   "description": "SvelteKit marketing pages, owner dashboard and admin dashboard on Cloudflare Workers, built on shadcn-svelte",
   "scripts": {
     "dev": "vite dev --host --port 5174 --strictPort",
-    "build": "wrangler types && vite build",
+    "build": "wrangler types && vite build && cp -R ../docs/.svartz/vaults/docs/dist .svelte-kit/cloudflare/docs",
     "preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4174",
     "prepare": "svelte-kit sync || echo ''",
     "check": "wrangler types && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold warning",
@@ -17,9 +17,10 @@
     "#lib/*": "./src/lib/*"
   },
   "devDependencies": {
-    "@fontsource-variable/funnel-sans": "catalog:",
     "@internationalized/date": "catalog:",
     "@logitland/contracts": "workspace:*",
+    "@logitland/tokens": "workspace:*",
+    "@logitland/ui": "workspace:*",
     "@lucide/svelte": "catalog:",
     "@mdream/js": "catalog:",
     "@shadcn-svelte/primitives": "catalog:",

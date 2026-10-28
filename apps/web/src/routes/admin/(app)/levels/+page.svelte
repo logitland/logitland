@@ -139,7 +139,7 @@
           aria-expanded={open}
           aria-controls="level-{level.level}-panel"
           onclick={() => toggle(level.level)}
-          class="flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50"
+          class="flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-left outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring"
         >
           <span class="font-semibold">{levelName(level.level)}</span>
           <span class="text-sm text-muted-foreground tabular-nums">{formatNumber(level.xp)} XP</span>
@@ -165,7 +165,7 @@
           <button
             type="button"
             onclick={() => askAdd(gap.from)}
-            class="group flex items-center gap-2 rounded-md px-3 py-1 text-sm text-muted-foreground/70 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            class="group flex items-center gap-2 rounded-md px-3 py-1 text-sm text-muted-foreground/70 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
           >
             <span>{gapLabel(gap)} · no overrides</span>
             <PlusIcon class="size-3.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden="true" />

@@ -1,0 +1,32 @@
+{
+  "name": "@logitland/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Technical docs for Logitland: a Svartz site built from the Markdown vault in ./vault",
+  "scripts": {
+    "dev": "svartz dev --vault docs --port 5179",
+    "build": "svartz build --vault docs",
+    "preview": "svartz preview --vault docs --port 4179",
+    "prepare": "svelte-kit sync || echo ''",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold warning"
+  },
+  "devDependencies": {
+    "@logitland/tokens": "workspace:*",
+    "@svartz/config": "^2.1.0",
+    "@svartz/theme-api-docs": "^2.1.0",
+    "@svartz/theme-mcp-docs": "^2.1.0",
+    "@svartz/ui": "^2.1.0",
+    "@svartz/vite": "^2.1.0",
+    "@sveltejs/adapter-static": "3.0.10",
+    "@sveltejs/kit": "2.70.3",
+    "@sveltejs/vite-plugin-svelte": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "svartz": "^2.1.0",
+    "svelte": "catalog:",
+    "svelte-check": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:ts6",
+    "vite": "catalog:"
+  }
+}

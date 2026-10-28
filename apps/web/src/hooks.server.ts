@@ -1,9 +1,9 @@
 import type { Handle } from '@sveltejs/kit/hooks';
 import { PATHS } from '#lib/fixtures/marketing/site.js';
-import { markdownPath, pageOf } from '#lib/markdown-paths.js';
+import { markdownPath, movedDoc, pageOf } from '#lib/markdown-paths.js';
 import { pageToMarkdown } from '#lib/server/markdown/convert.js';
 import { wantsMarkdown } from '#lib/server/markdown/negotiate.js';
-import { HAND_WRITTEN, needsSignIn, signInMarkdown } from '#lib/server/markdown/pages.js';
+import { handWrittenMarkdown, needsSignIn, signInMarkdown } from '#lib/server/markdown/pages.js';
 import { readSession } from '#lib/server/session.js';
 
 const MARKDOWN = 'text/markdown; charset=utf-8';
@@ -17,6 +17,8 @@ const VARY = 'Accept, User-Agent';
  */
 export const handle: Handle = async ({ event, resolve }) => {
   const { url, request } = event;
+  const moved = movedDoc(url.pathname);
+  if (moved) return new Response(null, { status: 308, headers: { location: moved + url.search } });
   event.locals.owner = await readSession(event.cookies);
   const page = pageOf(url.pathname);
   const negotiated = page === null && request.method === 'GET' && !event.isDataRequest;
@@ -33,11 +35,12 @@ export const handle: Handle = async ({ event, resolve }) => {
     return response;
   }
 
-  const path = page ?? url.pathname;
+  // Docs pages end in a slash; their Markdown, like every page's, is named without it.
+  const path = page ?? (url.pathname.replace(/\/+$/, '') || '/');
   const headers = { 'content-type': MARKDOWN, ...(negotiated && { vary: VARY }) };
 
-  const handWritten = HAND_WRITTEN[path];
-  if (handWritten) return new Response(handWritten(new URL(path + url.search, url)), { headers });
+  const handWritten = await handWrittenMarkdown(path, new URL(path + url.search, url));
+  if (handWritten !== undefined) return new Response(handWritten, { headers });
   if (needsSignIn(event.route.id) && !event.locals.owner) return new Response(signInMarkdown(url.origin, path), { headers });
 
   const response = await resolve(event);
@@ -49,7 +52,9 @@ export const handle: Handle = async ({ event, resolve }) => {
     return response;
   }
   if (!isHtml(response)) return response;
-  return new Response(pageToMarkdown(await response.text(), url.origin), { status: response.status, headers });
+  // Only docs pages link relatively, and each one renders at its path with a slash.
+  const rendered = new URL(path === '/' ? path : `${path}/`, url);
+  return new Response(pageToMarkdown(await response.text(), rendered), { status: response.status, headers });
 };
 
 const isHtml = (response: Response) => response.headers.get('content-type')?.startsWith('text/html') ?? false;

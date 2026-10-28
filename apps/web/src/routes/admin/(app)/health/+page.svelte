@@ -11,7 +11,17 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { Switch } from '#lib/components/ui/switch/index.js';
   import { HOLD_MS, formatNumber, isUrgent, plural, refusal, timeAgo, timeLeft } from '#lib/admin/format.js';
-  import { CHANNEL_KEYS, CHANNELS, KILL_SWITCH_KEYS, KILL_SWITCHES, ROLE_KEYS, ROLES, type ChannelKey, type KillSwitch, type RoleKey } from '#lib/admin/labels.js';
+  import {
+    CHANNEL_KEYS,
+    CHANNELS,
+    KILL_SWITCH_KEYS,
+    KILL_SWITCHES,
+    ROLE_KEYS,
+    ROLES,
+    type ChannelKey,
+    type KillSwitch,
+    type RoleKey,
+  } from '#lib/admin/labels.js';
   import { session } from '#lib/session.js';
   import { health, operations, registerCommands, setChannel, setRole, setSwitch } from './health.remote.js';
 
@@ -160,7 +170,7 @@
         <span class="flex min-h-6 items-center gap-1.5 text-xs text-muted-foreground">
           <Icon class="size-3.5 shrink-0 {STATUS_CLASSES[tile.status]}" aria-hidden="true" />
           {#if tile.href}
-            <a href={tile.href} class="outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">{tile.label}</a>
+            <a href={tile.href} class="outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring">{tile.label}</a>
           {:else}
             {tile.label}
           {/if}
@@ -209,7 +219,9 @@
               <div class="flex min-w-0 flex-col gap-0.5">
                 <span>{check.label}<span class="sr-only">{ok ? ': granted' : ': missing'}</span></span>
                 {#if !ok}
-                  <span class="text-xs text-muted-foreground">Missing in {check.missing.map((c) => `#${c}`).join(', ')}. Grant it in Discord, then check again.</span>
+                  <span class="text-xs text-muted-foreground"
+                    >Missing in {check.missing.map((c) => `#${c}`).join(', ')}. Grant it in Discord, then check again.</span
+                  >
                 {/if}
               </div>
             </li>

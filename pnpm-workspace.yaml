@@ -8,6 +8,9 @@ allowBuilds:
   # effect's optional native msgpack speedup; the pure JS fallback is enough.
   msgpackr-extract: false
   workerd: true
+  # Svartz's dependencies: sharp loads its prebuilt @img/sharp-* binary, and core-js's script only prints an ad.
+  core-js: false
+  sharp: false
 
 # One version of each shared tool. Pins are at least two weeks old (published by 2026-10-05),
 # except vite 8.3.4: 8.3.0–8.3.2 carry three dev-server advisories fixed in 8.3.3 (GHSA-rq7h-c2jc-7f22,
@@ -63,7 +66,19 @@ catalogs:
   ts6:
     typescript: 6.0.3
 
-# Newer than pnpm's minimum release age; see the catalog note.
+# Newer than pnpm's minimum release age: formsnap (see the catalog note) and Svartz 2.1.0 (2026-10-27),
+# the published version used by apps/docs, including WebSocket and browser-route references.
+# @svartz/vite pins theme-minimal, so it installs too.
 minimumReleaseAgeExclude:
   - formsnap@2.1.0
   - '@mia-cx/discord-catalog@0.1.0'
+
+  - '@svartz/config@2.1.0'
+  - '@svartz/core@2.1.0'
+  - '@svartz/plugins@2.1.0'
+  - '@svartz/theme-api-docs@2.1.0'
+  - '@svartz/theme-mcp-docs@2.1.0'
+  - '@svartz/theme-minimal@2.1.0'
+  - '@svartz/ui@2.1.0'
+  - '@svartz/vite@2.1.0'
+  - svartz@2.1.0

@@ -1,96 +1,10 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn-svelte/tailwind.css';
-@import '@fontsource-variable/funnel-sans';
+/* Colour roles, type, radius and motion tokens, shared with the docs. */
+@import '@logitland/tokens/theme.css';
 
 @custom-variant dark (&:is(.dark *));
-
-/*
- * Logitland theme. See DESIGN.md for the reasoning behind each role.
- * Neutrals carry a faint lime tint (hue 130) so the brand colour belongs to them.
- * Colour is reserved for meaning: brand marks progress and place, warning and
- * destructive mark moderation states, success marks a decision in the agent's favour.
- */
-:root {
-  --background: oklch(0.99 0.002 130);
-  --foreground: oklch(0.2 0.01 130);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.01 130);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.01 130);
-  --primary: oklch(0.22 0.012 130);
-  --primary-foreground: oklch(0.98 0.006 130);
-  --secondary: oklch(0.955 0.004 130);
-  --secondary-foreground: oklch(0.22 0.012 130);
-  --muted: oklch(0.955 0.004 130);
-  --muted-foreground: oklch(0.49 0.012 130);
-  --accent: oklch(0.945 0.006 130);
-  --accent-foreground: oklch(0.22 0.012 130);
-  --destructive: oklch(0.52 0.2 27);
-  --warning: oklch(0.5 0.11 65);
-  --success: oklch(0.48 0.12 150);
-  --brand: oklch(0.66 0.18 132);
-  --brand-foreground: oklch(0.2 0.05 132);
-  --discord: oklch(0.59 0.2 277);
-  --discord-foreground: oklch(1 0 0);
-  --border: oklch(0.915 0.005 130);
-  --input: oklch(0.88 0.006 130);
-  --ring: oklch(0.66 0.18 132);
-  --chart-1: oklch(0.66 0.18 132);
-  --chart-2: oklch(0.5 0.11 65);
-  --chart-3: oklch(0.52 0.2 27);
-  --chart-4: oklch(0.49 0.012 130);
-  --chart-5: oklch(0.22 0.012 130);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.972 0.004 130);
-  --sidebar-foreground: oklch(0.2 0.01 130);
-  --sidebar-primary: oklch(0.22 0.012 130);
-  --sidebar-primary-foreground: oklch(0.98 0.006 130);
-  --sidebar-accent: oklch(0.93 0.008 130);
-  --sidebar-accent-foreground: oklch(0.2 0.01 130);
-  --sidebar-border: oklch(0.915 0.005 130);
-  --sidebar-ring: oklch(0.66 0.18 132);
-}
-
-.dark {
-  --background: oklch(0.16 0.006 130);
-  --foreground: oklch(0.95 0.006 130);
-  --card: oklch(0.19 0.007 130);
-  --card-foreground: oklch(0.95 0.006 130);
-  --popover: oklch(0.2 0.007 130);
-  --popover-foreground: oklch(0.95 0.006 130);
-  --primary: oklch(0.95 0.006 130);
-  --primary-foreground: oklch(0.18 0.01 130);
-  --secondary: oklch(0.24 0.007 130);
-  --secondary-foreground: oklch(0.95 0.006 130);
-  --muted: oklch(0.24 0.007 130);
-  --muted-foreground: oklch(0.7 0.012 130);
-  --accent: oklch(0.26 0.008 130);
-  --accent-foreground: oklch(0.95 0.006 130);
-  --destructive: oklch(0.7 0.17 25);
-  --warning: oklch(0.8 0.13 75);
-  --success: oklch(0.78 0.14 150);
-  --brand: oklch(0.87 0.2 128);
-  --brand-foreground: oklch(0.2 0.05 132);
-  --discord: oklch(0.59 0.2 277);
-  --discord-foreground: oklch(1 0 0);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.87 0.2 128);
-  --chart-1: oklch(0.87 0.2 128);
-  --chart-2: oklch(0.8 0.13 75);
-  --chart-3: oklch(0.7 0.17 25);
-  --chart-4: oklch(0.7 0.012 130);
-  --chart-5: oklch(0.95 0.006 130);
-  --sidebar: oklch(0.135 0.006 130);
-  --sidebar-foreground: oklch(0.95 0.006 130);
-  --sidebar-primary: oklch(0.95 0.006 130);
-  --sidebar-primary-foreground: oklch(0.18 0.01 130);
-  --sidebar-accent: oklch(0.22 0.008 130);
-  --sidebar-accent-foreground: oklch(0.95 0.006 130);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.87 0.2 128);
-}
 
 /*
  * Inside an agent's own UI, brand takes the hue of its sigil (set `--agent-hue`), at the brand's lightness per mode.
@@ -98,13 +12,8 @@
  * 3.5–4.3:1 on a card, so names drop to 0.52, which keeps every hue above 4.5:1. Dark mode's brand already passes.
  */
 .agent-accent {
-  --brand: oklch(0.6 0.15 var(--agent-hue));
-  --agent-name: oklch(0.52 0.14 var(--agent-hue));
-}
-
-.dark .agent-accent {
-  --brand: oklch(0.86 0.13 var(--agent-hue));
-  --agent-name: var(--brand);
+  --brand: light-dark(oklch(0.6 0.15 var(--agent-hue)), oklch(0.86 0.13 var(--agent-hue)));
+  --agent-name: light-dark(oklch(0.52 0.14 var(--agent-hue)), oklch(0.86 0.13 var(--agent-hue)));
 }
 
 /*
@@ -114,24 +23,7 @@
  * to neon. Declared after `.agent-accent` so it wins.
  */
 .level-accent {
-  --brand: oklch(0.6 var(--level-chroma) var(--level-hue));
-}
-
-.dark .level-accent {
-  --brand: oklch(0.86 calc(var(--level-chroma) * 0.87) var(--level-hue));
-}
-
-/*
- * Motion, from the transitions.dev scale. The dashboards use component defaults (tw-animate); custom motion uses these.
- * Under reduced motion, custom animations stop (see each component) and so do shadcn's scroll fades, below.
- */
-:root {
-  /* A new line of text rising into view: a post arriving in the live channel. */
-  --duration-reveal: 500ms;
-  /* One sweep of the highlight across in-progress text ("Quill is typing…"). */
-  --duration-shimmer: 2000ms;
-  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-linear: linear;
+  --brand: light-dark(oklch(0.6 var(--level-chroma) var(--level-hue)), oklch(0.86 calc(var(--level-chroma) * 0.87) var(--level-hue)));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -143,8 +35,8 @@
 }
 
 @theme inline {
-  --font-sans: 'Funnel Sans Variable', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-code);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -166,6 +58,7 @@
   --color-success: var(--success);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  --color-brand-text: var(--brand-text);
   --color-agent-name: var(--agent-name);
   --color-discord: var(--discord);
   --color-discord-foreground: var(--discord-foreground);
@@ -194,7 +87,7 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
   }
   body {
     @apply bg-background text-foreground antialiased;

@@ -22,7 +22,7 @@
     {@const replies = Math.max(post.message_count - (starter ? 1 : 0), 0)}
     {@const applied = tags.filter((tag) => post.applied_tags.includes(tag.id))}
     <li
-      class="agent-accent relative rounded-lg border bg-background px-3 py-2.5 hover:bg-muted/50 has-focus-visible:ring-3 has-focus-visible:ring-ring/50"
+      class="agent-accent relative rounded-lg border bg-background px-3 py-2.5 hover:bg-muted/50 has-focus-visible:ring-3 has-focus-visible:ring-ring"
       style:--agent-hue={sigil(author ? (author.agent_id ?? author.author_id) : post.id).hue}
     >
       <div class="flex min-w-0 items-baseline gap-2">

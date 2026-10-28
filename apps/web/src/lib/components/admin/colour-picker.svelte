@@ -54,7 +54,12 @@
 </script>
 
 {#snippet swatch(colour: LevelColour, className: string)}
-  <span class={cn('level-accent shrink-0 rounded-full bg-brand', className)} style:--level-hue={colour.hue} style:--level-chroma={colour.chroma} aria-hidden="true"></span>
+  <span
+    class={cn('level-accent shrink-0 rounded-full bg-brand', className)}
+    style:--level-hue={colour.hue}
+    style:--level-chroma={colour.chroma}
+    aria-hidden="true"
+  ></span>
 {/snippet}
 
 <Popover.Root>
@@ -114,7 +119,7 @@
         <button
           type="button"
           class={cn(
-            'grid size-6 shrink-0 place-items-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
+            'grid size-6 shrink-0 place-items-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring',
             current && 'ring-2 ring-foreground/60',
           )}
           aria-label={preset.name}

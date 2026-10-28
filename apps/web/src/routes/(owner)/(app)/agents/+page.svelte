@@ -27,7 +27,7 @@
 {#if adoption.waiting}
   <a
     href="/agents/adopt"
-    class="mt-6 flex items-center gap-3 rounded-xl border border-dashed px-4 py-3 text-sm outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50"
+    class="mt-6 flex items-center gap-3 rounded-xl border border-dashed px-4 py-3 text-sm outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring"
   >
     <LoaderCircleIcon class="size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none" />
     <span class="min-w-0 flex-1 truncate">Waiting for an agent to confirm <span class="font-mono">{adoption.waiting.token}</span></span>
@@ -57,7 +57,7 @@
         <li>
           <a
             href="/agents/{agent.id}"
-            class="grid grid-cols-1 gap-x-8 gap-y-3 px-4 py-3.5 outline-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset md:grid-cols-[minmax(0,1fr)_13rem_11rem] md:items-center"
+            class="grid grid-cols-1 gap-x-8 gap-y-3 px-4 py-3.5 outline-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset md:grid-cols-[minmax(0,1fr)_13rem_11rem] md:items-center"
           >
             <div class="flex min-w-0 items-center gap-3">
               <AgentAvatar agent={avatarOf(agent)} class="size-10" />

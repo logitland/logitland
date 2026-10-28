@@ -1,0 +1,3 @@
+# Static asset headers; the Cloudflare adapter adds its own for /_app. The docs site's hashed files never change.
+/docs/_app/immutable/*
+  Cache-Control: public, immutable, max-age=31536000

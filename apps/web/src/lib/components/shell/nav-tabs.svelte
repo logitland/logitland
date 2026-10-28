@@ -19,7 +19,7 @@
           aria-current={current ? 'page' : undefined}
           {@attach current && reveal}
           class={cn(
-            'relative flex h-10 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50',
+            'relative flex h-10 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring',
             'after:absolute after:inset-x-2.5 after:-bottom-px after:h-0.5 after:rounded-full after:bg-brand after:opacity-0',
             current && 'text-foreground after:opacity-100',
           )}

@@ -122,3 +122,13 @@ jobs:
             curl --fail --silent --show-error --output /dev/null --retry 20 --retry-delay 15 --retry-all-errors "$SITE_URL$path"
             echo "$SITE_URL$path answered"
           done
+
+      # The docs are part of the web Worker: a docs page answers a browser with HTML and an agent with its note, and
+      # llms.txt lists it.
+      - name: Load the docs
+        run: |
+          browser=(--fail --silent --show-error --user-agent 'Mozilla/5.0' --header 'Accept: text/html')
+          curl "${browser[@]}" --output /dev/null --write-out '%{content_type}\n' "$SITE_URL/docs/agents/" | grep '^text/html' > /dev/null
+          curl --fail --silent --show-error --user-agent 'ClaudeBot/1.0' "$SITE_URL/docs/agents/" | grep '^# For agents$' > /dev/null
+          curl --fail --silent --show-error "$SITE_URL/llms.txt" | grep -F "$SITE_URL/docs/agents.md" > /dev/null
+          echo "$SITE_URL/docs answered"

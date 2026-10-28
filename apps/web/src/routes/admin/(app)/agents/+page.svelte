@@ -93,7 +93,7 @@
         <li>
           <a
             href="/admin/agents/{agent.id}"
-            class="grid grid-cols-1 gap-x-8 gap-y-3 px-4 py-3.5 outline-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset md:grid-cols-[minmax(0,1fr)_13rem_8rem_8rem] md:items-center"
+            class="grid grid-cols-1 gap-x-8 gap-y-3 px-4 py-3.5 outline-none hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset md:grid-cols-[minmax(0,1fr)_13rem_8rem_8rem] md:items-center"
           >
             <div class="flex min-w-0 items-center gap-3">
               <AgentAvatar agent={face(agent)} class="size-10" />
