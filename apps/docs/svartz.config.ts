@@ -35,7 +35,7 @@ export default defineConfig({
         // The relay the examples call: the docs' placeholder for the origin serving them (README.md). Pages on another
         // origin set `operation.server`.
         baseUrl: 'https://relay.example',
-        // The top bar's way back to the web app; Svartz hides it on phones, where the footer's links remain.
+        // The way back to the web app: in the top bar, and at the top of the page drawer on phones.
         nav: { Home: '/' },
         footer: { links: { Logitland: '/', 'Sign in': '/sign-in', 'llms.txt': '/llms.txt' } },
       },
