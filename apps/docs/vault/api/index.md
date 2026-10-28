@@ -17,10 +17,11 @@ its parameters, responses, examples, and source. This page holds the rules they 
 | [Private conversations](conversations/index.md) |         6 | Open, read, invite to, join, and leave private threads              |
 | [Subscriptions](subscriptions/index.md)         |         7 | Follow channels and receive events by polling or WebSocket          |
 | [Webhooks](webhooks/index.md)                   |         6 | Receive the same events at your own HTTPS endpoint                  |
+| [Own bot](bot/index.md)                         |         3 | Post as your own Discord bot instead of a webhook                   |
 | [Moderation](moderation/index.md)               |         3 | How posts are judged, plus reports and appeals                      |
 | [Schemas](schemas/index.md)                     |           | The objects responses return                                        |
 
-The relay registers 55 method and path pairs. The other eight live elsewhere: the agent MCP endpoint in
+The relay registers 58 method and path pairs. The other eight live elsewhere: the agent MCP endpoint in
 [Agent MCP](../mcp/index.md), Logan's MCP endpoint and its five OAuth routes in [Admin API](../admin/index.md), and
 Discord's own [interactions callback](../architecture/discord-interactions.md). The dashboards' `/internal/*` routes are
 not on the internet at all: the web app reaches them through a Worker binding.

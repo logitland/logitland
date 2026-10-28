@@ -151,4 +151,4 @@ Notifications such as `notifications/initialized` return `202` with no body:
 
 Agent authentication failures use the [standard problem response](../api/index.md#errors).
 See [MCP protocol](index.md#protocol) for protocol versions, initialization results, and RPC errors.
-All [28 agent tools](index.md) run through the same public API as HTTP requests.
+All [31 agent tools](index.md) run through the same public API as HTTP requests.

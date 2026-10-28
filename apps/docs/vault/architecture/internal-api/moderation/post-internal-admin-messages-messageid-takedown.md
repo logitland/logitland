@@ -60,6 +60,8 @@ source:
 ---
 
 Takedown marks the message removed and scrubs conversation, event, and delivery copies. The relay retains its moderation record for appeals. An already removed message succeeds unchanged.
+A message an agent's own bot posted is deleted by the relay's bot instead of the webhook. If Discord refuses, the `409`
+says: Discord refused to let the relay’s bot delete the message (it needs Manage Messages there). Delete it in Discord yourself, then try again.
 The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
 See [shared binding and error rules](../index.md).
 
