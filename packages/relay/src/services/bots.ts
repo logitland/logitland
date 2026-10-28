@@ -1,4 +1,4 @@
-import type { AgentBot, AgentBotStatus, ChannelType } from '@logitland/contracts';
+import { newId, type AgentBot, type AgentBotStatus, type ChannelType } from '@logitland/contracts';
 import { DiscordError, RateLimitedError, type CurrentApplication, type DiscordRest, type DiscordUser, type PartialGuild } from '@logitland/discord';
 import { sigilPng } from '@logitland/sigil';
 import { iso, type Relay } from '../context';
@@ -139,8 +139,18 @@ async function enforceDailySet(relay: Relay, agentId: string): Promise<void> {
     .first<{ at: string | null }>();
   if (!last?.at) return;
   const waitSeconds = Math.ceil((Date.parse(last.at) - relay.now().getTime()) / 1000) + SET_INTERVAL_SECONDS;
-  if (waitSeconds > 0) throw rateLimited('A bot can be given once a day. Tokens the relay refused don’t count. Try again later.', waitSeconds);
+  if (waitSeconds > 0) throw dailySetTaken(waitSeconds);
 }
+
+const dailySetTaken = (retryAfterSeconds: number) =>
+  rateLimited('A bot can be given once a day. Tokens the relay refused don’t count. Try again later.', retryAfterSeconds);
+
+/**
+ * SQL, with ?1 the agent and ?8 the cutoff (24 hours ago): enforceDailySet's rule, checked again in the write that accepts a
+ * bot, so two submissions that both passed the early check can't both be accepted.
+ */
+const DAILY_SET_OPEN = `(EXISTS (SELECT 1 FROM agent_bots WHERE agent_id = ?1 AND status = 'paused')
+  OR NOT EXISTS (SELECT 1 FROM audit_log WHERE target_type = 'agent' AND target_id = ?1 AND action = 'agent.bot_set' AND created_at > ?8))`;
 
 /**
  * Gives the relay an adopted agent's bot (#84), replacing any it had. The token must be a bot's, not the relay's own nor one
@@ -190,24 +200,28 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   const previous = await getBot(relay, agent.id);
   const now = iso(relay.now());
   const status: AgentBotStatus = guilds.some((g) => g.id === guildId) ? 'active' : 'waiting';
-  await relay.db.batch([
+  const sealed = await relay.secrets.seal(token, tokenAad(agent.id));
+  const cutoff = iso(new Date(relay.now().getTime() - SET_INTERVAL_SECONDS * 1000));
+  const diff = { bot_user_id: { from: previous?.bot_user_id ?? null, to: user.id }, status: { from: previous?.status ?? null, to: status } };
+  // The audit row is written only with the bot (its sealed token is this request's alone), and it is what the next day's check reads.
+  const [saved] = await relay.db.batch([
     relay.db
       .prepare(
-        `INSERT INTO agent_bots (agent_id, bot_user_id, application_id, username, token_ciphertext, status, checked_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agent_bots (agent_id, bot_user_id, application_id, username, token_ciphertext, status, checked_at, created_at, updated_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7 WHERE ${DAILY_SET_OPEN}
          ON CONFLICT (agent_id) DO UPDATE SET bot_user_id = excluded.bot_user_id, application_id = excluded.application_id, username = excluded.username,
            token_ciphertext = excluded.token_ciphertext, status = excluded.status, paused_reason = NULL, identity = NULL, checked_at = excluded.checked_at,
            created_at = excluded.created_at, updated_at = excluded.updated_at`,
       )
-      .bind(agent.id, user.id, app.id, user.username, await relay.secrets.seal(token, tokenAad(agent.id)), status, now, now, now),
-    auditStmt(relay, {
-      actor_type: actor.type,
-      actor_id: actor.id,
-      action: 'agent.bot_set',
-      target_type: 'agent',
-      target_id: agent.id,
-      diff: { bot_user_id: { from: previous?.bot_user_id ?? null, to: user.id }, status: { from: previous?.status ?? null, to: status } },
-    }),
+      .bind(agent.id, user.id, app.id, user.username, sealed, status, now, cutoff),
+    relay.db
+      .prepare(
+        `INSERT INTO audit_log (id, actor_type, actor_id, action, target_type, target_id, diff, created_at)
+         SELECT ?1, ?2, ?3, 'agent.bot_set', 'agent', ?4, ?5, ?6 WHERE EXISTS (SELECT 1 FROM agent_bots WHERE agent_id = ?4 AND token_ciphertext = ?7)`,
+      )
+      .bind(newId('audit'), actor.type, actor.id, agent.id, JSON.stringify(diff), now, sealed),
   ]);
+  if (!saved!.meta.changes) throw dailySetTaken(SET_INTERVAL_SECONDS);
   relay.log.info('bots.set', { agent_id: agent.id, status });
   // A bot this one replaces keeps none of the agent's roles or threads.
   if (previous && previous.bot_user_id !== user.id) await revokeGrants(relay, previous.bot_user_id);

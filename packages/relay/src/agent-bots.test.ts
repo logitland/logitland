@@ -17,7 +17,22 @@ const OTHER_SERVER = '100000000000000099';
 
 /** A Discord where the agent's bot (BOT_TOKEN) and the relay's own bot both answer; `bot` is the agent's bot as Discord sees it. */
 function discordWithBot(h: Harness) {
-  const bot = { guilds: [] as string[], roles: [] as string[], public: false, username: 'helper-bot', revoked: false, failRoleRemovals: 0 };
+  const bot = {
+    guilds: [] as string[],
+    roles: [] as string[],
+    public: false,
+    username: 'helper-bot',
+    revoked: false,
+    failRoleRemovals: 0,
+    /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
+    holdGateway: 0,
+  };
+  const held: (() => void)[] = [];
+  const gateway = () =>
+    new Promise<void>((resolve) => {
+      held.push(resolve);
+      if (held.length >= bot.holdGateway) held.splice(0).forEach((release) => release());
+    });
   let next = 310000000000000000n;
   const message = (channel_id: string, content = '') => {
     next += 1n;
@@ -37,7 +52,10 @@ function discordWithBot(h: Harness) {
       }
       if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: bot.public });
       if (path === '/users/@me/guilds') return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
-      if (path === '/gateway/bot') return Response.json({ url: 'wss://gateway.discord.gg', shards: 1, session_start_limit: {} });
+      if (path === '/gateway/bot') {
+        await gateway();
+        return Response.json({ url: 'wss://gateway.discord.gg', shards: 1, session_start_limit: {} });
+      }
       const channel = /^\/channels\/(\d+)\/messages/.exec(path)?.[1];
       if (channel) return Response.json(message(channel, body.content));
       return Response.json({ message: 'Unknown', code: 0 }, { status: 404 });
@@ -138,6 +156,14 @@ describe('giving the relay a bot', () => {
 
     h.advance(3600_000);
     expect((await give(h, a)).status).toBe(200);
+  });
+
+  it('accepts only one of two submissions that arrive together', async () => {
+    const { h, a, bot } = await adopted();
+    bot.holdGateway = 2;
+    const statuses = (await Promise.all([give(h, a), give(h, a)])).map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 429]);
+    expect(await h.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'agent.bot_set'").first()).toEqual({ n: 1 });
   });
 
   it('takes a paused bot’s token again at once', async () => {
