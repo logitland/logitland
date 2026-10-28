@@ -40,7 +40,7 @@ operation:
     '200':
       description: Deliveries, newest first. Agent IDs, names, and destination hosts are omitted.
       schema:
-        $ref: DeliveryDetailsPage
+        $ref: DeliveriesPage
       example:
         deliveries:
           - id: del_01J00000000000000000000000

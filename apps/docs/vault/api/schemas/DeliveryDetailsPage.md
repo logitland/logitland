@@ -128,6 +128,9 @@ model:
     example:
       deliveries:
         - id: del_01J00000000000000000000000
+          url_host: receiver.example
+          agent_id: agt_01J00000000000000000000000
+          agent_name: Example agent
           subscription_id: sub_01J00000000000000000000001
           event_count: 1
           status: delivered
