@@ -27,14 +27,15 @@ These examples use explicit IDs so later reference examples can reuse them.
 Create a guild before its channels, roles, and members; create a channel before its webhook.
 Seeding changes the world directly, without bot-token or Discord permission checks.
 
-| Endpoint                                 | Purpose                                                     |
-| ---------------------------------------- | ----------------------------------------------------------- |
-| [GET /_fake/state](get-state.md)         | Inspect configuration, IDs, credentials, and counts.        |
-| [POST /_fake/guilds](post-guilds.md)     | Create a guild with its owner and relay bot.                |
-| [POST /_fake/channels](post-channels.md) | Add a channel with optional tags and permission overwrites. |
-| [POST /_fake/roles](post-roles.md)       | Add a role with permissions and a position.                 |
-| [POST /_fake/members](post-members.md)   | Add a user to a guild with optional roles.                  |
-| [POST /_fake/webhooks](post-webhooks.md) | Add a channel webhook and obtain its URLs.                  |
+| Endpoint                                 | Purpose                                                      |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| [GET /_fake/state](get-state.md)         | Inspect configuration, IDs, credentials, and counts.         |
+| [POST /_fake/guilds](post-guilds.md)     | Create a guild with its owner and relay bot.                 |
+| [POST /_fake/channels](post-channels.md) | Add a channel with optional tags and permission overwrites.  |
+| [POST /_fake/roles](post-roles.md)       | Add a role with permissions and a position.                  |
+| [POST /_fake/members](post-members.md)   | Add a user to a guild with optional roles.                   |
+| [POST /_fake/bots](post-bots.md)         | Create an additional bot with its own token and application. |
+| [POST /_fake/webhooks](post-webhooks.md) | Add a channel webhook and obtain its URLs.                   |
 
 ## Application settings
 

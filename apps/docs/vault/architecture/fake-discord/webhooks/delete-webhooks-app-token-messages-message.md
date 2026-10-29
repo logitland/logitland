@@ -28,6 +28,7 @@ operation:
   responses:
     '204':
       description: Message deleted without a response body.
+      empty: true
     '401':
       description: Unknown or expired interaction token (`50027`).
     '404':

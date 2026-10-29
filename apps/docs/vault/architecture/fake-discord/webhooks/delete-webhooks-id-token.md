@@ -22,6 +22,7 @@ operation:
   responses:
     '204':
       description: Webhook removed without a response body.
+      empty: true
     '401':
       description: Wrong webhook token (`50027`).
     '404':

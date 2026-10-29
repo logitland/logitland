@@ -39,17 +39,17 @@ One control handler accepts both `DELETE /_fake/failures` and `DELETE /_fake/fai
 OAuth adds three handlers, including a Bearer-token variant of REST's `GET /users/@me`.
 The Gateway accepts WebSocket upgrades at `/gateway` and `/`.
 
-| Reference                                           | Coverage                                                                                                         |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [Bot REST](bot-rest/index.md)                       | Discovery, bot identity, application, guilds, roles, and commands. 13 routes in the source.                      |
-| [Messages and threads](messages-threads/index.md)   | Channels, bot messages, webhook creation, and thread management. 11 routes.                                      |
-| [Webhook REST](webhooks/index.md)                   | Six routes, including interaction follow-up branches.                                                            |
-| [Control seeding](control-seeding/index.md)         | State, guilds, channels, roles, members, bots, webhooks, and application settings. Eight handlers in the source. |
-| [Control actions](control-actions/index.md)         | People, messages, threads, member roles, and signed interactions. 11 handlers.                                   |
-| [Control diagnostics](control-diagnostics/index.md) | Logs, failure injection, clearing, and rate limits. Eight request forms.                                         |
-| [Control Gateway](control-gateway/index.md)         | Gateway inspection and fault controls. 11 handlers.                                                              |
-| [OAuth](oauth/index.md)                             | Local user selection, code exchange, and user identity.                                                          |
-| [Gateway WebSocket](gateway/index.md)               | Upgrade paths, client opcodes, events, authentication, and close codes.                                          |
+| Reference                                           | Coverage                                                                                                                        |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| [Bot REST](bot-rest/index.md)                       | Discovery, bot identity/profile, guild listing, application, guild reads, roles, and commands. 13 routes and 13 endpoint pages. |
+| [Messages and threads](messages-threads/index.md)   | Channels, bot messages, webhook creation, and thread management. 11 routes and 11 endpoint pages.                               |
+| [Webhook REST](webhooks/index.md)                   | Six routes, including interaction follow-up branches.                                                                           |
+| [Control seeding](control-seeding/index.md)         | State, guilds, channels, roles, members, bots, webhooks, and application settings. Eight handlers and eight endpoint pages.     |
+| [Control actions](control-actions/index.md)         | People, messages, threads, member roles, and signed interactions. 11 handlers.                                                  |
+| [Control diagnostics](control-diagnostics/index.md) | Logs, failure injection, clearing, and rate limits. Eight request forms.                                                        |
+| [Control Gateway](control-gateway/index.md)         | Gateway inspection and fault controls. 11 handlers.                                                                             |
+| [OAuth](oauth/index.md)                             | Local user selection, code exchange, and user identity.                                                                         |
+| [Gateway WebSocket](gateway/index.md)               | Upgrade paths, client opcodes, events, authentication, and close codes.                                                         |
 
 ## Example conventions
 
@@ -69,7 +69,9 @@ curl http://127.0.0.1:8790/_fake/guilds \
 ```
 
 Use [control seeding](control-seeding/index.md) to create the example guild, channel, member, role, and webhook.
-Messages and threads receive generated IDs. Substitute those IDs in later requests.
+Messages normally receive generated IDs; direct TypeScript fixtures can supply explicit message IDs.
+A thread started from a message reuses that message's ID; standalone threads and forum posts receive generated IDs.
+Substitute returned IDs in later requests.
 
 ## REST authentication and responses
 

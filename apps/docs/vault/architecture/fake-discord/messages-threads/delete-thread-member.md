@@ -27,6 +27,7 @@ operation:
   responses:
     '204':
       description: No response body, including when the user was not a member.
+      empty: true
     '400':
       description: The channel is not a thread or the thread is archived.
     '401':

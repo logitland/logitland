@@ -78,6 +78,7 @@ operation:
       description: The created Message when `wait=true`.
     '204':
       description: Message created without a response body when `wait` is not `true`.
+      empty: true
     '400':
       description: Empty message (`50006`), invalid fields/thread ID (`50035`), forum/thread rule violation (`220001`, `220002`, `220003`), or unknown forum tag (`10087`).
     '401':

@@ -35,6 +35,6 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L138
 ---
 
-`/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. `--seed dev` generates different IDs.
+`/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. `--seed dev` uses different, fixed IDs.
 
 This route does not check the bot's channel permissions. [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.

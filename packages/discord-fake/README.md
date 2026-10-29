@@ -66,7 +66,7 @@ The following inventory uses route names from [the implementation](src/rest.ts).
 
 **REST behavior and permissions.**
 
-- Webhook execution returns 204 by default, or the message with `wait=true`. It supports username/avatar overrides,
+- Webhook execution returns 204 by default, or the message with `wait=true`. It supports username overrides (`avatar_url` has no effect),
   allowed mentions, embeds and components (with `with_components=true`). Forum/media posts require `thread_name`
   or `thread_id`, not both. Sending into an archived thread restores it. Webhook message edits/deletes require the
   owning webhook and, for thread messages, `thread_id`.

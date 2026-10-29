@@ -21,12 +21,14 @@ See [shared REST rules](../index.md#rest-authentication-and-responses) for error
 
 ## Discovery and identity
 
-| Route                                             | Purpose                                          |
-| ------------------------------------------------- | ------------------------------------------------ |
-| [GET `/gateway`](get-gateway.md)                  | Discover the Gateway URL without authentication. |
-| [GET `/gateway/bot`](get-gateway-bot.md)          | Read the Gateway URL and shared session limits.  |
-| [GET `/users/@me`](get-users-me.md)               | Read the authenticated bot's profile.            |
-| [GET `/applications/@me`](get-applications-me.md) | Read the authenticated bot's application.        |
+| Route                                             | Purpose                                            |
+| ------------------------------------------------- | -------------------------------------------------- |
+| [GET `/gateway`](get-gateway.md)                  | Discover the Gateway URL without authentication.   |
+| [GET `/gateway/bot`](get-gateway-bot.md)          | Read the Gateway URL and shared session limits.    |
+| [GET `/users/@me`](get-users-me.md)               | Read the authenticated bot's profile.              |
+| [PATCH `/users/@me`](patch-users-me.md)           | Change the authenticated bot's username or avatar. |
+| [GET `/users/@me/guilds`](get-users-me-guilds.md) | List guilds containing the authenticated bot.      |
+| [GET `/applications/@me`](get-applications-me.md) | Read the authenticated bot's application.          |
 
 ## Guilds and member roles
 

@@ -32,6 +32,7 @@ operation:
   responses:
     '204':
       description: Message deleted without a response body.
+      empty: true
     '400':
       description: Malformed thread ID (`50035`).
     '404':

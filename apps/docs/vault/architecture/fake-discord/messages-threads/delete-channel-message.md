@@ -27,6 +27,7 @@ operation:
   responses:
     '204':
       description: Message deleted, with no response body. Emits MESSAGE_DELETE on the Gateway.
+      empty: true
     '401':
       description: Missing or unknown bot token (`0`).
     '403':

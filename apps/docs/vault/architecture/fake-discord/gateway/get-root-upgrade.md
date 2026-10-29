@@ -10,7 +10,7 @@ operation:
     - { name: v, in: query, required: true, description: API version 9 or 10., example: 10 }
     - { name: encoding, in: query, description: Only json is supported; defaults to json., example: json }
   responses:
-    '101': { description: Switching Protocols; valid Gateway query parameters receive HELLO, otherwise a close frame. }
+    '101': { description: 'Switching Protocols; valid Gateway query parameters receive HELLO, otherwise a close frame.' }
     '400': { description: Invalid WebSocket handshake., empty: true }
   messages:
     - direction: receive

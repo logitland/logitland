@@ -27,6 +27,7 @@ operation:
   responses:
     '204':
       description: No response body; the thread's `member_count` updates. Adding an existing member succeeds.
+      empty: true
     '400':
       description: The channel is not a thread or the thread is archived.
     '401':
