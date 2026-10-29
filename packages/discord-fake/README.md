@@ -59,8 +59,8 @@ The following inventory uses route names from [the implementation](src/rest.ts).
 | `guild.channels` / `guild.roles` / `guild.member.get` | `GET /guilds/:guild/channels`, `/guilds/:guild/roles`, `/guilds/:guild/members/:user` |
 | `guild.member.role.add` / `.remove`                   | `PUT` / `DELETE /guilds/:guild/members/:user/roles/:role`                             |
 | `users.me` / `users.me.edit`                          | `GET` / `PATCH /users/@me`                                                            |
-| `users.me.channels` | `POST /users/@me/channels` |
-| `emojis.list` / `.create` | `GET` / `POST /applications/:app/emojis` |
+| `users.me.channels`                                   | `POST /users/@me/channels`                                                            |
+| `emojis.list` / `.create`                             | `GET` / `POST /applications/:app/emojis`                                              |
 | `users.me.guilds`                                     | `GET /users/@me/guilds`                                                               |
 | `applications.me`                                     | `GET /applications/@me`                                                               |
 | `commands.list` / `.put`                              | `GET` / `PUT /applications/:app/guilds/:guild/commands`                               |
@@ -81,11 +81,13 @@ The following inventory uses route names from [the implementation](src/rest.ts).
 - With `flags: 32768` (Components V2), bot sends validate a layout tree instead of only action rows: containers, sections,
   text displays, thumbnails, separators, rows, and type-only media/file entries. The limit is 40 components including nested
   entries. Non-null `content`, `embeds`, `poll` and `sticker_ids` are refused beside this flag; the stored message keeps the flag.
-- `POST /users/@me/channels` opens the relay bot's DM with a known user (50033 otherwise), reusing the channel for that user.
+- `POST /users/@me/channels` opens the relay bot's DM with a known user other than itself (50033 otherwise), reusing the channel for that user.
   DMs live in `world.dms`, their messages in `world.messages`. Only the relay bot can send there, with content or components;
   `world.closedDms` causes 403/50007 on send. DM messages emit no Gateway event.
 - Application emoji live in `world.emojis`; listing returns `{ items }`. Creation validates unique names of 2–32 ASCII letters,
   digits or underscores and PNG/JPEG/GIF/WebP/AVIF data URI prefixes, without decoding the image or checking its size.
+- Webhook execution also selects V2 validation with `flags: 32768`, but does not store the flag or reject legacy fields beside it.
+  Components still require `with_components=true` to be stored.
 - Starting a message thread needs Create Public Threads; its ID equals the starter message ID. Opening a private
   thread needs Create Private Threads. Forum/media post creation needs Send Messages and returns the thread with
   its starter message. Thread-member changes need Send Messages in Threads and fail with 50083 when archived.

@@ -37,3 +37,4 @@ Always clears the request log, Gateway frame log, failure rules, and rate-limit 
 
 Setting `messages` to `true` also clears stored messages and threads. This is not a full world reset: request numbers, OAuth tokens,
 interaction records, guilds, and Gateway sessions remain.
+DM channels, closed-DM settings, and application emoji also remain. DM messages are cleared and each DM's `last_message_id` is reset to null.

@@ -44,6 +44,9 @@ operation:
           maxItems: 10
         components:
           type: array
+        flags:
+          type: number
+          description: Bit 32768 selects Components V2 validation, but webhook execution does not store this flag.
           maxItems: 5
         poll:
           type: object
@@ -102,6 +105,9 @@ Without `with_components=true`, execution validates components but drops them be
 ## Execute body
 
 Execution shares [message validation](../messages-threads/post-channel-messages.md#message-body) for `content`, `embeds`, `components`, `poll`, `allowed_mentions`, and `tts`. The same empty-body check accepts a `sticker_ids` array, but stores no stickers. Unlike bot message creation, webhook execution ignores `message_reference`. The example suppresses mention parsing with `allowed_mentions: { parse: [] }`.
+
+`flags: 32768` selects the shared Components V2 layout validation. Unlike bot sends, webhook execution neither rejects
+legacy fields beside that flag nor stores the flag. It still stores components only with `with_components=true`.
 
 ### Author name
 

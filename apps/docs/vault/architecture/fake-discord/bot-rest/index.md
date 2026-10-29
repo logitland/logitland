@@ -51,8 +51,8 @@ See [shared REST rules](../index.md#rest-authentication-and-responses) for error
 
 These routes accept only the relay bot's token, not tokens created with `POST /_fake/bots`.
 
-| Route | Purpose |
-| --- | --- |
-| [POST `/users/@me/channels`](post-users-me-channels.md) | Open a DM with a known user. |
-| [GET `/applications/:app/emojis`](get-application-emojis.md) | List application emoji. |
+| Route                                                          | Purpose                      |
+| -------------------------------------------------------------- | ---------------------------- |
+| [POST `/users/@me/channels`](post-users-me-channels.md)        | Open a DM with a known user. |
+| [GET `/applications/:app/emojis`](get-application-emojis.md)   | List application emoji.      |
 | [POST `/applications/:app/emojis`](post-application-emojis.md) | Create an application emoji. |

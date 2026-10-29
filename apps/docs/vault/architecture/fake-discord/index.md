@@ -39,17 +39,17 @@ One control handler accepts both `DELETE /_fake/failures` and `DELETE /_fake/fai
 OAuth adds three handlers, including a Bearer-token variant of REST's `GET /users/@me`.
 The Gateway accepts WebSocket upgrades at `/gateway` and `/`.
 
-| Reference                                           | Coverage                                                                                                                        |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Reference                                           | Coverage                                                                                                                                                |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Bot REST](bot-rest/index.md)                       | Discovery, bot identity/profile, guild listing, application, guild reads, roles, commands, DMs, and application emoji. 16 routes and 16 endpoint pages. |
-| [Messages and threads](messages-threads/index.md)   | Channels, bot messages, webhook creation, and thread management. 11 routes and 11 endpoint pages.                               |
-| [Webhook REST](webhooks/index.md)                   | Six routes, including interaction follow-up branches.                                                                           |
-| [Control seeding](control-seeding/index.md)         | State, guilds, channels, roles, members, bots, webhooks, and application settings. Eight handlers and eight endpoint pages.     |
-| [Control actions](control-actions/index.md)         | People, messages, threads, member roles, and signed interactions. 11 handlers.                                                  |
-| [Control diagnostics](control-diagnostics/index.md) | Logs, failure injection, clearing, and rate limits. Eight request forms.                                                        |
-| [Control Gateway](control-gateway/index.md)         | Gateway inspection and fault controls. 11 handlers.                                                                             |
-| [OAuth](oauth/index.md)                             | Local user selection, code exchange, and user identity.                                                                         |
-| [Gateway WebSocket](gateway/index.md)               | Upgrade paths, client opcodes, events, authentication, and close codes.                                                         |
+| [Messages and threads](messages-threads/index.md)   | Channels, bot messages, webhook creation, and thread management. 11 routes and 11 endpoint pages.                                                       |
+| [Webhook REST](webhooks/index.md)                   | Six routes, including interaction follow-up branches.                                                                                                   |
+| [Control seeding](control-seeding/index.md)         | State, guilds, channels, roles, members, bots, webhooks, and application settings. Eight handlers and eight endpoint pages.                             |
+| [Control actions](control-actions/index.md)         | People, messages, threads, member roles, and signed interactions. 11 handlers.                                                                          |
+| [Control diagnostics](control-diagnostics/index.md) | Logs, failure injection, clearing, and rate limits. Eight request forms.                                                                                |
+| [Control Gateway](control-gateway/index.md)         | Gateway inspection and fault controls. 11 handlers.                                                                                                     |
+| [OAuth](oauth/index.md)                             | Local user selection, code exchange, and user identity.                                                                                                 |
+| [Gateway WebSocket](gateway/index.md)               | Upgrade paths, client opcodes, events, authentication, and close codes.                                                                                 |
 
 ## Example conventions
 
@@ -114,14 +114,14 @@ Validation errors add a nested `errors` object:
 }
 ```
 
-| Status | Codes used by the fake                                                                                                    |
-| ------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `400`  | `50035` invalid fields; `50109` invalid JSON; `50006` empty message; `50024` wrong channel type; `50083` archived thread. |
-| `400`  | `10087` unknown tag; `160004` existing message thread; `30007` webhook limit; `40058` direct forum message; `50033` invalid DM recipient.               |
-| `400`  | `220001` missing forum thread; `220002` conflicting forum thread inputs; `220003` forum-only inputs elsewhere.            |
-| `401`  | `0` invalid bot credentials; `50027` invalid webhook or interaction token.                                                |
-| `403`  | `50001` missing access; `50013` missing permissions; `50005` editing another author's message; `50007` closed DMs.                            |
-| `404`  | `10003` channel; `10004` guild; `10007` member; `10008` message; `10011` role; `10015` webhook.                           |
+| Status | Codes used by the fake                                                                                                                    |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `400`  | `50035` invalid fields; `50109` invalid JSON; `50006` empty message; `50024` wrong channel type; `50083` archived thread.                 |
+| `400`  | `10087` unknown tag; `160004` existing message thread; `30007` webhook limit; `40058` direct forum message; `50033` invalid DM recipient. |
+| `400`  | `220001` missing forum thread; `220002` conflicting forum thread inputs; `220003` forum-only inputs elsewhere.                            |
+| `401`  | `0` invalid bot credentials; `50027` invalid webhook or interaction token.                                                                |
+| `403`  | `50001` missing access; `50013` missing permissions; `50005` editing another author's message; `50007` closed DMs.                        |
+| `404`  | `10003` channel; `10004` guild; `10007` member; `10008` message; `10011` role; `10015` webhook.                                           |
 
 An interaction follow-up attempted before acknowledgement returns `404`, code `10015` (Unknown Webhook).
 

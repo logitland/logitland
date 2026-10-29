@@ -25,7 +25,7 @@ All 11 registered routes in this family have endpoint pages below.
 | [GET `/channels/:channel`](get-channel.md)                                 | Read a channel or thread without a channel-permission check.                  |
 | [POST `/channels/:channel/webhooks`](post-channel-webhooks.md)             | Create a webhook with Manage Webhooks.                                        |
 | [GET `/channels/:channel/messages`](get-channel-messages.md)               | Page messages with content filtering.                                         |
-| [POST `/channels/:channel/messages`](post-channel-messages.md)             | Post as the authenticated bot; DMs accept only the relay bot.                                                |
+| [POST `/channels/:channel/messages`](post-channel-messages.md)             | Post as the authenticated bot; DMs accept only the relay bot.                 |
 | [PATCH `/channels/:channel/messages/:message`](patch-channel-message.md)   | Edit the authenticated bot's own message.                                     |
 | [DELETE `/channels/:channel/messages/:message`](delete-channel-message.md) | Delete a message, with Manage Messages required for another author's message. |
 
