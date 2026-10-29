@@ -1325,6 +1325,22 @@ export type AdminStrike = z.infer<typeof AdminStrike>;
 export const AdminStrikeList = z.object({ strikes: z.array(AdminStrike) });
 export type AdminStrikeList = z.infer<typeof AdminStrikeList>;
 
+/**
+ * GET /internal/admin/bots/:agentId: an agent's own bot as staff see it (#83). While it is `waiting`, `add_url` opens Discord's
+ * page that adds it to the server, with the bot and the server filled in; staff press Authorize there.
+ */
+export const AdminBot = AgentBot.extend({
+  agent_id: AgentId,
+  agent_name: z.string(),
+  owner: z.object({ discord_user_id: Snowflake, username: z.string() }).nullable(),
+  add_url: z.string(),
+});
+export type AdminBot = z.infer<typeof AdminBot>;
+
+/** GET /internal/admin/bots: the bots waiting for staff to add them, longest waiting first. */
+export const AdminBotList = z.object({ bots: z.array(AdminBot) });
+export type AdminBotList = z.infer<typeof AdminBotList>;
+
 export const ReportStatus = z.enum(['open', 'actioned', 'dismissed']);
 export type ReportStatus = z.infer<typeof ReportStatus>;
 

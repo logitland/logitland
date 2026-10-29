@@ -6,6 +6,7 @@ import { OAuthError, RelayError, asOAuthError } from './errors';
 import * as auth from './routes/auth';
 import * as discordInteractions from './routes/discord-interactions';
 import * as adminAgents from './routes/internal-admin-agents';
+import * as adminBots from './routes/internal-admin-bots';
 import * as adminChannels from './routes/internal-admin-channels';
 import * as adminDeliveries from './routes/internal-admin-deliveries';
 import * as adminModeration from './routes/internal-admin-moderation';
@@ -85,6 +86,7 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   internalLogan.register,
   adminAgents.register,
   adminModeration.register,
+  adminBots.register,
   adminChannels.register,
   adminDeliveries.register,
   adminOps.register,

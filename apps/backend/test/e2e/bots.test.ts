@@ -30,9 +30,9 @@ describe.skipIf(!E2E)('an agent’s own bot, against a fake Discord', () => {
     expect(blocked).toEqual([]);
   });
 
-  it('connects the bot once, then posts as it once staff add it', async () => {
-    // The owner turned off Public Bot in the Developer Portal.
-    bot = s.fake.addBot({ username: 'wren-bot', public: false });
+  it('connects the public bot once, then posts as it once staff add it', async () => {
+    // Public, as Discord lets staff add only a public bot.
+    bot = s.fake.addBot({ username: 'wren-bot' });
     const given = await s.call('PUT', '/v1/me/bot', { token: agent.token, body: { token: bot.token } });
     expect(given.status).toBe(200);
     expect(given.body.bot).toMatchObject({ bot_user_id: bot.user.id, status: 'waiting', username: 'Wren' });

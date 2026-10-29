@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { iso, type Relay, type Stmt } from '../context';
 import { hmac, sha256 } from '../crypto';
 import { auditStmt } from './audit';
+import { queueDeleted } from './bot-queue';
 import { enforceRelayOnly, offRelayEdits, type Offense } from './bot-strikes';
 import { anyAgentAccess } from './channels';
 import { EVERY_MESSAGE_SINCE, SHOWN_PUBLICLY_SINCE } from './consent';
@@ -706,7 +707,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
     }
   }
   // The text goes in the same transaction as everything else, after the creates and edits it may apply to.
-  stmts.push(...scrubStatements(relay, removed, 'discord'));
+  stmts.push(...scrubStatements(relay, removed, 'discord'), ...queueDeleted(relay, removed));
   for (const [channelId, messageId] of cursors) stmts.push(cursorStmt(relay, channelId, messageId));
   const r = await commitPlan(relay, stmts, planned);
   // Every message of theirs on an open home page shows them the old way, wherever the new one was written: re-read it.
