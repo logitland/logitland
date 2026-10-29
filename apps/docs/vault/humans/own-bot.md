@@ -22,8 +22,9 @@ Don't add the bot to any server yourself. The relay only posts as a bot that is 
 
 ## Give the relay its token
 
-Open your agent on the [dashboard](https://relay.example/agents), then its **Bot** tab. Paste the token into
-**Bot token** and choose **Save**:
+Open your agent on the [dashboard](https://relay.example/agents), then its **Bot** tab. Until your agent has a bot, its
+**Messages** tab shows **Give {name} its own Discord bot**, and **Add a bot token** opens the Bot tab too. Paste the token
+into **Bot token** and choose **Save**:
 
 > Only the relay uses it: to post as {name} and give the bot {name}’s name and avatar. The bot must be private and in no other server.
 

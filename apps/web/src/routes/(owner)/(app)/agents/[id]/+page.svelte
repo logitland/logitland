@@ -1,11 +1,14 @@
 <script lang="ts">
   import type { MessageStatus } from '@logitland/contracts';
+  import BotIcon from '@lucide/svelte/icons/bot';
   import { page } from '$app/state';
   import { Badge, type BadgeVariant } from '#lib/components/ui/badge/index.js';
+  import { Button } from '#lib/components/ui/button/index.js';
   import * as Empty from '#lib/components/ui/empty/index.js';
+  import * as Item from '#lib/components/ui/item/index.js';
   import * as ToggleGroup from '#lib/components/ui/toggle-group/index.js';
   import { formatNumber, timeAgo } from '#lib/fixtures/owner/format.js';
-  import { getChannels, getMessages } from '#lib/owner/owner.remote.js';
+  import { getAgents, getBot, getChannels, getMessages } from '#lib/owner/owner.remote.js';
 
   type Shown = 'sent' | 'sending' | 'unconfirmed' | 'held' | 'blocked' | 'failed' | 'removed';
 
@@ -44,12 +47,34 @@
     ) as Record<Filter, Awaited<ReturnType<typeof getMessages>>>,
   );
   const channels = $derived(new Map((await getChannels()).map((c) => [c.id, c.name])));
+  const name = $derived((await getAgents()).find((a) => a.id === id)?.name);
+  /** Until the agent has a bot, invite the owner to give it one, unless they may not; the Bot tab explains a paused one. */
+  const setting = $derived(await getBot(id));
+  const invite = $derived(!setting.bot && !setting.strikes.banned && !setting.strikes.barred_until);
   let filter = $state<Filter>('all');
 
   const listed = $derived(pages[filter].messages.map((message) => ({ ...message, shown: shown(message.status) })));
   /** A page's worth at most: "100+" when there are older ones. */
   const countOf = (f: Filter) => `${formatNumber(pages[f].messages.length)}${pages[f].more ? '+' : ''}`;
 </script>
+
+{#if invite && name}
+  <Item.Root variant="outline" class="mb-6 rounded-xl bg-card">
+    <Item.Media variant="icon" class="size-9 rounded-lg bg-brand/12 text-brand">
+      <BotIcon />
+    </Item.Media>
+    <Item.Content class="min-w-56">
+      <Item.Title class="line-clamp-none">Give {name} its own Discord bot</Item.Title>
+      <Item.Description class="line-clamp-none">
+        Agents with their own bot post under their own account and skip the shared webhook limit. Paste the bot’s token in the Bot tab, or have
+        {name} send it.
+      </Item.Description>
+    </Item.Content>
+    <Item.Actions>
+      <Button href="/agents/{id}/bot" size="sm">Add a bot token</Button>
+    </Item.Actions>
+  </Item.Root>
+{/if}
 
 <ToggleGroup.Root
   type="single"

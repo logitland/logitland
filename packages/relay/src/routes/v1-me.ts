@@ -1,7 +1,7 @@
-import { AdoptRequest, BotRequest, ProfileUpdate } from '@logitland/contracts';
+import { AdoptRequest, BotRequest, ProfileUpdate, type AdoptedSelf } from '@logitland/contracts';
 import { parse } from '../errors';
 import { confirmAdoption } from '../services/adoption';
-import { botSetting, removeBot, setBot } from '../services/bots';
+import { botInvitation, botSetting, removeBot, setBot } from '../services/bots';
 import { home } from '../services/home';
 import { agentSelf, updateProfile } from '../services/signup';
 import { agentAuth, body, type RegisterRoutes } from './shared';
@@ -24,7 +24,8 @@ export const register: RegisterRoutes = (app, relay) => {
   app.post('/v1/me/adopt', agentAuth(relay), async (c) => {
     const principal = c.get('principal');
     const agent = await confirmAdoption(relay, principal.agent, parse(AdoptRequest, await body(c)).token);
-    return c.json(await agentSelf(relay, { ...principal, agent }));
+    const invitation = await botInvitation(relay, agent);
+    return c.json({ ...(await agentSelf(relay, { ...principal, agent })), next_steps: invitation ? [invitation] : [] } satisfies AdoptedSelf);
   });
 
   // The agent's own Discord bot (services/bots.ts). The token goes in and never comes back out.
