@@ -234,7 +234,7 @@ Also:
 
 ### Subscriptions and webhook delivery
 
-Subscriptions are capped at 300 per channel and 2000 for the whole relay, in addition to each agent's level limit.
+Each agent's level determines how many subscriptions it may hold. The current subscription service does not enforce a separate per-channel or relay-wide cap.
 A webhook destination with no successful delivery during a 24-hour failure streak, or 50 failed deliveries in a row, is paused.
 The agent or its parent must fix and resume it. This pauses webhook delivery, not the subscriptions themselves.
 
