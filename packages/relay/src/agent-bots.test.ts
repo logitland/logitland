@@ -5,6 +5,7 @@ import { botsJob } from './services/bots';
 import { ingest } from './services/intake';
 import { processSend } from './services/sending';
 import { updateSettings } from './services/settings';
+import { STANDING_EMOJI } from './services/standing-emoji';
 import { asOwner } from './signup.helpers';
 import { ADMIN_DISCORD, GUILD, LOUNGE, application, harness, seedAgent, seedChannel, seedOwner, type Harness, type HarnessOptions } from './testing';
 
@@ -16,6 +17,8 @@ const APP_ID = '500000000000000002';
 const BOT_TOKEN = 'NTAwMDAwMDAwMDAwMDAwMDAx.GxYz12.an-agents-own-bot-token-for-tests';
 const AGENTS_ROLE = '130000000000000001';
 const OTHER_SERVER = '100000000000000099';
+const OWNER_DM = '140000000000000001';
+const STANDING_EMOJI_NAMES = Object.keys(STANDING_EMOJI);
 
 /** A Discord where the agent's bot (BOT_TOKEN) and the relay's own bot both answer; `bot` is the agent's bot as Discord sees it. */
 function discordWithBot(h: Harness) {
@@ -27,10 +30,17 @@ function discordWithBot(h: Harness) {
     revoked: false,
     failRoleRemovals: 0,
     refuseKick: false,
+    /** The relay's bot lacks Moderate Members and Manage Messages: Discord refuses its timeouts and deletes. */
+    refuseTimeout: false,
+    refuseDelete: false,
     /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
     holdGateway: 0,
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
     beforeAnswer: undefined as ((m: { id: string; content: string }) => Promise<unknown>) | undefined,
+    /** The relay's application emoji: every standing emoji, as after setup. */
+    emoji: STANDING_EMOJI_NAMES.map((name, i) => ({ id: `82000000000000000${i}`, name })),
+    /** The owner takes no DMs from the relay's bot. */
+    dmsClosed: false,
   };
   const held: (() => void)[] = [];
   const gateway = () =>
@@ -78,6 +88,7 @@ function discordWithBot(h: Harness) {
         bot.guilds = bot.guilds.filter((g) => g !== GUILD);
         bot.roles = [];
       }
+      if (req.method === 'PATCH' && bot.refuseTimeout) return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
       return Response.json({ roles: bot.roles });
     }
     const role = /^\/guilds\/\d+\/members\/\d+\/roles\/(\d+)$/.exec(path)?.[1];
@@ -86,8 +97,14 @@ function discordWithBot(h: Harness) {
       bot.roles = req.method === 'PUT' ? [...bot.roles, role] : bot.roles.filter((r) => r !== role);
       return new Response(null, { status: 204 });
     }
+    if (req.method === 'DELETE' && bot.refuseDelete && /\/messages\/\d+$/.test(path))
+      return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
     if (req.method === 'DELETE') return new Response(null, { status: 204 });
     if (path === '/applications/@me') return Response.json(application([ADMIN_DISCORD]));
+    if (/^\/applications\/\d+\/emojis$/.test(path)) return Response.json({ items: bot.emoji });
+    if (path === '/users/@me/channels') return Response.json({ id: OWNER_DM, type: 1 });
+    if (path === `/channels/${OWNER_DM}/messages` && bot.dmsClosed)
+      return Response.json({ message: 'Cannot send messages to this user', code: 50007 }, { status: 403 });
     return Response.json(message(LOUNGE, body.content));
   });
   return bot;
@@ -621,5 +638,140 @@ describe('posting outside the relay', () => {
     expect(refused.status).toBe(403);
     expect((await json(refused)).detail).toMatch(/banned for good/);
     expect((await h.internal('POST', `/internal/owners/${again.owner.id}/adoption-tokens`, undefined, asOwner(again.owner.id))).status).toBe(403);
+  });
+});
+
+/** What the relay's bot posted in the owner's DM. */
+const ownerDms = async (h: Harness) => (await calls(h, 'POST', new RegExp(`/channels/${OWNER_DM}/messages$`))).map((c) => c.body);
+/** A DM's text displays, at any depth, with emoji written by name. */
+const dmText = (dm: { components: unknown[] }): string =>
+  JSON.stringify(dm.components)
+    .match(/"content":"(?:[^"\\]|\\.)*"/g)!
+    .map((c) => JSON.parse(`{${c}}`).content as string)
+    .join('\n')
+    .replace(/<:(\w+):\d+>/g, ':$1:');
+const unix = (at: number | string) => Math.floor(new Date(at).getTime() / 1000);
+
+describe('the owner’s DM', () => {
+  it('shows the bot’s standing after every strike: the step it reached, its strikes, and when they and the bar end', async () => {
+    const { h, a, owner, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    const first = h.now().getTime();
+    await byItself(h, '320000000000000001', 'One');
+    h.advance(60_000);
+    await byItself(h, '320000000000000002', 'Two');
+    const timedOutUntil = h.now().getTime() + DAY;
+    h.advance(DAY + 60_000);
+    await byItself(h, '320000000000000003', 'Three');
+    const barredUntil = h.now().getTime() + 30 * DAY;
+    h.advance(30 * DAY);
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000004', 'Four');
+
+    expect((await calls(h, 'POST', /\/users\/@me\/channels$/)).map((c) => c.body)).toEqual(Array(4).fill({ recipient_id: owner.discord_user_id }));
+    const dms = await ownerDms(h);
+    expect(dms.map((dm) => [dm.flags, dm.content, dm.components[0].accent_color])).toEqual([
+      [1 << 15, undefined, 0xff55ff],
+      [1 << 15, undefined, 0xff55ff],
+      [1 << 15, undefined, 0xff55ff],
+      [1 << 15, undefined, 0xf05653],
+    ]);
+    const [notice, timeout, kick, ban] = dms.map(dmText);
+    expect(notice).toContain(
+      ':standing_past::standing_line_on::standing_now::standing_line_off::standing_next::standing_line_off::standing_next::standing_line_off::standing_next:\n-# All good · **Warned** · Timed out · Removed · Banned',
+    );
+    expect(notice).toContain(`1 active strike. It expires <t:${unix(first + 90 * DAY)}:R>.`);
+    expect(timeout).toContain('-# All good · Warned · **Timed out** · Removed · Banned');
+    expect(timeout).toContain(`timed the bot out until <t:${unix(timedOutUntil)}:f>`);
+    expect(kick).toContain('-# All good · Warned · Timed out · **Removed** · Banned');
+    expect(kick).toContain(`You can give the relay a bot again on <t:${unix(barredUntil)}:f>`);
+    expect(kick).toContain(`3 active strikes. The oldest expires <t:${unix(first + 90 * DAY)}:R>.`);
+    expect(ban).toContain(
+      ':standing_past::standing_line_on::standing_past::standing_line_on::standing_past::standing_line_on::standing_past::standing_line_on::standing_banned:',
+    );
+    expect(ban).toContain('-# 4 active strikes');
+    expect(JSON.stringify(dms[0])).toContain(`"url":"https://logitland.test/agents/${a.id}/bot"`);
+    expect(JSON.stringify(dms[0])).toContain(`"media":{"url":"https://relay.logitland.test/v1/avatars/${a.id}.png"}`);
+  });
+
+  it('says what Discord refused, rather than that it happened, without claiming staff were told', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    bot.refuseDelete = true;
+    await byItself(h, '320000000000000001', 'One');
+    bot.refuseDelete = false;
+    bot.refuseTimeout = true;
+    h.advance(60_000);
+    await byItself(h, '320000000000000002', 'Two');
+    const timedOutUntil = h.now().getTime() + DAY;
+    bot.refuseTimeout = false;
+    bot.refuseKick = true;
+    h.advance(DAY + 60_000);
+    await byItself(h, '320000000000000003', 'Three');
+    const barredUntil = h.now().getTime() + 30 * DAY;
+
+    expect((await ownerDms(h)).map((dm) => dmText(dm).split('\n').slice(0, 2))).toEqual([
+      [
+        '### Wren’s bot is **warned**',
+        'Wren’s bot posted outside the relay. Discord didn’t let the relay delete the message. Only the relay may post as the bot, because it checks every message first. Another strike while this one is active times the bot out for 24 hours.',
+      ],
+      [
+        '### Wren’s bot is **due a timeout**',
+        `Wren’s bot posted outside the relay again, so the relay deleted the message. Discord didn’t let the relay time the bot out until <t:${unix(timedOutUntil)}:f>. Another strike while these 2 strikes are active removes it from the server, and you can’t give the relay a bot for 30 days.`,
+      ],
+      [
+        '### Wren’s bot is **due to be removed**',
+        `Wren’s bot posted outside the relay again, so the relay deleted the message and forgot its token. Discord didn’t let the relay remove the bot from the server. Wren posts through webhooks for now. You can give the relay a bot again on <t:${unix(barredUntil)}:f>. Another strike while these 3 strikes are active bans you for good.`,
+      ],
+    ]);
+  });
+
+  it('warns of a ban only while the three strikes that removed the bot are active', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    const first = h.now().getTime();
+    await byItself(h, '320000000000000001', 'Day 0');
+    h.advance(60 * DAY);
+    await byItself(h, '320000000000000002', 'Day 60');
+    h.advance(20 * DAY);
+    await byItself(h, '320000000000000003', 'Day 80');
+    // The bar ends on day 110, after the day-0 strike expired on day 90.
+    h.advance(30 * DAY);
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000004', 'Day 110');
+
+    const [, , removed, next] = (await ownerDms(h)).map(dmText);
+    expect(removed).toContain('Another strike while these 3 strikes are active bans you for good.');
+    expect(removed).toContain(`3 active strikes. The oldest expires <t:${unix(first + 90 * DAY)}:R>.`);
+    expect(next).toContain('### Wren’s bot is **removed**');
+  });
+
+  it('draws the ladder with plain characters until the emoji are uploaded', async () => {
+    const { h, a, bot } = await adopted();
+    bot.emoji = [];
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000001', 'One');
+    const [dm] = await ownerDms(h);
+    expect(dmText(dm)).toContain('●━━◉──○──○──○\n-# All good · **Warned**');
+  });
+
+  it('leaves the strike in place and sends nothing else when the owner takes no DMs', async () => {
+    const { h, a, bot } = await adopted();
+    bot.dmsClosed = true;
+    await h.call('POST', '/v1/subscriptions', { kind: 'replies' }, h.as(a.token));
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000001', 'One');
+    expect((await botSetting(h, a)).strikes.active).toBe(1);
+    expect((await calls(h, 'POST', /\/channels\/\d+\/messages$/)).map((c) => c.url.pathname)).toEqual([`/api/v10/channels/${OWNER_DM}/messages`]);
+    expect(h.log.lines.filter((l) => l.event === 'bot_strikes.owner_dm_failed').map((l) => l.fields.closed)).toEqual([true]);
+    const page = await json(await h.call('GET', '/v1/events', undefined, h.as(a.token)));
+    expect(page.digests.flatMap((d: { events: { type: string }[] }) => d.events).map((e: { type: string }) => e.type)).toContain('bot.struck');
   });
 });

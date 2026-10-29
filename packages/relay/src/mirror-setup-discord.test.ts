@@ -1,8 +1,8 @@
-import type { RegisteredCommands } from '@logitland/contracts';
+import type { RegisteredCommands, UploadedEmoji } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { CONSENT_COMMAND } from './services/interactions';
 import { GUILD, harness, seedOwner, type Harness } from './testing';
-import { APP, admin, discordError, discordWorld } from './mirror.testkit';
+import { APP, admin, check, discordError, discordWorld, runChecks } from './mirror.testkit';
 
 const path = (r: Request) => `${r.method} ${new URL(r.url).pathname.replace('/api/v10', '')}`;
 const audit = async (h: Harness, like: string) =>
@@ -72,5 +72,27 @@ describe('POST /internal/admin/discord/commands', () => {
     const bare = harness({ env: { DISCORD_APPLICATION_ID: undefined } });
     const other = await admin(bare);
     expect((await bare.internal('POST', '/internal/admin/discord/commands', undefined, other.as)).status).toBe(503);
+  });
+});
+
+describe('POST /internal/admin/discord/emoji', () => {
+  it('uploads only the standing emoji the application lacks, once, and turns the setup check from warn to ok', async () => {
+    const { h, world, owner, as } = await ready();
+    world.emoji = [{ id: '820000000000000001', name: 'standing_past' }];
+    expect(check(await runChecks(h, as), 'standing-emoji').status).toBe('warn');
+
+    const first = await h.internal('POST', '/internal/admin/discord/emoji', undefined, as);
+    expect((await first.json()) as UploadedEmoji).toEqual({
+      uploaded: ['standing_now', 'standing_banned', 'standing_next', 'standing_line_on', 'standing_line_off'],
+    });
+    const posts = h.discordCalls.filter((r) => path(r) === `POST /applications/${APP}/emojis`);
+    expect(posts).toHaveLength(5);
+    expect(await posts[0]!.json()).toEqual({ name: 'standing_now', image: expect.stringMatching(/^data:image\/png;base64,iVBORw0KGgo/) });
+
+    const again = await h.internal('POST', '/internal/admin/discord/emoji', undefined, as);
+    expect((await again.json()) as UploadedEmoji).toEqual({ uploaded: [] });
+    expect(h.discordCalls.filter((r) => path(r) === `POST /applications/${APP}/emojis`)).toHaveLength(5);
+    expect(check(await runChecks(h, as), 'standing-emoji').status).toBe('ok');
+    expect((await audit(h, 'discord.emoji%')).map((a) => [a.actor_id, a.target_id])).toEqual([[owner.id, APP]]);
   });
 });

@@ -90,4 +90,20 @@ describe.skipIf(!E2E)('an agent’s own bot, against a fake Discord', () => {
     expect((await s.call('POST', `/v1/conversations/${conversation}/leave`, { token: agent.token })).status).toBe(204);
     expect(s.fake.world.threadMembers.get(conversation)?.has(bot.user.id)).toBe(false);
   });
+
+  it('DMs the owner the bot’s standing, drawn with the uploaded emoji, when the bot posts by itself', async () => {
+    const owner = await s.adminOwner();
+    const uploaded = await s.dashboard('POST', '/internal/admin/discord/emoji', { owner });
+    expect(uploaded.status).toBe(200);
+    expect(s.fake.world.emojis.map((e) => e.name)).toEqual(uploaded.body.uploaded);
+
+    s.fake.say(s.channels.lounge, { as: bot.user.id, content: 'Posted behind the relay’s back' });
+    const dm = await eventually(() => [...s.fake.world.dms.values()].find((d) => s.fake.world.messages.get(d.id)?.length), { what: 'the owner’s DM' });
+    expect(dm.recipients[0]!.id).toBe(s.community.adminId);
+    const [message] = s.fake.world.messages.get(dm.id)!;
+    expect(message!.flags).toBe(1 << 15);
+    const layout = JSON.stringify(message!.components);
+    expect(layout).toContain('Wren’s bot is **warned**');
+    expect(layout).toMatch(/<:standing_past:\d+><:standing_line_on:\d+><:standing_now:\d+>/);
+  });
 });

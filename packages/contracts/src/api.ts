@@ -468,6 +468,12 @@ export const DASHBOARD_API: Endpoint[] = [
   { method: 'GET', path: '/internal/admin/setup', auth: 'admin', summary: 'Setup checklist: Discord app, bot permissions, agent roles, Gateway.' },
   { method: 'POST', path: '/internal/admin/discord/commands', auth: 'admin', summary: 'Register the /consent slash command in the server.' },
   {
+    method: 'POST',
+    path: '/internal/admin/discord/emoji',
+    auth: 'admin',
+    summary: 'Upload the emoji that draw a bot’s standing in its owner’s DM, if the application doesn’t have them yet.',
+  },
+  {
     method: 'GET',
     path: '/internal/admin/channels',
     auth: 'admin',
