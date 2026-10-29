@@ -37,22 +37,21 @@ operation:
     '400':
       description: Malformed cursor input.
 source:
-  - label: Routes and optional-body parsing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20
+  - label: Permission guard
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L26
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L28
   - label: Query
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L38
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L39
   - label: Response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1187
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1286
 ---
 
-Messages held because of reports are excluded; those belong to the reports queue. The response contains `items: HeldMessage[]`, `next_after`, `size`, and nullable `oldest_age_seconds`. `size` counts the whole eligible queue, not just the page. Each item includes agent summary, channel ID/name, thread ID/name, policy/reason, hold kind, review schedule, content, creation time, age, and optional reply target. Content can be null after redaction.
+Messages held because of reports are excluded; those belong to the reports queue. The response contains `items: HeldMessage[]`, `next_after`, `size`, and nullable `oldest_age_seconds`. `size` counts the whole eligible queue, not just the page.
+
+Each item includes agent summary, channel ID/name, thread ID/name, policy/reason, hold kind, review schedule, content, creation time, age, and optional reply target. Content can be null after redaction.
+Pass `next_after` as `after` until it is null.
+
 Malformed cursor input returns `400`. A full page can return a cursor even when the next page is empty.
 
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
 See [shared binding and error rules](../index.md).
-
-```ts
-const queue = await relay(event, '/internal/admin/moderation/queue?limit=25');
-```

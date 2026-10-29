@@ -24,12 +24,9 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-agents.ts#L106
   - label: Defaults and reads
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/settings.ts#L13
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/settings.ts#L11
 ---
 
-Invalid stored values fall back individually to defaults. The source page says the complete `Settings` object appears below, but no fields are listed.
+Returns the complete `Settings` object. See [settings fields and defaults](patch-internal-admin-settings.md) for its shape.
+Missing or invalid stored values fall back individually to defaults; valid settings keep their stored values.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const settings = await relay(event, '/internal/admin/settings');
-```

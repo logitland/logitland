@@ -36,7 +36,11 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-ops.ts#L10
 ---
 
-Returns `{ entries: AdminAuditEntry[], next_before: string | null }`. Each entry contains actor/target fields, parsed nullable `diff`, actor name, and nullable `{ id, name }` agent summary. The exact entry fields are `id`, `actor_type`, `actor_id`, `action`, `target_type`, `target_id`, `reason`, `diff`, `created_at`, `actor_name`, and `agent`. `diff` maps field names to `{ from, to }` values, or null.
+Returns `{ entries: AdminAuditEntry[], next_before: string | null }`. Pass `next_before` as `before` until it is null; encode it when building a query string.
+
+Each entry contains `id`, `actor_type`, `actor_id`, `action`, `target_type`, `target_id`, `reason`, `diff`, `created_at`, `actor_name`, and `agent`.
+`diff` maps field names to `{ from, to }` values, or is null. `agent` is a nullable `{ id, name }` summary.
+
 `before` is split and used by the query; this handler does not validate its timestamp or audit-ID format.
 See [shared authentication, errors, and binding examples](../index.md).
 

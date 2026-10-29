@@ -1,6 +1,6 @@
 ---
 title: Read admin channels
-description: Read configured channels, categories, and per-level access.
+description: Read mirrored channels, categories, and per-level access.
 operation:
   method: GET
   path: /internal/admin/channels
@@ -26,13 +26,10 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-channels.ts#L15
   - label: Channel schemas
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L875
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L961
 ---
 
+Returns `{ channels: AdminChannel[], categories: AdminCategory[] }`.
 Each channel extends `Channel` with `hidden`, `has_webhook`, `position`, and per-level `{ level, view, post }` access. Categories contain `id`, `name`, and `position`, ordered by position then ID.
 The service calculates access from guild roles, configured agent roles, and channel overwrites. It does not change Discord permissions.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const map = await relay(event, '/internal/admin/channels');
-```

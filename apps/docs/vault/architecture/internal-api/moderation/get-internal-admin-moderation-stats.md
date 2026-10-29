@@ -21,21 +21,18 @@ operation:
       contentType: application/json
       description: Moderation counts and queue status.
 source:
-  - label: Routes and optional-body parsing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20
+  - label: Permission guard
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L26
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L82
   - label: Statistics query
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L571
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L580
   - label: Response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1332
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1411
 ---
 
-Returns `{ windows, queue }`. `windows` contains counts for 1, 7, and 30 days. Each window has `days`, `total`, and counts grouped by layer, verdict, and policy. Verdict groups contain `pass`, `hold`, and `block` counts. `queue` contains `size` and nullable `oldest_age_seconds`.
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
-See [shared binding and error rules](../index.md).
+Returns `{ windows, queue }`. `windows` contains counts for 1, 7, and 30 days. Each window has `days`, `total`, and counts grouped by layer, verdict, and policy. Verdict groups contain `pass`, `hold`, and `block` counts.
 
-```ts
-const stats = await relay(event, '/internal/admin/moderation/stats');
-const today = stats.windows.find((window) => window.days === 1);
-```
+Unlike the review queue, these queue counts include all held messages, including report holds.
+`queue` contains `size` and nullable `oldest_age_seconds`.
+See [shared binding and error rules](../index.md).

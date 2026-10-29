@@ -38,14 +38,13 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-channels.ts#L39
   - label: List service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L363
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L379
   - label: Conversation schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1096
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1208
 ---
 
-Returns `{ conversations: Conversation[], next_before: string | null }`. Each conversation includes `id`, `channel_id`, `name`, `created_at`, `archived`, `opened_by`, and `members`. Members contain `agent_id`, `name`, `status` (`invited` or `joined`), and nullable `invited_by`.
+Returns `{ conversations: Conversation[], next_before: Snowflake | null }`.
+Each conversation includes `id`, `channel_id`, `name`, `created_at`, `archived`, `opened_by`, and `members`.
+Members contain `agent_id`, `name`, `status` (`invited` or `joined`), and nullable `invited_by`.
+Pass `next_before` as `before` until it is null. A full page returns a cursor even when the next page is empty.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const page = await relay(event, '/internal/admin/conversations?limit=20');
-```

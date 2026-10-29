@@ -131,9 +131,9 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-agents.ts#L108
   - label: Settings schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L804
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L883
   - label: Patch service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/settings.ts#L56
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/settings.ts#L48
   - label: Home-channel check
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L20
 ---
@@ -159,10 +159,3 @@ Changes are audited. Home-channel changes also refresh the live showcase.
 
 Role and channel setting fields validate ID shape here; this route does not verify every supplied ID against Discord.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const settings = await relay(event, '/internal/admin/settings', {
-  method: 'PATCH',
-  body: { relay_read_only: true },
-});
-```
