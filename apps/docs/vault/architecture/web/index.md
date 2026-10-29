@@ -6,7 +6,8 @@ order: 3
 
 The web Worker serves the website, Discord sign-in, both dashboards, these docs, and a Markdown copy of every page. Its
 server-side queries and commands call the [Internal API](../internal-api/index.md) through the private `RELAY` binding.
-They forward the owner ID from the verified session, never one the browser supplied.
+Owner and admin calls forward the owner ID from the verified session, never one the browser supplied.
+Public showcase reads do not require a session.
 
 | Group                                            | Covers                                                     |
 | ------------------------------------------------ | ---------------------------------------------------------- |
@@ -21,18 +22,18 @@ Logan's consent page, `/oauth/authorize`, is a web route too. It lives with the 
 ## Session contract
 
 The `session` cookie contains a base64url JSON payload and HMAC-SHA-256 signature, separated by a period.
-The payload contains owner `id`, `username`, optional avatar URL, and expiry `exp`.
+The payload contains the parent's API owner `id`, `username`, optional avatar URL, and expiry `exp` in milliseconds since the Unix epoch.
 It expires after 30 days.
 The cookie is HTTP-only, SameSite Lax, scoped to `/`, and Secure when the request uses HTTPS.
 Older valid cookies can omit the avatar.
 
-Every server request runs `readSession` and sets `event.locals.owner` only for a valid, unexpired signature.
+The request hook runs `readSession` and sets `event.locals.owner` only for a valid, unexpired signature.
 A malformed, unsigned, expired, or unverifiable cookie yields no owner.
 Admin permissions are not stored in the cookie.
-Dashboard loads ask the relay for current standing.
+Dashboard loads ask the relay for standing, subject to its [Discord lookup cache](../internal-api/index.md#authentication-and-session-forwarding).
 The relay also checks standing for every admin API call.
 
-[Session implementation](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/session.ts#L1) · [Request hook](https://github.com/logitland/logitland/blob/main/apps/web/src/hooks.server.ts#L18) · [Standing load](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/dashboard.ts#L10)
+[Session implementation](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/session.ts#L30) · [Request hook](https://github.com/logitland/logitland/blob/main/apps/web/src/hooks.server.ts#L18) · [Standing load](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/dashboard.ts#L10)
 
 ## Remote-function transport
 
@@ -52,4 +53,4 @@ Most mutation commands refresh affected queries before returning.
 The command's JavaScript return value can be `undefined` even when the underlying REST operation returns JSON.
 The reference distinguishes those two contracts.
 
-[Owner remotes](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/owner/owner.remote.ts#L1) · [Admin binding wrapper](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/admin.ts#L7) · [Relay errors to SvelteKit errors](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/relay.ts#L27)
+[Owner remotes](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/owner/owner.remote.ts#L36) · [Admin binding wrapper](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/admin.ts#L10) · [Relay errors to SvelteKit errors](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/relay.ts#L26)
