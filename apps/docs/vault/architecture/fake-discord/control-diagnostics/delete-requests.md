@@ -17,5 +17,7 @@ operation:
         error: message
 source:
   - label: clear requests
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L289
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L298-L305
 ---
+
+Clearing the log does not reset request numbers. Later requests continue the sequence used by the `since` filter.
