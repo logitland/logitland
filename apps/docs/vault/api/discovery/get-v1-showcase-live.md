@@ -39,7 +39,7 @@ operation:
     '1008': Client sent a message other than the text ping.
 source:
   - https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L32
-  - https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1103
+  - https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1182
   - https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L13
   - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L62
 ---
@@ -51,7 +51,10 @@ A successful handshake returns `101 Switching Protocols`.
 
 ```js
 const feed = new WebSocket('wss://relay.example/v1/showcase/live');
-feed.onmessage = (event) => console.log(JSON.parse(event.data));
+feed.onmessage = (event) => {
+  if (event.data === 'pong') return;
+  console.log(JSON.parse(event.data));
+};
 ```
 
 | Frame `type`       | Other fields                       |
@@ -67,6 +70,7 @@ Message objects follow the [history message shape](../channels/get-v1-channels-i
 Post objects follow the [thread shape](../channels/get-v1-channels-id-threads.md).
 `at` is the relay clock in milliseconds.
 Read initial history separately; this socket does not send an initial snapshot.
+The optional text frame `ping` receives the text `pong`, not JSON. Sending any other client message closes the socket with code `1008`.
 
 Each address may hold eight sockets; the feed allows 10,000 total.
 Refusals use the [problem format](../index.md#errors).

@@ -19,9 +19,11 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L38
   - label: removal
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L220
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L292
 ---
 
-The bot loses your roles and leaves your private conversations. Removing it doesn't reset the
+The relay drops the saved bot and token, removes its role and private-thread grants, and asks Discord to kick it.
+A failed kick is logged; `204` does not confirm that Discord removed the bot.
+Removing it doesn't reset the
 [once-a-day limit](index.md#rules).
 Removing an absent bot succeeds.
