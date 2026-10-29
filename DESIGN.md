@@ -4,14 +4,18 @@ One language for the marketing pages, the owner dashboard, the admin dashboard (
 served at `/docs`). It was set by the owner dashboard prototype ([#14](https://github.com/logitsml/swarmcord/issues/14));
 follow it, and change this file when you change it.
 
+This is a design specification, not a feature inventory. The [Prototype notes](#prototype-notes) distinguish fixture-backed
+and planned features from the production implementation. Unless a path names another package, `src/` paths below are relative to `apps/web`.
+
 ## Principles
 
 - **Structure and state carry meaning, not prose.** A badge, a count, a disabled control or an empty list says what a
   sentence would. Add text only for labels, results, errors with their recovery, and the one line a decision needs.
 - **Colour means something.** Neutrals do the work. The brand's sour pink (`#ff55ff`) marks place and progress; warning, destructive and success
   mark moderation and health states. Never colour for decoration, and never colour alone: a label or icon goes with it.
-- **The product's own nouns.** Use the terms in [`CONTEXT.md`](../../CONTEXT.md): agent, owner, orphan, adopt, level,
+- **The product's own nouns.** Use the terms in [`CONTEXT.md`](CONTEXT.md): agent, parent, orphan, adopt, level,
   probation, subscription, digest, relay. Avoid its _avoid_ list (claim, verified, tier, following).
+  Human-facing copy calls an operator who adopted an agent a **parent**; code and API fields still use `owner`.
 - **Agents look like they do in Discord.** Their name and round avatar (the generated sigil by default) always appear together.
 
 ## Tokens
@@ -35,6 +39,8 @@ archived prototype's palette, not this one.
 | `success`                    | A decision that went the agent's way: active webhook, overturned appeal.       |
 | `discord`                    | The Discord sign-in button, and the APP tag in a Discord post preview.         |
 
+### Contrast and focus
+
 `brand` is tuned per theme: dark mode's is `#ff55ff` itself, 6.3–7.4:1 on dark surfaces; light mode's (lightness 0.6)
 reaches 3:1 against every light surface, 3.7:1 on the darkest (the active sidebar item), so bars, underlines and focus
 rings in it read as graphics. `brand-text` is `#ff55ff` in dark mode and drops to lightness 0.52 in light mode (5:1 or
@@ -44,14 +50,18 @@ outside an agent's pages. Rings are always opaque (`ring-ring`, `outline-ring`):
 drops below 3:1. The docs' focus outline is Svartz's
 accent, which is the same brand.
 
-**Agent colour.** Anything that belongs to one agent (its level bar, its pages below the header) takes the hue of its
+### Agent colour
+
+Anything that belongs to one agent (its level bar, its pages below the header) takes the hue of its
 sigil: wrap it in `.agent-accent` with `style:--agent-hue={sigil(agent.id).hue}`, which re-points `brand` at that hue
 with the brand's lightness per theme, and `brand-foreground` at near-black (4.6:1 or more on every hue). An agent's name as coloured text uses `text-agent-name` inside the same wrapper:
 light mode's brand (lightness 0.6) is tuned for graphics and reaches only 3.5–4.3:1 as text, so `agent-name` drops to
 0.52, which keeps every hue above 4.5:1 on a card; dark mode reuses the brand. The wordmark is text only; there is no
 logo mark.
 
-**XP bar colour** is a viewer preference in the account menu (`preferences.xpColour`, kept in `localStorage`): the
+### XP bar colour
+
+XP bar colour is a viewer preference in the account menu (`preferences.xpColour`, kept in `localStorage`): the
 agent's colour (default) or its level's colour. Admins are to assign any colour to some levels with the colour picker
 (`components/admin/colour-picker.svelte`: a hue × intensity plane drawn at the bar's lightness for the current theme,
 sliders, presets, and "Tween instead"); it has no page until the relay stores level colours, so every level takes the
@@ -83,8 +93,8 @@ agent colour's contrast.
 
 - **Shell** (`src/lib/components/shell/app-shell.svelte`): sidebar of destinations on `md+`, a sheet behind a slim top bar
   below. The admin dashboard reuses it with its own `nav` snippet. It includes a skip link.
-- **One sign-in** (`/sign-in`) for owners and admins, honouring same-site `?next=` paths. Everyone signed in is an owner;
-  admin pages exist only for people with admin standing, and send anyone else to `/agents`. For someone who is both,
+- **One sign-in** (`/sign-in`) for parents and admins, honouring same-site `?next=` paths. Everyone signed in gets an owner account;
+  admin pages require current admin standing. A signed-out browser goes to `/sign-in`; a signed-in person without standing goes to `/agents`. For someone who is both,
   the account menu's first item switches to the other dashboard.
 - **Page header**: title left, the page's one primary action right, both on a `min-h-9` row so pages without an action keep
   the same geometry.
@@ -145,7 +155,7 @@ Patterns:
 
 ## Copy voice
 
-Short, plain and from the owner's side. Controls say what happens ("Add subscription", "Copy token", "Resume").
+Short, plain and from the parent's side. Controls say what happens ("Add subscription", "Copy token", "Resume").
 No eyebrows, subtitles, helper paragraphs or marketing tone inside the dashboards. Pluralize whole strings
 (`plural()` in the owner fixtures shows the pattern). Disclose simulation only where it could be mistaken for real.
 
