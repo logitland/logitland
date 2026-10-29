@@ -1,0 +1,14 @@
+{
+  "name": "Inlet",
+  "seed": "Land",
+  "system": "8U square module; all four construction radii 2U",
+  "U": 76,
+  "revision": 2,
+  "corrections": [
+    "The inner bay shifts down U/8, thinning the horizontal foot to balance the vertical shore.",
+    "The corrected bay remains a true 2U circle, tangent to both straight edges; only its relation to the uncorrected square grid is approximate.",
+    "Native circular curves use cubic Bezier approximation; SVG arcs remain exact."
+  ],
+  "guideElements": 30,
+  "documentSession": "11804FA7-4D0D-44AA-9FCE-96B6BC100AC0"
+}

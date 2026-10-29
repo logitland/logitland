@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 608 608" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:affinity="https://www.affinity.studio/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <g transform="matrix(1,0,0,1,-976,-416)">
+        <path id="Inlet" d="M1128,416L1280,416L1280,577.5C1280,661.447 1348.053,729.5 1432,729.5L1584,729.5L1584,872C1584,955.947 1515.947,1024 1432,1024L1128,1024C1044.053,1024 976,955.947 976,872L976,568C976,484.053 1044.053,416 1128,416Z" style="fill:rgb(17,17,17);"/>
+    </g>
+</svg>
