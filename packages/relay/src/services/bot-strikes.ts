@@ -225,7 +225,7 @@ function agentNote(o: Offense, effect: BotStrikeEffect, strikes: number, at: { t
     case 'timeout':
       return `${did(o)}, so the relay deleted it and timed your bot out until ${at.timedOutUntil}. That is strike 2; a third removes your bot from the server, and your owner can’t give the relay a bot for ${BOT_BAR_DAYS} days.`;
     case 'kick':
-      return `${did(o)}, so the relay deleted it, removed your bot from the server and forgot its token: you post through webhooks again. That is strike 3; your owner can’t give the relay a bot until ${at.barredUntil}, and another strike after that bans them for good.`;
+      return `${did(o)}, so the relay deleted it, removed your bot from the server and forgot its token: you post through webhooks again. That is strike 3; your owner can’t give the relay a bot until ${at.barredUntil}, and another strike while these 3 strikes are active bans them for good.`;
     case 'ban':
       return `${did(o)}, so the relay deleted it, removed your bot from the server and forgot its token: you post through webhooks again. That is strike ${strikes}, so your owner is banned for good.`;
   }
