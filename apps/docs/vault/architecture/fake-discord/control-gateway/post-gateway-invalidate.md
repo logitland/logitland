@@ -12,6 +12,8 @@ operation:
       properties:
         resumable:
           type: boolean
+          default: false
+          description: Sends true only when this field is exactly the boolean true; other values send false.
     example:
       resumable: true
   responses:
@@ -20,10 +22,12 @@ operation:
       example:
         ok: true
     '400':
-      description: Invalid input or world error.
+      description: Malformed JSON or an unreadable request body.
 source:
   - label: invalidate
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L359
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L368-L375
+  - label: INVALID_SESSION control
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L223
 ---
 
-`resumable` defaults to `false`. It sends opcode `9` with that boolean to authenticated clients and keeps sockets open.
+This control only sends the INVALID_SESSION frame. It does not expire sessions or detach them from their open sockets, even when `resumable` is `false`. Use [forget](post-gateway-forget.md) to expire sessions.

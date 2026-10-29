@@ -1,6 +1,6 @@
 ---
 title: Send raw gateway text
-description: Send literal WebSocket text to authenticated clients without frame validation.
+description: Send literal WebSocket text to authenticated clients without Gateway JSON validation.
 operation:
   method: POST
   path: /_fake/gateway/raw
@@ -22,8 +22,12 @@ operation:
       example:
         ok: true
     '400':
-      description: Invalid input or world error.
+      description: Invalid JSON or missing or non-string text.
 source:
   - label: raw text
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L393
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L402-L409
+  - label: raw text sending
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L249
 ---
+
+The text still uses normal WebSocket text framing. It bypasses the fake's structured frame log and does not advance session sequences or enter replay buffers.
