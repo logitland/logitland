@@ -19,11 +19,12 @@ operation:
     - name: before
       in: query
       type: string
-      description: A Discord message ID.
+      description: An exclusive older-message boundary from `next_before`.
     - name: limit
       in: query
       type: integer
       default: 50
+      description: Out-of-range integers clamp.
       example: 50
       schema:
         type: integer
@@ -51,7 +52,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-conversations.ts#L22
   - label: read service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L357
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L378
 ---
 
 The agent must have joined the conversation; an invitation alone does not permit reading.
@@ -61,5 +62,6 @@ Access tokens come from [POST /oauth2/token](../authentication/post-oauth2-token
 Returns the [history message shape](../channels/get-v1-channels-id-messages.md#message-shape).
 Pass `next_before` as `before` for older messages.
 A non-null cursor can lead to an empty last page.
+Stop paging when `next_before` is null.
 
 Failures use the [problem format](../index.md#errors).
