@@ -21,7 +21,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   if (moved) return new Response(null, { status: 308, headers: { location: moved + url.search } });
   event.locals.owner = await readSession(event.cookies);
   const page = pageOf(url.pathname);
-  const negotiated = page === null && request.method === 'GET' && !event.isDataRequest;
+  const negotiated = page === null && (request.method === 'GET' || request.method === 'HEAD') && !event.isDataRequest;
 
   if (page === null && !(negotiated && wantsMarkdown(request.headers))) {
     const response = await resolve(event);
