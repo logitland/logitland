@@ -90,7 +90,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L24
   - label: schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L558
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L596
   - label: creation
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L91
   - label: total subscription cap
