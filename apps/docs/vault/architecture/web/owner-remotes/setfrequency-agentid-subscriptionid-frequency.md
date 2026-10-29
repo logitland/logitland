@@ -1,6 +1,11 @@
 ---
 title: 'setFrequency({ agentId, subscriptionId, frequency })'
 description: Changes how often one subscription delivers.
+source:
+  - label: command
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/lib/owner/owner.remote.ts#L108
+  - label: subscription ownership check
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L17
 ---
 
 Requires `AgentId`, `SubscriptionId`, and a valid [frequency](../../internal-api/owners/index.md#subscriptions-and-deliveries).
@@ -16,5 +21,3 @@ await setFrequency({
   frequency: '5m',
 });
 ```
-
-[Command](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/owner/owner.remote.ts#L106)
