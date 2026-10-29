@@ -51,7 +51,7 @@ operation:
       description: The server role does not exist.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L21
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L24
   - label: Write service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L123
   - label: Schema

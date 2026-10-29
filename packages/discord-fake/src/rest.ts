@@ -6,6 +6,7 @@ import { isSnowflake } from './ids.ts';
 import {
   ChannelType,
   DiscordHttpError,
+  IS_COMPONENTS_V2,
   Permission,
   errors,
   formBody,
@@ -90,37 +91,116 @@ function allowedMentions(o: Record<string, unknown>): AllowedMentions | undefine
   return { parse, users: list('users'), roles: list('roles'), replied_user: typeof v.replied_user === 'boolean' ? v.replied_user : undefined };
 }
 
+function button(c: Record<string, unknown>, at: string[]): void {
+  const style = c.style;
+  if (typeof style !== 'number' || ![1, 2, 3, 4, 5].includes(style)) throw formBody([...at, 'style'], 'BASE_TYPE_CHOICES', 'Must be one of 1, 2, 3, 4, 5.');
+  if (typeof c.label === 'string' && c.label.length > 80) throw formBody([...at, 'label'], 'BASE_TYPE_MAX_LENGTH', 'Must be 80 or fewer in length.');
+  if (c.label === undefined && c.emoji === undefined)
+    throw formBody([...at, 'label'], 'BUTTON_COMPONENT_LABEL_OR_EMOJI_REQUIRED', 'Button must have a label or an emoji.');
+  if (style === 5) {
+    if (typeof c.url !== 'string') throw formBody([...at, 'url'], 'BUTTON_COMPONENT_URL_REQUIRED', 'A url is required for link buttons.');
+    if (c.custom_id !== undefined)
+      throw formBody([...at, 'custom_id'], 'BUTTON_COMPONENT_CUSTOM_ID_NOT_ALLOWED', 'A custom_id is not allowed on link buttons.');
+  } else if (typeof c.custom_id !== 'string' || !c.custom_id) {
+    throw formBody([...at, 'custom_id'], 'BUTTON_COMPONENT_CUSTOM_ID_REQUIRED', 'A custom_id is required for this button style.');
+  } else if (c.custom_id.length > 100) {
+    throw formBody([...at, 'custom_id'], 'BASE_TYPE_MAX_LENGTH', 'Must be 100 or fewer in length.');
+  }
+}
+
+/** An action row (type 1) of one to five buttons; other items pass unchecked. Answers how many components it holds. */
+function actionRow(row: Record<string, unknown>, at: string[]): number {
+  const items = row.components;
+  if (!Array.isArray(items) || items.length < 1 || items.length > 5)
+    throw formBody([...at, 'components'], 'BASE_TYPE_BAD_LENGTH', 'Must be between 1 and 5 in length.');
+  items.forEach((c, j) => {
+    const where = [...at, 'components', String(j)];
+    if (!isObject(c)) throw formBody(where, 'MODEL_TYPE_CONVERT', 'Only dictionaries may be used in a ModelType');
+    if (c.type === 2) button(c, where);
+  });
+  return 1 + items.length;
+}
+
+/** Message components: up to five action rows, or with IS_COMPONENTS_V2 the layout tree (below). */
 function components(o: Record<string, unknown>): unknown[] | undefined {
   const v = o.components;
   if (v === undefined || v === null) return undefined;
   if (!Array.isArray(v)) throw formBody(['components'], 'LIST_TYPE_INVALID', 'Not a list');
+  if (typeof o.flags === 'number' && o.flags & IS_COMPONENTS_V2) return layout(v);
   if (v.length > 5) throw formBody(['components'], 'BASE_TYPE_MAX_LENGTH', 'Must be 5 or fewer in length.');
   v.forEach((row, i) => {
     if (!isObject(row) || row.type !== 1) throw formBody(['components', String(i), 'type'], 'ENUM_TYPE_INVALID', 'Value must be 1 for an action row.');
-    const items = row.components;
-    if (!Array.isArray(items) || items.length < 1 || items.length > 5)
-      throw formBody(['components', String(i), 'components'], 'BASE_TYPE_BAD_LENGTH', 'Must be between 1 and 5 in length.');
-    items.forEach((c, j) => {
-      const at = ['components', String(i), 'components', String(j)];
-      if (!isObject(c)) throw formBody(at, 'MODEL_TYPE_CONVERT', 'Only dictionaries may be used in a ModelType');
-      if (c.type !== 2) return;
-      const style = c.style;
-      if (typeof style !== 'number' || ![1, 2, 3, 4, 5].includes(style)) throw formBody([...at, 'style'], 'BASE_TYPE_CHOICES', 'Must be one of 1, 2, 3, 4, 5.');
-      if (typeof c.label === 'string' && c.label.length > 80) throw formBody([...at, 'label'], 'BASE_TYPE_MAX_LENGTH', 'Must be 80 or fewer in length.');
-      if (c.label === undefined && c.emoji === undefined)
-        throw formBody([...at, 'label'], 'BUTTON_COMPONENT_LABEL_OR_EMOJI_REQUIRED', 'Button must have a label or an emoji.');
-      if (style === 5) {
-        if (typeof c.url !== 'string') throw formBody([...at, 'url'], 'BUTTON_COMPONENT_URL_REQUIRED', 'A url is required for link buttons.');
-        if (c.custom_id !== undefined)
-          throw formBody([...at, 'custom_id'], 'BUTTON_COMPONENT_CUSTOM_ID_NOT_ALLOWED', 'A custom_id is not allowed on link buttons.');
-      } else if (typeof c.custom_id !== 'string' || !c.custom_id) {
-        throw formBody([...at, 'custom_id'], 'BUTTON_COMPONENT_CUSTOM_ID_REQUIRED', 'A custom_id is required for this button style.');
-      } else if (c.custom_id.length > 100) {
-        throw formBody([...at, 'custom_id'], 'BASE_TYPE_MAX_LENGTH', 'Must be 100 or fewer in length.');
-      }
-    });
+    actionRow(row, ['components', String(i)]);
   });
   return v;
+}
+
+/** Component types a V2 message may hold at its top level, and inside a container. */
+const V2_TOP = [1, 9, 10, 12, 13, 14, 17];
+const V2_IN_CONTAINER = [1, 9, 10, 12, 13, 14];
+const V2_MAX_COMPONENTS = 40;
+
+/**
+ * A Components V2 layout: containers (17) of sections (9: one to three text displays and a button or thumbnail accessory),
+ * text displays (10), thumbnails (11, `media.url`), separators (14) and action rows, 40 components in all.
+ * https://docs.discord.com/developers/components/reference
+ */
+function layout(v: unknown[]): unknown[] {
+  if (!v.length) throw formBody(['components'], 'BASE_TYPE_REQUIRED', 'This field is required');
+  let count = 0;
+  const walk = (c: unknown, at: string[], allowed: number[]): void => {
+    count += 1;
+    if (!isObject(c) || typeof c.type !== 'number' || !allowed.includes(c.type))
+      throw formBody([...at, 'type'], 'UNION_TYPE_CHOICES', `Value of field "type" must be one of (${allowed.join(', ')}).`);
+    const children = (key: string, min: number, max: number, types: number[]) => {
+      const list = c[key];
+      if (!Array.isArray(list) || list.length < min || list.length > max)
+        throw formBody([...at, key], 'BASE_TYPE_BAD_LENGTH', `Must be between ${min} and ${max} in length.`);
+      list.forEach((child, i) => walk(child, [...at, key, String(i)], types));
+    };
+    switch (c.type) {
+      case 1:
+        count += actionRow(c, at) - 1;
+        return;
+      case 2:
+        return button(c, at);
+      case 9:
+        children('components', 1, 3, [10]);
+        return walk(c.accessory, [...at, 'accessory'], [2, 11]);
+      case 10:
+        if (typeof c.content !== 'string' || !c.content) throw formBody([...at, 'content'], 'BASE_TYPE_REQUIRED', 'This field is required');
+        return;
+      case 11:
+        if (!isObject(c.media) || typeof c.media.url !== 'string') throw formBody([...at, 'media', 'url'], 'BASE_TYPE_REQUIRED', 'This field is required');
+        return;
+      case 14:
+        if (c.spacing !== undefined && c.spacing !== 1 && c.spacing !== 2) throw formBody([...at, 'spacing'], 'BASE_TYPE_CHOICES', 'Must be one of 1, 2.');
+        return;
+      case 17:
+        if (
+          c.accent_color !== undefined &&
+          c.accent_color !== null &&
+          !(Number.isInteger(c.accent_color) && (c.accent_color as number) >= 0 && (c.accent_color as number) <= 0xffffff)
+        )
+          throw formBody([...at, 'accent_color'], 'NUMBER_TYPE_MAX', 'Must be between 0 and 16777215.');
+        return children('components', 1, V2_MAX_COMPONENTS, V2_IN_CONTAINER);
+    }
+  };
+  v.forEach((c, i) => walk(c, ['components', String(i)], V2_TOP));
+  if (count > V2_MAX_COMPONENTS) throw formBody(['components'], 'BASE_TYPE_MAX_LENGTH', `Must be ${V2_MAX_COMPONENTS} or fewer components in total.`);
+  return v;
+}
+
+/** A V2 message is its components alone: Discord refuses `content`, `embeds`, `poll` and stickers beside them. */
+function legacyFieldsWithLayout(o: Record<string, unknown>): void {
+  if (!(typeof o.flags === 'number' && o.flags & IS_COMPONENTS_V2)) return;
+  for (const key of ['content', 'embeds', 'poll', 'sticker_ids'])
+    if (o[key] !== undefined && o[key] !== null)
+      throw formBody(
+        [key],
+        'MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2',
+        `The '${key}' field cannot be used when using MessageFlags.IS_COMPONENTS_V2`,
+      );
 }
 
 function embeds(o: Record<string, unknown>): unknown[] | undefined {
@@ -262,6 +342,46 @@ export function routes(): Route[] {
     ok(bot.other ? otherApplication(bot.other) : fake.applicationObject()),
   );
 
+  // The relay's bot opens a DM with anyone the fake knows; whether they take its messages is `world.closedDms`.
+  add('users.me.channels', 'POST', '/users/@me/channels', 'bot', 'users', ({ fake, body }) => {
+    const o = objectBody(body);
+    if (!isSnowflake(o.recipient_id)) throw formBody(['recipient_id'], 'NUMBER_TYPE_COERCE', `Value "${String(o.recipient_id)}" is not snowflake.`);
+    return ok(fake.world.openDm(o.recipient_id));
+  });
+
+  /* ----- Application emoji ----- */
+
+  const emojiApp = (fake: DiscordFake, params: Record<string, string>) => {
+    if (params.app !== fake.application.id) throw errors.missingAccess();
+  };
+  add('emojis.list', 'GET', '/applications/:app/emojis', 'bot', 'applications', ({ fake, params }) => {
+    emojiApp(fake, params);
+    return ok({ items: fake.world.emojis });
+  });
+  // Names are 2 to 32 letters, digits and underscores, unique per application; the image is a data URI.
+  add('emojis.create', 'POST', '/applications/:app/emojis', 'bot', 'applications', ({ fake, params, body }) => {
+    emojiApp(fake, params);
+    const o = objectBody(body);
+    const name = text(o, 'name', { min: 2, max: 32, required: true })!;
+    if (!/^\w+$/.test(name)) throw formBody(['name'], 'STRING_TYPE_REGEX', 'String value did not match validation regex.');
+    if (fake.world.emojis.some((e) => e.name === name))
+      throw formBody(['name'], 'APPLICATION_EMOJI_NAME_ALREADY_TAKEN', 'An emoji with this name already exists');
+    if (typeof o.image !== 'string' || !/^data:image\/(png|jpeg|gif|webp|avif);base64,/.test(o.image))
+      throw formBody(['image'], 'IMAGE_INVALID', 'Invalid image data');
+    const emoji = {
+      id: fake.world.newId(),
+      name,
+      roles: [],
+      user: fake.world.botUser,
+      require_colons: true,
+      managed: false,
+      animated: false,
+      available: true,
+    };
+    fake.world.emojis.push(emoji);
+    return ok(emoji);
+  });
+
   /* ----- Guilds ----- */
 
   add('guild.channels', 'GET', '/guilds/:guild/channels', 'bot', 'guild', ({ fake, params }) => {
@@ -389,11 +509,29 @@ export function routes(): Route[] {
   });
 
   add('channel.messages.create', 'POST', '/channels/:channel/messages', 'any-bot', 'channel', ({ fake, params, body, bot }) => {
+    if (fake.world.dms.has(params.channel!)) {
+      if (bot.other) throw errors.missingAccess();
+      const o = objectBody(body);
+      legacyFieldsWithLayout(o);
+      const content = text(o, 'content', { max: 2000 });
+      const comps = components(o);
+      if (!content && !comps?.length) throw errors.emptyMessage();
+      return ok(
+        fake.world.postDm(params.channel!, {
+          author: bot.user,
+          content,
+          components: comps,
+          flags: typeof o.flags === 'number' ? o.flags & IS_COMPONENTS_V2 : 0,
+          application_id: bot.applicationId,
+        }),
+      );
+    }
     const channel = fake.world.channel(params.channel!);
     botCan(fake, channel, isThread(channel.type) ? Permission.sendMessagesInThreads : Permission.sendMessages, bot.user.id);
     if (isForum(channel.type)) throw errors.cannotPostInForum();
     if (channel.type === ChannelType.category) throw errors.wrongChannelType();
     const o = objectBody(body);
+    legacyFieldsWithLayout(o);
     const content = text(o, 'content', { max: 2000 });
     const comps = components(o);
     const emb = embeds(o);
@@ -403,6 +541,7 @@ export function routes(): Route[] {
       author: bot.user,
       content,
       application_id: bot.applicationId,
+      flags: typeof o.flags === 'number' ? o.flags & IS_COMPONENTS_V2 : 0,
       components: comps,
       embeds: emb,
       poll: pl,
