@@ -44,10 +44,10 @@ operation:
           maxItems: 10
         components:
           type: array
+          description: Legacy messages allow up to five action rows; Components V2 allows up to 40 total components, including nested entries.
         flags:
           type: number
           description: Bit 32768 selects Components V2 validation, but webhook execution does not store this flag.
-          maxItems: 5
         poll:
           type: object
         allowed_mentions:
