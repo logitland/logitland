@@ -82,6 +82,10 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
+Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigidly rigged
+3D interpretation of the supplied pink-screen robot concept, with editable materials,
+studio lighting, and neutral and waving poses.
+
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
 implementation contracts and fake Discord; maintainer operations and local development come last.
