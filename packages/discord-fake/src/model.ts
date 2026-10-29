@@ -273,7 +273,32 @@ export const errors = {
   threadExists: () => new DiscordHttpError(400, 160004, 'A thread has already been created for this message'),
   threadArchived: () => new DiscordHttpError(400, 50083, 'Thread is archived'),
   tooManyWebhooks: () => new DiscordHttpError(400, 30007, 'Maximum number of webhooks reached (15)'),
+  invalidRecipient: () => new DiscordHttpError(400, 50033, 'Invalid Recipient(s)'),
+  cannotMessageUser: () => new DiscordHttpError(403, 50007, 'Cannot send messages to this user'),
 };
+
+/** Message flag: laid out by components alone (containers, text displays); `content` and `embeds` are refused. */
+export const IS_COMPONENTS_V2 = 1 << 15;
+
+/** The bot's DM channel with one person (type 1). It belongs to no guild, and its messages reach no Gateway session. */
+export interface DmChannel {
+  id: string;
+  type: 1;
+  last_message_id: string | null;
+  recipients: User[];
+}
+
+/** An emoji the application owns, usable in any message it sends. */
+export interface ApplicationEmoji {
+  id: string;
+  name: string;
+  roles: string[];
+  user: User;
+  require_colons: boolean;
+  managed: boolean;
+  animated: boolean;
+  available: boolean;
+}
 
 /** `{ field: { _errors: [{ code, message }, …also] } }`, nested for a path like ['poll', 'question']. */
 export function formBody(path: string[], code: string, message: string, also: { code: string; message: string }[] = []): DiscordHttpError {

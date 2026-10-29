@@ -60,7 +60,7 @@ operation:
       description: Unknown channel.
 source:
   - label: channel.messages.create
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L352
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L511
   - label: message validators
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L62
   - label: poll validation
@@ -76,6 +76,10 @@ source:
 `content` is optional, with at most 2,000 characters. A nonempty `content`, poll, embeds array, or components array makes a nonempty message. The validator also accepts a `sticker_ids` array as a body, but does not store stickers. `tts` defaults to `false`. `message_reference` accepts optional snowflake `message_id`, `channel_id`, and `guild_id` fields.
 
 `embeds` accepts at most ten entries. The fake does not validate each embed's contents. `components` accepts at most five action rows, each with `type: 1` and 1–5 child components. Buttons use styles 1–5 and need a label or emoji. Labels have at most 80 characters. Non-link buttons need a nonempty `custom_id` of at most 100 characters. Style `5` needs `url` and forbids `custom_id`.
+
+With `flags: 32768` (`1 << 15`, Components V2), `components` is a layout instead: containers (17, `accent_color` 0–0xFFFFFF), sections (9, one to three text displays and a button or thumbnail `accessory`), text displays (10, nonempty `content`), thumbnails (11, `media.url`), separators (14, `spacing` 1 or 2) and action rows, at most 40 components in all. `content`, `embeds`, `poll` and `sticker_ids` are then refused (`MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2`), and the message keeps the flag.
+
+In a DM channel from [`POST /users/@me/channels`](../bot-rest/post-users-me-channels.md), only the relay's bot may post, with `content` or components; someone in `world.closedDms` answers `403` with code `50007`. DM messages emit no Gateway event.
 
 `allowed_mentions` accepts string arrays `parse`, `users`, and `roles`, plus boolean `replied_user`. `parse` values must be `users`, `roles`, or `everyone`.
 

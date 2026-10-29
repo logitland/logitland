@@ -32,6 +32,7 @@ describe('GET /internal/admin/setup', () => {
       'message-content-intent',
       'interactions-url',
       'consent-command',
+      'standing-emoji',
       'agent-roles',
       'agent-channels',
       'gateway',
@@ -77,7 +78,7 @@ describe('the bot token and the bot’s place in the server', () => {
     expect(check(checks, 'bot-token').fix).toContain('Reset Token');
     expect(check(checks, 'bot-in-server')).toMatchObject({ status: 'unknown' });
     expect(check(checks, 'bot-in-server').fix).toContain('bot token first');
-    expect(checks).toHaveLength(9);
+    expect(checks).toHaveLength(10);
 
     world.overrides['GET /users/@me'] = discordError(500, 0);
     checks = await run();

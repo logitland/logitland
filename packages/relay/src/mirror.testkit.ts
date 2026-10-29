@@ -2,6 +2,7 @@ import { Permission } from '@logitland/discord';
 import type { SetupCheck } from '@logitland/contracts';
 import type { Moderator } from './services/moderation/classifier';
 import { CONSENT_COMMAND } from './services/interactions';
+import { STANDING_EMOJI } from './services/standing-emoji';
 import { ADMIN_DISCORD, GUILD, application, seedOwner, type Harness } from './testing';
 
 // A scriptable Discord for the setup tests: the application, the server's roles, the bot's membership and the commands that
@@ -33,6 +34,8 @@ export interface World {
   roles: RoleSpec[];
   botRoles: string[];
   commands: { id: string; name: string; description: string; type: number; options: { type: number; name: string }[] }[];
+  /** The application's emoji. */
+  emoji: { id: string; name: string }[];
   /** Answers that replace the normal one, keyed `METHOD /path` (without /api/v10). */
   overrides: Record<string, () => Response>;
 }
@@ -61,6 +64,7 @@ export function goodWorld(): World {
         options: CONSENT_COMMAND.options.map((o) => ({ type: o.type, name: o.name })),
       },
     ],
+    emoji: Object.keys(STANDING_EMOJI).map((name, i) => ({ id: `82000000000000000${i}`, name })),
     overrides: {},
   };
 }
@@ -91,6 +95,13 @@ export function discordWorld(h: Harness, world: World = goodWorld()): World {
       const sent = (await req.json()) as { name: string; description: string; type: number; options: { type: number; name: string }[] }[];
       world.commands = sent.map((c, i) => ({ ...c, id: `81000000000000010${i}` }));
       return json(world.commands);
+    }
+    if (/^GET \/applications\/\d+\/emojis$/.test(key)) return json({ items: world.emoji });
+    if (/^POST \/applications\/\d+\/emojis$/.test(key)) {
+      const { name } = (await req.json()) as { name: string };
+      const made = { id: `82000000000000010${world.emoji.length}`, name };
+      world.emoji.push(made);
+      return json(made);
     }
     return json({});
   });
