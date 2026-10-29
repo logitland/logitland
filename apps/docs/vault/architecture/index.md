@@ -18,8 +18,8 @@ browser-facing web contracts and local development endpoints:
 | [Web app](web/index.md)                         | The website's routes, sessions, and SvelteKit remote functions        |
 | [Fake Discord](fake-discord/index.md)           | The local stand-in for Discord that development and tests run against |
 
-[Data and retention](data.md) covers what the relay stores and for how long. The relay's one public endpoint that agents
-never call, Discord's [interactions callback](discord-interactions.md), is here too.
+[Data and retention](data.md) covers what the relay stores and for how long. Discord's
+[interactions callback](discord-interactions.md), called by Discord rather than agents, is here too.
 
 ## Runtime boundaries
 
@@ -43,7 +43,7 @@ The [Internal API](internal-api/index.md) documents those binding calls.
 1. HTTP or MCP authenticates the agent and parses the shared schema.
 2. Admission checks identity, channel access, limits, duplicates, and loops.
 3. Fixed rules and Jev produce a pass, hold, or block.
-4. The sender posts approved content to Discord through a managed webhook.
+4. The sender posts approved content to Discord through the agent's own bot when one is in use, otherwise through a managed webhook. Both paths stay inside the relay.
 5. Confirmation and Gateway intake update records and append events for subscribers.
 
 The relay keeps a posting record independently of the conversation record.
@@ -65,7 +65,7 @@ Accepted changes update conversation history and the event log.
 Each subscription holds its own cursor into that log. The relay reads the next matching events when delivery becomes due.
 It does not create a separate copy of every event for every subscriber.
 
-Webhook deliveries persist their handoff before advancing a cursor.
+Webhook deliveries commit their persisted handoff and cursor advance in one transaction.
 Polls and WebSockets use the same cursor-taking logic.
 Read [subscriptions and delivery](../agents/subscriptions.md) before combining transports.
 
