@@ -8,14 +8,26 @@ operation:
   client: browser
   parameters:
     - { name: session, in: cookie, description: Signed-in owner's session; otherwise redirects to sign-in., example: <browser-session> }
-    - { name: response_type, in: query, required: true, example: code }
-    - { name: client_id, in: query, required: true, example: lgc_0000000001 }
-    - { name: redirect_uri, in: query, required: true, example: 'https://client.example/callback' }
-    - { name: code_challenge, in: query, required: true, example: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA }
-    - { name: code_challenge_method, in: query, required: true, example: S256 }
-    - { name: state, in: query, example: example-state }
-    - { name: scope, in: query, description: Optional requested scope. }
-    - { name: resource, in: query, description: Optional protected-resource URL. }
+    - { name: response_type, in: query, required: true, description: Must be code., example: code }
+    - { name: client_id, in: query, required: true, description: Registered client ID; at most 64 characters., example: lgc_0000000001 }
+    - {
+        name: redirect_uri,
+        in: query,
+        required: true,
+        description: Must match registration; at most 2048 characters.,
+        example: 'https://client.example/callback',
+      }
+    - {
+        name: code_challenge,
+        in: query,
+        required: true,
+        description: PKCE challenge; 43–128 base64url characters.,
+        example: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA,
+      }
+    - { name: code_challenge_method, in: query, required: true, description: Must be S256., example: S256 }
+    - { name: state, in: query, description: At most 1024 characters; returned in the client redirect., example: example-state }
+    - { name: scope, in: query, description: At most 256 characters; accepted but not used to select scopes. Tokens always carry logan. }
+    - { name: resource, in: query, description: At most 2048 characters; must equal the Logan MCP URL, allowing one trailing slash. }
   responses:
     '200': { description: Logan consent page., contentType: text/html }
     '303':
@@ -25,25 +37,20 @@ operation:
           Location: '/sign-in?next=%2Foauth%2Fauthorize%3Fresponse_type%3Dcode%26client_id%3Dlgc_0000000001%26redirect_uri%3Dhttps%253A%252F%252Fclient.example%252Fcallback%26code_challenge%3DAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%26code_challenge_method%3DS256%26state%3Dexample-state',
         }
     '400': { description: Incomplete or invalid client authorization request., contentType: text/html }
-source: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/oauth/authorize/+page.server.ts#L13
+source:
+  - https://github.com/logitland/logitland/blob/main/apps/web/src/routes/oauth/authorize/+page.server.ts#L13
+  - https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1465
+  - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L111
 ---
 
 This page is Logan's browser authorization step for MCP OAuth.
-Without a session, redirect `303` to `/sign-in?next=<encoded-path-and-query>`.
-With a session, parse the authorization fields, then call the owner's internal Logan consent route.
-The page load returns `{ request, consent, username }` to its Svelte page.
-`consent` contains `{ client_name, allowed }`.
+Without a session, the page redirects `303` to `/sign-in?next=<encoded-path-and-query>`.
+With a session, it validates the client request through the owner's [internal consent route](../../architecture/internal-api/owners/post-logan-consent.md).
+The page shows the client name and offers **Allow** only when the owner holds the relay's `logan` admin permission.
+**Cancel** remains available without that permission.
 
-Required query fields are `response_type`, `client_id`, `redirect_uri`, `code_challenge`, and `code_challenge_method`.
-Optional fields are `state`, `scope`, and `resource`.
-The relay requires response type `code`, PKCE method `S256`, and a registered redirect.
-See [the full authorization schema and service checks](../../architecture/internal-api/owners/index.md#logan-oauth-owner-routes).
-
-```http
-GET /oauth/authorize?response_type=code&client_id=lgc_0000000001&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256&state=example-state HTTP/1.1
-Host: relay.example
-Cookie: session=<browser-session>
-```
+Use the authorization fields sent by the MCP client, including its actual registered ID, redirect, and PKCE challenge;
+the examples are placeholders. For redirect matching, see [client registration](post-oauth2-admin-register.md).
 
 Missing or malformed fields produce `400` with `This sign-in link is incomplete. Start again from your MCP client.`
 Relay validation errors also become HTTP errors on this page, rather than redirecting to an unverified client URL.

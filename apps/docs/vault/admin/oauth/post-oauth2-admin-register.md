@@ -16,15 +16,20 @@ operation:
           maxItems: 10
           items:
             type: string
+            format: uri
             maxLength: 2048
         client_name:
           type: string
-          maxLength: 100
+          description: Trimmed and truncated to 100 characters. A blank or non-string value uses the default.
+          default: An MCP client
         token_endpoint_auth_method:
           type: string
           const: none
+          default: none
         grant_types:
           type: array
+          nullable: true
+          default: [authorization_code, refresh_token]
           items:
             type: string
             enum:
@@ -63,8 +68,19 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L75
 ---
 
-Redirects allow HTTPS, HTTP on `localhost`, `127.0.0.1`, or `[::1]`, and non-refused custom URI schemes.
-Plain HTTP elsewhere and browser-executable schemes are refused.
-Loopback redirects can use a different port during authorization.
-Other redirect components must match the registered URI.
-Registration is limited to twenty per network per hour.
+Send a JSON object. `redirect_uris` is required; the other listed fields are optional.
+Omitted or null `grant_types` defaults to `[authorization_code, refresh_token]`. Supplied grant types are echoed in the
+response but are not stored or enforced during later token exchanges.
+
+## Redirect rules
+
+Redirects allow HTTPS, HTTP on `localhost`, `127.0.0.1`, or `[::1]`, and custom URI schemes not on the refusal list.
+Fragments are refused. Plain HTTP elsewhere and the schemes `javascript`, `data`, `file`, `vbscript`, `blob`, and `about` are refused.
+
+Non-loopback redirects must match the registered string exactly. For loopback HTTP redirects, authorization compares
+the hostname, path, and query, allowing a different port. The token exchange then requires the exact redirect used for authorization.
+
+## Registration limit
+
+Registration allows twenty attempts per network per hour. Metadata validation failures count toward this limit.
+On `429`, wait for the `Retry-After` interval before retrying. Errors use `{ error, error_description }`.
