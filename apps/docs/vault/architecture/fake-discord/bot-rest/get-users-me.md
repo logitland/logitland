@@ -20,7 +20,7 @@ operation:
       description: Missing or wrong bot token (`0`).
 source:
   - label: users.me
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L239
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L319
   - label: User object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L74
 ---

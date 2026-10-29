@@ -30,5 +30,5 @@ source:
   - label: message delete
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L214-L221
   - label: World.deleteMessage
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L497-L504
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L544-L551
 ---

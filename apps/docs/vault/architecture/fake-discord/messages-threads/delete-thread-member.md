@@ -38,9 +38,9 @@ operation:
       description: Unknown channel (`10003`).
 source:
   - label: channel.thread_members.remove
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L494-L504
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L633-L643
   - label: thread membership
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L590-L600
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L637-L647
 ---
 
 `/api/v9` and `/api` also work. Unlike adding a member, removal does not check guild membership. Removing an absent user still succeeds and updates `member_count`.

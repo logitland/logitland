@@ -10,7 +10,7 @@ operation:
       in: path
       required: true
       type: string
-      description: Channel or thread ID.
+      description: Guild channel or thread ID; DM channels are not supported.
       example: '100000000000000020'
     - name: message
       in: path
@@ -50,20 +50,21 @@ operation:
     '403':
       description: The message belongs to another author (`50005`), even if the bot has Manage Messages.
     '404':
-      description: Unknown channel (`10003`) or message (`10008`).
+      description: Unknown or DM channel (`10003`), or unknown message (`10008`).
 source:
   - label: channel.message.edit
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L417
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L556
   - label: Content and embed validation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L62-L74
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L63-L75
   - label: Embed array validation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L126-L131
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L206-L211
   - label: World.editMessage
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L479-L495
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L526-L542
 ---
 
 Route name `channel.message.edit`. The `/api/v9` and `/api` prefixes also work.
 Use a message ID returned by [message creation](post-channel-messages.md), not the illustrative ID above.
+Only guild channels and threads are supported. A DM channel returns `404`, code `10003`, even if the message exists.
 The token selects the main fake bot or a bot created with [POST /_fake/bots](../control-seeding/post-bots.md).
 
 Only that bot's own messages can be edited. The fake does not recheck channel permissions or thread archive state for this operation.

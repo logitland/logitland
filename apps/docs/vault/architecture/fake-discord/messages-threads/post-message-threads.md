@@ -58,9 +58,9 @@ operation:
       description: Unknown channel or message.
 source:
   - label: channel.messages.thread
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L436-L452
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L575-L591
   - label: message threads
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L603-L619
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L650-L666
 ---
 
 `/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. Messages receive generated IDs. Replace the message ID with one returned by an earlier request.

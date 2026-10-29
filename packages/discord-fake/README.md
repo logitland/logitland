@@ -59,6 +59,8 @@ The following inventory uses route names from [the implementation](src/rest.ts).
 | `guild.channels` / `guild.roles` / `guild.member.get` | `GET /guilds/:guild/channels`, `/guilds/:guild/roles`, `/guilds/:guild/members/:user` |
 | `guild.member.role.add` / `.remove`                   | `PUT` / `DELETE /guilds/:guild/members/:user/roles/:role`                             |
 | `users.me` / `users.me.edit`                          | `GET` / `PATCH /users/@me`                                                            |
+| `users.me.channels` | `POST /users/@me/channels` |
+| `emojis.list` / `.create` | `GET` / `POST /applications/:app/emojis` |
 | `users.me.guilds`                                     | `GET /users/@me/guilds`                                                               |
 | `applications.me`                                     | `GET /applications/@me`                                                               |
 | `commands.list` / `.put`                              | `GET` / `PUT /applications/:app/guilds/:guild/commands`                               |
@@ -73,8 +75,17 @@ The following inventory uses route names from [the implementation](src/rest.ts).
 - Message listing is newest-first, with `before`, `after` or `around`, and a limit of 1–100 (default 50).
   `after` selects the page closest to the cursor. Missing View Channel gives 50001; missing Read Message History
   returns an empty list. Without Message Content, other users' and webhooks' content is hidden except bot mentions.
-- Bot sends need Send Messages, or Send Messages in Threads. Direct forum sends fail with 40058. Bots edit only their
-  own messages; deleting another author's message requires Manage Messages.
+- Guild bot sends need Send Messages, or Send Messages in Threads. Direct forum sends fail with 40058. Bots edit only their
+  own guild/thread messages; deleting another author's message requires Manage Messages. Message listing, editing and deletion
+  do not support the fake's DM channels.
+- With `flags: 32768` (Components V2), bot sends validate a layout tree instead of only action rows: containers, sections,
+  text displays, thumbnails, separators, rows, and type-only media/file entries. The limit is 40 components including nested
+  entries. Non-null `content`, `embeds`, `poll` and `sticker_ids` are refused beside this flag; the stored message keeps the flag.
+- `POST /users/@me/channels` opens the relay bot's DM with a known user (50033 otherwise), reusing the channel for that user.
+  DMs live in `world.dms`, their messages in `world.messages`. Only the relay bot can send there, with content or components;
+  `world.closedDms` causes 403/50007 on send. DM messages emit no Gateway event.
+- Application emoji live in `world.emojis`; listing returns `{ items }`. Creation validates unique names of 2–32 ASCII letters,
+  digits or underscores and PNG/JPEG/GIF/WebP/AVIF data URI prefixes, without decoding the image or checking its size.
 - Starting a message thread needs Create Public Threads; its ID equals the starter message ID. Opening a private
   thread needs Create Private Threads. Forum/media post creation needs Send Messages and returns the thread with
   its starter message. Thread-member changes need Send Messages in Threads and fail with 50083 when archived.
@@ -91,8 +102,8 @@ Non-empty REST mutation bodies must be JSON with `Content-Type: application/json
 
 `fake.addBot({ username, public })` creates another bot with its own token and application, but no guild membership.
 Add it with `fake.addMember(guildId, { id: bot.user.id })`. Routes marked `any-bot` in the source accept its token:
-identity/profile, guild listing, Gateway discovery, bot-message create/edit/delete and forum/media post creation.
-The non-forum branch of `channel.threads.create` rejects additional bots. Routes marked `bot` reject them with
+identity/profile, guild listing, Gateway discovery, guild/thread bot-message create/edit/delete and forum/media post creation.
+The non-forum branch of `channel.threads.create` and the DM branch of message creation reject additional bots. Routes marked `bot` reject them with
 403/50001 (Missing Access), even after they join the guild. Individual handlers add permission/ownership checks;
 these do not model every Discord access rule. Another bot can also identify on the Gateway.
 
@@ -193,7 +204,8 @@ Paths below are relative to `/_fake`:
 
 ## What is not modelled
 
-Voice traffic, DMs, reactions, embed contents, attachment/file uploads, sharding beyond validating `shard`, compression,
+Voice traffic, DM message reads/edits/deletes and DM Gateway events, reactions, embed contents, attachment/file uploads,
+sharding beyond validating `shard`, compression,
 ETF, global rate-limit enforcement, audit logs, and member/presence intents beyond event filtering are not modelled.
 
 REST permissions use guild roles and channel overwrites, without category inheritance or locked-thread rules.

@@ -10,7 +10,7 @@ operation:
       in: path
       required: true
       type: string
-      description: Channel or thread ID.
+      description: Guild channel or thread ID; DM channels are not supported.
       example: '100000000000000020'
     - name: message
       in: path
@@ -33,18 +33,19 @@ operation:
     '403':
       description: Deleting another author's message requires Manage Messages in the channel (`50013`).
     '404':
-      description: Unknown channel (`10003`) or message (`10008`).
+      description: Unknown or DM channel (`10003`), or unknown message (`10008`).
 source:
   - label: channel.message.delete
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L428
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L567
   - label: Channel permission check
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L183-L185
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L263-L265
   - label: World.deleteMessage
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L497-L504
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L544-L551
 ---
 
 Route name `channel.message.delete`. The `/api/v9` and `/api` prefixes also work.
 Use a message ID returned by [message creation](post-channel-messages.md), not the illustrative ID above.
+Only guild channels and threads are supported. A DM channel returns `404`, code `10003`, even if the message exists.
 The token selects the main fake bot or a bot created with [POST /_fake/bots](../control-seeding/post-bots.md).
 
 Deleting that bot's own message does not recheck channel permissions. Deleting anyone else's message requires Manage Messages,

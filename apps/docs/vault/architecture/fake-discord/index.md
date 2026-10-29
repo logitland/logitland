@@ -34,14 +34,14 @@ Sources: [development-only override](https://github.com/logitland/logitland/blob
 
 ## Endpoint groups
 
-The source registers 30 REST routes and 37 control handlers.
+The source registers 33 REST routes and 37 control handlers.
 One control handler accepts both `DELETE /_fake/failures` and `DELETE /_fake/failures/:id`, making 38 control request forms.
 OAuth adds three handlers, including a Bearer-token variant of REST's `GET /users/@me`.
 The Gateway accepts WebSocket upgrades at `/gateway` and `/`.
 
 | Reference                                           | Coverage                                                                                                                        |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [Bot REST](bot-rest/index.md)                       | Discovery, bot identity/profile, guild listing, application, guild reads, roles, and commands. 13 routes and 13 endpoint pages. |
+| [Bot REST](bot-rest/index.md)                       | Discovery, bot identity/profile, guild listing, application, guild reads, roles, commands, DMs, and application emoji. 16 routes and 16 endpoint pages. |
 | [Messages and threads](messages-threads/index.md)   | Channels, bot messages, webhook creation, and thread management. 11 routes and 11 endpoint pages.                               |
 | [Webhook REST](webhooks/index.md)                   | Six routes, including interaction follow-up branches.                                                                           |
 | [Control seeding](control-seeding/index.md)         | State, guilds, channels, roles, members, bots, webhooks, and application settings. Eight handlers and eight endpoint pages.     |
@@ -117,16 +117,16 @@ Validation errors add a nested `errors` object:
 | Status | Codes used by the fake                                                                                                    |
 | ------ | ------------------------------------------------------------------------------------------------------------------------- |
 | `400`  | `50035` invalid fields; `50109` invalid JSON; `50006` empty message; `50024` wrong channel type; `50083` archived thread. |
-| `400`  | `10087` unknown tag; `160004` existing message thread; `30007` webhook limit; `40058` direct forum message.               |
+| `400`  | `10087` unknown tag; `160004` existing message thread; `30007` webhook limit; `40058` direct forum message; `50033` invalid DM recipient.               |
 | `400`  | `220001` missing forum thread; `220002` conflicting forum thread inputs; `220003` forum-only inputs elsewhere.            |
 | `401`  | `0` invalid bot credentials; `50027` invalid webhook or interaction token.                                                |
-| `403`  | `50001` missing access; `50013` missing permissions; `50005` editing another author's message.                            |
+| `403`  | `50001` missing access; `50013` missing permissions; `50005` editing another author's message; `50007` closed DMs.                            |
 | `404`  | `10003` channel; `10004` guild; `10007` member; `10008` message; `10011` role; `10015` webhook.                           |
 
 An interaction follow-up attempted before acknowledgement returns `404`, code `10015` (Unknown Webhook).
 
 Sources: [error definitions](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L252),
-[validation error builder](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L279).
+[validation error builder](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L304).
 
 Matched REST routes normally return rate-limit headers, including authentication and validation failures.
 Unknown routes, oversized bodies, dropped connections, OAuth, and control responses do not carry these bucket headers.
@@ -143,7 +143,9 @@ Source: [buckets, headers, and failure handling](https://github.com/logitland/lo
 
 Tables name the actual object types rather than repeat every field.
 A Message contains IDs, author, content, timestamps, mentions, embeds, attachments, components, type, and flags.
-A Channel contains IDs, type, name, parent, position, overwrites, and optional thread metadata or forum tags.
+A guild Channel contains IDs, type, name, parent, position, overwrites, and optional thread metadata or forum tags.
+A DM Channel has `type: 1`, `id`, `last_message_id` and `recipients`; only the relay bot can open and send to it.
+DM message reads, edits, deletes and Gateway events are not implemented; see [opening a DM](bot-rest/post-users-me-channels.md).
 Permission bitfields are decimal strings.
 
 Sources: [User, Role, and Member](https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L74),

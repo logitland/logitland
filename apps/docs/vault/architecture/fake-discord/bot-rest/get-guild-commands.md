@@ -34,7 +34,7 @@ operation:
       description: Unknown guild (`10004`).
 source:
   - label: commands.list
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L310
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L430
   - label: ApplicationCommand object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L219
 ---

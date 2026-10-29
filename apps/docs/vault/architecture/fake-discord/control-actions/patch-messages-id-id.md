@@ -39,5 +39,5 @@ source:
   - label: message edit
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L212
   - label: World.editMessage
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L479-L495
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L526-L542
 ---

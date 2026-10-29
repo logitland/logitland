@@ -38,9 +38,9 @@ operation:
       description: Unknown channel or user is not a member of the thread's guild.
 source:
   - label: channel.thread_members.add
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L494-L504
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L633-L643
   - label: thread membership
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L590-L600
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L637-L647
 ---
 
 `/api/v9` and `/api` also work. Replace the thread ID with one returned by an earlier request. The example member comes from [`POST /_fake/members`](../control-seeding/post-members.md) with an explicit ID.

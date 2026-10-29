@@ -43,7 +43,7 @@ source:
   - label: roles
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L153
   - label: role creation and defaults
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L168-L196
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L176-L204
 ---
 
 The role ID generates when omitted. This seeding endpoint does not enforce the bot's role hierarchy or validate position bounds.

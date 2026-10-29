@@ -39,11 +39,11 @@ operation:
       description: Unknown guild (`10004`), member (`10007`), or role (`10011`).
 source:
   - label: shared role-change handler
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L286
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L406
   - label: guild.member.role.add
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L301
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L421
   - label: role update and Gateway event
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L378
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L386
 ---
 
 Route name `guild.member.role.add`.

@@ -44,7 +44,7 @@ operation:
       description: Unknown channel.
 source:
   - label: channel.webhooks.create
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L357-L368
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L477-L488
   - label: Webhook object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L161
 ---

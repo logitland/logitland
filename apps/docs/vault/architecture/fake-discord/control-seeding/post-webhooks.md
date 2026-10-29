@@ -40,7 +40,7 @@ source:
   - label: webhook creation result
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L344-L348
   - label: webhook defaults
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L300-L313
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L308-L321
 ---
 
 The ID and token generate when omitted. This seeding endpoint requires an existing channel but does not check channel type or bot permissions.

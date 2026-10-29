@@ -42,7 +42,7 @@ source:
   - label: thread edit
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L236-L246
   - label: thread mutations
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L647-L659
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L694-L706
 ---
 
 Omitted or `null` fields stay unchanged. Applied tag IDs are not validated against the parent channel's available tags.

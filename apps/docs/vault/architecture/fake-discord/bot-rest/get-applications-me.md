@@ -20,11 +20,11 @@ operation:
       description: Missing or wrong bot token (`0`).
 source:
   - label: applications.me
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L261
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L341
   - label: application object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L267
   - label: another bot's application object
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L204
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L284
 ---
 
 Route name `applications.me`. The `/api/v9` and `/api` prefixes also work.

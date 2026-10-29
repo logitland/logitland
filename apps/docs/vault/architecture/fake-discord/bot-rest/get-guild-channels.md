@@ -29,7 +29,7 @@ operation:
       description: Unknown guild (`10004`).
 source:
   - label: guild.channels
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L267
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L387
   - label: Channel object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L138
 ---

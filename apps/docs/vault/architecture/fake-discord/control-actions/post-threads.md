@@ -44,7 +44,7 @@ source:
   - label: DiscordFake.startThread
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L403-L405
   - label: World.createThreadFromMessage
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L603-L619
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L650-L666
 ---
 
 Text channels produce public threads (`type: 11`); announcement channels produce announcement threads (`type: 10`).

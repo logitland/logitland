@@ -29,7 +29,7 @@ operation:
       description: Unknown webhook (`10015`), including one already deleted.
 source:
   - label: webhook.delete
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L529-L532
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L668-L671
 ---
 
 No `Authorization` header is needed. Deletion removes the webhook, not its existing messages. A second delete returns `404/10015` because the webhook lookup happens first.

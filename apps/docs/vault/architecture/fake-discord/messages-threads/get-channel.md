@@ -30,7 +30,7 @@ operation:
       description: Unknown channel.
 source:
   - label: channel.get
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L355
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L475
   - label: Channel object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L138
 ---

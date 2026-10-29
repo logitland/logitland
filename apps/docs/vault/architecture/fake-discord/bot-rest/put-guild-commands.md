@@ -95,9 +95,9 @@ operation:
       description: Unknown guild (`10004`).
 source:
   - label: commands.put
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L314
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L434
   - label: option validation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L630
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L769
 ---
 
 Route name `commands.put`. The `/api/v9` and `/api` prefixes also work.

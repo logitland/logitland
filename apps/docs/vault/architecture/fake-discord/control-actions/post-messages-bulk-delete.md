@@ -37,7 +37,7 @@ source:
   - label: bulk delete
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L203-L210
   - label: World.deleteMessages
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L506-L517
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L553-L564
 ---
 
 Every distinct ID must exist in the channel; if any is missing, no messages are deleted.

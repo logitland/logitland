@@ -34,7 +34,7 @@ operation:
       description: Unknown guild (`10004`) or member (`10007`).
 source:
   - label: guild.member.get
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L279
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L399
   - label: Member object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L100
 ---

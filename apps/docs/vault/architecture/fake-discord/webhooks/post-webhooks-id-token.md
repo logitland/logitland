@@ -87,11 +87,11 @@ operation:
       description: Unknown webhook (`10015`), or unknown channel/thread or thread from another parent (`10003`).
 source:
   - label: execution fields and forum rules
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L534-L590
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L673-L729
   - label: thread target
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L187-L200
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L267-L280
   - label: forum creation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L625-L645
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L672-L692
 ---
 
 Handles a webhook route using the token in the path. No Authorization header is required.

@@ -41,9 +41,9 @@ source:
   - label: members
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L162
   - label: member defaults and role validation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L199-L228
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L207-L236
   - label: existing users
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L117-L131
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L125-L139
 ---
 
 For a new user, the ID generates when omitted. `username` defaults to `user-` followed by the supplied ID's last four characters,

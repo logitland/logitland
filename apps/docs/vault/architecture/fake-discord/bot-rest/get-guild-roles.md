@@ -29,7 +29,7 @@ operation:
       description: Unknown guild (`10004`).
 source:
   - label: guild.roles
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L273
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L393
   - label: Role object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L84
 ---

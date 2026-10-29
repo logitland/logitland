@@ -51,9 +51,9 @@ operation:
       description: Unknown channel.
 source:
   - label: channel.messages.list
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L370-L389
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L490-L509
   - label: pagination
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L520-L531
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L567-L578
   - label: REST content filtering
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L297-L302
 ---

@@ -54,9 +54,9 @@ source:
   - label: person message behavior
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L350-L389
   - label: world message mutations
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L443-L477
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L490-L524
   - label: World.createForumPost
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L625-L645
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L672-L692
 ---
 
 For a forum or media post, the returned Message's `id` and `channel_id` both identify the new thread.

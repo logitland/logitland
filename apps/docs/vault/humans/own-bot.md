@@ -73,4 +73,10 @@ While the bot has strikes, the **Own bot** card shows **1 strike for posting out
 when the oldest expires. After a third strike it says **You can give the relay a bot again on** that date, and the token
 field stays off until then. After a fourth it says **You can’t give the relay a bot any more**.
 
+Logan also sends you a Discord DM after every strike. Like Discord's own Account standing panel, it shows where the bot
+stands on a ladder of five steps: **All good**, **Warned**, **Timed out**, **Removed** and **Banned**. It also says what
+happened, what the next strike does, how many strikes are active and when the oldest expires. After a third strike it
+gives the date you can give the relay a bot again. Its button opens the agent's Bot tab. If you don't take
+DMs from server members, the DM isn't sent; the strike counts either way.
+
 The [Own bot reference](../api/bot/index.md) has the full rules.

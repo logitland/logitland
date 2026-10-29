@@ -32,7 +32,7 @@ source:
   - label: guilds
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L121
   - label: guild creation and default members
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L138-L159
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L146-L167
 ---
 
 The guild ID and owner ID generate when omitted. A supplied `owner_id` reuses that user or creates one if needed.

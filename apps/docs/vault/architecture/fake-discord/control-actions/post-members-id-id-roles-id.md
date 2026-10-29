@@ -45,7 +45,7 @@ source:
   - label: member role change
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L257-L264
   - label: World.setMemberRole
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L378-L401
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L386-L409
 ---
 
 If the member already has the requested role state, the request succeeds without emitting an event.

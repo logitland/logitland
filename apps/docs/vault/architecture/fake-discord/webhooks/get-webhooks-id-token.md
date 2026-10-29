@@ -29,7 +29,7 @@ operation:
       description: Unknown webhook (`10015`).
 source:
   - label: webhook.get
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L525-L527
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L664-L666
 ---
 
 Use the token from [`POST /_fake/webhooks`](../control-seeding/post-webhooks.md) or [`POST /channels/:channel/webhooks`](../messages-threads/post-channel-webhooks.md). No `Authorization` header is needed. The response includes the webhook token; treat it as a credential for this local fake.

@@ -25,7 +25,7 @@ source:
   - label: thread deletion
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L248-L255
   - label: World.deleteThread
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L661-L669
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L708-L716
 ---
 
 Deleting a thread started from a message leaves that starter message in the parent channel.

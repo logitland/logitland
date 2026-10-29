@@ -84,11 +84,11 @@ operation:
       description: Unknown channel.
 source:
   - label: channel.threads.create
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L454-L492
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L593-L631
   - label: thread creation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L571-L587
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L618-L634
   - label: forum and media posts
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L625-L645
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L672-L692
 ---
 
 `/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID.

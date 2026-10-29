@@ -41,7 +41,7 @@ operation:
       description: Wrong webhook token (`50027`).
 source:
   - label: webhook.message.get
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L601-L604
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L740-L743
 ---
 
 No `Authorization` header is needed. Include `thread_id` to read a message inside a thread, including a forum/media post. The thread must belong to the webhook's parent channel. Omitting it searches only the parent channel's message list.

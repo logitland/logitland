@@ -90,7 +90,7 @@ source:
   - label: channel types
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L4
   - label: channel and tag creation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L231-L266
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L239-L274
   - label: channel summary
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L36-L54
 ---

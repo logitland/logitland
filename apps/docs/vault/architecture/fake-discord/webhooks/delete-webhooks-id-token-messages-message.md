@@ -41,7 +41,7 @@ operation:
       description: Wrong webhook token (`50027`).
 source:
   - label: webhook.message.delete
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L619-L625
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L758-L764
 ---
 
 No `Authorization` header is needed. A normal webhook can delete only its own messages. Include `thread_id` for a message in a thread, including a forum/media post; the thread must belong to the webhook's parent channel. Omitting it searches only the parent channel. A second delete returns `404/10008`.

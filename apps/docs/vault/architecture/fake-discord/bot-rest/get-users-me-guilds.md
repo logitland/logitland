@@ -27,7 +27,7 @@ operation:
       description: Missing or unknown bot token (`0`).
 source:
   - label: users.me.guilds
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L253
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L333
   - label: Bot token lookup
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L338
 ---

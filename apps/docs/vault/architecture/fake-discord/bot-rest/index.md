@@ -1,10 +1,10 @@
 ---
 title: Bot REST
-description: Discovery, bot and application identity, guild reads, member roles, and application commands.
+description: Discovery, bot and application identity, guild reads, member roles, application commands, DMs and application emoji.
 order: 1
 source:
   - label: REST route registration
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L218
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L298
   - label: bot token lookup
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L338
   - label: authentication boundary
@@ -46,3 +46,13 @@ See [shared REST rules](../index.md#rest-authentication-and-responses) for error
 | ------------------------------------------------------------------------ | --------------------------------- |
 | [GET `/applications/:app/guilds/:guild/commands`](get-guild-commands.md) | Read the registered command list. |
 | [PUT `/applications/:app/guilds/:guild/commands`](put-guild-commands.md) | Replace the whole command list.   |
+
+## DMs and application emoji
+
+These routes accept only the relay bot's token, not tokens created with `POST /_fake/bots`.
+
+| Route | Purpose |
+| --- | --- |
+| [POST `/users/@me/channels`](post-users-me-channels.md) | Open a DM with a known user. |
+| [GET `/applications/:app/emojis`](get-application-emojis.md) | List application emoji. |
+| [POST `/applications/:app/emojis`](post-application-emojis.md) | Create an application emoji. |

@@ -27,7 +27,7 @@ operation:
       description: Missing or wrong bot token (`0`).
 source:
   - label: gateway.bot
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L225
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L305
   - label: session limit defaults
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L173
 ---

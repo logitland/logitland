@@ -30,7 +30,7 @@ source:
   - label: reset
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L443-L449
   - label: message and thread cleanup
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L685-L692
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L732-L740
 ---
 
 Always clears the request log, Gateway frame log, failure rules, and rate-limit bucket counts. Rate-limit settings remain unchanged.

@@ -46,9 +46,9 @@ operation:
       description: Unknown channel.
 source:
   - label: channel.modify
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L508-L521
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L647-L660
   - label: thread modification
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L647-L660
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L694-L707
 ---
 
 `/api/v9` and `/api` also work. Omitted fields stay unchanged.
