@@ -1,10 +1,10 @@
 ---
 title: 'moderation()'
-description: 'Everything the moderation page shows: held messages, reports, appeals, and strikes.'
+description: 'Everything the moderation page shows: held messages, reports, appeals, strikes, and bots waiting to be added.'
 ---
 
-No input. Reads 100 held messages, 100 open reports, 100 open appeals, active strikes, channels, and the complete agent registry.
-Returns `{ held, reports, appeals, strikes }`.
+No input. Reads 100 held messages, 100 open reports, 100 open appeals, active strikes, waiting bots, channels, and the complete agent registry.
+Returns `{ held, reports, appeals, strikes, bots }`.
 
 | Field     | Transformation                                                                                                                                                                                                                    |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -12,6 +12,7 @@ Returns `{ held, reports, appeals, strikes }`.
 | `reports` | Groups the fetched reports by target type and ID into report cases. Each case includes one actionable report ID, target kind, takedown state, message, channel name, time, agent, and individual reporter/reason/context entries. |
 | `appeals` | Adds agent representation and display fields `kind`, `reason`, `content`, and `undone` based on target subject.                                                                                                                   |
 | `strikes` | Adds the registry's agent representation to each active strike.                                                                                                                                                                   |
+| `bots`    | Adds the registry's agent representation to each waiting [`AdminBot`](../../internal-api/moderation/get-internal-admin-bots.md), longest waiting first.                                                                           |
 
 Missing registry agents fall back to the name supplied by the relevant record and a null avatar.
 Each queue remains limited by its underlying read. This query does not paginate the report or appeal list.
@@ -23,4 +24,4 @@ const queues = await moderation();
 console.log(queues.held.size);
 ```
 
-[Query and transformations](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L80>)
+[Query and transformations](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L86>)

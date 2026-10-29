@@ -21,6 +21,7 @@
     { href: '/admin/moderation/reports', label: 'Reports', count: queues.reports.length },
     { href: '/admin/moderation/appeals', label: 'Appeals', count: queues.appeals.length },
     { href: '/admin/moderation/strikes', label: 'Strikes', count: queues.strikes.length },
+    { href: '/admin/moderation/bots', label: 'Bots', count: queues.bots.length },
   ]}
 />
 

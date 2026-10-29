@@ -23,9 +23,10 @@ const STANDING_EMOJI_NAMES = Object.keys(STANDING_EMOJI);
 /** A Discord where the agent's bot (BOT_TOKEN) and the relay's own bot both answer; `bot` is the agent's bot as Discord sees it. */
 function discordWithBot(h: Harness) {
   const bot = {
+    /** Change it to stand for another bot behind the same token. */
+    id: BOT_ID,
     guilds: [] as string[],
     roles: [] as string[],
-    public: false,
     username: 'helper-bot',
     revoked: false,
     failRoleRemovals: 0,
@@ -33,6 +34,8 @@ function discordWithBot(h: Harness) {
     /** The relay's bot lacks Moderate Members and Manage Messages: Discord refuses its timeouts and deletes. */
     refuseTimeout: false,
     refuseDelete: false,
+    /** The relay's own bot's messages Discord won't edit. */
+    refusedEdits: new Set<string>(),
     /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
     holdGateway: 0,
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
@@ -63,9 +66,10 @@ function discordWithBot(h: Harness) {
       if (bot.revoked) return Response.json({ message: '401: Unauthorized', code: 0 }, { status: 401 });
       if (path === '/users/@me') {
         if (req.method === 'PATCH') bot.username = body.username ?? bot.username;
-        return Response.json({ id: BOT_ID, username: bot.username, bot: true });
+        return Response.json({ id: bot.id, username: bot.username, bot: true });
       }
-      if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: bot.public });
+      // Public: Discord lets only an application's owner add a private bot, so staff can add only a public one.
+      if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: true });
       if (path === '/users/@me/guilds') return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
       if (path === '/gateway/bot') {
         await gateway();
@@ -100,6 +104,7 @@ function discordWithBot(h: Harness) {
     if (req.method === 'DELETE' && bot.refuseDelete && /\/messages\/\d+$/.test(path))
       return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
     if (req.method === 'DELETE') return new Response(null, { status: 204 });
+    if (req.method === 'PATCH' && bot.refusedEdits.has(path.split('/').pop()!)) return new Response('upstream error', { status: 503 });
     if (path === '/applications/@me') return Response.json(application([ADMIN_DISCORD]));
     if (/^\/applications\/\d+\/emojis$/.test(path)) return Response.json({ items: bot.emoji });
     if (path === '/users/@me/channels') return Response.json({ id: OWNER_DM, type: 1 });
@@ -165,18 +170,12 @@ describe('giving the relay a bot', () => {
     expect((await steps()).join('\n')).not.toContain('PUT /v1/me/bot');
   });
 
-  it('refuses an orphan, a public bot, and a bot that is in another server', async () => {
+  it('refuses an orphan, and a bot that is in another server', async () => {
     const { h, owner, bot } = await adopted();
     const orphan = await seedAgent(h.relay);
     expect((await give(h, orphan)).status).toBe(403);
 
     const adoptee = await seedAgent(h.relay, { ownerId: owner.id });
-    bot.public = true;
-    const pub = await give(h, adoptee);
-    expect(pub.status).toBe(422);
-    expect((await json(pub)).detail).toMatch(/Your bot is public/);
-
-    bot.public = false;
     bot.guilds.push(OTHER_SERVER);
     const res = await give(h, adoptee);
     expect(res.status).toBe(422);
@@ -186,9 +185,9 @@ describe('giving the relay a bot', () => {
 
   it('takes one accepted bot a day, removing it doesn’t reset that, and refused tokens don’t count', async () => {
     const { h, a, bot } = await adopted();
-    bot.public = true;
+    bot.guilds.push(OTHER_SERVER);
     expect((await give(h, a)).status).toBe(422);
-    bot.public = false;
+    bot.guilds = [];
     expect((await give(h, a)).status).toBe(200);
 
     await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token));
@@ -213,15 +212,15 @@ describe('giving the relay a bot', () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
     await staffAdd(h, bot);
-    bot.public = true;
+    bot.revoked = true;
     await laterCheck(h);
-    bot.public = false;
+    bot.revoked = false;
     expect((await give(h, a)).status).toBe(200);
   });
 });
 
 describe('posting as the bot', () => {
-  it('posts through the webhook until staff add the bot, then as the bot with the agent’s roles and a native reply', async () => {
+  it('posts through the webhook until staff add the public bot, then as the bot with the agent’s roles and a native reply', async () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
     expect((await json(await post(h, a, say('Before the bot joined')))).status).toBe('sent');
@@ -283,18 +282,6 @@ describe('posting as the bot', () => {
     expect(bot.roles).toEqual([]);
     expect((await json(await post(h, a, say('Back on the webhook')))).status).toBe('sent');
     expect((await calls(h, 'POST', /\/channels\/\d+\/messages$/)).filter(asBot)).toEqual([]);
-  });
-
-  it('pauses when the bot becomes public', async () => {
-    const { h, a, bot } = await adopted();
-    await give(h, a);
-    await staffAdd(h, bot);
-    bot.public = true;
-    await laterCheck(h);
-
-    const { bot: status } = await json(await h.call('GET', '/v1/me/bot', undefined, h.as(a.token)));
-    expect(status).toMatchObject({ status: 'paused', paused_reason: expect.stringMatching(/became public/) });
-    expect(bot.roles).toEqual([]);
   });
 
   it('kicks a bot its agent stopped posting as, so it can’t stay behind unwatched', async () => {
@@ -446,10 +433,10 @@ describe('intake', () => {
 describe('posting outside the relay', () => {
   it('deletes what the bot posts by itself, logs it for staff and strikes the bot once a burst, but keeps a send the Gateway shows first', async () => {
     const { h, a, bot } = await adopted();
-    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
     await h.call('POST', '/v1/subscriptions', { kind: 'replies' }, h.as(a.token));
     await give(h, a);
     await staffAdd(h, bot);
+    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
     // While the relay's send is still waiting for Discord's answer, the Gateway shows it with two posts the relay didn't send.
     bot.beforeAnswer = (m) =>
       ingest(h.relay, {
@@ -492,9 +479,9 @@ describe('posting outside the relay', () => {
 
   it('deletes a message the bot edited itself and logs both texts, but not the relay’s own edit that the Gateway shows first', async () => {
     const { h, a, bot } = await adopted();
-    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
     await give(h, a);
     await staffAdd(h, bot);
+    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
     const msg = await json(await post(h, a, say('The first version of this')));
     const edit = (content: string) => ({
       kind: 'message_update',
@@ -773,5 +760,160 @@ describe('the owner’s DM', () => {
     expect(h.log.lines.filter((l) => l.event === 'bot_strikes.owner_dm_failed').map((l) => l.fields.closed)).toEqual([true]);
     const page = await json(await h.call('GET', '/v1/events', undefined, h.as(a.token)));
     expect(page.digests.flatMap((d: { events: { type: string }[] }) => d.events).map((e: { type: string }) => e.type)).toContain('bot.struck');
+  });
+});
+
+describe('staff adding the bot from the mod queue', () => {
+  const OTHER_BOT = '500000000000000003';
+  const queueEdits = async (h: Harness) =>
+    (await calls(h, 'PATCH', new RegExp(`/channels/${STAFF}/messages/\\d+$`))).map((c) => [c.url.pathname.split('/').pop(), c.body.content as string]);
+  const asStaff = async (h: Harness) => {
+    const staff = await seedOwner(h.relay, ADMIN_DISCORD, 'admin');
+    return (path: string) => h.internal('GET', path, undefined, { 'x-logitland-owner': staff.id });
+  };
+  const waiting = (a: { id: string }, bot = 'Wren') =>
+    `Wren’s own bot \`${bot}\` is waiting to be added to the server. Owner: <@200000000000000001>.\n[Add it from the dashboard](https://logitland.test/admin/moderation/bots/${a.id})`;
+
+  async function queued() {
+    const setup = await adopted();
+    await updateSettings(setup.h.relay, 'own_admin', { alerts_channel_id: STAFF });
+    return setup;
+  }
+
+  it('posts one message for a waiting bot, linking to its page, whose Add to server link is Discord’s for this bot and server', async () => {
+    const { h, a, owner } = await queued();
+    await give(h, a);
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect(await staffAlerts(h)).toEqual([waiting(a)]);
+
+    const staff = await asStaff(h);
+    const { bots } = await json(await staff('/internal/admin/bots'));
+    expect(bots).toEqual([
+      {
+        agent_id: a.id,
+        agent_name: 'Wren',
+        owner: { discord_user_id: '200000000000000001', username: 'luna-test' },
+        bot_user_id: BOT_ID,
+        application_id: APP_ID,
+        username: 'Wren',
+        status: 'waiting',
+        paused_reason: null,
+        created_at: expect.any(String),
+        add_url: `https://discord.com/oauth2/authorize?client_id=${APP_ID}&scope=bot&permissions=0&guild_id=${GUILD}&disable_guild_select=true`,
+      },
+    ]);
+    expect(await json(await staff(`/internal/admin/bots/${a.id}`))).toEqual(bots[0]);
+    expect((await h.internal('GET', '/internal/admin/bots', undefined, asOwner(owner.id))).status).toBe(403);
+  });
+
+  it('rewrites its message for a bot that replaces the waiting one, instead of posting again', async () => {
+    const { h, a, bot } = await queued();
+    await give(h, a);
+    h.advance(DAY);
+    bot.id = OTHER_BOT;
+    bot.username = 'helper-two';
+    expect((await give(h, a)).status).toBe(200);
+
+    expect(await staffAlerts(h)).toHaveLength(1);
+    expect((await queueEdits(h)).map(([, c]) => c)).toEqual([waiting(a)]);
+    expect(await h.db.prepare('SELECT queue_shows FROM agent_bots WHERE agent_id = ?').bind(a.id).first()).toEqual({ queue_shows: `waiting:${OTHER_BOT}` });
+  });
+
+  it('says the bot was added once it joins, and it leaves the waiting list', async () => {
+    const { h, a, bot } = await queued();
+    await give(h, a);
+    const message = await h.db.prepare('SELECT queue_message_id AS id FROM agent_bots WHERE agent_id = ?').bind(a.id).first<{ id: string }>();
+    await staffAdd(h, bot);
+
+    expect(await queueEdits(h)).toEqual([[message!.id, 'Wren’s own bot `Wren` was added to the server.']]);
+    const staff = await asStaff(h);
+    expect((await json(await staff('/internal/admin/bots'))).bots).toEqual([]);
+    expect(await json(await staff(`/internal/admin/bots/${a.id}`))).toMatchObject({ status: 'active' });
+    await laterCheck(h);
+    expect(await queueEdits(h)).toHaveLength(1);
+  });
+
+  it('says so when the bot is paused or removed before staff add it', async () => {
+    const { h, a, bot } = await queued();
+    await give(h, a);
+    bot.guilds.push(OTHER_SERVER);
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect((await queueEdits(h)).map(([, c]) => c)).toEqual(['Wren’s own bot `Wren` was paused before it was added, so there’s nothing to add.']);
+
+    bot.guilds = [];
+    await give(h, a);
+    await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token));
+    expect(await staffAlerts(h)).toEqual([waiting(a), waiting(a)]);
+    expect((await queueEdits(h)).map(([, c]) => c).at(-1)).toBe('Wren’s own bot `Wren` was removed before it was added, so there’s nothing to add.');
+  });
+
+  it('posts at the next run when there was no mod queue to post in', async () => {
+    const { h, a } = await adopted();
+    await give(h, a);
+    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect(await staffAlerts(h)).toEqual([waiting(a)]);
+  });
+
+  it('posts once more when staff delete the message while the bot still waits', async () => {
+    const { h, a } = await queued();
+    await seedChannel(h.relay, { id: STAFF, access: 'off', webhookUrl: null });
+    await give(h, a);
+    const message = await h.db.prepare('SELECT queue_message_id AS id FROM agent_bots WHERE agent_id = ?').bind(a.id).first<{ id: string }>();
+    await ingest(h.relay, { source: 'test', events: [{ kind: 'message_delete', channel_id: STAFF, message_id: message!.id }] });
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect(await staffAlerts(h)).toEqual([waiting(a), waiting(a)]);
+  });
+
+  it('removes the bot at once when Discord refuses to say so, and says so at a later run', async () => {
+    const { h, a, bot } = await queued();
+    await give(h, a);
+    const message = await h.db.prepare('SELECT queue_message_id AS id FROM agent_bots WHERE agent_id = ?').bind(a.id).first<{ id: string }>();
+    bot.refusedEdits.add(message!.id);
+    expect((await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token))).ok).toBe(true);
+    expect(await h.db.prepare('SELECT 1 FROM agent_bots WHERE agent_id = ?').bind(a.id).first()).toBeNull();
+
+    bot.refusedEdits.clear();
+    for (let run = 0; run < 2; run++) {
+      h.advance(60_000);
+      await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    }
+    const removed = 'Wren’s own bot `Wren` was removed before it was added, so there’s nothing to add.';
+    expect(await queueEdits(h)).toEqual([
+      [message!.id, removed],
+      [message!.id, removed],
+    ]);
+  });
+
+  it('gets to every message Discord refused, though the oldest ten keep failing', async () => {
+    const { h, owner, bot } = await queued();
+    const ids: string[] = [];
+    for (let i = 0; i < 11; i++) {
+      const agent = await seedAgent(h.relay, { name: `Agent ${i}`, ownerId: owner.id });
+      const id = `32000000000000000${i.toString().padStart(2, '0')}`;
+      const botId = `5100000000000000${i.toString().padStart(2, '0')}`;
+      const checked = new Date(h.now().getTime() - (11 - i) * 60_000).toISOString();
+      await h.db
+        .prepare(
+          `INSERT INTO agent_bots (agent_id, bot_user_id, application_id, username, token_ciphertext, status, paused_reason, checked_at, created_at, updated_at,
+             queue_channel_id, queue_message_id, queue_shows) VALUES (?, ?, ?, 'helper', 'sealed', 'paused', 'joined another server', ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(agent.id, botId, APP_ID, checked, checked, checked, STAFF, id, `waiting:${botId}`)
+        .run();
+      ids.push(id);
+    }
+    for (const id of ids.slice(0, 10)) bot.refusedEdits.add(id);
+    for (let run = 0; run < 2; run++) {
+      h.advance(60_000);
+      await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    }
+    expect((await queueEdits(h)).filter(([id]) => id === ids[10])).toHaveLength(1);
   });
 });
