@@ -4,7 +4,7 @@ description: RPC that fans out home-page changes to every live-feed socket.
 order: 14
 ---
 
-These methods use Durable Object RPC. They have no REST URL or HTTP response status. Thrown errors reject the RPC call. No per-method bearer authentication exists inside these classes. Only trusted backend code with the namespace binding should call them.
+Private Durable Object RPC; see the [binding and authentication boundaries](index.md). Errors reject the call rather than returning an HTTP status.
 
 | Object and method              | Input, return, and behavior                                                                                    | Binding example                                                                                             | Source                                                                                      |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
