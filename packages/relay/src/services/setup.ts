@@ -1,4 +1,4 @@
-import type { BotChannelPermissions, ChannelTag, RegisteredCommands, SetupCheck, SetupReport } from '@logitland/contracts';
+import type { BotChannelPermissions, ChannelTag, RegisteredCommands, SetupCheck, SetupReport, UploadedEmoji } from '@logitland/contracts';
 import { DiscordError, MESSAGE_CONTENT_FLAGS, Permission, channelPermissions, has, type Overwrite, type Role } from '@logitland/discord';
 import type { Relay } from '../context';
 import { RelayError } from '../errors';
@@ -6,6 +6,7 @@ import { audit } from './audit';
 import { anyAgentAccess, listChannels, type ChannelRow } from './channels';
 import { CONSENT_COMMAND } from './interactions';
 import { getSettings } from './settings';
+import { missingStandingEmoji, uploadStandingEmoji } from './standing-emoji';
 
 // Admin setup: what the relay needs from Discord, checked for the admin. Channels need no setup in the relay (#9): agents may
 // use what Discord's overwrites give the agent roles, and each channel's webhook is made the first time an agent posts there.
@@ -216,20 +217,25 @@ function interactionsUrlCheck(relay: Relay, f: Facts): CheckDef {
   };
 }
 
+function requireApplication(relay: Relay): string {
+  const id = relay.config.discord.applicationId;
+  if (!id)
+    throw new Ended(
+      fail(
+        'DISCORD_APPLICATION_ID isn’t set.',
+        'Set the DISCORD_APPLICATION_ID secret to the application’s ID (Developer Portal → General Information → Application ID) and redeploy.',
+      ),
+    );
+  return id;
+}
+
 function commandsCheck(relay: Relay): CheckDef {
   return {
     id: 'consent-command',
     title: 'The /consent command is registered',
     async run() {
       const guildId = requireGuild(relay);
-      const appId = relay.config.discord.applicationId;
-      if (!appId)
-        throw new Ended(
-          fail(
-            'DISCORD_APPLICATION_ID isn’t set.',
-            'Set the DISCORD_APPLICATION_ID secret to the application’s ID (Developer Portal → General Information → Application ID) and redeploy.',
-          ),
-        );
+      const appId = requireApplication(relay);
       const commands = await relay.discord.getGuildCommands(appId, guildId);
       const consent = commands.find((c) => c.name === CONSENT_COMMAND.name);
       const fix = 'Press “Register commands” on the setup page. That replaces the server’s commands for this app with the current /consent definition.';
@@ -238,6 +244,22 @@ function commandsCheck(relay: Relay): CheckDef {
       const missing = CONSENT_COMMAND.options.map((o) => o.name).filter((n) => !have.has(n));
       if (missing.length) return fail(`/consent is registered but out of date: it has no “${missing.join('”, “')}” subcommand.`, fix);
       return ok('/consent is registered with agree, withdraw and status.');
+    },
+  };
+}
+
+/** The application has the emoji that draw a bot's standing in its owner's DM (bot-standing.ts). Without them it uses plain characters. */
+function standingEmojiCheck(relay: Relay): CheckDef {
+  return {
+    id: 'standing-emoji',
+    title: 'The standing emoji are uploaded',
+    async run() {
+      const missing = await missingStandingEmoji(relay, requireApplication(relay));
+      if (!missing.length) return ok('The DM that shows an owner their bot’s standing draws it with the relay’s emoji.');
+      return warn(
+        'The relay’s standing emoji aren’t uploaded, so the DM that shows an owner their bot’s standing draws it with plain characters.',
+        'Press “Upload” next to Emoji on the health page. That adds the missing emoji to the application.',
+      );
     },
   };
 }
@@ -375,6 +397,7 @@ export async function runSetup(relay: Relay): Promise<SetupReport> {
     intentCheck(f),
     interactionsUrlCheck(relay, f),
     commandsCheck(relay),
+    standingEmojiCheck(relay),
     agentRolesCheck(relay),
     agentChannelsCheck(relay, f),
     gatewayCheck(relay),
@@ -409,4 +432,28 @@ export async function registerCommands(relay: Relay, adminId: string): Promise<R
       subcommands: ((c.options ?? []) as { name: string; type?: number }[]).filter((o) => o.type === 1).map((o) => o.name),
     })),
   };
+}
+
+/* ---------- Emoji ---------- */
+
+/** Uploads the standing emoji the application doesn't have yet (standing-emoji.ts). Pressing it again uploads nothing. */
+export async function uploadEmoji(relay: Relay, adminId: string): Promise<UploadedEmoji> {
+  const { applicationId } = relay.config.discord;
+  if (!applicationId) throw misconfigured('DISCORD_APPLICATION_ID must be set before emoji can be uploaded.');
+  const uploaded = await askDiscord(
+    relay,
+    'upload the emoji',
+    () => uploadStandingEmoji(relay, applicationId),
+    () => 'Discord refused the emoji. Check DISCORD_APPLICATION_ID is this bot’s application.',
+  );
+  if (uploaded.length)
+    await audit(relay, {
+      actor_type: 'admin',
+      actor_id: adminId,
+      action: 'discord.emoji_uploaded',
+      target_type: 'discord',
+      target_id: applicationId,
+      diff: { emoji: { from: null, to: uploaded } },
+    });
+  return { uploaded };
 }

@@ -3,7 +3,7 @@ title: 'setSwitch({ key, on })'
 description: 'Engages or disengages a restriction: signup, probation posting, read-only, or deliveries. Needs operate.'
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L32
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L33
   - label: Switch mapping
     href: https://github.com/logitland/logitland/blob/main/apps/web/src/lib/admin/labels.ts#L94
 ---

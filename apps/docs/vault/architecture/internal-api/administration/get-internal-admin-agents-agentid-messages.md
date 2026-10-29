@@ -50,7 +50,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-agents.ts#L67
   - label: Message schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1251
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1255
 ---
 
 The result is `{ messages: OwnerMessage[], next_before: MessageId | null }`. The message statuses and fields match the [owner message contract](../owners/index.md#messages-and-channel-names).

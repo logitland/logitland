@@ -99,6 +99,7 @@ const ACTIONS: Record<string, string> = {
   'admin_role.updated': 'Changed a role’s admin powers',
   'settings.updated': 'Changed settings',
   'discord.commands_registered': 'Registered slash commands',
+  'discord.emoji_uploaded': 'Uploaded the standing emoji',
   'reader.created': 'Made a reader',
   'delivery.replayed': 'Replayed a delivery',
   'channel.webhook_dropped': 'Dropped a channel’s webhook',

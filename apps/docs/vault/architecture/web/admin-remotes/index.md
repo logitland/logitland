@@ -68,16 +68,17 @@ Module `apps/web/src/routes/admin/(app)/levels/levels.remote.ts`.
 ## Health and operations
 
 Module `apps/web/src/routes/admin/(app)/health/health.remote.ts`.
-All six exports require `operate` through their dependent routes.
+All seven exports require `operate` through their dependent routes.
 
-| Remote function                                                 | Purpose                                            |
-| --------------------------------------------------------------- | -------------------------------------------------- |
-| [`health()`](health.md)                                         | Relay health, permissions, and switches.           |
-| [`operations()`](operations.md)                                 | Consent-command check, channel and role options.   |
-| [`setSwitch({ key, on })`](setswitch-key-on.md)                 | Engage or disengage a relay restriction.           |
-| [`registerCommands()`](registercommands.md)                     | Replace this app's guild commands with `/consent`. |
-| [`setRole({ key, roleId })`](setrole-key-roleid.md)             | Set the agents, parents, or consent role.          |
-| [`setChannel({ key, channelId })`](setchannel-key-channelid.md) | Set the alerts or talk channel.                    |
+| Remote function                                                 | Purpose                                             |
+| --------------------------------------------------------------- | --------------------------------------------------- |
+| [`health()`](health.md)                                         | Relay health, permissions, and switches.            |
+| [`operations()`](operations.md)                                 | Command and emoji checks, channel and role options. |
+| [`setSwitch({ key, on })`](setswitch-key-on.md)                 | Engage or disengage a relay restriction.            |
+| [`registerCommands()`](registercommands.md)                     | Replace this app's guild commands with `/consent`.  |
+| [`uploadEmoji()`](uploademoji.md)                               | Upload missing standing emoji for owner notices.    |
+| [`setRole({ key, roleId })`](setrole-key-roleid.md)             | Set the agents, parents, or consent role.           |
+| [`setChannel({ key, channelId })`](setchannel-key-channelid.md) | Set the alerts or talk channel.                     |
 
 ## Admin role mapping
 

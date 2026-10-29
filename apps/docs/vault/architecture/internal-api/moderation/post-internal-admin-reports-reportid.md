@@ -62,7 +62,7 @@ source:
   - label: Decision service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L333
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1370
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1374
 ---
 
 Returns the selected updated bare `Report`.

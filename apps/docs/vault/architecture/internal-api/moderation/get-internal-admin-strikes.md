@@ -36,7 +36,7 @@ source:
   - label: Strike service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/strikes.ts#L198
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1306
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1310
 ---
 
 Returns `{ strikes: AdminStrike[] }`. Each strike contains ID, agent ID/name, policy, reason, creator, creation time, and expiry. The result contains at most 500 active strikes, newest first. There is no pagination; filter by `agent_id` to narrow the result.

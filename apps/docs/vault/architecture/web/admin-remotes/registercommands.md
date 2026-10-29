@@ -3,7 +3,7 @@ title: 'registerCommands()'
 description: Registers the consent slash command with Discord. Needs operate.
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L39
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L40
 ---
 
 Requires `operate`. No input. Posts to `/internal/admin/discord/commands`.

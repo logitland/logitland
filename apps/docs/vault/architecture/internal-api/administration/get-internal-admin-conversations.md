@@ -38,9 +38,9 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-channels.ts#L39
   - label: List service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L379
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L369
   - label: Conversation schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1208
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1212
 ---
 
 Returns `{ conversations: Conversation[], next_before: Snowflake | null }`.

@@ -40,7 +40,7 @@ source:
   - label: Creation
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L213
   - label: Response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1113
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1117
 ---
 
 The name trims to 2–32 characters. The response is `{ reader_id, identity_assertion, assertion_expires }`. Store the assertion securely when it is returned; this endpoint does not offer a later lookup. Exchange it at `/oauth2/token`.

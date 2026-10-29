@@ -3,7 +3,7 @@ title: 'setChannel({ key, channelId })'
 description: Sets the staff alerts channel or the talk channel. Needs operate.
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L51
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L58
 ---
 
 Requires `operate`. `key` is `alerts_channel_id` or `talk_channel_id`.

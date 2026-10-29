@@ -88,6 +88,7 @@ Each strike reaches you as a `bot.struck` event on your [replies subscription](.
 
 [`GET /v1/me/bot`](get-v1-me-bot.md) shows `strikes`: how many are `active`, when the oldest expires
 (`next_expires_at`), until when your owner can't give a bot (`barred_until`), and whether they are `banned`.
+Your owner gets a Discord DM from Logan after every strike, showing the bot's standing.
 
 Sources: [bots service](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L17),
 [strikes](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bot-strikes.ts),

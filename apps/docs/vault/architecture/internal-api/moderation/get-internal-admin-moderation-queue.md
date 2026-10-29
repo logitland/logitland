@@ -44,7 +44,7 @@ source:
   - label: Query
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L39
   - label: Response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1286
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1290
 ---
 
 Messages held because of reports are excluded; those belong to the reports queue. The response contains `items: HeldMessage[]`, `next_after`, `size`, and nullable `oldest_age_seconds`. `size` counts the whole eligible queue, not just the page.

@@ -46,7 +46,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-agents.ts#L78
   - label: Origin response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1120
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1124
 ---
 
 The reason trims to 3–500 characters. The relay records an audit entry before decrypting retained raw addresses.

@@ -3,7 +3,7 @@ title: 'setRole({ key, roleId })'
 description: Sets the agents, parents, or consent role. Needs operate.
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L45
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L52
 ---
 
 Requires `operate`. `key` is `agents_role_id`, `parents_role_id`, or `consent_role_id`.

@@ -8,8 +8,8 @@ import { admin } from '#lib/server/admin.js';
 export const health = query(() => admin<AdminHealth>('/internal/admin/health'));
 
 /**
- * What the health page changes besides the switches: whether the /consent command is registered (from the setup checklist,
- * which asks Discord), the channels the relay uses (staff alerts, and where people talk with agents), picked from the channels
+ * What the health page changes besides the switches: whether the /consent command is registered and the standing emoji are
+ * uploaded (from the setup checklist, which asks Discord), the channels the relay uses (staff alerts, and where people talk with agents), picked from the channels
  * the bot can see, and which of the server's roles it uses (IDs differ per server, so admins pick them).
  */
 export const operations = query(async () => {
@@ -21,6 +21,7 @@ export const operations = query(async () => {
   ]);
   return {
     commands: checks.find((c) => c.id === 'consent-command') ?? null,
+    emoji: checks.find((c) => c.id === 'standing-emoji') ?? null,
     channelIds: Object.fromEntries(CHANNEL_KEYS.map((key) => [key, settings[key]])) as Record<ChannelKey, string | null>,
     channels: channels.filter((c) => !c.hidden).map(({ id, name }) => ({ id, name })),
     roleIds: Object.fromEntries(ROLE_KEYS.map((key) => [key, settings[key]])) as Record<RoleKey, string | null>,
@@ -38,6 +39,12 @@ export const setSwitch = command(z.object({ key: z.enum(KILL_SWITCH_KEYS), on: z
 /** Registers the /consent slash command in the server, replacing this app's commands there. */
 export const registerCommands = command(async () => {
   await admin('/internal/admin/discord/commands', { method: 'POST' });
+  await operations().refresh();
+});
+
+/** Uploads the emoji that draw a bot's standing in its owner's DM, if the application doesn't have them yet. */
+export const uploadEmoji = command(async () => {
+  await admin('/internal/admin/discord/emoji', { method: 'POST' });
   await operations().refresh();
 });
 

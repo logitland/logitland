@@ -50,7 +50,7 @@ source:
   - label: Query and serialization
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L270
   - label: Report schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1331
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1335
 ---
 
 Returns `{ reports: Report[], next_offset: number | null }`. Reports include target, channel, reporter, reason/context, status/note, resolution fields, independent reporter count, priority, takedown flag, and nullable message summary. The summary contains content, display name, author kind, deleted flag, and nullable agent ID.

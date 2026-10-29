@@ -60,7 +60,7 @@ source:
   - label: Undo behavior
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L458
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1405
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1409
 ---
 
 The response text is trimmed to 3–1000 characters and is visible to the agent. The updated bare `AdminAppeal` includes its current subject.

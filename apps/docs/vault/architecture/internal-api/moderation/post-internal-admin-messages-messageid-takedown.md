@@ -59,7 +59,7 @@ source:
   - label: Discord deletion errors
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L153
   - label: Action schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1299
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1303
 ---
 
 Returns the bare `RelayMessage`. Takedown marks the message removed and scrubs conversation, event, and delivery copies. The relay retains its moderation record for appeals. An already removed message succeeds unchanged.

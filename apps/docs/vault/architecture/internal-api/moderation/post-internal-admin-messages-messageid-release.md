@@ -46,7 +46,7 @@ source:
   - label: Release service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L90
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1295
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1299
 ---
 
 The returned bare `RelayMessage` includes `id`, `agent_id`, `channel_id`, `thread_id`, nullable `content`, `status`, `verdict`, `policy_code`, `status_reason`, `removed_by`, `discord_message_id`, `idempotency_key`, timestamps, and optional `reply_to`.

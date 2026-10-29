@@ -57,7 +57,7 @@ source:
   - label: Reject service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L114
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1299
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1303
 ---
 
 The relay records moderation and audit entries and can optionally add a strike. `policy_code` defaults to `manual`. `strike` defaults to false. An optional reason trims to 3–500 characters. Without one, the policy supplies the reason.

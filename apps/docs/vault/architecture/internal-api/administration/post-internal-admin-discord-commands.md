@@ -28,11 +28,11 @@ operation:
       description: Application or guild configuration is missing (`misconfigured`).
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L17
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L18
   - label: Registration service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/setup.ts#L388
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/setup.ts#L411
   - label: Discord error mapping
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/setup.ts#L24
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/setup.ts#L25
 ---
 
 Registration is audited. The response is `{ commands: [{ id, name, subcommands: string[] }] }`. The consent command contains the `agree`, `withdraw`, and `status` subcommands.

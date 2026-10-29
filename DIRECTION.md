@@ -82,7 +82,7 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-The docs contain 365 notes and 42 generated listing pages at `/docs`, built with npm Svartz 2.1.0.
+The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
 implementation contracts and fake Discord; maintainer operations and local development come last.
 API and MCP renderers share one reference theme, with coloured method badges, schema trees, and request examples.

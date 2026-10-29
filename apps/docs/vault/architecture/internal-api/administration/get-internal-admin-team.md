@@ -25,7 +25,7 @@ operation:
       description: Discord standing or lookup failed.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L25
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L28
   - label: Team service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L63
 ---

@@ -217,6 +217,25 @@ export interface ApplicationCommand {
 /** Bit flags on the application that show the Message Content intent is on. */
 export const MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19);
 
+/** Message flag: the message is laid out by components alone (containers, text displays), with no `content` or embeds. */
+export const IS_COMPONENTS_V2 = 1 << 15;
+
+/** Discord's code when it won't let a bot message someone, for example one who turned off DMs. */
+export const CANNOT_MESSAGE_USER = 50007;
+
+/** An emoji the application owns: usable in any message the app sends, DMs included, as `<:name:id>`. */
+export interface ApplicationEmoji {
+  id: string;
+  name: string;
+}
+
+/** What the bot posts as itself. `content` is required unless `flags` has IS_COMPONENTS_V2 and `components` lay the message out. */
+export interface CreateMessageBody {
+  content?: string;
+  components?: unknown[];
+  flags?: number;
+}
+
 export interface RestOptions {
   botToken?: string;
   fetch?: typeof fetch;
@@ -372,7 +391,7 @@ export class DiscordRest {
   }
 
   /** A message from the bot itself, for example an alert in the staff channel. Mentions are off unless `mention` names a user. */
-  createMessage(channelId: string, body: { content: string; components?: unknown[] }, mention?: string): Promise<DiscordMessage> {
+  createMessage(channelId: string, body: CreateMessageBody, mention?: string): Promise<DiscordMessage> {
     const allowed_mentions = mention ? { parse: [], users: [mention] } : { parse: [] };
     return this.send<DiscordMessage>('POST', `/channels/${channelId}/messages`, { ...body, allowed_mentions }, true);
   }
@@ -384,6 +403,20 @@ export class DiscordRest {
 
   getGuildCommands(applicationId: string, guildId: string): Promise<ApplicationCommand[]> {
     return this.send<ApplicationCommand[]>('GET', `/applications/${applicationId}/guilds/${guildId}/commands`, undefined, true);
+  }
+
+  /** The bot's DM channel with someone, opened if it isn't yet. Posting there fails with CANNOT_MESSAGE_USER when they don't take DMs. */
+  createDmChannel(recipientId: string): Promise<{ id: string; type: number }> {
+    return this.send<{ id: string; type: number }>('POST', '/users/@me/channels', { recipient_id: recipientId }, true);
+  }
+
+  async listApplicationEmojis(applicationId: string): Promise<ApplicationEmoji[]> {
+    return (await this.send<{ items: ApplicationEmoji[] }>('GET', `/applications/${applicationId}/emojis`, undefined, true)).items;
+  }
+
+  /** `image` is a data URI (PNG, JPEG, GIF, WebP or AVIF, 256 KiB at most). Names are unique per application. */
+  createApplicationEmoji(applicationId: string, name: string, image: string): Promise<ApplicationEmoji> {
+    return this.send<ApplicationEmoji>('POST', `/applications/${applicationId}/emojis`, { name, image }, true);
   }
 
   /** Replaces every guild command with this list. */

@@ -51,7 +51,7 @@ source:
   - label: Registry query
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L501
   - label: Result schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1076
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1080
 ---
 
 Returns `{ agents: AdminAgent[], next_before: AgentId | null }`. Pass `next_before` as `before` until it is null.

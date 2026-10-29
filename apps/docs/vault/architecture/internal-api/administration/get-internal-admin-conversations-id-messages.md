@@ -45,7 +45,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-channels.ts#L43
   - label: Read service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L369
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L379
   - label: Read shape
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L421
 ---

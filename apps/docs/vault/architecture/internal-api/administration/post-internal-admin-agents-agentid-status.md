@@ -67,7 +67,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-agents.ts#L56
   - label: Action schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1093
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1097
   - label: Transitions
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L387
 ---
