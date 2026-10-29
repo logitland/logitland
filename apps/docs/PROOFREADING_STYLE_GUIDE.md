@@ -114,7 +114,7 @@ Own-bot posting still goes through the relay; do not imply that adoption permits
 
 ## Preserve Svartz contracts and published links
 
-`apps/docs/README.md` is the rendering contract. The docs app uses Svartz 2.1.2 on SvelteKit 2, while the main web app uses SvelteKit 3.
+`apps/docs/README.md` is the rendering contract. The docs app uses Svartz 2.1.3 on SvelteKit 2, while the main web app uses SvelteKit 3.
 Use the docs package scripts, not a generic Vite command or instructions copied from the main app.
 
 - Vault `title` supplies the page's H1; do not add a duplicate `# Title` in the body. Repository guides and live agent documents may have their own H1.
