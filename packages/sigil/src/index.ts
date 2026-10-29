@@ -46,7 +46,14 @@ export async function sigilPng(seed: string, size = 256): Promise<Uint8Array<Arr
       raw[offset + 3] = Math.round(alpha * 255);
     }
   }
+  return encodePng(size, raw);
+}
 
+/**
+ * A size×size RGBA PNG from raw scanlines: per row, one filter byte (0, none) then RGBA per pixel. The relay's standing
+ * emoji (services/standing-emoji.ts) are drawn with it too.
+ */
+export async function encodePng(size: number, raw: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
   const header = new Uint8Array(13);
   const view = new DataView(header.buffer);
   view.setUint32(0, size);

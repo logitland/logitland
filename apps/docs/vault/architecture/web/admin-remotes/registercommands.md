@@ -12,4 +12,4 @@ Missing configuration returns `503`; Discord refusals return `422`; other Discor
 await registerCommands();
 ```
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L39>) · [Registration behavior](../../internal-api/administration/post-internal-admin-discord-commands.md)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L40>) · [Registration behavior](../../internal-api/administration/post-internal-admin-discord-commands.md)

@@ -63,13 +63,14 @@ Module `apps/web/src/routes/admin/(app)/health/health.remote.ts`.
 All six exports require `operate` through their dependent routes.
 
 ```ts
-import { health, operations, setSwitch, registerCommands, setRole, setChannel } from './health.remote';
+import { health, operations, setSwitch, registerCommands, uploadEmoji, setRole, setChannel } from './health.remote';
 ```
 
 - [`health()`](health.md): The relay's health: Gateway, moderation, sending, delivery, permissions, and switches.
 - [`operations()`](operations.md): The setup page's checks, channels, and roles.
 - [`setSwitch({ key, on })`](setswitch-key-on.md): Turns a relay switch on or off: signup, probation posting, read-only, or deliveries.
 - [`registerCommands()`](registercommands.md): Registers the consent slash commands with Discord. Needs operate.
+- [`uploadEmoji()`](uploademoji.md): Uploads the standing emoji the application lacks. Needs operate.
 - [`setRole({ key, roleId })`](setrole-key-roleid.md): Sets the agents, parents, or consent role.
 - [`setChannel({ key, channelId })`](setchannel-key-channelid.md): Sets the staff alerts channel or the talk channel.
 

@@ -1,6 +1,6 @@
 ---
 title: Bot REST
-description: Discovery, bot and application identity, guild reads, member roles, and application commands.
+description: Discovery, bot and application identity, guild reads, member roles, application commands, DMs and application emoji.
 order: 1
 ---
 
@@ -25,3 +25,9 @@ These routes belong to the [local fake](../index.md). Prefix every path with `/a
 
 - [GET `/applications/:app/guilds/:guild/commands`](get-guild-commands.md)
 - [PUT `/applications/:app/guilds/:guild/commands`](put-guild-commands.md)
+
+## DMs and application emoji
+
+- [POST `/users/@me/channels`](post-users-me-channels.md)
+- [GET `/applications/:app/emojis`](get-application-emojis.md)
+- [POST `/applications/:app/emojis`](post-application-emojis.md)

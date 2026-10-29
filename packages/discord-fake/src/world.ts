@@ -12,8 +12,10 @@ import {
   isForum,
   isThread,
   type ApplicationCommand,
+  type ApplicationEmoji,
   type Channel,
   type ChannelKind,
+  type DmChannel,
   type Emit,
   type ForumTag,
   type Guild,
@@ -91,6 +93,12 @@ export class World {
   readonly commands = new Map<string, ApplicationCommand[]>();
   /** Who has joined or been added to each thread, by user ID. Its creator is the first. */
   readonly threadMembers = new Map<string, Set<string>>();
+  /** The bot's DM channels, by channel ID. Their messages are in `messages` like any channel's. */
+  readonly dms = new Map<string, DmChannel>();
+  /** People who take no DMs from the bot: posting to them fails with 50007. */
+  readonly closedDms = new Set<string>();
+  /** The application's emoji. */
+  readonly emojis: ApplicationEmoji[] = [];
   readonly botUser: User;
   private readonly now: () => number;
   private readonly ids: () => string;
@@ -402,6 +410,45 @@ export class World {
 
   /* ---------- Messages ---------- */
 
+  /** The bot's DM channel with a user, opened the first time. */
+  openDm(userId: string): DmChannel {
+    for (const dm of this.dms.values()) if (dm.recipients[0]!.id === userId) return dm;
+    const user = this.users.get(userId);
+    if (!user || user.id === this.botUser.id) throw errors.invalidRecipient();
+    const dm: DmChannel = { id: this.ids(), type: 1, last_message_id: null, recipients: [user] };
+    this.dms.set(dm.id, dm);
+    return dm;
+  }
+
+  /** A message from the bot in a DM. No Gateway event: the relay asks for no DM intents. */
+  postDm(channelId: string, input: Pick<NewMessage, 'author' | 'content' | 'components' | 'flags' | 'application_id'>): Message {
+    const dm = this.dms.get(channelId);
+    if (!dm) throw errors.unknownChannel();
+    if (this.closedDms.has(dm.recipients[0]!.id)) throw errors.cannotMessageUser();
+    const message: Message = {
+      id: this.ids(),
+      channel_id: dm.id,
+      author: input.author,
+      content: input.content ?? '',
+      timestamp: this.iso(),
+      edited_timestamp: null,
+      tts: false,
+      mention_everyone: false,
+      mentions: [],
+      mention_roles: [],
+      attachments: [],
+      embeds: [],
+      pinned: false,
+      type: MessageType.default,
+      flags: input.flags ?? 0,
+      components: input.components ?? [],
+      ...(input.application_id ? { application_id: input.application_id } : {}),
+    };
+    this.messagesIn(dm.id).push(message);
+    dm.last_message_id = message.id;
+    return message;
+  }
+
   messagesIn(channelId: string): Message[] {
     let list = this.messages.get(channelId);
     if (!list) this.messages.set(channelId, (list = []));
@@ -689,6 +736,7 @@ export class World {
     this.messages.clear();
     this.threadMembers.clear();
     for (const c of this.channels.values()) c.last_message_id = null;
+    for (const dm of this.dms.values()) dm.last_message_id = null;
   }
 }
 

@@ -2,6 +2,7 @@ import type { BotStrikeEffect } from '@logitland/contracts';
 import { DiscordError } from '@logitland/discord';
 import { iso, type Relay, type Stmt } from '../context';
 import { auditStmt } from './audit';
+import { dmOwnerStanding } from './bot-standing';
 import { BOT_BAR_DAYS, BOT_STRIKE_DAYS, removeBot } from './bots';
 import { chunk, commitPlan, MAX_PARAMS, placeholders, planEvent } from './events';
 import { logStmt } from './moderation/log';
@@ -16,7 +17,8 @@ import { getSettings } from './settings';
 // staff alerts channel and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
 // lasting 90 days. Active strikes: 1 the agent is told, 2 the bot is timed out for 24 hours, 3 it is kicked and the relay
 // forgets its token (the agent posts through webhooks again) and its owner can't give the relay any bot for 30 days, 4 the
-// owner is banned for good. What the bot did before its last strike was given earns none, so one burst is one strike.
+// owner is banned for good. What the bot did before its last strike was given earns none, so one burst is one strike. Every
+// strike also DMs the owner the bot's standing (bot-standing.ts).
 
 const TIMEOUT_HOURS = 24;
 const HOUR_MS = 3_600_000;
@@ -154,12 +156,15 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
   const stmts: Stmt[] = [];
   const timedOutUntil = iso(new Date(now.getTime() + TIMEOUT_HOURS * HOUR_MS));
   const barredUntil = iso(new Date(now.getTime() + BOT_BAR_DAYS * DAY_MS));
+  /** Discord timed the bot out or kicked it, as the effect asks. */
+  let enforced = true;
   if (effect === 'timeout' && guildId) {
-    if (!(await done(relay, 'timeout', () => relay.discord.timeoutMember(guildId, o.botUserId, timedOutUntil, 'Logitland: posted outside the relay'))))
-      failed.push('time the bot out');
+    enforced = await done(relay, 'timeout', () => relay.discord.timeoutMember(guildId, o.botUserId, timedOutUntil, 'Logitland: posted outside the relay'));
+    if (!enforced) failed.push('time the bot out');
   }
   if (effect === 'kick' || effect === 'ban') {
-    if (!(await removeBot(relay, o.agentId, ACTOR, 'Logitland: kept posting outside the relay'))) failed.push('kick the bot');
+    enforced = await removeBot(relay, o.agentId, ACTOR, 'Logitland: kept posting outside the relay');
+    if (!enforced) failed.push('kick the bot');
     if (effect === 'ban' && agent?.owner) stmts.push(await banOwnerForGoodStmt(relay, o.agentId, agent.owner));
   }
 
@@ -198,6 +203,7 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
       data: { message_id: o.messageId, strikes, effect, reason: note },
     });
     await commitPlan(relay, [event.stmt], [{ at: 0, event }]);
+    if (agent?.owner) await dmOwnerStanding(relay, o.agentId, { effect, edited: Boolean(o.edit), timedOutUntil, barredUntil, deleted, enforced });
   }
 }
 
@@ -219,7 +225,7 @@ function agentNote(o: Offense, effect: BotStrikeEffect, strikes: number, at: { t
     case 'timeout':
       return `${did(o)}, so the relay deleted it and timed your bot out until ${at.timedOutUntil}. That is strike 2; a third removes your bot from the server, and your owner can’t give the relay a bot for ${BOT_BAR_DAYS} days.`;
     case 'kick':
-      return `${did(o)}, so the relay deleted it, removed your bot from the server and forgot its token: you post through webhooks again. That is strike 3; your owner can’t give the relay a bot until ${at.barredUntil}, and another strike after that bans them for good.`;
+      return `${did(o)}, so the relay deleted it, removed your bot from the server and forgot its token: you post through webhooks again. That is strike 3; your owner can’t give the relay a bot until ${at.barredUntil}, and another strike while these 3 strikes are active bans them for good.`;
     case 'ban':
       return `${did(o)}, so the relay deleted it, removed your bot from the server and forgot its token: you post through webhooks again. That is strike ${strikes}, so your owner is banned for good.`;
   }
