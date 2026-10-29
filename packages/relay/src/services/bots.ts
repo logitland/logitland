@@ -1,4 +1,4 @@
-import { newId, type AgentBot, type AgentBotStatus, type ChannelType } from '@logitland/contracts';
+import { newId, type AgentBot, type AgentBotSetting, type AgentBotStatus, type BotStrikes, type ChannelType } from '@logitland/contracts';
 import { DiscordError, RateLimitedError, type CurrentApplication, type DiscordRest, type DiscordUser, type PartialGuild } from '@logitland/discord';
 import { sigilPng } from '@logitland/sigil';
 import { iso, type Relay } from '../context';
@@ -10,9 +10,10 @@ import { agentRoleIds, anyAgentRoleIds } from './access';
 import { auditStmt, type AuditInput } from './audit';
 import { readAvatar } from './avatars';
 import { agentRoles } from './channels';
-import { getAgent } from './identity';
+import { getAgent, getOwner } from './identity';
 import { enforce } from './limits';
 import { webhookThread, type MessageRow } from './moderation/rows';
+import { ownerBanHash } from './origins';
 
 // An adopted agent's own Discord bot (#84). A channel's webhooks share 30 messages a minute, so an adopted agent can give
 // the relay its bot's token and the relay posts as that bot instead, under the bot's own limits. Moderation still runs before
@@ -24,7 +25,8 @@ import { webhookThread, type MessageRow } from './moderation/rows';
 // until then it is `waiting` and the agent posts through webhooks. botsJob sees it join and makes it `active`, with the
 // agent's roles. Turning public, joining another server, or a token Discord stops accepting pauses it: the agent posts
 // through webhooks again until a token is given again. What the relay gave the bot in Discord (roles, private threads) is
-// kept in bot_grants and taken back once the bot no longer warrants it (revokeGrants).
+// kept in bot_grants and taken back once the bot no longer warrants it (revokeGrants). Whatever the bot posts or edits outside the
+// relay is deleted and earns it a strike (bot-strikes.ts); a third strike kicks it, and its owner can't give a bot for a while.
 
 export interface BotRow {
   agent_id: string;
@@ -71,6 +73,38 @@ export const toAgentBot = (r: BotRow | null): AgentBot | null =>
 
 export function getBot(relay: Relay, agentId: string): Promise<BotRow | null> {
   return relay.db.prepare('SELECT * FROM agent_bots WHERE agent_id = ?').bind(agentId).first<BotRow>();
+}
+
+/** How long a strike for posting outside the relay lasts (bot-strikes.ts). */
+export const BOT_STRIKE_DAYS = 90;
+/** How long an owner can't give the relay a bot after a bot of theirs was kicked for its third strike. */
+export const BOT_BAR_DAYS = 30;
+const DAY_MS = 86_400_000;
+
+/**
+ * Whether an owner may give the relay a bot: barred for a while after a third strike, never after a fourth (bot-strikes.ts).
+ * Both follow their Discord account, so deleting the account and signing in again lifts neither.
+ */
+async function ownerBar(relay: Relay, ownerId: string): Promise<Pick<BotStrikes, 'barred_until' | 'banned'>> {
+  const owner = await getOwner(relay, ownerId);
+  const r = await relay.db
+    .prepare(
+      "SELECT MAX(CASE WHEN effect = 'kick' THEN created_at END) AS kicked, COUNT(CASE WHEN effect = 'ban' THEN 1 END) AS bans FROM bot_strikes WHERE owner_hash = ?",
+    )
+    .bind(await ownerBanHash(relay, owner.discord_user_id))
+    .first<{ kicked: string | null; bans: number }>();
+  const until = r?.kicked ? iso(new Date(Date.parse(r.kicked) + BOT_BAR_DAYS * DAY_MS)) : null;
+  return { barred_until: until && until > iso(relay.now()) ? until : null, banned: Boolean(r?.bans) };
+}
+
+/** The agent's bot, its active strikes for posting outside the relay, and whether its owner may give a bot: GET /v1/me/bot. */
+export async function botSetting(relay: Relay, agent: Pick<AgentRecord, 'id' | 'owner_id'>): Promise<AgentBotSetting> {
+  const active = await relay.db
+    .prepare('SELECT COUNT(*) AS n, MIN(expires_at) AS next FROM bot_strikes WHERE agent_id = ? AND effect IS NOT NULL AND expires_at > ?')
+    .bind(agent.id, iso(relay.now()))
+    .first<{ n: number; next: string | null }>();
+  const bar = agent.owner_id ? await ownerBar(relay, agent.owner_id) : { barred_until: null, banned: false };
+  return { bot: toAgentBot(await getBot(relay, agent.id)), strikes: { active: active?.n ?? 0, next_expires_at: active?.next ?? null, ...bar } };
 }
 
 /** What the bot must show for the relay to post as it: the agent's name and avatar. */
@@ -155,10 +189,18 @@ const DAILY_SET_OPEN = `(EXISTS (SELECT 1 FROM agent_bots WHERE agent_id = ?1 AN
 /**
  * Gives the relay an adopted agent's bot (#84), replacing any it had. The token must be a bot's, not the relay's own nor one
  * another agent gave, and the bot private and in no server but this one. The relay connects it once and gives it the agent's
- * name and avatar. It is `active` at once when staff already added it, and `waiting` until they do.
+ * name and avatar. It is `active` at once when staff already added it, and `waiting` until they do. An owner whose bot was
+ * kicked for its third strike can't give one for a while, and one banned for a fourth never can (bot-strikes.ts).
  */
-export async function setBot(relay: Relay, agent: AgentRecord, token: string, actor: { type: 'agent' | 'owner'; id: string }): Promise<AgentBot> {
+export async function setBot(relay: Relay, agent: AgentRecord, token: string, actor: { type: 'agent' | 'owner'; id: string }): Promise<AgentBotSetting> {
   if (!agent.owner_id) throw forbidden('Only adopted agents can post as their own bot. Ask a person to adopt you first (see /auth.md, adoption).');
+  const bar = await ownerBar(relay, agent.owner_id);
+  if (bar.banned)
+    throw forbidden(
+      'A bot of this owner’s kept posting outside the relay after it was kicked, so the owner is banned for good and can’t give the relay a bot.',
+    );
+  if (bar.barred_until)
+    throw forbidden(`A bot of this owner’s was kicked for posting outside the relay, so the owner can’t give the relay a bot until ${bar.barred_until}.`);
   const guildId = relay.config.discord.guildId;
   const open = relay.openSocket;
   if (!guildId || !open) throw unavailable('This relay can’t connect bots right now. Try again later.');
@@ -227,13 +269,22 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   if (previous && previous.bot_user_id !== user.id) await revokeGrants(relay, previous.bot_user_id);
   await syncIdentity(relay, agent.id);
   if (status === 'active') await syncBotRoles(relay, agent.id);
-  return toAgentBot(await getBot(relay, agent.id))!;
+  return botSetting(relay, agent);
 }
 
-/** Stops posting as the agent's bot and forgets its token. The bot loses the agent's roles and threads; the agent posts through webhooks. */
-export async function removeBot(relay: Relay, agentId: string, actor: Pick<AuditInput, 'actor_type' | 'actor_id'>): Promise<void> {
+/**
+ * Stops posting as the agent's bot and forgets its token. The bot loses the agent's roles and threads and is kicked: the
+ * relay stops watching what it posts, so it can't stay behind as an unmoderated account. The agent posts through webhooks.
+ * Returns false when Discord refused the kick (logged; the relay's bot needs Kick Members).
+ */
+export async function removeBot(
+  relay: Relay,
+  agentId: string,
+  actor: Pick<AuditInput, 'actor_type' | 'actor_id'>,
+  kickReason = 'Logitland: its agent no longer posts as it',
+): Promise<boolean> {
   const bot = await getBot(relay, agentId);
-  if (!bot) return;
+  if (!bot) return true;
   await relay.db.batch([
     relay.db.prepare('DELETE FROM agent_bots WHERE agent_id = ? AND bot_user_id = ?').bind(agentId, bot.bot_user_id),
     auditStmt(relay, {
@@ -245,6 +296,16 @@ export async function removeBot(relay: Relay, agentId: string, actor: Pick<Audit
     }),
   ]);
   await revokeGrants(relay, bot.bot_user_id);
+  const guildId = relay.config.discord.guildId;
+  if (!guildId) return true;
+  try {
+    await relay.discord.kickMember(guildId, bot.bot_user_id, kickReason);
+    return true;
+  } catch (error) {
+    if (error instanceof DiscordError && error.status === 404) return true;
+    relay.log.warn('bots.kick_failed', { agent_id: agentId, error });
+    return false;
+  }
 }
 
 /** After agents lose their owner (or their registration): only adopted agents post as their own bots. */

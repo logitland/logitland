@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { AgentBot, AgentBotStatus } from '@logitland/contracts';
+  import type { AgentBot, AgentBotStatus, BotStrikes } from '@logitland/contracts';
+  import BanIcon from '@lucide/svelte/icons/ban';
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
   import { toast } from 'svelte-sonner';
   import * as Alert from '#lib/components/ui/alert/index.js';
@@ -9,14 +10,18 @@
   import * as Field from '#lib/components/ui/field/index.js';
   import { Input } from '#lib/components/ui/input/index.js';
   import { Spinner } from '#lib/components/ui/spinner/index.js';
+  import { formatDate, plural } from '#lib/fixtures/owner/format.js';
   import { messageOf } from '#lib/owner/errors.js';
   import { removeBot, setBot } from '#lib/owner/owner.remote.js';
 
   /**
    * The agent's own Discord bot, which the relay posts as instead of a webhook once staff add it to the server. The owner gives
-   * or replaces its token here; the relay never shows it back.
+   * or replaces its token here; the relay never shows it back. Strikes for posting outside the relay show above it, and a
+   * kicked or banned owner can't give a token.
    */
-  let { agentId, name, bot }: { agentId: string; name: string; bot: AgentBot | null } = $props();
+  let { agentId, name, bot, strikes }: { agentId: string; name: string; bot: AgentBot | null; strikes: BotStrikes } = $props();
+
+  const barred = $derived(strikes.banned || strikes.barred_until !== null);
 
   const STATUS: Record<AgentBotStatus, { label: string; variant: BadgeVariant }> = {
     waiting: { label: 'Waiting', variant: 'default' },
@@ -63,6 +68,32 @@
       <Card.Title>Own bot</Card.Title>
     </Card.Header>
     <Card.Content class="gap-6">
+      {#if strikes.banned}
+        <Alert.Root variant="destructive">
+          <BanIcon />
+          <Alert.Title>You can’t give the relay a bot any more</Alert.Title>
+          <Alert.Description>A bot of yours kept posting outside the relay after it was kicked.</Alert.Description>
+        </Alert.Root>
+      {:else if strikes.barred_until}
+        <Alert.Root variant="warning">
+          <TriangleAlertIcon />
+          <Alert.Title>You can give the relay a bot again on {formatDate(Date.parse(strikes.barred_until))}</Alert.Title>
+          <Alert.Description>A bot of yours was kicked for posting outside the relay.</Alert.Description>
+        </Alert.Root>
+      {/if}
+
+      {#if strikes.active && strikes.next_expires_at}
+        <Alert.Root variant="warning">
+          <TriangleAlertIcon />
+          <Alert.Title>
+            {plural(strikes.active, { one: '# strike for posting outside the relay', other: '# strikes for posting outside the relay' })}
+          </Alert.Title>
+          <Alert.Description>
+            The relay deletes anything {name}’s bot posts or edits itself. The oldest strike expires on {formatDate(Date.parse(strikes.next_expires_at))}.
+          </Alert.Description>
+        </Alert.Root>
+      {/if}
+
       {#if bot?.status === 'paused'}
         <Alert.Root variant="warning">
           <TriangleAlertIcon />
@@ -93,7 +124,7 @@
           spellcheck={false}
           bind:value={token}
           oninput={() => (error = undefined)}
-          disabled={busy !== undefined}
+          disabled={barred || busy !== undefined}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? 'bot-token-error' : 'bot-token-use'}
           class="font-mono sm:max-w-md"
@@ -114,7 +145,7 @@
           Remove bot
         </Button>
       {/if}
-      <Button type="submit" disabled={!token.trim() || busy !== undefined}>
+      <Button type="submit" disabled={barred || !token.trim() || busy !== undefined}>
         {#if busy === 'saving'}<Spinner />Checking token…{:else}Save{/if}
       </Button>
     </Card.Footer>

@@ -119,14 +119,16 @@ export const setCap = command(z.object({ agentId: AgentId, ...OwnerDeliveryPatch
   await getAgents().refresh();
 });
 
-/** The agent's own Discord bot, if it or its owner gave the relay one: whether the relay posts as it, and if not, why. */
-export const getBot = query(AgentId, async (agentId) => (await owned<AgentBotSetting>(`/agents/${agentId}/bot`)).bot);
+/**
+ * The agent's own Discord bot, if it or its owner gave the relay one: whether the relay posts as it, and if not, why. Also its
+ * strikes for posting outside the relay, and whether the owner may give a bot.
+ */
+export const getBot = query(AgentId, async (agentId) => owned<AgentBotSetting>(`/agents/${agentId}/bot`));
 
 /** Gives the relay the agent's bot token; the relay checks it with Discord before it keeps it. */
 export const setBot = command(z.object({ agentId: AgentId, ...BotRequest.shape }), async ({ agentId, token }) => {
-  const { bot } = await owned<AgentBotSetting>(`/agents/${agentId}/bot`, { method: 'PUT', body: { token } });
+  await owned<AgentBotSetting>(`/agents/${agentId}/bot`, { method: 'PUT', body: { token } });
   await getBot(agentId).refresh();
-  return bot!;
 });
 
 /** Stops posting as the agent's bot and forgets its token. */

@@ -155,6 +155,11 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
     // Only the bot that posted it can change it, and only while the relay still posts as that bot.
     const bot = await postingBot(relay, agent.id, row.bot_user_id);
     if (!bot) throw conflict('Your bot posted this message and the relay no longer posts as it, so it can’t be edited. Delete it and post again instead.');
+    // The Gateway can show the edit before Discord answers: intake takes this text as the relay's own (bot-strikes.ts).
+    await relay.db
+      .prepare('INSERT OR IGNORE INTO bot_edits (discord_message_id, text_hash, created_at) VALUES (?, ?, ?)')
+      .bind(row.discord_message_id, textHash, iso(relay.now()))
+      .run();
     try {
       await bot.editMessage(webhookThread(row, where.type) ?? row.channel_id, row.discord_message_id, text);
     } catch (err) {

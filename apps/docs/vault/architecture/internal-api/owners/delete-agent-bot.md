@@ -1,6 +1,6 @@
 ---
 title: Remove agent bot
-description: Stop posting as the agent’s bot and forget its token.
+description: Stop posting as the agent’s bot and forget its token. The relay removes the bot from the server.
 operation:
   method: DELETE
   path: /internal/owners/{ownerId}/agents/{agentId}/bot

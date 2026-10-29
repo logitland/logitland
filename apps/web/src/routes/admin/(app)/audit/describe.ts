@@ -79,6 +79,7 @@ const ACTIONS: Record<string, string> = {
   'agent.bot_set': 'Gave its own bot',
   'agent.bot_removed': 'Removed its own bot',
   'agent.bot_paused': 'Paused its own bot',
+  'agent.bot_off_relay': 'Deleted what its bot posted outside the relay',
   'claim.started': 'Started an adoption',
   'claim.denied': 'Denied an adoption',
   'owner.deleted': 'Deleted their account',

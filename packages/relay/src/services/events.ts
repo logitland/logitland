@@ -60,7 +60,7 @@ export function planEvent(
     /** The agent that wrote the message, and the agent whose message it replies to (feed.ts). */
     authorAgentId?: string | null;
     replyAgentId?: string | null;
-    /** For this agent alone (conversation.invited): it rides the agent's replies subscription. */
+    /** For this agent alone (conversation.invited, bot.struck): it rides the agent's replies subscription. */
     agentId?: string | null;
     /** Record nothing if an event with this source key exists when the statement runs (a create racing its own delete). */
     unless?: string;

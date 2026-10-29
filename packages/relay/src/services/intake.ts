@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { iso, type Relay, type Stmt } from '../context';
 import { hmac, sha256 } from '../crypto';
 import { auditStmt } from './audit';
+import { enforceRelayOnly, offRelayEdits, type Offense } from './bot-strikes';
 import { anyAgentAccess } from './channels';
 import { EVERY_MESSAGE_SINCE, SHOWN_PUBLICLY_SINCE } from './consent';
 import { authorRef } from './conversation';
@@ -145,6 +146,8 @@ interface Context {
   known: Map<string, Relayed & { id: string }>;
   /** Agents' own bots (bots.ts), by bot user ID: what they post through the relay is their agent's. */
   agentBots: Map<string, string>;
+  /** What those bots posted or edited outside the relay: deleted and struck after the rounds (bot-strikes.ts), never kept. */
+  offRelay: Offense[];
   history: boolean;
 }
 
@@ -236,6 +239,7 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
     turnedAway: [],
     known: new Map(results.map((c) => [c.id, c])),
     agentBots: new Map(bots.map((b) => [b.bot_user_id, b.agent_id])),
+    offRelay: [],
     history: history ?? false,
   };
   for (const part of chunk(messages, EVENTS_PER_ROUND)) {
@@ -244,6 +248,7 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
     total.ignored += r.ignored;
   }
   if (ctx.turnedAway.length) await turnAway(relay, ctx.turnedAway);
+  if (ctx.offRelay.length) await enforceRelayOnly(relay, ctx.offRelay);
   if (total.invalid) relay.log.warn('intake.invalid_events', { source, count: total.invalid });
   if (total.recorded) relay.log.info('intake.batch', { source, ...total });
   return total;
@@ -261,12 +266,19 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   const { relayed } = ctx;
   const out = { ignored: 0 };
   const keyed: { e: MessageEvent; key: string | null }[] = [];
+  // Each update's text as Discord sent it, reply line included: what an agent's bot wrote is judged whole.
+  const rawText = new Map<string, string | undefined>();
   for (const e of events) {
     const removal = e.kind === 'message_delete' || e.kind === 'message_delete_bulk' || e.kind === 'thread_delete';
     const places = removal ? ctx.known : relayed;
     const relevant = e.kind === 'thread_sync' ? true : 'parent_id' in e ? places.has(e.parent_id) : places.has(e.channel_id);
-    if (relevant) keyed.push({ e: withoutReplyLine(e), key: await sourceKey(e) });
-    else out.ignored++;
+    if (!relevant) {
+      out.ignored++;
+      continue;
+    }
+    const key = await sourceKey(e);
+    if (e.kind === 'message_update' && key) rawText.set(key, e.content);
+    keyed.push({ e: withoutReplyLine(e), key });
   }
 
   // Everything the round needs to know about the current state, in a handful of queries.
@@ -317,6 +329,13 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
       .all<Sent & { did: string }>();
     for (const r of results) sent.set(r.did, r);
   }
+  // Edits of what agents' bots posted through the relay, with text the relay didn't give: read before the reply line comes off.
+  // An edit of a send this round settles (`settled`) is read again when it comes, once the send is the relay's.
+  const botEdits = await offRelayEdits(
+    relay,
+    events.flatMap((e) => (e.kind === 'message_update' ? [e] : [])),
+  );
+  const settled = new Set<string>();
   // A person's message is kept only if they had agreed by the time they wrote it: when each person in the round agreed (for
   // those who still have).
   const fromPeople = keyed.flatMap(({ e }) => (e.kind === 'message_create' && !e.author.bot && !e.author.webhook_id ? [e] : []));
@@ -502,6 +521,24 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           repliesToAgent,
           owners: e.thread_id ? privateOwners.get(e.thread_id) : undefined,
         });
+        // An agent's bot is that agent only in what the relay sent. Anything else it posts is deleted and struck, never kept;
+        // a channel's history (a first look) is left as it is.
+        const botAgent = who?.kind === 'bot' && !ctx.history ? ctx.agentBots.get(e.author.id) : undefined;
+        if (botAgent) {
+          ctx.offRelay.push({
+            sourceKey: key!,
+            agentId: botAgent,
+            botUserId: e.author.id,
+            guildId: ch.guild_id,
+            channelId: e.channel_id,
+            threadId: e.thread_id ?? null,
+            messageId: e.message_id,
+            at: e.timestamp,
+            content: e.content,
+          });
+          out.ignored++;
+          break;
+        }
         if (!who) {
           // A person's message their agreement doesn't cover: dropped, not stored. One written live in the talk channel, by
           // someone who hasn't agreed to every message being relayed, is also removed from Discord.
@@ -511,6 +548,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           break;
         }
         if (who.kind === 'agent' && who.agent_id) agentMessages.set(e.message_id, who.agent_id);
+        if (who.relay_message_id && !sent.has(e.message_id)) settled.add(e.message_id);
         // A delete that came first leaves a tombstone: the late create is kept as a removed message, without its text.
         const tomb = tombs.get(e.message_id);
         const reply_to = e.reply_to ?? who.reply_to;
@@ -564,6 +602,22 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           break;
         }
         seen.add(key!);
+        // New text an agent's bot put on a message the relay posted: deleted and struck, and the text never kept.
+        const offRelay =
+          botEdits.get(key!) ?? (settled.has(e.message_id) ? (await offRelayEdits(relay, [{ ...e, content: rawText.get(key!) }])).get(key!) : undefined);
+        if (offRelay) {
+          ctx.offRelay.push({
+            ...offRelay,
+            sourceKey: key!,
+            guildId: ch.guild_id,
+            channelId: e.channel_id,
+            threadId: e.thread_id ?? null,
+            messageId: e.message_id,
+            at: e.edited_timestamp,
+          });
+          out.ignored++;
+          break;
+        }
         record(
           planEvent(relay, {
             type: 'message.updated',
@@ -851,7 +905,11 @@ async function settleSend(relay: Relay, e: Create, bot?: { agentId: string; botU
       return candidate;
     }
   }
-  return null;
+  // Another intake call, or the sender, settled it first: the message is still the relay's.
+  return relay.db
+    .prepare('SELECT m.id, m.agent_id, a.name, m.reply_to FROM relay_messages m JOIN agents a ON a.id = m.agent_id WHERE m.discord_message_id = ?')
+    .bind(e.message_id)
+    .first<Sent>();
 }
 
 export interface AgentPost {

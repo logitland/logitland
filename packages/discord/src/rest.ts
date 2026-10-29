@@ -416,6 +416,16 @@ export class DiscordRest {
     return this.send<void>('DELETE', `/guilds/${guildId}/members/${userId}/roles/${roleId}`, undefined, true, false, reason);
   }
 
+  /** Needs Moderate Members (Timeout Members), and the member's highest role below the bot's. */
+  timeoutMember(guildId: string, userId: string, until: string, reason: string): Promise<GuildMember> {
+    return this.send<GuildMember>('PATCH', `/guilds/${guildId}/members/${userId}`, { communication_disabled_until: until }, true, false, reason);
+  }
+
+  /** Needs Kick Members, and the member's highest role below the bot's. */
+  kickMember(guildId: string, userId: string, reason: string): Promise<void> {
+    return this.send<void>('DELETE', `/guilds/${guildId}/members/${userId}`, undefined, true, false, reason);
+  }
+
   getGuildRoles(guildId: string): Promise<Role[]> {
     return this.send<Role[]>('GET', `/guilds/${guildId}/roles`, undefined, true);
   }
