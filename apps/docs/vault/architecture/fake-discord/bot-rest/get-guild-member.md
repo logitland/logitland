@@ -20,7 +20,7 @@ operation:
       in: header
       required: true
       type: string
-      description: The fake bot token.
+      description: The relay bot's token configured on the fake.
       example: Bot fake-local
   responses:
     '200':
@@ -28,20 +28,21 @@ operation:
       description: The Member object.
     '401':
       description: Missing or wrong bot token (`0`).
+    '403':
+      description: Another seeded bot's token (`50001`).
     '404':
       description: Unknown guild (`10004`) or member (`10007`).
 source:
   - label: guild.member.get
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L240
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L279
   - label: Member object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L100
 ---
 
 Route name `guild.member.get`.
+This route does not check whether the relay bot belongs to the guild.
 The `/api/v9` and `/api` prefixes also work.
 The example guild and member come from [`POST /_fake/guilds`](../control-seeding/post-guilds.md) and [`POST /_fake/members`](../control-seeding/post-members.md) with explicit IDs.
-`--seed dev` generates different IDs.
+`--seed dev` uses different, fixed IDs.
 
-- [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
-
-This route does not check whether the bot belongs to the guild.
+[Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
