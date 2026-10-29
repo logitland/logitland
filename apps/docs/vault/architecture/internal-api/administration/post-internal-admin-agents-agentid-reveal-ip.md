@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: agentId
       in: path
+      required: true
       type: string
       example: agt_0000000001
     - name: x-logitland-internal
@@ -45,15 +46,10 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-agents.ts#L78
   - label: Origin response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1041
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1120
 ---
 
-The reason trims to 3–500 characters. The relay records an audit entry before decrypting retained raw addresses. Origins contain `kind: "signup" | "use"`, `ip`, nullable `asn`, `network`, `country`, and `seen_at`. Only addresses still retained can appear.
+The reason trims to 3–500 characters. The relay records an audit entry before decrypting retained raw addresses.
+Origins contain `kind: "signup" | "use"`, `ip`, nullable `asn`, `network`, and `country`, plus `seen_at` and `purge_after` timestamps.
+Only addresses still within retention can appear, newest first.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const result = await relay(event, '/internal/admin/agents/agt_0000000001/reveal-ip', {
-  method: 'POST',
-  body: { reason: 'Investigating a reported account cluster' },
-});
-```

@@ -44,9 +44,7 @@ source:
 
 ## Deliveries and subscriptions
 
+Returns `{ deliveries: DeliveryDetail[], next_before: DeliveryId | null }`.
 Delivery statuses are `pending`, `retrying`, `delivered`, `failed`, and `dropped`. `DeliveryDetail` includes the state, timestamps, attempt log, URL host, and agent ID/name.
+Pass `next_before` as `before` until it is null. A full page returns a cursor even when the next page is empty.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-await relay(event, '/internal/admin/deliveries?status=retrying&limit=25');
-```

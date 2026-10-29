@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: id
       in: path
+      required: true
       type: string
       example: '123456789012345678'
     - name: before
@@ -44,14 +45,11 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-channels.ts#L43
   - label: Read service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L374
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L369
   - label: Read shape
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L400
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L421
 ---
 
 Returns `{ messages: ConversationMessage[], next_before: Snowflake | null }`, newest first. A successful read records `conversation.read` in the audit log.
+Pass `next_before` as `before` until it is null. A full page returns a cursor even when the next page is empty.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const page = await relay(event, '/internal/admin/conversations/123456789012345678/messages?limit=25');
-```
