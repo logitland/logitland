@@ -39,7 +39,7 @@ operation:
     '400': { description: Incomplete or invalid client authorization request., contentType: text/html }
 source:
   - https://github.com/logitland/logitland/blob/main/apps/web/src/routes/oauth/authorize/+page.server.ts#L13
-  - https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1469
+  - https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1485
   - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L111
 ---
 

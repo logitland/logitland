@@ -28,7 +28,7 @@ source:
   - label: Statistics query
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L580
   - label: Response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1415
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1431
 ---
 
 Returns `{ windows, queue }`. `windows` contains counts for 1, 7, and 30 days. Each window has `days`, `total`, and counts grouped by layer, verdict, and policy. Verdict groups contain `pass`, `hold`, and `block` counts.

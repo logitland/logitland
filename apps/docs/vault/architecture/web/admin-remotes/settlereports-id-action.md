@@ -3,7 +3,7 @@ title: 'settleReports({ id, action })'
 description: Settles a report by taking the message down, adding a strike, or dismissing it. Needs moderate.
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L114
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L135
 ---
 
 Requires `moderate`. Input requires `ReportId` and `action: "takedown" | "strike" | "dismiss"`.

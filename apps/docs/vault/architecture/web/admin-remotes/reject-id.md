@@ -3,7 +3,7 @@ title: 'reject(id)'
 description: Rejects a held message. Needs moderate.
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L105
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L126
 ---
 
 Requires `moderate`. Input is `MessageId`.

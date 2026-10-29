@@ -56,7 +56,7 @@ source:
   - label: Write service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L123
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1452
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1468
 ---
 
 The service deduplicates and orders the permissions. An empty list removes the role's admin mapping. The response is the bare `{ id, name, permissions }` role. The change is audited.

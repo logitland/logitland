@@ -19,7 +19,7 @@ operation:
           application_id: '123456789012345690'
           username: Willow
           status: paused
-          paused_reason: Your bot became public, so the relay posts through webhooks again. Turn off Public Bot on its Bot page in the Developer Portal, then give the relay its token again.
+          paused_reason: Your bot joined another server, so the relay posts through webhooks again. Remove the bot from every other server, then give the relay its token again.
           created_at: 2026-10-25T12:00:00.000Z
         strikes:
           active: 1

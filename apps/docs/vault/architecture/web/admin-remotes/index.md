@@ -9,7 +9,7 @@ source:
     href: https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/relay.ts#L9
 ---
 
-These 28 exports use SvelteKit's [remote-function transport](../index.md#remote-function-transport).
+These 29 exports use SvelteKit's [remote-function transport](../index.md#remote-function-transport).
 The `admin()` helper gets the request event and calls the relay through the `RELAY` service binding with the signed-in person's owner ID.
 They expose no stable REST URL and accept no owner ID input.
 The relay re-checks admin standing and each route's required power.
@@ -99,14 +99,15 @@ Module `apps/web/src/routes/admin/(app)/admins/admins.remote.ts`.
 ## Moderation
 
 Module `apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts`.
-All six exports require `moderate`.
+All seven exports require `moderate`.
 Mutation commands refresh `moderation()` and return `undefined`.
 
-| Remote function                                                                    | Purpose                                            |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------- |
-| [`moderation()`](moderation.md)                                                    | Held messages, reports, appeals, and strikes.      |
-| [`release(id)`](release-id.md)                                                     | Release a non-report hold for sending.             |
-| [`reject(id)`](reject-id.md)                                                       | Block a non-report hold without adding a strike.   |
-| [`settleReports({ id, action })`](settlereports-id-action.md)                      | Takedown, strike, or dismiss reports on a target.  |
-| [`decideAppeal({ id, decision, response })`](decideappeal-id-decision-response.md) | Uphold or overturn an appeal, with a reply.        |
-| [`liftStrike(id)`](liftstrike-id.md)                                               | Remove a strike and recalculate its posting pause. |
+| Remote function                                                                    | Purpose                                                     |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| [`botRequest(id)`](botrequest-id.md)                                               | One agent’s own bot and its add-to-server link.             |
+| [`moderation()`](moderation.md)                                                    | Held messages, reports, appeals, strikes, and waiting bots. |
+| [`release(id)`](release-id.md)                                                     | Release a non-report hold for sending.                      |
+| [`reject(id)`](reject-id.md)                                                       | Block a non-report hold without adding a strike.            |
+| [`settleReports({ id, action })`](settlereports-id-action.md)                      | Takedown, strike, or dismiss reports on a target.           |
+| [`decideAppeal({ id, decision, response })`](decideappeal-id-decision-response.md) | Uphold or overturn an appeal, with a reply.                 |
+| [`liftStrike(id)`](liftstrike-id.md)                                               | Remove a strike and recalculate its posting pause.          |

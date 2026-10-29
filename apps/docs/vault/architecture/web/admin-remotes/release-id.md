@@ -3,7 +3,7 @@ title: 'release(id)'
 description: Releases a held message for sending. Needs moderate.
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L99
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L120
 ---
 
 Requires `moderate`. Input is a relay `MessageId`.

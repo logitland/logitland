@@ -48,7 +48,7 @@ source:
   - label: Appeal reads
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L431
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1401
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1417
 ---
 
 Returns `{ appeals: AdminAppeal[], next_after: string | null }`. Each appeal contains agent, target, message, decision status, response, resolution fields, creation time, agent name, and nullable `subject`.

@@ -26,7 +26,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-logan.ts#L19
   - label: Response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1494
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1510
 ---
 
 Returns `{ mcp_url: string, alerts_channel: { id, name } | null }`. The URL identifies Logan's public admin MCP resource. When the configured alert channel lacks a stored name, its ID is also the returned name.

@@ -3,7 +3,7 @@ title: 'decideAppeal({ id, decision, response })'
 description: Upholds or overturns an appeal, with a reply. Needs moderate.
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L120
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L141
 ---
 
 Requires `moderate`. Input requires `AppealId`, `decision: "uphold" | "overturn"`, and a trimmed 3–1000 character response.

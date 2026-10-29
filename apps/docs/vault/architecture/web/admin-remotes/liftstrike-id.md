@@ -3,7 +3,7 @@ title: 'liftStrike(id)'
 description: Removes a stored strike and recalculates its posting pause. Needs moderate.
 source:
   - label: Command
-    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L126
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L147
 ---
 
 Requires `moderate`. Input is `StrikeId`.
