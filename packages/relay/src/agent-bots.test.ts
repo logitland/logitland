@@ -35,6 +35,8 @@ function discordWithBot(h: Harness) {
     /** The relay's bot lacks Moderate Members and Manage Messages: Discord refuses its timeouts and deletes. */
     refuseTimeout: false,
     refuseDelete: false,
+    /** The relay's own bot's messages Discord won't edit. */
+    refusedEdits: new Set<string>(),
     /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
     holdGateway: 0,
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
@@ -102,6 +104,7 @@ function discordWithBot(h: Harness) {
     if (req.method === 'DELETE' && bot.refuseDelete && /\/messages\/\d+$/.test(path))
       return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
     if (req.method === 'DELETE') return new Response(null, { status: 204 });
+    if (req.method === 'PATCH' && bot.refusedEdits.has(path.split('/').pop()!)) return new Response('upstream error', { status: 503 });
     if (path === '/applications/@me') return Response.json(application([ADMIN_DISCORD]));
     if (/^\/applications\/\d+\/emojis$/.test(path)) return Response.json({ items: bot.emoji });
     if (path === '/users/@me/channels') return Response.json({ id: OWNER_DM, type: 1 });
@@ -872,5 +875,63 @@ describe('staff adding the bot from the mod queue', () => {
     await botsJob(h.relay, { deadline: Date.now() + 10_000 });
     await botsJob(h.relay, { deadline: Date.now() + 10_000 });
     expect(await staffAlerts(h)).toEqual([waiting(a)]);
+  });
+
+  it('posts once more when staff delete the message while the bot still waits', async () => {
+    const { h, a } = await queued();
+    await seedChannel(h.relay, { id: STAFF, access: 'off', webhookUrl: null });
+    await give(h, a);
+    const message = await h.db.prepare('SELECT queue_message_id AS id FROM agent_bots WHERE agent_id = ?').bind(a.id).first<{ id: string }>();
+    await ingest(h.relay, { source: 'test', events: [{ kind: 'message_delete', channel_id: STAFF, message_id: message!.id }] });
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect(await staffAlerts(h)).toEqual([waiting(a), waiting(a)]);
+  });
+
+  it('removes the bot at once when Discord refuses to say so, and says so at a later run', async () => {
+    const { h, a, bot } = await queued();
+    await give(h, a);
+    const message = await h.db.prepare('SELECT queue_message_id AS id FROM agent_bots WHERE agent_id = ?').bind(a.id).first<{ id: string }>();
+    bot.refusedEdits.add(message!.id);
+    expect((await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token))).ok).toBe(true);
+    expect(await h.db.prepare('SELECT 1 FROM agent_bots WHERE agent_id = ?').bind(a.id).first()).toBeNull();
+
+    bot.refusedEdits.clear();
+    for (let run = 0; run < 2; run++) {
+      h.advance(60_000);
+      await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    }
+    const removed = 'Wren’s own bot `Wren` was removed before it was added, so there’s nothing to add.';
+    expect(await queueEdits(h)).toEqual([
+      [message!.id, removed],
+      [message!.id, removed],
+    ]);
+  });
+
+  it('gets to every message Discord refused, though the oldest ten keep failing', async () => {
+    const { h, owner, bot } = await queued();
+    const ids: string[] = [];
+    for (let i = 0; i < 11; i++) {
+      const agent = await seedAgent(h.relay, { name: `Agent ${i}`, ownerId: owner.id });
+      const id = `32000000000000000${i.toString().padStart(2, '0')}`;
+      const botId = `5100000000000000${i.toString().padStart(2, '0')}`;
+      const checked = new Date(h.now().getTime() - (11 - i) * 60_000).toISOString();
+      await h.db
+        .prepare(
+          `INSERT INTO agent_bots (agent_id, bot_user_id, application_id, username, token_ciphertext, status, paused_reason, checked_at, created_at, updated_at,
+             queue_channel_id, queue_message_id, queue_shows) VALUES (?, ?, ?, 'helper', 'sealed', 'paused', 'made public', ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(agent.id, botId, APP_ID, checked, checked, checked, STAFF, id, `waiting:${botId}`)
+        .run();
+      ids.push(id);
+    }
+    for (const id of ids.slice(0, 10)) bot.refusedEdits.add(id);
+    for (let run = 0; run < 2; run++) {
+      h.advance(60_000);
+      await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    }
+    expect((await queueEdits(h)).filter(([id]) => id === ids[10])).toHaveLength(1);
   });
 });

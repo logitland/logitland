@@ -1,8 +1,9 @@
 import type { AdminBot } from '@logitland/contracts';
 import { DiscordError } from '@logitland/discord';
-import { iso, type Relay } from '../context';
+import { iso, type Relay, type Stmt } from '../context';
 import { notFound } from '../errors';
 import type { BotRow } from './bots';
+import { chunk, MAX_PARAMS, placeholders } from './events';
 import { getSettings } from './settings';
 
 // Staff add each agent's own bot by hand (#83): adding a bot to a server takes someone with Manage Server, and Discord asks for
@@ -10,7 +11,8 @@ import { getSettings } from './settings';
 // queue (the staff alerts channel): the agent, its owner, the bot, and a link to the bot's page in the admin dashboard, whose
 // Add to server button opens Discord's authorize page with the bot and the server filled in. The message follows the request:
 // a new bot for the same agent rewrites it, and once the bot is added, paused or removed it says so and the request is done.
-// botsJob sees the bot join (bots.ts) and tries again whatever Discord refused here.
+// A message staff delete while the bot still waits is posted again. botsJob sees the bot join (bots.ts) and tries again
+// whatever Discord refused here, a removed bot's last edit included (bot_queue_closings).
 
 /** Messages botsJob tries again per run. */
 const RETRIES_PER_RUN = 10;
@@ -105,25 +107,66 @@ export async function syncQueue(relay: Relay, agentId: string): Promise<void> {
   }
 }
 
-/** After the bot was removed (its row is gone): an open message says so. */
-export async function queueRemoved(relay: Relay, bot: BotRow): Promise<void> {
-  if (!isOpen(bot)) return;
+/** For removeBot's batch, which deletes the bot's row: an open message is kept with what it should say (closeRemoved). */
+export async function queueRemoved(relay: Relay, bot: BotRow): Promise<Stmt[]> {
+  if (!isOpen(bot)) return [];
   const agent = await relay.db.prepare('SELECT name FROM agents WHERE id = ?').bind(bot.agent_id).first<{ name: string }>();
-  await edit(relay, bot, text(relay, { ...bot, agent_name: agent?.name ?? bot.agent_id, owner_discord_id: null }, 'removed'));
+  const content = text(relay, { ...bot, agent_name: agent?.name ?? bot.agent_id, owner_discord_id: null }, 'removed');
+  return [
+    relay.db
+      .prepare('INSERT OR REPLACE INTO bot_queue_closings (message_id, channel_id, agent_id, content, attempted_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(bot.queue_message_id, bot.queue_channel_id, bot.agent_id, content, iso(relay.now())),
+  ];
 }
 
-/** botsJob: the messages Discord refused to post or rewrite, tried again. */
+/**
+ * Says in removed bots' messages that they were removed: the one given, or (botsJob) those Discord refused, the longest since
+ * their last try first. A message is forgotten once the edit is done or staff deleted it. Returns how many it tried.
+ */
+export async function closeRemoved(relay: Relay, messageId?: string): Promise<number> {
+  const now = relay.now();
+  const { results } = await relay.db
+    .prepare('SELECT * FROM bot_queue_closings WHERE message_id = ?1 OR (?1 IS NULL AND attempted_at <= ?2) ORDER BY attempted_at LIMIT ?3')
+    .bind(messageId ?? null, iso(new Date(now.getTime() - SETTLE_MS)), RETRIES_PER_RUN)
+    .all<{ message_id: string; channel_id: string; agent_id: string; content: string }>();
+  for (const c of results) {
+    const edited = await edit(relay, { agent_id: c.agent_id, queue_channel_id: c.channel_id, queue_message_id: c.message_id }, c.content);
+    await (
+      edited === 'failed'
+        ? relay.db.prepare('UPDATE bot_queue_closings SET attempted_at = ? WHERE message_id = ?').bind(iso(now), c.message_id)
+        : relay.db.prepare('DELETE FROM bot_queue_closings WHERE message_id = ?').bind(c.message_id)
+    ).run();
+  }
+  return results.length;
+}
+
+/** For intake's batch: staff deleted these messages, so a bot still waiting gets a new one (retryQueue). */
+export const queueDeleted = (relay: Relay, messageIds: string[]): Stmt[] =>
+  chunk(messageIds, MAX_PARAMS).map((part) =>
+    relay.db
+      .prepare(`UPDATE agent_bots SET queue_channel_id = NULL, queue_message_id = NULL, queue_shows = NULL WHERE queue_message_id IN (${placeholders(part.length)})`)
+      .bind(...part),
+  );
+
+/**
+ * botsJob: the messages Discord refused to post or rewrite (or staff deleted while the bot waits), tried again; untried ones
+ * first, then the longest since their last try.
+ */
 export async function retryQueue(relay: Relay): Promise<number> {
+  const now = relay.now();
   const { results } = await relay.db
     .prepare(
       `SELECT agent_id FROM agent_bots WHERE checked_at <= ?
          AND ((status = 'waiting' AND queue_shows IS NOT ('waiting:' || bot_user_id)) OR (status != 'waiting' AND queue_shows LIKE 'waiting:%'))
-       ORDER BY checked_at LIMIT ?`,
+       ORDER BY queue_attempted_at NULLS FIRST, checked_at LIMIT ?`,
     )
-    .bind(iso(new Date(relay.now().getTime() - SETTLE_MS)), RETRIES_PER_RUN)
+    .bind(iso(new Date(now.getTime() - SETTLE_MS)), RETRIES_PER_RUN)
     .all<{ agent_id: string }>();
-  for (const { agent_id } of results) await syncQueue(relay, agent_id);
-  return results.length;
+  for (const { agent_id } of results) {
+    await relay.db.prepare('UPDATE agent_bots SET queue_attempted_at = ? WHERE agent_id = ?').bind(iso(now), agent_id).run();
+    await syncQueue(relay, agent_id);
+  }
+  return results.length + (await closeRemoved(relay));
 }
 
 const toAdminBot = (relay: Relay, b: QueueRow): AdminBot => ({

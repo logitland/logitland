@@ -9,7 +9,7 @@ import type { AgentRecord } from '../types';
 import { agentRoleIds, anyAgentRoleIds } from './access';
 import { auditStmt, type AuditInput } from './audit';
 import { readAvatar } from './avatars';
-import { queueRemoved, retryQueue, syncQueue } from './bot-queue';
+import { closeRemoved, queueRemoved, retryQueue, syncQueue } from './bot-queue';
 import { agentRoles } from './channels';
 import { getAgent, getOwner } from './identity';
 import { enforce } from './limits';
@@ -45,6 +45,7 @@ export interface BotRow {
   queue_channel_id: string | null;
   queue_message_id: string | null;
   queue_shows: string | null;
+  queue_attempted_at: string | null;
 }
 
 /** Sealed to its agent (reseal.ts re-seals it under a new key the same way). */
@@ -312,8 +313,9 @@ export async function removeBot(
       target_id: agentId,
       diff: { bot_user_id: { from: bot.bot_user_id, to: null } },
     }),
+    ...(await queueRemoved(relay, bot)),
   ]);
-  await queueRemoved(relay, bot);
+  if (bot.queue_message_id) await closeRemoved(relay, bot.queue_message_id);
   await revokeGrants(relay, bot.bot_user_id);
   const guildId = relay.config.discord.guildId;
   if (!guildId) return true;
