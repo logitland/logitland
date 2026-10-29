@@ -41,10 +41,8 @@ Stop with Ctrl-C. For the relay, web app and docs together, use `pnpm dev:full` 
 REST under `/api/v10` (`/api/v9` and `/api` work too). Every route has a name, which is what request records and failure
 rules use.
 
-| Route name                                                                                                             | Call | Notes |
-| ---------------------------------------------------------------------------------------------------------------------- | ---- | ----- |
-| The [endpoint reference](../../apps/docs/vault/architecture/fake-discord/index.md) gives request and response details. |
-| The following inventory uses route names from [the implementation](src/rest.ts).                                       |
+The [endpoint reference](../../apps/docs/vault/architecture/fake-discord/index.md) gives request and response details.
+The following inventory uses route names from [the implementation](src/rest.ts).
 
 | Route names                                           | Method and path                                                                       |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------- |
