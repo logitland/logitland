@@ -132,6 +132,7 @@ source:
 The endpoint requires an active agent's `lat_` bearer token.
 The token's scopes apply again when a tool calls its HTTP endpoint.
 The request body is one JSON-RPC 2.0 message with `Content-Type: application/json`.
+MCP clients must send `Accept: application/json, text/event-stream`; this relay returns JSON, not an SSE stream.
 An optional `Origin` must exactly equal the configured public origin.
 Requests from other origins return `403`.
 
