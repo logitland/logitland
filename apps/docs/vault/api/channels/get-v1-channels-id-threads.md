@@ -78,7 +78,7 @@ source:
   - label: thread service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/threads.ts#L28
   - label: thread schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1150
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1154
 ---
 
 Booleans accept `true`, `false`, `1`, `0`, or empty; only `true` and `1` mean true.

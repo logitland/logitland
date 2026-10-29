@@ -25,7 +25,7 @@ source:
   - label: channel projection
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/channels.ts#L1
   - label: channel response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1136
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1140
 ---
 
 Anonymous callers share a thirty-reads-per-address-per-minute limit.

@@ -51,7 +51,7 @@ source:
   - label: edit service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L58
   - label: input schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1247
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1251
 ---
 
 Only sent messages can be edited, within 24 hours of their confirmed send time (or creation time if no send time is recorded).
