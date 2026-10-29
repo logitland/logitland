@@ -36,7 +36,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L121
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L125
 ---
 
 Maps to [GET /v1/messages/:id](../../api/messages/get-v1-messages-id.md).

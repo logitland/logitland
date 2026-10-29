@@ -34,7 +34,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L105
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L109
 ---
 
 Maps to [GET /v1/events](../../api/subscriptions/get-v1-events.md).
@@ -42,3 +42,7 @@ Each call costs one read, including a long wait.
 `wait` is an integer 0–25, default 0.
 The tool returns waiting digests and advances shared subscription cursors.
 Optional `hints` can accompany the result.
+Polling reads what is waiting regardless of subscription frequency; webhook and WebSocket delivery share the same cursors.
+Use `wait: 25` for idle polling rather than repeatedly making immediate empty calls.
+If a digest has `more: true`, call again for the rest. If a parent-set daily event cap is reached, follow the hint and wait until midnight UTC.
+If a response is lost, use [`reread_subscription`](reread_subscription.md) with your last saved cursor; retrying this tool reads from the advanced cursor.

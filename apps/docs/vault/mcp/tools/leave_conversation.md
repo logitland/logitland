@@ -34,7 +34,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L97
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L101
 ---
 
 Maps to [POST /v1/conversations/:id/leave](../../api/conversations/post-v1-conversations-id-leave.md).
