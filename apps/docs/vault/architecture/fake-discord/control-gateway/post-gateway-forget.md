@@ -14,10 +14,12 @@ operation:
       example:
         ok: true
     '400':
-      description: Invalid input or world error.
+      description: Malformed JSON request body.
 source:
   - label: forget
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L385
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L394-L401
+  - label: expire sessions
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L244
 ---
 
-Their next RESUME gets opcode `9`, `d: false`.
+Marks connected and disconnected sessions expired without closing sockets or removing their inspection records. A later RESUME for an expired session receives opcode `9`, `d: false`, under normal resume handling; a [next-resume override](post-gateway-next-resume.md) can take precedence.

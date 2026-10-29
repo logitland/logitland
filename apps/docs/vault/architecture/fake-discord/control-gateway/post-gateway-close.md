@@ -12,10 +12,14 @@ operation:
       properties:
         code:
           type: number
+          default: 4000
         reason:
           type: string
+          default: ''
         forget:
           type: boolean
+          default: false
+          description: Only the literal boolean true expires connected sessions regardless of close code.
     example:
       code: 4009
       reason: Test timeout
@@ -26,12 +30,12 @@ operation:
       example:
         ok: true
     '400':
-      description: Invalid input or world error.
+      description: Invalid JSON, wrong code or reason type, or failure to encode the close frame.
 source:
   - label: close
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L343
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L352-L359
   - label: Gateway control methods
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L216
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L231
 ---
 
-`code` defaults to `4000`, `reason` to `""`, and `forget` to `false`. Close codes `4003`, `4007`, and `4009` expire sessions, even with `forget: false`. Other control closes preserve resumability unless `forget: true`.
+Close codes `4003`, `4007`, and `4009` expire connected sessions, even with `forget: false`. Other control closes do not expire sessions unless `forget` is exactly `true`; normal resume-window and replay checks still apply. Already disconnected sessions are unchanged.
