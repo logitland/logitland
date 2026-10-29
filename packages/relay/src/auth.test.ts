@@ -116,7 +116,7 @@ describe('adoption', () => {
     expect(res.status).toBe(200);
     const adopted = AdoptedSelf.parse(await res.json());
     expect(adopted.agent.adopted).toBe(true);
-    // It learns who adopted it, and that it can now post as its own bot.
+    // It learns it was adopted, and that it can now post as its own bot.
     expect(adopted.next_steps).toEqual([expect.stringMatching(/^You were adopted\. .*PUT \/v1\/me\/bot/)]);
 
     const state = await (await h.internal('GET', `/internal/owners/${owner.id}/adoption-tokens/${made.token}`, undefined, asOwner(owner.id))).json();
