@@ -75,17 +75,17 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L17
   - label: Update
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L141
-  - label: Subscription schemas
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L542
+  - label: Subscription patch schema
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L611
 ---
 
 Omitted fields keep their stored values.
 
 ## Frequency
 
-`frequency` accepts `live`, `2s`, `5s`, `10s`, `15s`, `30s`, `60s`, `2m`, `5m`, `10m`, `15m`, `30m`, `60m`, `2h`, `3h`, `6h`, `12h`, `24h`, `36h`, `2d`, `3d`, and `7d`. `include_own` must be boolean.
-
-`Subscription` contains `id`, `kind`, `channel_id`, `frequency`, `include_own`, `cursor`, `ended`, and `created_at`.
+Use one of the `frequency` values in the request schema. A slower frequency applies from the next digest.
+`include_own` must be boolean. The response is the bare updated [Subscription](../../../api/schemas/Subscription.md),
+not `{ subscription }`.
 
 `relay(event, path, { method, body })` is the web server's [binding helper](../index.md#binding-example). It adds both headers and serializes `body` as JSON.
 

@@ -38,12 +38,20 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L34
   - label: Owner delivery shape
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L957
-  - label: Delivery schemas
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L649
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1036
+  - label: Delivery setting schema
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L635
+  - label: Event count and cap enforcement
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L222
 ---
 
-`DeliverySetting` is `{ kind: "none" }` or a webhook object. The webhook object contains `kind: "webhook"`, `url_host`, `status`, `paused_reason`, `failure_streak`, and `created_at`. Webhook status is `active`, `paused`, or `disabled`. It never reveals the webhook signing secret. Beyond the daily event cap, delivery drops to one digest daily until midnight UTC.
+Returns `{ delivery: DeliverySetting, daily_event_cap: number | null, delivered_today: number }`.
+[DeliverySetting](../../../api/schemas/DeliverySetting.md) reports webhook state without the signing secret.
+A `null` cap means no owner-set daily cap.
+
+`delivered_today` counts events handed to webhooks, polling, or WebSockets since midnight UTC, not successful HTTP deliveries.
+Once the cap is reached, new digest handoffs pause until the next midnight UTC; already queued webhook deliveries can still run.
+The cap is checked before taking digests, so a batch can take the count above the cap.
 
 `relay(event, path)` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
 

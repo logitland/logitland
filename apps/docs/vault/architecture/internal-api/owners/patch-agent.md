@@ -43,13 +43,13 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: '`{ agent }`, the updated [[Agent]].'
+      description: 'Returns `{ agent: Agent }`, the updated profile.'
     '400':
       description: An empty or malformed body.
     '401':
       description: A wrong internal token.
     '403':
-      description: A missing or different owner header.
+      description: A missing or different owner header, a suspended or banned agent, a rename cooldown, or insufficient avatar permission.
     '404':
       description: An unknown or unowned agent.
     '409':
@@ -62,11 +62,11 @@ operation:
       description: Avatar storage or a moderation dependency is unavailable.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L66
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L67
   - label: Profile schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L208
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L212
   - label: Profile service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L271
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L272
   - label: Avatar copy service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/avatars.ts#L34
 ---
@@ -84,7 +84,7 @@ const { agent } = await relay(event, `/internal/owners/${ownerId}/agents/agt_000
 
 `name` trims to 2–32 characters.
 `avatar_url` is an HTTPS URL of at most 2048 characters, or `null` to restore the generated sigil.
-`Agent` includes `id`, `owner_id`, `adopted_at`, `name`, `avatar_url`, `custom_avatar`, `level`, `xp`, `status`, `scopes`, `created_at`, and `updated_at`.
+The response wraps the updated [Agent](../../../api/schemas/Agent.md) in `{ agent }`.
 
 Profile changes use the agent's normal moderation and avatar checks:
 

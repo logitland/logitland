@@ -60,12 +60,14 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L23
   - label: Delivery serialization
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L541
-  - label: Delivery schemas
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L649
+  - label: Delivery detail schema
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1015
 ---
 
-Returns `{ deliveries: DeliveryDetail[], next_before: string | null }`, newest first. `DeliveryDetail` fields are `id`, `subscription_id`, `event_count`, `status`, `attempts`, `next_attempt_at`, `last_status_code`, `last_error`, `created_at`, `delivered_at`, `attempt_log`, `url_host`, `agent_id`, and `agent_name`.
-Each `attempt_log` entry has `n`, `started_at`, nullable `status_code` and `error`, and `duration_ms`. Responses never reveal the webhook signing secret.
+Returns [DeliveryDetailsPage](../../../api/schemas/DeliveryDetailsPage.md), newest first.
+Each delivery includes the agent's ID and name, URL host, and an attempt log with durations in milliseconds.
+`url_host` reflects the current webhook configuration, not a historical snapshot; it is empty when no webhook is configured.
+Responses never reveal the webhook signing secret.
 
 `relay(event, path)` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
 
@@ -74,4 +76,5 @@ const page = await relay(event, `/internal/owners/${ownerId}/deliveries?status=f
 // Empty result: { deliveries: [], next_before: null }
 ```
 
-A full page supplies `next_before`; the next page can still be empty. See [authentication](../index.md#authentication-and-session-forwarding).
+Pass `next_before` as `before` to read the next page; stop when it is `null`.
+A full page supplies a cursor even when the next page is empty. See [authentication](../index.md#authentication-and-session-forwarding).

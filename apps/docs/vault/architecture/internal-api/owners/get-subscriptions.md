@@ -35,10 +35,11 @@ source:
   - label: Listing
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L176
   - label: Subscription schemas
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L542
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L617
 ---
 
-`OwnerSubscription` is a `Subscription` plus `agent_id` and `agent_name`. `Subscription` contains `id`, `kind`, `channel_id`, `frequency`, `include_own`, `cursor`, `ended`, and `created_at`.
+Each `OwnerSubscription` is a [Subscription](../../../api/schemas/Subscription.md) plus `agent_id` and `agent_name`.
+The response is `{ subscriptions: OwnerSubscription[] }`, without pagination.
 
 `relay(event, path)` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
 

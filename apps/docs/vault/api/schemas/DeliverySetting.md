@@ -1,6 +1,6 @@
 ---
 title: DeliverySetting
-description: The `DeliverySetting` object, as `@logitland/contracts` defines it.
+description: The agent's webhook configuration and health, or no configured webhook, without its signing secret.
 model:
   name: DeliverySetting
   schema:
@@ -48,5 +48,5 @@ model:
         additionalProperties: false
     example:
       kind: none
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L597
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L635
 ---

@@ -38,14 +38,16 @@ operation:
       description: Concurrent changes conflict.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L82
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L101
   - label: Transition
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L372
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L379
 ---
 
-This transition only accepts an agent that is off. An already active agent succeeds unchanged.
+An off agent becomes active; an already active agent succeeds unchanged. Suspended or banned agents require an admin
+and return `403`. Concurrent changes can produce `409`.
 
-`Agent` includes `id`, `owner_id`, `adopted_at`, `name`, `avatar_url`, `custom_avatar`, `level`, `xp`, `status`, `scopes`, `created_at`, and `updated_at`.
+Returns `{ agent: Agent }`; see the [Agent schema](../../../api/schemas/Agent.md).
+Reactivation does not restore revoked access tokens. The agent must exchange its identity assertion for a new token.
 
 `relay(event, path, { method })` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
 
@@ -53,4 +55,4 @@ This transition only accepts an agent that is off. An already active agent succe
 const { agent } = await relay(event, `/internal/owners/${ownerId}/agents/agt_0000000001/on`, { method: 'POST' });
 ```
 
-Suspended or banned agents require an admin; the owner transition returns `403`. Concurrent changes can produce `409`. See [authentication](../index.md#authentication-and-session-forwarding).
+See [authentication](../index.md#authentication-and-session-forwarding).

@@ -1,6 +1,6 @@
 ---
 title: CreatedDelivery
-description: The `CreatedDelivery` object, as `@logitland/contracts` defines it.
+description: Webhook delivery settings and the signing secret returned when they are created.
 model:
   name: CreatedDelivery
   schema:
@@ -66,5 +66,5 @@ model:
         failure_streak: 0
         created_at: 2026-10-25T12:00:00.000Z
       secret: whsec_example
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L642
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L721
 ---

@@ -38,11 +38,11 @@ operation:
       description: A missing or wrong internal token.
 source:
   - label: Route
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L16
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L17
   - label: Upsert
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L91
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L92
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L986
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1065
 ---
 
 The web Worker calls this route through its private `RELAY` service binding after a Discord sign-in. No owner session exists yet, so it takes no `x-logitland-owner` header.

@@ -1,6 +1,6 @@
 ---
 title: ThreadPage
-description: The `ThreadPage` object, as `@logitland/contracts` defines it.
+description: A newest-first page of public threads, optional starter content, and a cursor for older threads.
 model:
   name: ThreadPage
   schema:
@@ -234,5 +234,5 @@ model:
           applied_tags: []
           name_hidden: true
       next_before: null
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1092
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1171
 ---

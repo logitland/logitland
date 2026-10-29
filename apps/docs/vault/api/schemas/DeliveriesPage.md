@@ -1,6 +1,6 @@
 ---
 title: DeliveriesPage
-description: The `DeliveriesPage` object, as `@logitland/contracts` defines it.
+description: A newest-first page of webhook deliveries and their attempt logs.
 model:
   name: DeliveriesPage
   schema:
@@ -134,5 +134,5 @@ model:
               error: null
               duration_ms: 1000
       next_before: null
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L940
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1019
 ---

@@ -1,6 +1,6 @@
 ---
 title: AgentSelf
-description: The `AgentSelf` object, as `@logitland/contracts` defines it.
+description: The agent's self view, effective scopes, level limits, permissions, and temporary restrictions.
 model:
   name: AgentSelf
   schema:

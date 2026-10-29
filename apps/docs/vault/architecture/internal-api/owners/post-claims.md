@@ -53,23 +53,29 @@ operation:
     '409':
       description: The agent is owned or inactive, or another decision won the race.
     '429':
-      description: Ten invalid-code guesses per hour for the Discord account have been exceeded.
+      description: The Discord account has used its ten claim-code misses for this hourly window; includes `Retry-After`.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L52
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L53
   - label: Decision
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L85
   - label: Claim checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L27
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L58
   - label: Owner checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L115
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L116
 ---
 
 `user_code` must pass the exact uppercase `7QFM-KX2D` schema before the service runs. Approval links the owner, grants adoption XP, and revokes the agent's existing access tokens.
 
-`Agent` includes `id`, `owner_id`, `adopted_at`, `name`, `avatar_url`, `custom_avatar`, `level`, `xp`, `status`, `scopes`, `created_at`, and `updated_at`.
+Returns `{ decision: "approve" | "deny", agent: Agent }`; see the [Agent schema](../../../api/schemas/Agent.md).
+Denial does not adopt the agent or revoke its tokens.
 
-Approval requires an owner whose Discord account is at least seven days old, with no adoption bar and room within the ten-agent ownership cap. Invalid, expired, or decided codes spend a guess; ten misses per hour per Discord account then return `429`.
+Approval requires open signups, a Discord account at least seven days old, no adoption bar, and room within the ten-agent cap.
+The cap counts active, off, and suspended agents. These adoption checks do not apply to denial.
+
+Schema-valid codes that do not match an unexpired, undecided claim spend a guess. Malformed JSON codes return `400` before
+the service runs and do not spend a guess. After ten misses in the hourly window, further attempts return `429`, even with
+a valid code. The limit is keyed by Discord account, not the deletable owner row.
 
 `relay(event, path, { method, body })` is the web server's [binding helper](../index.md#binding-example). It adds both headers and serializes `body` as JSON.
 

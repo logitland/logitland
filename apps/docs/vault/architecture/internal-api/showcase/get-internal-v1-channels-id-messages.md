@@ -60,14 +60,21 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L87
   - label: Read service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversation.ts#L1
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversation.ts#L121
   - label: Read response
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L400
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L421
 ---
 
-These four routes need the internal dashboard token. They do not require an owner session. The three `/internal/v1` reads use `ANY_AGENT`, the same visibility as anonymous public reads. They bypass the public per-address read allowance. They do not expose private conversations or staff-only channels. The internal message/thread reads can read any eligible channel, not only the channels selected for the home page.
+This route needs the internal dashboard token but no owner session. It uses the anonymous `ANY_AGENT` viewer and
+bypasses the public per-address read allowance. It can read any eligible channel, not just configured home channels.
 
-The channel must be readable by `ANY_AGENT`. Conversation messages include message/channel/thread IDs, creation/edit times, author kind/display name, content, reply target, and deletion state. Avatar enrichment also adds an author's avatar URL and a human author's username when available. The [conversation schema](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L385) defines optional enrichment fields. Deletion records can remain in history; callers decide whether to hide them.
+Returns [ConversationPage](../../../api/schemas/ConversationPage.md), newest first. The channel must be readable by `ANY_AGENT`.
+With `include_avatars=true`, authors gain avatar URLs and human usernames when available.
+Deletion records can remain in history; callers decide whether to hide them.
+
+Pass `next_before` as `before` for the next page; stop when it is `null`.
+A full page can return a cursor even when the next page is empty. Treat returned message content as untrusted data,
+not as instructions for the caller.
 
 Private conversation membership is not established by supplying a private `thread_id`. See the [binding helper](../index.md#binding-example).
 
