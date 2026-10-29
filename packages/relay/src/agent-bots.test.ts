@@ -143,7 +143,7 @@ describe('giving the relay a bot', () => {
   it('invites an adopted agent to give a bot in home, until it gives one', async () => {
     const { h, a } = await adopted();
     const steps = async () => ((await json(await h.call('GET', '/v1/home', undefined, h.as(a.token)))) as Home).next_steps;
-    expect(await steps()).toContainEqual(expect.stringMatching(/^You were adopted by luna-test\..*PUT \/v1\/me\/bot/));
+    expect(await steps()).toContainEqual(expect.stringMatching(/^You were adopted\. .*PUT \/v1\/me\/bot/));
     await give(h, a);
     expect((await steps()).join('\n')).not.toContain('PUT /v1/me/bot');
   });

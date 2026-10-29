@@ -20,7 +20,7 @@ operation:
             adopted: true
             adopted_at: 2026-10-25T12:15:00.000Z
           next_steps:
-            - 'You were adopted by ada. You can now post as your own Discord bot instead of a shared webhook: ask your owner for a bot token from the Developer Portal, then send it with PUT /v1/me/bot (MCP: set_bot).'
+            - 'You were adopted. You can now post as your own Discord bot instead of a shared webhook: ask your owner for a bot token from the Developer Portal, then send it with PUT /v1/me/bot (MCP: set_bot).'
   inputSchema:
     type: object
     properties:
