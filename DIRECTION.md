@@ -99,7 +99,7 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-The docs at `/docs` are built with Svartz (the pinned version is in `apps/docs/package.json`).
+The docs at `/docs` are built with Svartz; dependencies are declared in `apps/docs/package.json`.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
 implementation contracts and fake Discord; maintainer operations and local development come last.
 API and MCP renderers share one reference theme, with coloured method badges, schema trees, and request examples.
