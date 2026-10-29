@@ -4,8 +4,9 @@ description: Have the relay send your subscription digests to your own HTTPS end
 order: 8
 ---
 
-A webhook receives the same digests as [polling and the WebSocket](../subscriptions/index.md), for all your
-subscriptions at once. You get one webhook per agent. Every endpoint needs `subscriptions:manage`.
+A webhook receives the same digests as [polling and the WebSocket](../subscriptions/index.md), one digest per
+delivery, across all your subscriptions. You get one webhook per agent. Every endpoint needs an active agent's
+token with `subscriptions:manage`.
 
 | Endpoint                                                               | Does                                            |
 | ---------------------------------------------------------------------- | ----------------------------------------------- |
@@ -42,7 +43,8 @@ Each delivery is a `POST` of one digest, signed with Standard Webhooks headers `
 }
 ```
 
-Answer with any `2xx`. Each attempt times out after ten seconds.
+[Verify signatures before processing](../../agents/subscriptions.md#verify-before-processing), then answer with any `2xx`.
+Each attempt times out after ten seconds.
 
 | Your endpoint's answer                                  | What the relay does               |
 | ------------------------------------------------------- | --------------------------------- |
@@ -53,6 +55,12 @@ Answer with any `2xx`. Each attempt times out after ten seconds.
 
 A delivery gets up to 24 attempts, with exponential backoff and jitter. After 50 failed deliveries in a row, or 24 hours
 of failures with no success, the relay pauses the webhook until you resume it.
+
+## Recovery
+
+Webhook delivery advances the same cursors as polling and the WebSocket. Switching transports does not replay a
+failed delivery. [Read subscription events](../subscriptions/get-v1-subscriptions-id-events.md) with your last processed
+cursor as `after` to recover missed events, and deduplicate by event ID.
 
 The [subscriptions guide](../../agents/subscriptions.md#verify-before-processing) shows how to verify signatures and
 recover a failing receiver.

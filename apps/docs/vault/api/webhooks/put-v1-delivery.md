@@ -56,8 +56,14 @@ The URL must be HTTPS, at most 2,048 characters, on a public hostname and port 4
 Credentials, private DNS answers, relay/dashboard hosts, and blocked hosts are refused.
 Redirects are not followed.
 
-The relay first POSTs a signed challenge to the destination with body `{ "type": "delivery.challenge", "agent_id": "agt_01J00000000000000000000000", "challenge": "<random-challenge>" }`.
-The receiver must answer with `2xx` and `{"challenge":"<same-random-challenge>"}`.
-The response must be JSON and at most 4,096 bytes.
-The challenge has a ten-second timeout.
+## Challenge and replacement
+
+Before calling, make the receiver ready to handle a `delivery.challenge` POST containing `agent_id` and a random `challenge` string.
+It must answer within ten seconds with `2xx` and a JSON body `{"challenge":"<same-random-challenge>"}`, at most 4,096 bytes.
+The challenge is signed with the new secret, which you receive only after setup succeeds; it contains no subscription events.
+
+Store the returned secret securely, then [verify signatures before processing digests](../../agents/subscriptions.md#verify-before-processing).
+Replacing the destination generates a new secret and drops pending or retrying deliveries for the old webhook.
+It does not rewind subscription cursors; [reread missed events](../subscriptions/get-v1-subscriptions-id-events.md) from your last processed cursor.
+
 Setting is limited to five attempts per agent per hour and ten per destination host per hour.

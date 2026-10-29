@@ -75,4 +75,6 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L141
 ---
 
-Types and allowed frequencies match creation.
+Only the supplied fields change; the subscription's kind, target, and cursor stay unchanged.
+`frequency` controls pushes, not [polling](get-v1-events.md), which reads available events immediately.
+`include_own` affects channel and conversation posts, not the replies subscription's own-message status events.

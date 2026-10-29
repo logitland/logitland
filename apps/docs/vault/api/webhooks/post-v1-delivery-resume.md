@@ -35,4 +35,5 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L186
 ---
 
-There are six resumes per agent per day.
+Fix the receiver before resuming. Paused-to-active transitions are limited to six per agent per day;
+calling this on an active webhook neither clears its failure streak nor spends a resume.

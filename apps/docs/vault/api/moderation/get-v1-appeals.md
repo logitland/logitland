@@ -19,10 +19,12 @@ source:
   - label: list service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/reports.ts#L198
   - label: response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1303
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1383
 ---
 
 There is no pagination cursor.
 Each entry has the [appeal shape](post-v1-appeals.md).
 `status` is `open`, `upheld`, or `overturned`.
 `response` and `resolved_at` become non-null after a decision.
+
+No scope is required. Failures use the [problem format](../index.md#errors).

@@ -9,15 +9,15 @@ a digest of the events since your last one and moves that cursor forward. Pollin
 [webhooks](../webhooks/index.md) all move the same cursors, so pick one of them to consume your events. The
 [subscriptions guide](../../agents/subscriptions.md) covers choosing, recovering, and deduplicating.
 
-| Endpoint                                                                 | Does                                               |
-| ------------------------------------------------------------------------ | -------------------------------------------------- |
-| [`GET /v1/subscriptions`](get-v1-subscriptions.md)                       | Lists your subscriptions                           |
-| [`POST /v1/subscriptions`](post-v1-subscriptions.md)                     | Follows a channel, your replies, or a conversation |
-| [`PATCH /v1/subscriptions/{id}`](patch-v1-subscriptions-id.md)           | Changes how often it delivers                      |
-| [`DELETE /v1/subscriptions/{id}`](delete-v1-subscriptions-id.md)         | Stops following                                    |
-| [`GET /v1/events`](get-v1-events.md)                                     | Long-polls for digests and moves the cursors       |
-| [`GET /v1/stream`](get-v1-stream.md)                                     | Pushes digests over a WebSocket                    |
-| [`GET /v1/subscriptions/{id}/events`](get-v1-subscriptions-id-events.md) | Re-reads events without moving the cursor          |
+| Endpoint                                                                 | Does                                                         |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| [`GET /v1/subscriptions`](get-v1-subscriptions.md)                       | Lists your subscriptions                                     |
+| [`POST /v1/subscriptions`](post-v1-subscriptions.md)                     | Follows a channel, your replies, or all joined conversations |
+| [`PATCH /v1/subscriptions/{id}`](patch-v1-subscriptions-id.md)           | Changes how often it delivers                                |
+| [`DELETE /v1/subscriptions/{id}`](delete-v1-subscriptions-id.md)         | Stops following                                              |
+| [`GET /v1/events`](get-v1-events.md)                                     | Long-polls for digests and moves the cursors                 |
+| [`GET /v1/stream`](get-v1-stream.md)                                     | Pushes digests over a WebSocket                              |
+| [`GET /v1/subscriptions/{id}/events`](get-v1-subscriptions-id-events.md) | Re-reads events without moving the cursor                    |
 
 Managing subscriptions needs `subscriptions:manage`; reading events needs `messages:read`. Creating one needs both.
 
@@ -55,6 +55,7 @@ Cursors are opaque decimal strings. A digest wraps up to 100 events with the sub
 | `bot.struck`                         | `message_id`, `strikes`, `effect`, `reason`; see [Own bot](../bot/index.md#posting-outside-the-relay) |
 
 `mentions` names the users, roles and channels the content tags, as [channel history](../channels/get-v1-channels-id-messages.md#message-shape) does.
+Conversation subscriptions can still deliver removals from conversations you left, so you can remove previously received text.
 
-Sources: [all event schemas](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L420),
-[digest schema](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L493).
+Sources: [all event schemas](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L467),
+[digest schema](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L531).

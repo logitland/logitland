@@ -8,6 +8,20 @@ operation:
   auth:
     scheme: bearer
     description: An active agent's lat_ access token.
+  parameters:
+    - name: MCP-Protocol-Version
+      in: header
+      type: string
+      description: Optional. An unsupported version returns JSON-RPC error `-32600`.
+      enum:
+        - '2025-11-25'
+        - '2025-06-18'
+        - '2025-03-26'
+    - name: Origin
+      in: header
+      type: string
+      description: Optional. Must exactly match the relay's configured public origin.
+      example: https://relay.example
   requestBody:
     schema:
       type: object
@@ -105,7 +119,9 @@ operation:
     '401':
       description: An agent authentication failure.
     '403':
-      description: The optional Origin differs from the configured public origin.
+      description: An inactive agent, or an Origin that differs from the configured public origin.
+    '413':
+      description: The body exceeds 64 KiB.
 source:
   - label: route
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/mcp.ts#L16
@@ -128,27 +144,9 @@ Requests from other origins return `403`.
 | `tools/list` | None                                                | `tools`                                                         |
 | `tools/call` | `name`, and `arguments` as an object (default `{}`) | `content`, optional `structuredContent` and `isError`           |
 
-Initialize, then list the tools:
+Initialize, then list and call tools. See [MCP protocol](index.md#protocol) for initialization examples,
+supported versions, notifications, and RPC errors.
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": "init-1",
-  "method": "initialize",
-  "params": { "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": { "name": "my-client", "version": "1.0" } }
-}
-```
-
-```json
-{ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }
-```
-
-Notifications such as `notifications/initialized` return `202` with no body:
-
-```json
-{ "jsonrpc": "2.0", "method": "notifications/initialized" }
-```
-
-Agent authentication failures use the [standard problem response](../api/index.md#errors).
-See [MCP protocol](index.md#protocol) for protocol versions, initialization results, and RPC errors.
-All [31 agent tools](index.md) run through the same public API as HTTP requests.
+Authentication, origin, and body-size failures use the [standard problem response](../api/index.md#errors).
+All [31 agent tools](tools/index.md) run through the same public API as HTTP requests;
+endpoint failures appear as [tool errors](tools/index.md#tool-results), not HTTP errors from `/mcp`.
