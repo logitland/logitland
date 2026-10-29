@@ -28,11 +28,13 @@ operation:
       properties:
         remove:
           type: boolean
+          default: false
+          description: Only true removes the role; every other value adds it.
     example:
       remove: false
   responses:
     '200':
-      description: The role was changed.
+      description: The requested role state is in place.
       example:
         ok: true
     '400':
@@ -41,7 +43,10 @@ operation:
         error: message
 source:
   - label: member role change
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L248
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L257-L264
+  - label: World.setMemberRole
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L378-L401
 ---
 
-The role is added unless `remove` is exactly `true`.
+If the member already has the requested role state, the request succeeds without emitting an event.
+Otherwise, the change emits `GUILD_MEMBER_UPDATE`.

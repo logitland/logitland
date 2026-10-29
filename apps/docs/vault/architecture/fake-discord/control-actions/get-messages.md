@@ -11,6 +11,7 @@ operation:
       in: query
       required: true
       type: string
+      description: Existing channel or thread ID.
       example: '100000000000000020'
     - name: webhook
       in: query
@@ -20,12 +21,14 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: Messages in oldest-first order, with full content.
+      description: An object with a messages array in oldest-first order, with full content and no pagination.
     '400':
       description: The channel query is absent or the channel is unknown.
       example:
         error: message
 source:
   - label: message reads
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L214
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L223-L232
+  - label: DiscordFake.messages and webhookMessages
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L407-L416
 ---
