@@ -83,9 +83,10 @@ function copy(s: Standing): string {
   const refused = actions.filter((a) => !a.ok).map((a) => a.refused);
   const did = `${name}’s bot ${s.edited ? 'edited a message' : 'posted'} outside the relay${s.effect === 'notice' ? '' : ' again'}`;
   const happened = [`${did}${done.length ? `, so the relay ${list(done)}` : ''}.`];
-  if (refused.length) happened.push(`Discord refused, so the relay asked staff to ${list(refused)}.`);
+  if (refused.length) happened.push(`Discord didn’t let the relay ${list(refused)}.`);
   const next = {
-    notice: 'Only the relay may post as the bot, because it checks every message first. Another strike while this one is active times the bot out for 24 hours.',
+    notice:
+      'Only the relay may post as the bot, because it checks every message first. Another strike while this one is active times the bot out for 24 hours.',
     timeout: `Another strike while these 2 strikes are active removes it from the server, and you can’t give the relay a bot for ${BOT_BAR_DAYS} days.`,
     kick: `${name} posts through webhooks for now. You can give the relay a bot again on ${at(s.barredUntil, 'f')}. Another strike while these 3 strikes are active bans you for good.`,
   };

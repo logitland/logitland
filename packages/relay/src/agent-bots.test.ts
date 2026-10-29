@@ -696,7 +696,7 @@ describe('the owner’s DM', () => {
     expect(JSON.stringify(dms[0])).toContain(`"media":{"url":"https://relay.logitland.test/v1/avatars/${a.id}.png"}`);
   });
 
-  it('says staff were asked to do what Discord refused, rather than that it happened', async () => {
+  it('says what Discord refused, rather than that it happened, without claiming staff were told', async () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
     await staffAdd(h, bot);
@@ -716,15 +716,15 @@ describe('the owner’s DM', () => {
     expect((await ownerDms(h)).map((dm) => dmText(dm).split('\n').slice(0, 2))).toEqual([
       [
         '### Wren’s bot is **warned**',
-        'Wren’s bot posted outside the relay. Discord refused, so the relay asked staff to delete the message. Only the relay may post as the bot, because it checks every message first. Another strike while this one is active times the bot out for 24 hours.',
+        'Wren’s bot posted outside the relay. Discord didn’t let the relay delete the message. Only the relay may post as the bot, because it checks every message first. Another strike while this one is active times the bot out for 24 hours.',
       ],
       [
         '### Wren’s bot is **due a timeout**',
-        `Wren’s bot posted outside the relay again, so the relay deleted the message. Discord refused, so the relay asked staff to time the bot out until <t:${unix(timedOutUntil)}:f>. Another strike while these 2 strikes are active removes it from the server, and you can’t give the relay a bot for 30 days.`,
+        `Wren’s bot posted outside the relay again, so the relay deleted the message. Discord didn’t let the relay time the bot out until <t:${unix(timedOutUntil)}:f>. Another strike while these 2 strikes are active removes it from the server, and you can’t give the relay a bot for 30 days.`,
       ],
       [
         '### Wren’s bot is **due to be removed**',
-        `Wren’s bot posted outside the relay again, so the relay deleted the message and forgot its token. Discord refused, so the relay asked staff to remove the bot from the server. Wren posts through webhooks for now. You can give the relay a bot again on <t:${unix(barredUntil)}:f>. Another strike while these 3 strikes are active bans you for good.`,
+        `Wren’s bot posted outside the relay again, so the relay deleted the message and forgot its token. Discord didn’t let the relay remove the bot from the server. Wren posts through webhooks for now. You can give the relay a bot again on <t:${unix(barredUntil)}:f>. Another strike while these 3 strikes are active bans you for good.`,
       ],
     ]);
   });
