@@ -82,8 +82,10 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigidly rigged
-3D interpretation of the supplied pink-screen robot concept, with editable materials,
+Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigged
+3D interpretation of the supplied pink-screen robot concept, with continuous deforming
+sleeves and trousers with full faceted volumes, a deep chamfered monitor head,
+magenta surface gradients, neon bloom,
 studio lighting, and neutral and waving poses.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.

@@ -1,8 +1,9 @@
 # Logan
 
 Open **logan.blend** in Blender 5.2 or newer. It contains the character, a 32-bone
-rig, editable materials, studio lights, a portrait camera, and the packed concept
-image. The side and back geometry interpret the single supplied front reference.
+rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
+and the packed full-body concept image. The side and back geometry interpret the
+supplied front reference.
 
 ## Pose and render
 
@@ -11,15 +12,21 @@ image. The side and back geometry interpret the single supplied front reference.
    and enter **Pose Mode**. Rotate the named body, arm, leg, hand, and finger bones.
    This is an FK rig: move the legs and feet with their bones.
 3. Set **blink_L**, **blink_R** (0–1), and **screen_brightness** under the rig's
-   **Object Properties → Custom Properties**. Insert keyframes to keep pose edits
-   when moving along the timeline.
+   **Object Properties → Custom Properties**. Insert keyframes after editing the
+   animated pose, before rendering or moving along the timeline.
 4. Press **F12** to render. The PNGs in `renders/` are 1600 × 1600; the master is
    set to 1200 × 1200 for quicker previews.
 
 `root` moves the whole character. `torso` carries the jacket and arms; `head`
-carries the face and headset. Each mesh has a single rigid bone assignment.
+carries the face and headset. Each sleeve and trouser leg is one connected mesh,
+with blended joint weights and volume-preserving deformation at elbows and knees.
+The head, boots, cuffs, and hand segments remain rigid.
+The sleeves widen through the forearms and taper into octagonal cuffs. Rounded
+cross sections give the jacket and trousers volume while retaining flat facets.
 The hidden Reference collection contains the source image. The original image
-also lives in `reference/logan.png`.
+also lives in `reference/logan.png`; `logan-original.png` retains the first concept.
+The crown and head edges use surface gradients. The compositor adds bloom from
+emissive surfaces, with the halo included in the transparent PNG's alpha.
 
 ## Rebuild or render from the terminal
 
@@ -29,6 +36,7 @@ On macOS, use `/Applications/Blender.app/Contents/MacOS/Blender` for `blender`:
 blender --background --python brand/logan/build.py
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- neutral
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- hello
+blender --background brand/logan/logan.blend --python brand/logan/render.py -- three-quarter
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- transparent
 ```
 
@@ -46,6 +54,5 @@ because the add-on requires it, including for localhost.
 
 Codex has a global `blender-lab` entry launching
 `~/.local/share/blender-lab-mcp/.venv/bin/blender-mcp`. Newly started Codex sessions
-can discover its tools. The current session used the same official bridge through
-its Python client; a separate MCP handshake and scene query verified all 26 tools
-were discoverable.
+can discover its tools. The connection has been verified through an MCP handshake,
+scene queries, and execution of the builder in the running Blender instance.
