@@ -5,7 +5,7 @@ source:
   - label: query
     href: https://github.com/logitland/logitland/blob/main/apps/web/src/lib/owner/owner.remote.ts#L70
   - label: message fields
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1251
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1255
   - label: filtering and pagination
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L377
 ---

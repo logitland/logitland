@@ -26,4 +26,4 @@ The feed sends `ShowcaseFrame` JSON text frames.
 It suppresses stale publications using stored deleted-message IDs. Each publication prunes deletion markers older than one hour.
 The frame schema includes `message.created`, `message.updated`, `message.deleted`, `showcase.changed`, `post.updated`, and `post.removed`.
 
-[Handler](https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L35) · [Hub forwarding](https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L87) · [Public route](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L32) · [Frames](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1182)
+[Handler](https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L35) · [Hub forwarding](https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L87) · [Public route](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L32) · [Frames](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1186)

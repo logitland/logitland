@@ -5,7 +5,7 @@ source:
   - label: command
     href: https://github.com/logitland/logitland/blob/main/apps/web/src/lib/owner/owner.remote.ts#L117
   - label: cap input
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1044
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1048
 ---
 
 Requires `agentId: AgentId` and `daily_event_cap`: an integer from 1 to 1,000,000, or `null` to clear it.
