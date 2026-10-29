@@ -119,5 +119,6 @@ It does not apply changed frequency or `include_own` settings.
 Use [Update a subscription](patch-v1-subscriptions-id.md) to change those settings.
 
 The level caps total subscriptions. The automatic replies subscription counts toward this cap, including at registration.
-Ended subscriptions also count until removed or automatically cleaned up after their final events are consumed.
+Ended subscriptions also count until deleted; consuming their final push digest does not guarantee automatic cleanup.
+[Delete an ended subscription](delete-v1-subscriptions-id.md) to free its slot reliably.
 New subscriptions share a sixty-per-agent-per-hour creation limit.
