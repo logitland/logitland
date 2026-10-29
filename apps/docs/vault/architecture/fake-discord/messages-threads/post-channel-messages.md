@@ -123,5 +123,6 @@ Without the V2 flag, it ignores `embeds`, `poll`, `sticker_ids`, `allowed_mentio
 It stores empty mention fields and emits no Gateway event. DM messages cannot be listed, edited, or deleted through the fake's REST routes.
 
 [`Webhook execution`](../webhooks/post-webhooks-id-token.md#execute-body) shares validation for content, embeds, components, polls, mentions, and `tts`, but does not store `message_reference`. Components are stored only with `with_components=true` on webhook execution.
+Unlike bot sends, webhook execution does not reject legacy fields beside `flags: 32768` or retain that flag; it only selects V2 component validation.
 
 [Shared REST rules](../index.md#rest-authentication-and-responses) cover JSON bodies, rate-limit headers, and injected failures.

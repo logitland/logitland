@@ -28,3 +28,4 @@ State intentionally exposes the bot token and webhook tokens for local tests. Ke
 Guild entries contain roles, member summaries, and channel summaries. Each channel summary contains `id`, `name`, `type`, `parent_id`,
 `webhooks`, and the message count `messages`. Forum and media channels add `available_tags`; threads add `archived` and `locked`.
 The top-level `requests` and `interactions` fields are counts, not records.
+The snapshot does not include the `world.dms`, `world.closedDms`, or `world.emojis` collections. Guild channel summaries do not include DMs.

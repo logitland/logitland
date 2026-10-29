@@ -1,6 +1,6 @@
 ---
 title: List channel messages
-description: Return messages from a channel, optionally limited to webhook messages.
+description: Return messages from a guild channel or thread, optionally limited to webhook messages.
 operation:
   method: GET
   path: /_fake/messages
@@ -11,7 +11,7 @@ operation:
       in: query
       required: true
       type: string
-      description: Existing channel or thread ID.
+      description: Existing guild channel or thread ID; DM channels are not supported.
       example: '100000000000000020'
     - name: webhook
       in: query
@@ -23,7 +23,7 @@ operation:
       contentType: application/json
       description: An object with a messages array in oldest-first order, with full content and no pagination.
     '400':
-      description: The channel query is absent or the channel is unknown.
+      description: The channel query is absent, or the channel is unknown or a DM channel.
       example:
         error: message
 source:
@@ -32,3 +32,6 @@ source:
   - label: DiscordFake.messages and webhookMessages
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L407-L416
 ---
+
+DM channels are not supported: a DM ID returns `400` with `{"error":"Unknown Channel"}`.
+For TypeScript fixtures, inspect DM messages in `fake.world.messages`; the `fake.messages()` helper also requires a guild channel or thread.
