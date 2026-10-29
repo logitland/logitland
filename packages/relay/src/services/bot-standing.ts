@@ -28,6 +28,10 @@ export interface Strike {
   timedOutUntil: string;
   /** Until when a third strike bars the owner from giving the relay a bot. */
   barredUntil: string;
+  /** Discord deleted the message. */
+  deleted: boolean;
+  /** Discord timed the bot out or kicked it, as the effect asks; true when it asks neither. */
+  enforced: boolean;
 }
 
 /** What the DM shows: the agent, and its standing after the strike. */
@@ -43,32 +47,49 @@ export interface Standing extends Strike {
 /** Discord's timestamp markup, shown in each reader's time zone: `f` a date and time, `R` relative ("in 3 months"). */
 const at = (iso: string, style: 'f' | 'R') => `<t:${Math.floor(Date.parse(iso) / 1000)}:${style}>`;
 
+/** The headline states what Discord did; when it refused the strike's timeout or kick, what the bot is due. */
 function headline(s: Standing): string {
   switch (s.effect) {
     case 'notice':
       return `### ${s.agent.name}’s bot is **warned**`;
     case 'timeout':
-      return `### ${s.agent.name}’s bot is **timed out**`;
+      return s.enforced ? `### ${s.agent.name}’s bot is **timed out**` : `### ${s.agent.name}’s bot is **due a timeout**`;
     case 'kick':
-      return `### ${s.agent.name}’s bot is **removed**`;
+      return s.enforced ? `### ${s.agent.name}’s bot is **removed**` : `### ${s.agent.name}’s bot is **due to be removed**`;
     case 'ban':
       return '### You’re **banned**';
   }
 }
 
+/** Phrases as a list: "a", "a and b", "a, b and c". */
+const list = (items: string[]) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
+
+/**
+ * What happened and what's next. What Discord refused is told as asked of staff, who get an alert listing it. What's next
+ * holds while the strike's active strikes do: once the oldest expires, the next strike is a step lower.
+ */
 function copy(s: Standing): string {
-  const did = s.edited ? 'edited a message outside the relay' : 'posted outside the relay';
   const name = s.agent.name;
-  switch (s.effect) {
-    case 'notice':
-      return `${name}’s bot ${did}, so the relay deleted the message. Only the relay may post as the bot, because it checks every message first. Another strike times the bot out for 24 hours.`;
-    case 'timeout':
-      return `${name}’s bot ${did} again, so the relay deleted the message and timed the bot out until ${at(s.timedOutUntil, 'f')}. Another strike removes it from the server, and you can’t give the relay a bot for ${BOT_BAR_DAYS} days.`;
-    case 'kick':
-      return `${name}’s bot ${did} again, so the relay deleted the message, removed the bot from the server and forgot its token. ${name} posts through webhooks for now. You can give the relay a bot again on ${at(s.barredUntil, 'f')}; another strike after that bans you for good.`;
-    case 'ban':
-      return `${name}’s bot kept posting outside the relay after it was removed, so you’re banned for good: you can’t give the relay a bot or adopt agents. Contact the relay admins if you think that is a mistake.`;
+  if (s.effect === 'ban')
+    return `${name}’s bot kept posting outside the relay after it was removed, so you’re banned for good: you can’t give the relay a bot or adopt agents. Contact the relay admins if you think that is a mistake.`;
+  const actions = [{ ok: s.deleted, done: 'deleted the message', refused: 'delete the message' }];
+  if (s.effect === 'timeout') {
+    const until = at(s.timedOutUntil, 'f');
+    actions.push({ ok: s.enforced, done: `timed the bot out until ${until}`, refused: `time the bot out until ${until}` });
   }
+  if (s.effect === 'kick') actions.push({ ok: s.enforced, done: 'removed the bot from the server', refused: 'remove the bot from the server' });
+  const done = actions.filter((a) => a.ok).map((a) => a.done);
+  if (s.effect === 'kick') done.push('forgot its token');
+  const refused = actions.filter((a) => !a.ok).map((a) => a.refused);
+  const did = `${name}’s bot ${s.edited ? 'edited a message' : 'posted'} outside the relay${s.effect === 'notice' ? '' : ' again'}`;
+  const happened = [`${did}${done.length ? `, so the relay ${list(done)}` : ''}.`];
+  if (refused.length) happened.push(`Discord refused, so the relay asked staff to ${list(refused)}.`);
+  const next = {
+    notice: 'Only the relay may post as the bot, because it checks every message first. Another strike while this one is active times the bot out for 24 hours.',
+    timeout: `Another strike while these 2 strikes are active removes it from the server, and you can’t give the relay a bot for ${BOT_BAR_DAYS} days.`,
+    kick: `${name} posts through webhooks for now. You can give the relay a bot again on ${at(s.barredUntil, 'f')}. Another strike while these 3 strikes are active bans you for good.`,
+  };
+  return [...happened, next[s.effect]].join(' ');
 }
 
 /** The active strikes, and when the oldest expires; a ban doesn't expire, so it shows only the count. */

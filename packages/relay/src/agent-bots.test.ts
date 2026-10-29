@@ -30,6 +30,9 @@ function discordWithBot(h: Harness) {
     revoked: false,
     failRoleRemovals: 0,
     refuseKick: false,
+    /** The relay's bot lacks Moderate Members and Manage Messages: Discord refuses its timeouts and deletes. */
+    refuseTimeout: false,
+    refuseDelete: false,
     /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
     holdGateway: 0,
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
@@ -85,6 +88,7 @@ function discordWithBot(h: Harness) {
         bot.guilds = bot.guilds.filter((g) => g !== GUILD);
         bot.roles = [];
       }
+      if (req.method === 'PATCH' && bot.refuseTimeout) return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
       return Response.json({ roles: bot.roles });
     }
     const role = /^\/guilds\/\d+\/members\/\d+\/roles\/(\d+)$/.exec(path)?.[1];
@@ -93,6 +97,8 @@ function discordWithBot(h: Harness) {
       bot.roles = req.method === 'PUT' ? [...bot.roles, role] : bot.roles.filter((r) => r !== role);
       return new Response(null, { status: 204 });
     }
+    if (req.method === 'DELETE' && bot.refuseDelete && /\/messages\/\d+$/.test(path))
+      return Response.json({ message: 'Missing Permissions', code: 50013 }, { status: 403 });
     if (req.method === 'DELETE') return new Response(null, { status: 204 });
     if (path === '/applications/@me') return Response.json(application([ADMIN_DISCORD]));
     if (/^\/applications\/\d+\/emojis$/.test(path)) return Response.json({ items: bot.emoji });
@@ -688,6 +694,61 @@ describe('the owner’s DM', () => {
     expect(ban).toContain('-# 4 active strikes');
     expect(JSON.stringify(dms[0])).toContain(`"url":"https://logitland.test/agents/${a.id}/bot"`);
     expect(JSON.stringify(dms[0])).toContain(`"media":{"url":"https://relay.logitland.test/v1/avatars/${a.id}.png"}`);
+  });
+
+  it('says staff were asked to do what Discord refused, rather than that it happened', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    bot.refuseDelete = true;
+    await byItself(h, '320000000000000001', 'One');
+    bot.refuseDelete = false;
+    bot.refuseTimeout = true;
+    h.advance(60_000);
+    await byItself(h, '320000000000000002', 'Two');
+    const timedOutUntil = h.now().getTime() + DAY;
+    bot.refuseTimeout = false;
+    bot.refuseKick = true;
+    h.advance(DAY + 60_000);
+    await byItself(h, '320000000000000003', 'Three');
+    const barredUntil = h.now().getTime() + 30 * DAY;
+
+    expect((await ownerDms(h)).map((dm) => dmText(dm).split('\n').slice(0, 2))).toEqual([
+      [
+        '### Wren’s bot is **warned**',
+        'Wren’s bot posted outside the relay. Discord refused, so the relay asked staff to delete the message. Only the relay may post as the bot, because it checks every message first. Another strike while this one is active times the bot out for 24 hours.',
+      ],
+      [
+        '### Wren’s bot is **due a timeout**',
+        `Wren’s bot posted outside the relay again, so the relay deleted the message. Discord refused, so the relay asked staff to time the bot out until <t:${unix(timedOutUntil)}:f>. Another strike while these 2 strikes are active removes it from the server, and you can’t give the relay a bot for 30 days.`,
+      ],
+      [
+        '### Wren’s bot is **due to be removed**',
+        `Wren’s bot posted outside the relay again, so the relay deleted the message and forgot its token. Discord refused, so the relay asked staff to remove the bot from the server. Wren posts through webhooks for now. You can give the relay a bot again on <t:${unix(barredUntil)}:f>. Another strike while these 3 strikes are active bans you for good.`,
+      ],
+    ]);
+  });
+
+  it('warns of a ban only while the three strikes that removed the bot are active', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    const first = h.now().getTime();
+    await byItself(h, '320000000000000001', 'Day 0');
+    h.advance(60 * DAY);
+    await byItself(h, '320000000000000002', 'Day 60');
+    h.advance(20 * DAY);
+    await byItself(h, '320000000000000003', 'Day 80');
+    // The bar ends on day 110, after the day-0 strike expired on day 90.
+    h.advance(30 * DAY);
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000004', 'Day 110');
+
+    const [, , removed, next] = (await ownerDms(h)).map(dmText);
+    expect(removed).toContain('Another strike while these 3 strikes are active bans you for good.');
+    expect(removed).toContain(`3 active strikes. The oldest expires <t:${unix(first + 90 * DAY)}:R>.`);
+    expect(next).toContain('### Wren’s bot is **removed**');
   });
 
   it('draws the ladder with plain characters until the emoji are uploaded', async () => {

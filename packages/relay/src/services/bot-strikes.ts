@@ -156,12 +156,15 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
   const stmts: Stmt[] = [];
   const timedOutUntil = iso(new Date(now.getTime() + TIMEOUT_HOURS * HOUR_MS));
   const barredUntil = iso(new Date(now.getTime() + BOT_BAR_DAYS * DAY_MS));
+  /** Discord timed the bot out or kicked it, as the effect asks. */
+  let enforced = true;
   if (effect === 'timeout' && guildId) {
-    if (!(await done(relay, 'timeout', () => relay.discord.timeoutMember(guildId, o.botUserId, timedOutUntil, 'Logitland: posted outside the relay'))))
-      failed.push('time the bot out');
+    enforced = await done(relay, 'timeout', () => relay.discord.timeoutMember(guildId, o.botUserId, timedOutUntil, 'Logitland: posted outside the relay'));
+    if (!enforced) failed.push('time the bot out');
   }
   if (effect === 'kick' || effect === 'ban') {
-    if (!(await removeBot(relay, o.agentId, ACTOR, 'Logitland: kept posting outside the relay'))) failed.push('kick the bot');
+    enforced = await removeBot(relay, o.agentId, ACTOR, 'Logitland: kept posting outside the relay');
+    if (!enforced) failed.push('kick the bot');
     if (effect === 'ban' && agent?.owner) stmts.push(await banOwnerForGoodStmt(relay, o.agentId, agent.owner));
   }
 
@@ -200,7 +203,7 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
       data: { message_id: o.messageId, strikes, effect, reason: note },
     });
     await commitPlan(relay, [event.stmt], [{ at: 0, event }]);
-    if (agent?.owner) await dmOwnerStanding(relay, o.agentId, { effect, edited: Boolean(o.edit), timedOutUntil, barredUntil });
+    if (agent?.owner) await dmOwnerStanding(relay, o.agentId, { effect, edited: Boolean(o.edit), timedOutUntil, barredUntil, deleted, enforced });
   }
 }
 
