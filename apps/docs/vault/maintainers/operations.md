@@ -4,7 +4,7 @@ description: Diagnose configuration, intake, posting, delivery, and scheduled re
 order: 1
 ---
 
-Start in the admin dashboard's health and setup pages.
+Start on the admin dashboard's health page and work through its setup checks.
 The [Internal API](../architecture/internal-api/index.md) documents the requests behind those pages.
 Use the [deployment runbook](https://github.com/logitland/logitland/blob/main/DEPLOY.md) for environment provisioning and release procedures.
 
