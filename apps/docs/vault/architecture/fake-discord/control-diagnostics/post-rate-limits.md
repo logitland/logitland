@@ -17,15 +17,19 @@ operation:
           properties:
             limit:
               type: number
+              description: Requests allowed per window.
             windowMs:
               type: number
+              description: Window length in milliseconds.
         default:
           type: object
           properties:
             limit:
               type: number
+              description: Requests allowed per window.
             windowMs:
               type: number
+              description: Window length in milliseconds.
     example:
       enforce: true
       webhook:
@@ -41,11 +45,19 @@ operation:
         error: message
 source:
   - label: rate-limit endpoint
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L441
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L450-L459
   - label: configuration defaults
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L149
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L165
+  - label: configuration patch
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L497-L503
   - label: bucket keys
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L465
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L505-L532
 ---
 
-Defaults are `enforce: false`, `webhook: {limit:5,windowMs:2000}`, and `default: {limit:50,windowMs:1000}`. The handler passes bucket patches through without range validation. Webhook buckets are shared per webhook ID. Other buckets use the route's major parameter. Enforced exhaustion returns REST `429` with `message`, `retry_after` seconds, and `global: false`.
+Initial defaults are `enforce: false`, `webhook: {limit:5,windowMs:2000}`, and `default: {limit:50,windowMs:1000}`.
+Omitted settings retain their current values; every call clears bucket counts, even with an empty patch.
+The handler passes bucket patches through without type or range validation. Use positive numbers for `limit` and `windowMs`.
+
+Webhook buckets are shared per webhook ID. Other buckets use the route's major parameter, falling back to `id` or the route's bucket name.
+Recognized REST routes count requests and send rate-limit headers even when enforcement is off.
+Enforced exhaustion returns REST `429` with `message`, `retry_after` in seconds, and `global: false`.

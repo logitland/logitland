@@ -14,6 +14,7 @@ operation:
           type: string
         name:
           type: string
+          default: Test server
         owner_id:
           type: string
     example:
@@ -30,6 +31,10 @@ operation:
 source:
   - label: guilds
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L121
+  - label: guild creation and default members
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L138-L159
 ---
 
-`name` defaults to `Test server`. IDs and owner otherwise generate. The guild includes owner and bot members, `@everyone`, and the bot role at position 10.
+The guild ID and owner ID generate when omitted. A supplied `owner_id` reuses that user or creates one if needed.
+The guild includes the owner and relay bot as members, an `@everyone` role, and the bot role at position `10`.
+The `@everyone` role ID equals the guild ID; the bot role ID generates.
