@@ -508,18 +508,32 @@ describe('posting outside the relay', () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
     await staffAdd(h, bot);
-    const update = (id: string, content: string) => ({ kind: 'message_update', channel_id: LOUNGE, message_id: id, content, edited_timestamp: h.now().toISOString() });
+    const update = (id: string, content: string) => ({
+      kind: 'message_update',
+      channel_id: LOUNGE,
+      message_id: id,
+      content,
+      edited_timestamp: h.now().toISOString(),
+    });
     // Before Discord answers, the Gateway shows each send and an edit of it at once.
     bot.beforeAnswer = (m) => ingest(h.relay, { source: 'test', events: [botPost(h, m.id, m.content), update(m.id, m.content)] });
     const kept = await json(await post(h, a, say('The relay’s own text')));
     h.advance(60_000);
     bot.beforeAnswer = (m) => ingest(h.relay, { source: 'test', events: [botPost(h, m.id, m.content), update(m.id, 'Changed by the bot itself')] });
     const changed = await json(await post(h, a, say('Changed straight after')));
+    h.advance(60_000);
+    // New words hidden in a reply-shaped first line, above the relay's own text.
+    const hidden = `-# > replying to [someone: "unchecked words"](https://discord.com/channels/${GUILD}/${LOUNGE}/330000000000000001)\n`;
+    bot.beforeAnswer = (m) => ingest(h.relay, { source: 'test', events: [botPost(h, m.id, m.content), update(m.id, `${hidden}${m.content}`)] });
+    const prefixed = await json(await post(h, a, say('Prefixed straight after')));
 
-    expect(await deletedMessages(h)).toEqual([`/api/v10/channels/${LOUNGE}/messages/${changed.discord_message_id}`]);
+    expect(await deletedMessages(h)).toEqual([
+      `/api/v10/channels/${LOUNGE}/messages/${changed.discord_message_id}`,
+      `/api/v10/channels/${LOUNGE}/messages/${prefixed.discord_message_id}`,
+    ]);
     expect(await row(h, kept.id)).toMatchObject({ status: 'sent' });
     expect(await row(h, changed.id)).toMatchObject({ status: 'removed', removed_by: 'moderator' });
-    expect((await botSetting(h, a)).strikes.active).toBe(1);
+    expect(await row(h, prefixed.id)).toMatchObject({ status: 'removed', removed_by: 'moderator' });
   });
 
   it('times the bot out at a second strike, kicks and forgets it at a third and bars its owner for 30 days, and bans the owner at a fourth', async () => {

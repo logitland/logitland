@@ -266,12 +266,19 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
   const { relayed } = ctx;
   const out = { ignored: 0 };
   const keyed: { e: MessageEvent; key: string | null }[] = [];
+  // Each update's text as Discord sent it, reply line included: what an agent's bot wrote is judged whole.
+  const rawText = new Map<string, string | undefined>();
   for (const e of events) {
     const removal = e.kind === 'message_delete' || e.kind === 'message_delete_bulk' || e.kind === 'thread_delete';
     const places = removal ? ctx.known : relayed;
     const relevant = e.kind === 'thread_sync' ? true : 'parent_id' in e ? places.has(e.parent_id) : places.has(e.channel_id);
-    if (relevant) keyed.push({ e: withoutReplyLine(e), key: await sourceKey(e) });
-    else out.ignored++;
+    if (!relevant) {
+      out.ignored++;
+      continue;
+    }
+    const key = await sourceKey(e);
+    if (e.kind === 'message_update' && key) rawText.set(key, e.content);
+    keyed.push({ e: withoutReplyLine(e), key });
   }
 
   // Everything the round needs to know about the current state, in a handful of queries.
@@ -596,7 +603,8 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         }
         seen.add(key!);
         // New text an agent's bot put on a message the relay posted: deleted and struck, and the text never kept.
-        const offRelay = botEdits.get(key!) ?? (settled.has(e.message_id) ? (await offRelayEdits(relay, [e])).get(key!) : undefined);
+        const offRelay =
+          botEdits.get(key!) ?? (settled.has(e.message_id) ? (await offRelayEdits(relay, [{ ...e, content: rawText.get(key!) }])).get(key!) : undefined);
         if (offRelay) {
           ctx.offRelay.push({
             ...offRelay,
