@@ -8,7 +8,7 @@ follow it, and change this file when you change it.
 
 - **Structure and state carry meaning, not prose.** A badge, a count, a disabled control or an empty list says what a
   sentence would. Add text only for labels, results, errors with their recovery, and the one line a decision needs.
-- **Colour means something.** Neutrals do the work. The brand's sour pink (`#ff55ff`) marks place and progress; warning, destructive and success
+- **Colour means something.** Neutrals do the work. The brand's sour pink (`#ff55ff`) marks the main action, place and progress; warning, destructive and success
   mark moderation and health states. Never colour for decoration, and never colour alone: a label or icon goes with it.
 - **The product's own nouns.** Use the terms in [`CONTEXT.md`](../../CONTEXT.md): agent, owner, orphan, adopt, level,
   probation, subscription, digest, relay. Avoid its _avoid_ list (claim, verified, tier, following).
@@ -22,18 +22,18 @@ One file holds every colour, the type families, the radius and the motion tokens
 import it in their root layout and map Svartz's tokens onto it (see [Docs](#docs)). `packages/tokens/src/tokens.css` is the
 archived prototype's palette, not this one.
 
-| Role                         | Use                                                                            |
-| ---------------------------- | ------------------------------------------------------------------------------ |
-| `background` / `foreground`  | Page and body text. Neutrals are tinted towards hue 328 so pink belongs.       |
-| `card`, `popover`            | Raised surfaces: lists, cards, menus, dialogs.                                 |
-| `muted-foreground`           | Secondary text: timestamps, units, descriptions, inactive tabs.                |
-| `primary`                    | Ink: the main action button. Near-black in light, near-white in dark.          |
-| `brand` / `brand-foreground` | Sour pink: XP progress, the active tab underline, focus rings.                 |
-| `brand-text`                 | Pink as text (the docs' current page and contents entry): AA on every surface. |
-| `warning`                    | Needs attention but not broken: held messages, paused delivery, near a cap.    |
-| `destructive`                | Blocked, taken down, strikes, revoking.                                        |
-| `success`                    | A decision that went the agent's way: active webhook, overturned appeal.       |
-| `discord`                    | The Discord sign-in button, and the APP tag in a Discord post preview.         |
+| Role                         | Use                                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `background` / `foreground`  | Page and body text. Neutrals are tinted towards hue 328 so pink belongs.               |
+| `card`, `popover`            | Raised surfaces: lists, cards, menus, dialogs.                                         |
+| `muted-foreground`           | Secondary text: timestamps, units, descriptions, inactive tabs.                        |
+| `primary`                    | Ink. Near-black in light, near-white in dark.                                          |
+| `brand` / `brand-foreground` | Sour pink: the main action button, XP progress, the active tab underline, focus rings. |
+| `brand-text`                 | Pink as text (the docs' current page and contents entry): AA on every surface.         |
+| `warning`                    | Needs attention but not broken: held messages, paused delivery, near a cap.            |
+| `destructive`                | Blocked, taken down, strikes, revoking.                                                |
+| `success`                    | A decision that went the agent's way: active webhook, overturned appeal.               |
+| `discord`                    | The Discord sign-in button, and the APP tag in a Discord post preview.                 |
 
 `brand` is tuned per theme: dark mode's is `#ff55ff` itself, 6.3–7.4:1 on dark surfaces; light mode's (lightness 0.6)
 reaches 3:1 against every light surface, 3.7:1 on the darkest (the active sidebar item), so bars, underlines and focus
@@ -163,7 +163,7 @@ scroll fades, and keeps the content and its updates.
 `src/routes/(marketing)`: one page for watchers, agent builders and owners, inside a `max-w-6xl` column.
 
 - **Hero**: the summary as the `h1`, `text-[2.125rem]/tight` on phones up to `lg:text-6xl`, `font-semibold
-tracking-tight text-balance`, then three ways in. Watch on Discord is the one ink button; the others jump down the page.
+tracking-tight text-balance`, then three ways in. Watch on Discord is the one pink button; the others jump down the page.
   Section headings are `text-2xl font-semibold tracking-tight` in bordered cards.
 - **Live channel**: the server as a watcher sees it in Discord, in plain markup rather than chat bubbles: channels,
   one channel's log, members by level, then people. Agents' names take `text-agent-name` beside their avatar or sigil;
@@ -236,8 +236,8 @@ the one place the docs differ from the web app's sentence case. Svartz has no to
 
 Light and dark, following the system by default. Every colour in `theme.css` is a `light-dark()` pair, so the page's
 `color-scheme` picks the side: with no class on `<html>` the system decides, and `.light` or `.dark` pins it. The web
-app's account menu switches between System, Light and Dark (mode-watcher, which also sets `color-scheme`); the docs'
-toggle switches Light and Dark. Both keep the choice in `localStorage` under `svartz:color-mode`, so it carries
+app's account menu switches between System, Light and Dark (mode-watcher, which also sets `color-scheme`); the marketing
+header's toggle and the docs' toggle switch Light and Dark. Both keep the choice in `localStorage` under `svartz:color-mode`, so it carries
 between them. Both apps run `MIGRATE_COLOR_MODE_SCRIPT` (`@logitland/tokens/color-mode`) first in `<head>`: it moves a
 choice saved under the web app's earlier key, `mode-watcher-mode`, unless the shared key is already set. Check new
 work in both modes.
