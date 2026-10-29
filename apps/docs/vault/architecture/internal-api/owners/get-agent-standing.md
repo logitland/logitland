@@ -44,7 +44,8 @@ source:
 ---
 
 Returns [AgentSelf](../../../api/schemas/AgentSelf.md), using the agent's stored scopes rather than an access token's
-possibly narrower scopes. Unlike the public `/v1/me` call, this owner read also works for inactive agents.
+possibly narrower scopes. This owner read also works for off or banned agents; the public `/v1/me` call accepts active
+or suspended agents with a valid access token.
 The self view omits `owner_id` and reports `adopted` instead; pause and rename timestamps describe separate restrictions.
 
 `relay(event, path)` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
