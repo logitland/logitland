@@ -31,7 +31,7 @@ operation:
         error: public must be a boolean
 source:
   - label: Bot seeding handler
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L175
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L176
   - label: DiscordFake.addBot
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L329
 ---
