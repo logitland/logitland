@@ -1,4 +1,4 @@
-"""Build Logan's editable, rigidly rigged Blender master from the supplied concept.
+"""Build Logan's editable Blender master from the supplied concept.
 
 Run with Blender 5.2: blender --background --python brand/logan/build.py
 Only the LOGAN scene is rebuilt. Front is -Y; one unit is one stylized metre.
@@ -43,11 +43,12 @@ def collection(name):
     return group
 
 
-character = collection("01 · Logan / rigid parts")
+character = collection("01 · Logan / meshes")
 rig_collection = collection("02 · Pose rig")
 studio = collection("03 · Studio")
 reference_collection = collection("04 · Reference")
 bindings = []
+deform_bindings = []
 
 
 def material(name, color, metallic=0, roughness=.4, emission=0, texture=False):
@@ -81,11 +82,58 @@ rubber = material("Joint · soft black", (.012, .014, .019), .1, .58)
 cloth = material("Jacket · charcoal", (.013, .014, .018), .12, .57, texture=True)
 cloth_dark = material("Jacket · shadow facet", (.010, .011, .014), .12, .58, texture=True)
 cloth_light = material("Jacket · light facet", (.017, .018, .022), .12, .56, texture=True)
-pink = material("Pink · anodised trim", (.8, .012, .66), .55, .3)
-light_pink = material("Pink · lit inlay", (.8, .008, .68), .15, .35, .35)
-screen_mat = material("Screen · hot pink", (.8, .008, .68), 0, .5, .5)
+pink = material("Pink · anodised trim", (.8, .012, .66), .35, .45)
+light_pink = material("Pink · lit inlay", (.8, .008, .68), .15, .35, 2.2)
+screen_mat = material("Screen · hot pink", (.8, .008, .68), 0, .5, 1.7)
 highlight = material("Screen · eye pixels", (.95, .025, .8), 0, .35, .5)
 ground_mat = material("Studio · warm grey", (.44, .45, .48), 0, .8, .23)
+
+
+def gradient_metal(name, stops, axis='X'):
+    """A surface finish, with the reference's magenta-to-graphite fade baked into its coordinates."""
+    mat=material(name,(.10,.002,.08),.65,.42,texture=True)
+    nodes=mat.node_tree.nodes
+    links=mat.node_tree.links
+    coords=nodes.new('ShaderNodeTexCoord')
+    separate=nodes.new('ShaderNodeSeparateXYZ')
+    ramp=nodes.new('ShaderNodeValToRGB')
+    ramp.color_ramp.elements.remove(ramp.color_ramp.elements[1])
+    for i,(position,color) in enumerate(stops):
+        element=ramp.color_ramp.elements[0] if i==0 else ramp.color_ramp.elements.new(position)
+        element.position=position
+        element.color=(*color,1)
+    links.new(coords.outputs['Generated'],separate.inputs[0])
+    links.new(separate.outputs[axis],ramp.inputs[0])
+    shader=nodes.get('Principled BSDF')
+    links.new(ramp.outputs['Color'],shader.inputs['Base Color'])
+    links.new(ramp.outputs['Color'],shader.inputs['Emission Color'])
+    shader.inputs['Emission Strength'].default_value=.22
+    return mat
+
+
+hot=(.95,.008,.78)
+ink=(.009,.002,.012)
+head_gradient=gradient_metal('Head · twin magenta fades',[
+    (0,hot),(.08,(.30,.002,.24)),(.30,(.045,.002,.035)),(.55,ink),
+    (.575,ink),(.58,hot),(.67,(.24,.002,.18)),(.85,(.035,.002,.026)),(1,ink)])
+side_gradient=gradient_metal('Head · edge fade',[(0,(.15,.002,.12)),(.08,ink),(.90,ink),(1,(.25,.002,.20))],'Z')
+trim_gradient=gradient_metal('Trim · magenta falloff',[(0,hot),(1,ink)])
+
+# A brighter centre gives the display luminous depth, while retaining its pink edge.
+nodes=screen_mat.node_tree.nodes
+links=screen_mat.node_tree.links
+coords=nodes.new('ShaderNodeTexCoord')
+distance=nodes.new('ShaderNodeVectorMath')
+distance.operation='DISTANCE'
+distance.inputs[1].default_value=(.5,0,.5)
+ramp=nodes.new('ShaderNodeValToRGB')
+ramp.color_ramp.elements[0].color=(.95,.035,.90,1)
+ramp.color_ramp.elements[1].position=.72
+ramp.color_ramp.elements[1].color=(.70,.004,.60,1)
+links.new(coords.outputs['Generated'],distance.inputs[0])
+links.new(distance.outputs['Value'],ramp.inputs[0])
+for socket in ['Base Color','Emission Color']:
+    links.new(ramp.outputs['Color'],nodes.get('Principled BSDF').inputs[socket])
 
 
 def link(obj, group=character, bone=None):
@@ -135,18 +183,29 @@ def outline(width, height, cut):
             (x-cut,z),(-x+cut,z),(-x,z-cut),(-x,-z+cut)]
 
 
-def frame(name, center, outer, inner, depth, cut, bone, mat=shell):
-    cx, cy, cz = center
-    rings = [(outer, cut, cy-depth/2), (inner, .025, cy-depth/2-.004),
-             (inner, .025, cy+depth/2), (outer, cut, cy+depth/2)]
-    verts = [(cx+x, y, cz+z) for size, c, y in rings for x,z in outline(*size,c)]
-    faces = []
-    for ring in range(4):
-        nxt = (ring+1) % 4
-        for j in range(8):
-            k = (j+1) % 8
-            faces.append((ring*8+j,ring*8+k,nxt*8+k,nxt*8+j))
-    return mesh(name, verts, faces, mat, bone, .012)
+def monitor_head():
+    """A rectangular recessed face with a broad sloping crown and narrow side chamfers."""
+    # The crown rises behind the face. The front silhouette has almost square corners.
+    rings=[(2.84,2.10,5.35,-.12,.12),
+           (2.56,1.75,5.29,-.67,.025),
+           (2.31,1.47,5.31,-.675,.012),
+           (2.31,1.47,5.31,-.57,.012),
+           (2.84,2.10,5.35,1.18,.18)]
+    verts=[(x,y,z+center_z) for w,h,center_z,y,c in rings for x,z in outline(w,h,c)]
+    faces=[]
+    # Outer slope, dark inner lip, screen recess, casing sides, rear cap.
+    for a,b in [(0,1),(1,2),(2,3),(4,0)]:
+        faces.extend((a*8+j,a*8+(j+1)%8,b*8+(j+1)%8,b*8+j) for j in range(8))
+    faces.append(tuple(range(32,40)))
+    obj=mesh('Head / chamfered monitor housing',verts,faces,shell,'head',.018)
+    obj.data.materials.append(head_gradient)
+    obj.data.materials.append(side_gradient)
+    for poly in obj.data.polygons:
+        if poly.index<8:
+            poly.material_index=1 if poly.index in (0,3,4,5) else 2
+        elif 24<=poly.index<32:
+            poly.material_index=1 if poly.index==28 else 2
+    return obj
 
 
 def panel(name, points, y, mat, bone, bevel=.012):
@@ -197,7 +256,7 @@ def faceted_segment(name, start, end, rings, bone, mat=cloth):
     rotation = segment_rotation(direction)
     verts = []
     for t,w,d in rings:
-        cross = outline(w,d,min(w,d)*.18)
+        cross = outline(w,d,min(w,d)*.30)
         verts.extend(a + direction*t + rotation @ Vector((x,y,0)) for x,y in cross)
     faces = [tuple(reversed(range(8)))]
     for j in range(len(rings)-1):
@@ -215,6 +274,62 @@ def faceted_segment(name, start, end, rings, bone, mat=cloth):
         obj.data.materials.append(cloth_light)
         for poly in obj.data.polygons:
             poly.material_index = random.choices([0,1,2],[7,1,1])[0]
+    return obj
+
+
+def continuous_limb(name, start, joint, end, rings, bones, side, stripe=True):
+    """One watertight low-poly sleeve or trouser leg, smoothly weighted across its joint."""
+    start,joint,end=map(Vector,(start,joint,end))
+    pivot=(joint-start).length/((joint-start).length+(end-joint).length)
+    # An elliptical polygon, rather than a rectangle with clipped corners.
+    profile=[(-.191,-.462),(-.075,-.485),(.075,-.485),(.191,-.462),(.265,-.388),
+             (.462,-.191),(.462,.191),(.191,.462),(-.191,.462),(-.462,.191),
+             (-.462,-.191),(-.265,-.388)]
+    sides=len(profile)
+    verts=[]
+    weights=[]
+    for t,w,d in rings:
+        w*=1.20 if stripe else 1.35
+        d*=1.22
+        if t<=pivot:
+            center=start.lerp(joint,t/pivot)
+        else:
+            center=joint.lerp(end,(t-pivot)/(1-pivot))
+        blend=max(0,min(1,(t-(pivot-.17))/.34))
+        blend=blend*blend*(3-2*blend)
+        tangent=(joint-start).normalized().lerp((end-joint).normalized(),blend)
+        rotation=segment_rotation(tangent)
+        for index,(x,y) in enumerate(profile):
+            # Slightly irregular cross sections produce real triangular cloth facets.
+            depth=d*y-(.028*sin(t*pi*3) if index in (1,2) else 0)
+            verts.append(center+rotation @ Vector((w*x,depth,0)))
+            weights.append(blend)
+    faces=[tuple(reversed(range(sides)))]
+    material_indices=[0]
+    for row in range(len(rings)-1):
+        for j in range(sides):
+            a=row*sides+j
+            b=row*sides+(j+1)%sides
+            c=(row+1)*sides+(j+1)%sides
+            d=(row+1)*sides+j
+            pink_edge=j in ((0,11) if side==1 else (2,3))
+            # Sleeves have a continuous outer stripe; trousers light only the lower side.
+            if stripe:
+                accented=pink_edge and rings[row][0]<.78
+            else:
+                accented=j==(10 if side==1 else 4) and .7<rings[row][0]<.91
+            mat_index=3 if accented else random.choices([0,1,2],[14,1,1])[0]
+            faces.extend([(a,b,d),(b,c,d)] if (row+j)%2 else [(a,b,c),(a,c,d)])
+            material_indices.extend([mat_index,mat_index])
+    faces.append(tuple(range((len(rings)-1)*sides,len(rings)*sides)))
+    material_indices.append(0)
+    obj=mesh(name,verts,faces,cloth)
+    obj.data.materials.append(cloth_dark)
+    obj.data.materials.append(cloth_light)
+    obj.data.materials.append(light_pink)
+    for poly,index in zip(obj.data.polygons,material_indices):
+        poly.material_index=index
+    deform_bindings.append((obj,bones,weights))
     return obj
 
 
@@ -288,17 +403,12 @@ bpy.ops.object.mode_set(mode='OBJECT')
 for pbone in rig.pose.bones:
     pbone.rotation_mode='XYZ'
 
-# Head: a deep chamfered casing behind a recessed, luminous display.
-box('Head / rear casing',(0,.18,5.35),(2.76,1.10,2.08),shell,.19,'head')
-frame('Head / continuous screen bezel',(0,-.47,5.35),(2.84,2.10),(2.31,1.47),.35,.23,'head')
+# The gradients belong to the sloped housing itself, with no raised crown patch.
+monitor_head()
 box('Screen / glass',(0,-.59,5.31),(2.32,.07,1.48),screen_mat,.018,'head')
-box('Head / crown inset',(0,.04,6.38),(1.6,.57,.035),edge,.015,'head')
-# Small purposeful purple panels echo the image without painting every facet pink.
-box('Head / crown pink stripe',(.73,-.06,6.39),(.40,.82,.045),pink,.012,'head')
-panel('Head / lower pink stripe',[(.53,4.32),(.95,4.32),(.89,4.49),(.50,4.49)],-.66,pink,'head')
 for s in [-1,1]:
     for z in [5.0,5.16,5.32]:
-        box('Head / rear vent',(s*.87,.744,z),(.54,.025,.045),rubber,.008,'head')
+        box('Head / rear vent',(s*.87,1.195,z),(.54,.025,.045),rubber,.008,'head')
 
 # Headset on Logan's left; faceted ear cup and rectangular antenna.
 box('Headset / mount',(1.43,.02,5.10),(.28,.65,.89),rubber,.09,'head')
@@ -318,15 +428,17 @@ for s,side in [(-1,'R'),(1,'L')]:
     brow=box('Face / brow.'+side,(s*.61,-.676,5.58),(.63,.045,.135),black,.025,'head',segments=3)
     brow.rotation_euler.y=radians(-s*7)
 
-# A thin asymmetric crescent makes the confident smirk actual editable geometry.
-mouth_points=[]
-for i in range(25):
+# Explicit ribbon faces preserve the crescent's concave upper contour.
+mouth_verts=[(-.25,-.659,4.94)]
+for i in range(1,24):
     t=i/24
-    mouth_points.append((-.25+.5*t,4.94+.105*t-.07*sin(pi*t)))
-for i in range(24,-1,-1):
-    t=i/24
-    mouth_points.append((-.25+.5*t,4.94+.105*t-.13*sin(pi*t)))
-mouth=panel('Face / smirk',mouth_points,-.659,black,'head',.005)
+    top=4.94+.105*t-.07*sin(pi*t)
+    mouth_verts.extend([(-.25+.5*t,-.659,top),(-.25+.5*t,-.659,top-.05*sin(pi*t))])
+mouth_verts.append((.25,-.659,5.045))
+mouth_faces=[(0,1,2)]
+mouth_faces.extend((1+i*2,3+i*2,4+i*2,2+i*2) for i in range(22))
+mouth_faces.append((45,47,46))
+mesh('Face / smirk',mouth_verts,mouth_faces,black,'head')
 
 # Neck and jacket: fitted torso, broad raised collar, hem, lapels and glowing pockets.
 cylinder('Neck / swivel',(0,0,4.18),.35,.34,rubber,'head','Z')
@@ -335,10 +447,10 @@ faceted_segment('Jacket / torso',(0,0,2.19),(0,0,3.88),
 box('Pelvis / waist joint',(0,0,2.20),(1.39,.71,.40),rubber,.10,'pelvis')
 faceted_segment('Collar / raised band',(0,0,3.89),(0,0,4.23),
                 [(0,1.54,.91),(.40,1.98,1.12),(1,2.10,1.18)],'torso',shell)
-box('Collar / pink clasp',(.43,-.595,4.08),(.29,.035,.32),pink,.014,'torso')
+box('Collar / gradient inset',(.43,-.565,4.08),(.37,.008,.32),trim_gradient,.002,'torso')
 panel('Jacket / left lapel',[(-.91,3.83),(-.54,3.83),(-.30,3.18),(-.60,3.35)],-.535,edge,'torso')
 panel('Jacket / right lapel',[(.91,3.83),(.54,3.83),(.30,3.18),(.60,3.35)],-.535,edge,'torso')
-panel('Jacket / centre placket',[(-.39,2.20),(.39,2.20),(.31,3.18),(-.31,3.18)],-.575,cloth_dark,'torso')
+panel('Jacket / centre placket',[(-.44,2.16),(.44,2.16),(.36,3.88),(-.36,3.83)],-.60,cloth_dark,'torso')
 box('Jacket / hem',(0,-.015,2.20),(2.29,1.08,.12),shell,.025,'torso')
 for s,side in [(-1,'R'),(1,'L')]:
     pts=[(s*.69,2.36),(s*1.02,2.40),(s*.81,3.15),(s*.55,3.04)]
@@ -349,7 +461,6 @@ for s,side in [(-1,'R'),(1,'L')]:
     panel('Pocket / flap.'+side,pts,-.67,edge,'torso',.015)
 
 # The chest reproduces the repository's pixel-L mark as geometry and gradients.
-box('Chest / badge',(0,-.602,3.47),(.91,.12,.97),black,.025,'torso')
 gradient=material('Logo / pink to ink', (1,.04,.82),.15,.4)
 nodes=gradient.node_tree.nodes
 links=gradient.node_tree.links
@@ -365,7 +476,7 @@ links.new(ramp.outputs['Color'],nodes.get('Principled BSDF').inputs['Base Color'
 unit=.91/280
 for name,x,z,w,h,mat in [('trail',60,60,80,120,gradient),('stem',140,60,40,120,light_pink),
                          ('foot trail',100,180,80,40,gradient),('foot pixel',180,180,40,40,light_pink)]:
-    box('Logo / '+name,((x+w/2-140)*unit,-.67,3.47+(140-z-h/2)*unit),
+    box('Logo / '+name,((x+w/2-140)*unit,-.627,3.47+(140-z-h/2)*unit),
         (w*unit,.015,h*unit),mat,.001,'torso')
 
 # Articulated sleeves, wrist bands, palms and individually jointed digits.
@@ -375,24 +486,25 @@ for side,s in [('L',1),('R',-1)]:
     lower='forearm.'+side
     hand='hand.'+side
     cylinder('Shoulder / swivel.'+side,shoulder,.29,.71,rubber,upper)
-    faceted_segment('Sleeve / upper.'+side,shoulder,elbow,
-                    [(0,.71,.80),(.30,.85,.89),(1,.82,.81)],upper)
-    faceted_segment('Sleeve / forearm.'+side,elbow,wrist,
-                    [(0,.82,.81),(.6,.87,.84),(1,.74,.73)],lower)
-    cylinder('Elbow / hinge.'+side,elbow,.25,.60,rubber,lower)
-    # Follow the front surface instead of burying a rectangular stripe in its bevel.
-    for part,a,b,bname,depths in [('upper',shoulder,elbow,upper,[(.06,.82),(.30,.89),(.94,.82)]),
-                                 ('lower',elbow,wrist,lower,[(.04,.82),(.60,.84),(.94,.75)])]:
-        rotation=segment_rotation(b-a)
-        verts=[a.lerp(b,t)+rotation @ Vector((x,-d/2-.012,0))
-               for t,d in depths for x in [-.18,.18]]
-        mesh('Sleeve / pink stripe '+part+'.'+side,verts,[(0,1,3,2),(2,3,5,4)],pink,bname)
+    continuous_limb('Sleeve / continuous.'+side,shoulder,elbow,wrist,
+                    [(0,.71,.80),(.18,.85,.89),(.36,.85,.85),(.48,.83,.82),
+                     (.59,.85,.83),(.74,1.00,.97),(.84,1.05,1.00),
+                     (1,.72,.72)],(upper,lower),s)
+    cap_end=shoulder.lerp(elbow,.52)
+    cap=faceted_segment('Shoulder / fitted cap.'+side,shoulder,cap_end,
+                       [(0,.82,.96),(.24,1.08,1.20),(.93,1.10,1.20),
+                        (1,1.08,1.18)],upper,shell)
+    cap.data.materials.append(pink)
+    for face in cap.data.polygons:
+        t=(face.center-shoulder).dot(cap_end-shoulder)/(cap_end-shoulder).length_squared
+        if t<.24 and face.normal.z>.25:
+            face.material_index=1
     cuff_dir=(wrist-elbow).normalized()
     a=wrist-cuff_dir*.035
     b=wrist+cuff_dir*.20
-    segment_box('Cuff / band.'+side,a,b,.79,.78,shell,lower,.045)
-    segment_box('Cuff / light.'+side,a+Vector((0,-.406,0))+cuff_dir*.06,
-                b+Vector((0,-.406,0))-cuff_dir*.06,.51,.04,light_pink,lower,.008)
+    faceted_segment('Cuff / band.'+side,a,b,[(0,.92,.90),(1,.93,.91)],lower,shell)
+    segment_box('Cuff / light.'+side,a+Vector((0,-.467,0))+cuff_dir*.06,
+                b+Vector((0,-.467,0))-cuff_dir*.06,.58,.04,light_pink,lower,.008)
     faceted_segment('Hand / palm.'+side,wrist+cuff_dir*.14,palm,
                     [(0,.46,.29),(1,.61,.33)],hand,shell)
     for index in range(1,4):
@@ -417,15 +529,15 @@ for side,s in [('L',1),('R',-1)]:
     hip=arm_data.bones[thigh].head_local.copy()
     knee=arm_data.bones[shin].head_local.copy()
     ankle=arm_data.bones[foot].head_local.copy()
-    faceted_segment('Trouser / thigh.'+side,hip,knee,
-                    [(0,.75,.78),(.6,.78,.77),(1,.73,.70)],thigh)
-    cylinder('Knee / hinge.'+side,knee,.23,.62,rubber,shin)
-    faceted_segment('Trouser / shin.'+side,knee,ankle,
-                    [(0,.73,.70),(.65,.82,.73),(1,.69,.65)],shin)
-    segment_box('Trouser / outer stripe.'+side,knee+Vector((s*.29,-.29,-.02)),
-                ankle+Vector((s*.29,-.29,.15)),.17,.045,pink,shin,.01)
+    # Gather the hem above the ankle band; extending it to the foot pivot clips the boot.
+    hem=Vector((ankle.x,ankle.y,.99))
+    continuous_limb('Trouser / continuous.'+side,hip,knee,hem,
+                    [(0,.75,.78),(.24,.78,.78),(.39,.75,.73),(.5,.73,.72),
+                     (.61,.75,.73),(.78,.86,.80),(.91,.87,.79),
+                     (1,.59,.57)],(thigh,shin),s,False)
     x=s*.73
-    box('Boot / ankle band.'+side,(x,0,.85),(.96,.91,.26),shell,.055,foot)
+    faceted_segment('Boot / ankle band.'+side,(x,0,.72),(x,0,.99),
+                    [(0,.96,.94),(1,.98,.96)],foot,shell)
     box('Boot / upper.'+side,(x,-.19,.45),(.94,1.30,.66),shell,.15,foot)
     box('Boot / sole.'+side,(x,-.21,.14),(1.06,1.45,.23),rubber,.055,foot)
     box('Boot / heel.'+side,(x,.32,.28),(1.0,.32,.28),shell,.035,foot)
@@ -434,17 +546,62 @@ for side,s in [('L',1),('R',-1)]:
     box('Boot / sole pixel.'+side,(x+s*.53,-.36,.15),(.018,.15,.10),pink,.005,foot)
     box('Boot / instep stripe.'+side,(x+s*.23,-.22,.788),(.18,.44,.022),pink,.008,foot)
 
-# Single-bone weights preserve the hard-surface silhouettes through every pose.
+# Match the latest full-body reference: longer trousers and a smaller, rectangular head.
+def reference_proportions(point, is_head=False):
+    p=Vector(point)
+    if is_head:
+        return Vector((p.x*.95,p.y,5.273+(p.z-4.3)*.9))
+    p.x*=1.05
+    p.y*=1.20
+    if p.z<=.85:
+        return p
+    if p.z<2.2:
+        p.z=.85+(p.z-.85)*(2.9-.85)/(2.2-.85)
+    elif p.z<4.3:
+        p.z=2.9+(p.z-2.2)*1.13
+    else:
+        p.x*=.9
+        p.y*=.9
+        p.z=5.273+(p.z-4.3)*.9
+    return p
+
+
+bpy.context.view_layer.update()
+head_parts={obj for obj,bname in bindings if bname=='head'}
+for obj in character.objects:
+    transform=obj.matrix_world.copy()
+    origin=reference_proportions(obj.location,obj in head_parts)
+    for vertex in obj.data.vertices:
+        vertex.co=reference_proportions(transform @ vertex.co,obj in head_parts)-origin
+    obj.matrix_world=Matrix.Translation(origin)
+bpy.context.view_layer.objects.active=rig
+bpy.ops.object.mode_set(mode='EDIT')
+for item in arm_data.edit_bones:
+    item.head=reference_proportions(item.head,item.name=='head')
+    item.tail=reference_proportions(item.tail,item.name=='head')
+    item.align_roll(Vector((0,-1,0)))
+bpy.ops.object.mode_set(mode='OBJECT')
+
+# Rigid accessories, but continuous dual-quaternion skinning across knees and elbows.
 for obj,bname in bindings:
     group=obj.vertex_groups.new(name=bname)
     group.add(list(range(len(obj.data.vertices))),1.0,'REPLACE')
     modifier=obj.modifiers.new('Rigid joint','ARMATURE')
     modifier.object=rig
     obj.parent=rig
+for obj,bnames,weights in deform_bindings:
+    groups=[obj.vertex_groups.new(name=name) for name in bnames]
+    for index,weight in enumerate(weights):
+        groups[0].add([index],1-weight,'REPLACE')
+        groups[1].add([index],weight,'REPLACE')
+    modifier=obj.modifiers.new('Continuous cloth deformation','ARMATURE')
+    modifier.object=rig
+    modifier.use_deform_preserve_volume=True
+    obj.parent=rig
 
 rig['blink_L']=0.0
 rig['blink_R']=0.0
-rig['screen_brightness']=.5
+rig['screen_brightness']=1.7
 for prop in ['blink_L','blink_R']:
     rig.id_properties_ui(prop).update(min=0,max=1,description='0 = open; 1 = closed')
 rig.id_properties_ui('screen_brightness').update(min=0,max=3,description='Emission strength of the pink face screen')
@@ -457,7 +614,7 @@ for side,eye,glint in eye_objects:
         variable.targets[0].id=rig
         variable.targets[0].data_path=f'["blink_{side}"]'
     driver=glint.driver_add('location',2).driver
-    driver.expression='5.27 + 0.13 * (1-blink)'
+    driver.expression=f'{reference_proportions((0,0,5.27)).z} + {0.13*.9} * (1-blink)'
     variable=driver.variables.new()
     variable.name='blink'
     variable.targets[0].id=rig
@@ -484,6 +641,7 @@ for name,names in [('Body',['root','pelvis','torso','head']),
 scene.frame_start=1
 scene.frame_end=40
 scene.timeline_markers.clear()
+rig.pose.bones['head'].rotation_euler.z=radians(4)
 for b in rig.pose.bones:
     b.keyframe_insert('rotation_euler',frame=1,group=b.name)
     b.keyframe_insert('location',frame=1,group=b.name)
@@ -524,22 +682,22 @@ def area(name,position,energy,color,size,target=(0,0,3.2)):
     obj.rotation_euler=(Vector(target)-obj.location).to_track_quat('-Z','Y').to_euler()
 
 
-area('Studio / key softbox',(-4,-6,9),1350,(1,.93,.96),5)
-area('Studio / fill softbox',(5,-3,5),850,(.79,.85,1),4)
-area('Studio / magenta rim',(3,3,6),550,(1,.09,.73),3)
-area('Studio / crown',(-2,2,8),1000,(1,.85,1),3)
+area('Studio / key softbox',(-4,-6,9),1000,(1,.93,.96),5)
+area('Studio / fill softbox',(5,-3,5),500,(.79,.85,1),4)
+area('Studio / magenta rim',(3,3,6),350,(1,.015,.75),3)
+area('Studio / crown',(-3,1,9),200,(1,.025,.8),3)
 camera_data=bpy.data.cameras.new('Logan · portrait camera')
 camera=bpy.data.objects.new('Camera / portrait',camera_data)
 studio.objects.link(camera)
 camera.location=(5,-28,8.2)
-target=Vector((0,0,3.28))
+target=Vector((0,0,3.65))
 camera.rotation_euler=(target-camera.location).to_track_quat('-Z','Y').to_euler()
 camera_data.type='ORTHO'
-camera_data.ortho_scale=7.8
+camera_data.ortho_scale=8.4
 camera_data.lens=55
 scene.camera=camera
 
-reference=bpy.data.images.load(str(ASSET_DIR/'reference/logan.png'),check_existing=True)
+reference=bpy.data.images.load(str(ASSET_DIR/'reference/logan.png'),check_existing=False)
 reference.pack()
 ref=bpy.data.objects.new('Reference / original concept',None)
 reference_collection.objects.link(ref)
@@ -566,6 +724,60 @@ scene.view_settings.look='None'
 scene.view_settings.exposure=-.6
 scene.render.filepath=str(ASSET_DIR/'renders/logan-neutral.png')
 
+# Optical glow is part of the saved scene, so every camera and pose renders consistently.
+compositor=bpy.data.node_groups.new('Logan · neon bloom','CompositorNodeTree')
+compositor.interface.new_socket(name='Image',in_out='OUTPUT',socket_type='NodeSocketColor')
+layers=compositor.nodes.new('CompositorNodeRLayers')
+layers.scene=scene
+scene.view_layers[0].use_pass_emit=True
+scene.view_layers[0].update_render_passes()
+glow=compositor.nodes.new('CompositorNodeGlare')
+glow.inputs['Type'].default_value='Fog Glow'
+glow.inputs['Quality'].default_value='High'
+glow.inputs['Threshold'].default_value=.22
+glow.inputs['Strength'].default_value=.85
+glow.inputs['Size'].default_value=.9
+add=compositor.nodes.new('ShaderNodeMix')
+add.data_type='RGBA'
+add.blend_type='ADD'
+add.inputs[0].default_value=1
+compositor.links.new(layers.outputs['Emission'],glow.inputs['Image'])
+compositor.links.new(layers.outputs['Image'],add.inputs[6])
+compositor.links.new(glow.outputs['Glare'],add.inputs[7])
+# Export the halo into PNG alpha, including outside the character silhouette.
+channels=compositor.nodes.new('CompositorNodeSeparateColor')
+compositor.links.new(glow.outputs['Glare'],channels.inputs[0])
+maximum=compositor.nodes.new('ShaderNodeMath')
+maximum.operation='MAXIMUM'
+compositor.links.new(channels.outputs[0],maximum.inputs[0])
+compositor.links.new(channels.outputs[2],maximum.inputs[1])
+alpha=compositor.nodes.new('ShaderNodeMath')
+alpha.operation='MAXIMUM'
+alpha.use_clamp=True
+compositor.links.new(layers.outputs['Alpha'],alpha.inputs[0])
+compositor.links.new(maximum.outputs[0],alpha.inputs[1])
+# Avoid saturated hidden RGB where PNG's 8-bit alpha rounds a faint halo to zero.
+visible=compositor.nodes.new('ShaderNodeMath')
+visible.operation='GREATER_THAN'
+visible.inputs[1].default_value=.5/255
+compositor.links.new(alpha.outputs[0],visible.inputs[0])
+masked=compositor.nodes.new('ShaderNodeMix')
+masked.data_type='RGBA'
+masked.inputs[6].default_value=(0,0,0,0)
+compositor.links.new(visible.outputs[0],masked.inputs[0])
+compositor.links.new(add.outputs[2],masked.inputs[7])
+masked_alpha=compositor.nodes.new('ShaderNodeMath')
+masked_alpha.operation='MULTIPLY'
+compositor.links.new(alpha.outputs[0],masked_alpha.inputs[0])
+compositor.links.new(visible.outputs[0],masked_alpha.inputs[1])
+set_alpha=compositor.nodes.new('CompositorNodeSetAlpha')
+set_alpha.inputs['Type'].default_value='Replace Alpha'
+compositor.links.new(masked.outputs[2],set_alpha.inputs['Image'])
+compositor.links.new(masked_alpha.outputs[0],set_alpha.inputs['Alpha'])
+output=compositor.nodes.new('NodeGroupOutput')
+compositor.links.new(set_alpha.outputs['Image'],output.inputs['Image'])
+scene.compositing_node_group=compositor
+
 # Keep the first opening useful: camera view, material colours and the rig selected.
 bpy.ops.object.select_all(action='DESELECT')
 rig.select_set(True)
@@ -577,6 +789,8 @@ for screen in bpy.data.screens:
             if space is None:
                 continue
             space.region_3d.view_perspective='CAMERA'
+            space.region_3d.view_camera_zoom=0
+            space.region_3d.view_camera_offset=(0,0)
             space.shading.type='MATERIAL'
             space.shading.use_scene_world=False
             space.overlay.show_overlays=False
@@ -589,8 +803,11 @@ Frame 1: neutral. Frame 40: hello. Timeline markers name both poses.
 Select LOGAN · Pose me, enter Pose Mode, rotate the named bones.
 Enable viewport Overlays to see bones; Alt-R clears a selected bone rotation.
 Root moves the whole character; torso/head/limbs and every finger are articulated.
+Insert keyframes after editing the animated pose, before rendering or changing frames.
 Object Custom Properties: blink_L, blink_R (0–1), screen_brightness (0–3).
-All shell parts have rigid weights. Camera, materials and lights remain editable.
+Sleeves and trousers deform continuously; the head, boots and accessories are rigid.
+Surface gradients and optical neon bloom are saved in the materials and compositor.
+Camera, materials and lights remain editable.
 The original reference is packed into this file, in the hidden Reference collection.
 F12 renders the current pose. Render Properties > Film > Transparent removes the sky;
 hide Studio / floor as well for a completely transparent character cutout.
