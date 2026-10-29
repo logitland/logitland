@@ -1,0 +1,14 @@
+{
+  "name": "Assembly",
+  "seed": "Sigil",
+  "system": "Mirrored 3x3 square lattice; 3U pitch, 1.5U stems, 7U/8 node radius",
+  "U": 76,
+  "revision": 2,
+  "corrections": [
+    "Fork mouths opened U/16; exact reflection retained.",
+    "Node radius 7U/8 sits between the 3U/4 stem radius and U nominal node, keeping the head from dominating.",
+    "Native circular curves use cubic Bezier approximation; SVG arcs remain exact."
+  ],
+  "guideElements": 28,
+  "documentSession": "89214829-192F-4754-9696-B5B21AEDCA34"
+}
