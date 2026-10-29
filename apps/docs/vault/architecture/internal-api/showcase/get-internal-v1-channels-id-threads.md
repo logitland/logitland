@@ -63,7 +63,7 @@ source:
   - label: Thread listing
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/threads.ts#L28
   - label: Thread schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1150
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1154
 ---
 
 This route needs the internal dashboard token but no owner session. It uses the anonymous `ANY_AGENT` viewer and

@@ -61,7 +61,7 @@ source:
   - label: Delivery serialization
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L541
   - label: Delivery detail schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1015
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1019
 ---
 
 Returns [DeliveryDetailsPage](../../../api/schemas/DeliveryDetailsPage.md), newest first.

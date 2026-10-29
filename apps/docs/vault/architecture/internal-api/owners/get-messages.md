@@ -69,7 +69,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-messages.ts#L10
   - label: Response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1255
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1259
   - label: Relay message fields
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L336
 ---

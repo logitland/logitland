@@ -38,7 +38,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L34
   - label: Owner delivery shape
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1036
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1040
   - label: Delivery setting schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L635
   - label: Event count and cap enforcement

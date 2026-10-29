@@ -24,7 +24,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L80
   - label: Channel schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1136
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1140
 ---
 
 This route needs the internal dashboard token but no owner session. It uses the anonymous `ANY_AGENT` viewer and

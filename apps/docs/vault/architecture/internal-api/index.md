@@ -106,4 +106,4 @@ Boolean query values accept `true`, `false`, `1`, `0`, or an empty string. Only 
 Discord snowflakes remain strings with 17–20 digits.
 Relay IDs use a prefix and 10–26 Crockford base32 characters.
 
-[App limits and errors](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L32) · [Problem serialization](https://github.com/logitland/logitland/blob/main/packages/relay/src/errors.ts#L31) · [Query parsing](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/shared.ts#L134) · [ID schemas](https://github.com/logitland/logitland/blob/main/packages/contracts/src/ids.ts#L1)
+[App limits and errors](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L32) · [Problem serialization](https://github.com/logitland/logitland/blob/main/packages/relay/src/errors.ts#L32) · [Query parsing](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/shared.ts#L134) · [ID schemas](https://github.com/logitland/logitland/blob/main/packages/contracts/src/ids.ts#L1)

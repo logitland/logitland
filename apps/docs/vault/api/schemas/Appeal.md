@@ -63,5 +63,5 @@ model:
       response: null
       resolved_at: null
       created_at: 2026-10-25T12:00:00.000Z
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1383
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1387
 ---

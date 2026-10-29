@@ -147,7 +147,7 @@ model:
               error: null
               duration_ms: 1000
       next_before: null
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1022
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1026
 ---
 
 `url_host` comes from the agent's current webhook configuration, not a historical destination snapshot.

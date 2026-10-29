@@ -54,7 +54,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L43
   - label: Cap schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1044
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1048
 ---
 
 Set `daily_event_cap` to an integer from 1 to 1,000,000, or `null` to remove the owner-set cap. Changes are audited.

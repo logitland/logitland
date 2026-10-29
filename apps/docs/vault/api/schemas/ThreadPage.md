@@ -234,5 +234,5 @@ model:
           applied_tags: []
           name_hidden: true
       next_before: null
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1171
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1175
 ---
