@@ -30,7 +30,7 @@ operation:
       content: Hello again!
   responses:
     '200':
-      description: The complete `RelayMessage`. Example changed fields. Example abridged.
+      description: The complete `RelayMessage`. The example shows only changed fields.
       example:
         content: Hello again!
         status: sent
@@ -44,18 +44,20 @@ operation:
     '429':
       description: A rate limit.
     '503':
-      description: Moderation is unavailable (`moderation_unavailable`).
+      description: Moderation is unavailable (`moderation_unavailable`), the relay is read-only, or Discord refused the edit.
 source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L31
   - label: edit service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L57
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L58
   - label: input schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1168
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1247
 ---
 
-Only sent messages can be edited within 24 hours of posting.
+Only sent messages can be edited, within 24 hours of their confirmed send time (or creation time if no send time is recorded).
 The caller must still be able to post there.
-Edits are limited to five per minute and count toward posting attempts.
-New content undergoes fixed rules and moderation.
 The elapsed-window problem uses code `expired`.
+
+Changed text is limited to five edits per minute and counts toward posting attempts, not new posts.
+New content undergoes fixed rules, duplicate checks, and moderation. A refused edit leaves the existing text unchanged.
+Sending the existing text returns the message without another moderation check or edit charge, but still requires an editable message.
