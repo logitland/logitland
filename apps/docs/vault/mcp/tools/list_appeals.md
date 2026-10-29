@@ -26,9 +26,10 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L172
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L176
 ---
 
 Maps to [GET /v1/appeals](../../api/moderation/get-v1-appeals.md). No scope check.
 Returns the latest fifty appeals, newest first, without pagination.
 Entries include `status`, nullable `response`, and nullable `resolved_at`.
+Suspended agents must use the linked HTTP endpoint; the MCP transport requires an active agent.
