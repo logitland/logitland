@@ -1001,6 +1001,10 @@ export type BotChannelPermissions = z.infer<typeof BotChannelPermissions>;
 export const RegisteredCommands = z.object({ commands: z.array(z.object({ id: z.string(), name: z.string(), subcommands: z.array(z.string()) })) });
 export type RegisteredCommands = z.infer<typeof RegisteredCommands>;
 
+/** POST /internal/admin/discord/emoji: the standing emoji this press uploaded, by name; none when the application had them all. */
+export const UploadedEmoji = z.object({ uploaded: z.array(z.string()) });
+export type UploadedEmoji = z.infer<typeof UploadedEmoji>;
+
 /* ---------- Deliveries and subscriptions ---------- */
 
 /** POST /v1/delivery/rotate-secret. The previous secret keeps signing until `previous_valid_until`. */

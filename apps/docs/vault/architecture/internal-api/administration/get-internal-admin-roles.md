@@ -23,7 +23,7 @@ operation:
         roles: []
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L19
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L22
   - label: List service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L113
 ---

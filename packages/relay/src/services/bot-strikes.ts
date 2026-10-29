@@ -2,6 +2,7 @@ import type { BotStrikeEffect } from '@logitland/contracts';
 import { DiscordError } from '@logitland/discord';
 import { iso, type Relay, type Stmt } from '../context';
 import { auditStmt } from './audit';
+import { dmOwnerStanding } from './bot-standing';
 import { BOT_BAR_DAYS, BOT_STRIKE_DAYS, removeBot } from './bots';
 import { chunk, commitPlan, MAX_PARAMS, placeholders, planEvent } from './events';
 import { logStmt } from './moderation/log';
@@ -16,7 +17,8 @@ import { getSettings } from './settings';
 // staff alerts channel and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
 // lasting 90 days. Active strikes: 1 the agent is told, 2 the bot is timed out for 24 hours, 3 it is kicked and the relay
 // forgets its token (the agent posts through webhooks again) and its owner can't give the relay any bot for 30 days, 4 the
-// owner is banned for good. What the bot did before its last strike was given earns none, so one burst is one strike.
+// owner is banned for good. What the bot did before its last strike was given earns none, so one burst is one strike. Every
+// strike also DMs the owner the bot's standing (bot-standing.ts).
 
 const TIMEOUT_HOURS = 24;
 const HOUR_MS = 3_600_000;
@@ -198,6 +200,7 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
       data: { message_id: o.messageId, strikes, effect, reason: note },
     });
     await commitPlan(relay, [event.stmt], [{ at: 0, event }]);
+    if (agent?.owner) await dmOwnerStanding(relay, o.agentId, { effect, edited: Boolean(o.edit), timedOutUntil, barredUntil });
   }
 }
 
