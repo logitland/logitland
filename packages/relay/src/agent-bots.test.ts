@@ -27,7 +27,6 @@ function discordWithBot(h: Harness) {
     id: BOT_ID,
     guilds: [] as string[],
     roles: [] as string[],
-    public: false,
     username: 'helper-bot',
     revoked: false,
     failRoleRemovals: 0,
@@ -69,7 +68,8 @@ function discordWithBot(h: Harness) {
         if (req.method === 'PATCH') bot.username = body.username ?? bot.username;
         return Response.json({ id: bot.id, username: bot.username, bot: true });
       }
-      if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: bot.public });
+      // Public: Discord lets only an application's owner add a private bot, so staff can add only a public one.
+      if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: true });
       if (path === '/users/@me/guilds') return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
       if (path === '/gateway/bot') {
         await gateway();
@@ -170,18 +170,12 @@ describe('giving the relay a bot', () => {
     expect((await steps()).join('\n')).not.toContain('PUT /v1/me/bot');
   });
 
-  it('refuses an orphan, a public bot, and a bot that is in another server', async () => {
+  it('refuses an orphan, and a bot that is in another server', async () => {
     const { h, owner, bot } = await adopted();
     const orphan = await seedAgent(h.relay);
     expect((await give(h, orphan)).status).toBe(403);
 
     const adoptee = await seedAgent(h.relay, { ownerId: owner.id });
-    bot.public = true;
-    const pub = await give(h, adoptee);
-    expect(pub.status).toBe(422);
-    expect((await json(pub)).detail).toMatch(/Your bot is public/);
-
-    bot.public = false;
     bot.guilds.push(OTHER_SERVER);
     const res = await give(h, adoptee);
     expect(res.status).toBe(422);
@@ -191,9 +185,9 @@ describe('giving the relay a bot', () => {
 
   it('takes one accepted bot a day, removing it doesn’t reset that, and refused tokens don’t count', async () => {
     const { h, a, bot } = await adopted();
-    bot.public = true;
+    bot.guilds.push(OTHER_SERVER);
     expect((await give(h, a)).status).toBe(422);
-    bot.public = false;
+    bot.guilds = [];
     expect((await give(h, a)).status).toBe(200);
 
     await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token));
@@ -218,15 +212,15 @@ describe('giving the relay a bot', () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
     await staffAdd(h, bot);
-    bot.public = true;
+    bot.revoked = true;
     await laterCheck(h);
-    bot.public = false;
+    bot.revoked = false;
     expect((await give(h, a)).status).toBe(200);
   });
 });
 
 describe('posting as the bot', () => {
-  it('posts through the webhook until staff add the bot, then as the bot with the agent’s roles and a native reply', async () => {
+  it('posts through the webhook until staff add the public bot, then as the bot with the agent’s roles and a native reply', async () => {
     const { h, a, bot } = await adopted();
     await give(h, a);
     expect((await json(await post(h, a, say('Before the bot joined')))).status).toBe('sent');
@@ -288,18 +282,6 @@ describe('posting as the bot', () => {
     expect(bot.roles).toEqual([]);
     expect((await json(await post(h, a, say('Back on the webhook')))).status).toBe('sent');
     expect((await calls(h, 'POST', /\/channels\/\d+\/messages$/)).filter(asBot)).toEqual([]);
-  });
-
-  it('pauses when the bot becomes public', async () => {
-    const { h, a, bot } = await adopted();
-    await give(h, a);
-    await staffAdd(h, bot);
-    bot.public = true;
-    await laterCheck(h);
-
-    const { bot: status } = await json(await h.call('GET', '/v1/me/bot', undefined, h.as(a.token)));
-    expect(status).toMatchObject({ status: 'paused', paused_reason: expect.stringMatching(/became public/) });
-    expect(bot.roles).toEqual([]);
   });
 
   it('kicks a bot its agent stopped posting as, so it can’t stay behind unwatched', async () => {
@@ -855,12 +837,12 @@ describe('staff adding the bot from the mod queue', () => {
   it('says so when the bot is paused or removed before staff add it', async () => {
     const { h, a, bot } = await queued();
     await give(h, a);
-    bot.public = true;
+    bot.guilds.push(OTHER_SERVER);
     h.advance(60_000);
     await botsJob(h.relay, { deadline: Date.now() + 10_000 });
     expect((await queueEdits(h)).map(([, c]) => c)).toEqual(['Wren’s own bot `Wren` was paused before it was added, so there’s nothing to add.']);
 
-    bot.public = false;
+    bot.guilds = [];
     await give(h, a);
     await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token));
     expect(await staffAlerts(h)).toEqual([waiting(a), waiting(a)]);
@@ -921,7 +903,7 @@ describe('staff adding the bot from the mod queue', () => {
       await h.db
         .prepare(
           `INSERT INTO agent_bots (agent_id, bot_user_id, application_id, username, token_ciphertext, status, paused_reason, checked_at, created_at, updated_at,
-             queue_channel_id, queue_message_id, queue_shows) VALUES (?, ?, ?, 'helper', 'sealed', 'paused', 'made public', ?, ?, ?, ?, ?, ?)`,
+             queue_channel_id, queue_message_id, queue_shows) VALUES (?, ?, ?, 'helper', 'sealed', 'paused', 'joined another server', ?, ?, ?, ?, ?, ?)`,
         )
         .bind(agent.id, botId, APP_ID, checked, checked, checked, STAFF, id, `waiting:${botId}`)
         .run();
