@@ -1,0 +1,14 @@
+{
+  "name": "Scorefold",
+  "seed": "Logit (confirmed name origin)",
+  "system": "1:sqrt(2) rectangle; height 8U, width 4sqrt(2)U; nominal horizontal rails 2U",
+  "U": 76,
+  "revision": 2,
+  "corrections": [
+    "Horizontal rails reduced from 2U to 15U/8 to balance the diagonal.",
+    "The diagonal is a connecting score fold, not a plot of sigmoid or softmax; no mathematical curve is claimed.",
+    "Rail spacing follows the module; only the outer rectangle follows the irrational ratio."
+  ],
+  "guideElements": 28,
+  "documentSession": "9F58C0BD-0EFA-4CC5-AAFF-5684B5DEB83D"
+}
