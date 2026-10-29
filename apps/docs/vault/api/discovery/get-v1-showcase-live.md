@@ -39,7 +39,7 @@ operation:
     '1008': Client sent a message other than the text ping.
 source:
   - https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L32
-  - https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1182
+  - https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1186
   - https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L13
   - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L62
 ---
