@@ -494,6 +494,34 @@ describe('posting outside the relay', () => {
     ]);
   });
 
+  it('keeps a send that live intake and a backfill both show before Discord answers', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    bot.beforeAnswer = (m) => Promise.all([1, 2].map(() => ingest(h.relay, { source: 'test', events: [botPost(h, m.id, m.content)] })));
+    expect((await json(await post(h, a, say('Through the relay')))).status).toBe('sent');
+    expect(await deletedMessages(h)).toEqual([]);
+    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM bot_strikes').first()).toEqual({ n: 0 });
+  });
+
+  it('deletes an edit the bot made itself to a send shown in the same batch, but not one with the relay’s own text', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    const update = (id: string, content: string) => ({ kind: 'message_update', channel_id: LOUNGE, message_id: id, content, edited_timestamp: h.now().toISOString() });
+    // Before Discord answers, the Gateway shows each send and an edit of it at once.
+    bot.beforeAnswer = (m) => ingest(h.relay, { source: 'test', events: [botPost(h, m.id, m.content), update(m.id, m.content)] });
+    const kept = await json(await post(h, a, say('The relay’s own text')));
+    h.advance(60_000);
+    bot.beforeAnswer = (m) => ingest(h.relay, { source: 'test', events: [botPost(h, m.id, m.content), update(m.id, 'Changed by the bot itself')] });
+    const changed = await json(await post(h, a, say('Changed straight after')));
+
+    expect(await deletedMessages(h)).toEqual([`/api/v10/channels/${LOUNGE}/messages/${changed.discord_message_id}`]);
+    expect(await row(h, kept.id)).toMatchObject({ status: 'sent' });
+    expect(await row(h, changed.id)).toMatchObject({ status: 'removed', removed_by: 'moderator' });
+    expect((await botSetting(h, a)).strikes.active).toBe(1);
+  });
+
   it('times the bot out at a second strike, kicks and forgets it at a third and bars its owner for 30 days, and bans the owner at a fourth', async () => {
     const { h, a, owner, bot } = await adopted();
     await give(h, a);
@@ -544,5 +572,31 @@ describe('posting outside the relay', () => {
     await byItself(h, '320000000000000002', 'Two');
     expect((await botSetting(h, a)).strikes.active).toBe(1);
     expect(await calls(h, 'PATCH', new RegExp(`/guilds/${GUILD}/members/${BOT_ID}$`))).toEqual([]);
+  });
+
+  it('lets an owner whose bot was struck delete their account, and the ban stays with their Discord account', async () => {
+    const { h, a, owner, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000001', 'Expires');
+    h.advance(90 * DAY);
+    await byItself(h, '320000000000000002', 'A notice');
+    h.advance(60_000);
+    await byItself(h, '320000000000000003', 'A timeout');
+    h.advance(DAY);
+    await byItself(h, '320000000000000004', 'A kick');
+    h.advance(30 * DAY);
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000005', 'A ban');
+    expect((await botSetting(h, a)).strikes).toMatchObject({ active: 4, banned: true });
+
+    expect((await h.internal('DELETE', `/internal/owners/${owner.id}`, undefined, asOwner(owner.id))).status).toBe(204);
+    const again = await json(await h.internal('POST', '/internal/owners', { discord_user_id: owner.discord_user_id, username: 'luna-test' }));
+    const other = await seedAgent(h.relay, { name: 'Moss', ownerId: again.owner.id });
+    const refused = await give(h, other);
+    expect(refused.status).toBe(403);
+    expect((await json(refused)).detail).toMatch(/banned for good/);
+    expect((await h.internal('POST', `/internal/owners/${again.owner.id}/adoption-tokens`, undefined, asOwner(again.owner.id))).status).toBe(403);
   });
 });

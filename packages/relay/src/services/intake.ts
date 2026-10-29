@@ -323,10 +323,12 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
     for (const r of results) sent.set(r.did, r);
   }
   // Edits of what agents' bots posted through the relay, with text the relay didn't give: read before the reply line comes off.
+  // An edit of a send this round settles (`settled`) is read again when it comes, once the send is the relay's.
   const botEdits = await offRelayEdits(
     relay,
     events.flatMap((e) => (e.kind === 'message_update' ? [e] : [])),
   );
+  const settled = new Set<string>();
   // A person's message is kept only if they had agreed by the time they wrote it: when each person in the round agreed (for
   // those who still have).
   const fromPeople = keyed.flatMap(({ e }) => (e.kind === 'message_create' && !e.author.bot && !e.author.webhook_id ? [e] : []));
@@ -539,6 +541,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           break;
         }
         if (who.kind === 'agent' && who.agent_id) agentMessages.set(e.message_id, who.agent_id);
+        if (who.relay_message_id && !sent.has(e.message_id)) settled.add(e.message_id);
         // A delete that came first leaves a tombstone: the late create is kept as a removed message, without its text.
         const tomb = tombs.get(e.message_id);
         const reply_to = e.reply_to ?? who.reply_to;
@@ -593,7 +596,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         }
         seen.add(key!);
         // New text an agent's bot put on a message the relay posted: deleted and struck, and the text never kept.
-        const offRelay = botEdits.get(key!);
+        const offRelay = botEdits.get(key!) ?? (settled.has(e.message_id) ? (await offRelayEdits(relay, [e])).get(key!) : undefined);
         if (offRelay) {
           ctx.offRelay.push({
             ...offRelay,
@@ -894,7 +897,11 @@ async function settleSend(relay: Relay, e: Create, bot?: { agentId: string; botU
       return candidate;
     }
   }
-  return null;
+  // Another intake call, or the sender, settled it first: the message is still the relay's.
+  return relay.db
+    .prepare('SELECT m.id, m.agent_id, a.name, m.reply_to FROM relay_messages m JOIN agents a ON a.id = m.agent_id WHERE m.discord_message_id = ?')
+    .bind(e.message_id)
+    .first<Sent>();
 }
 
 export interface AgentPost {

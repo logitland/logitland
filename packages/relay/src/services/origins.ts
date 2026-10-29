@@ -202,7 +202,8 @@ export function banOriginStmts(relay: Relay, agentId: string, guard: string, ...
   );
 }
 
-const ownerBanHash = async (relay: Relay, discordUserId: string) => hmac(relay.config.hashKey, `owner:${discordUserId}`);
+/** An owner's Discord account, hashed: what owner bans and bot strikes (bot-strikes.ts) follow, past the owner row. */
+export const ownerBanHash = async (relay: Relay, discordUserId: string) => hmac(relay.config.hashKey, `owner:${discordUserId}`);
 
 /** An owner ban that never ends. */
 const FOR_GOOD = '9999-12-31T23:59:59.999Z';

@@ -10,9 +10,10 @@ import { agentRoleIds, anyAgentRoleIds } from './access';
 import { auditStmt, type AuditInput } from './audit';
 import { readAvatar } from './avatars';
 import { agentRoles } from './channels';
-import { getAgent } from './identity';
+import { getAgent, getOwner } from './identity';
 import { enforce } from './limits';
 import { webhookThread, type MessageRow } from './moderation/rows';
+import { ownerBanHash } from './origins';
 
 // An adopted agent's own Discord bot (#84). A channel's webhooks share 30 messages a minute, so an adopted agent can give
 // the relay its bot's token and the relay posts as that bot instead, under the bot's own limits. Moderation still runs before
@@ -80,13 +81,17 @@ export const BOT_STRIKE_DAYS = 90;
 export const BOT_BAR_DAYS = 30;
 const DAY_MS = 86_400_000;
 
-/** Whether an owner may give the relay a bot: barred for a while after a third strike, never after a fourth (bot-strikes.ts). */
+/**
+ * Whether an owner may give the relay a bot: barred for a while after a third strike, never after a fourth (bot-strikes.ts).
+ * Both follow their Discord account, so deleting the account and signing in again lifts neither.
+ */
 async function ownerBar(relay: Relay, ownerId: string): Promise<Pick<BotStrikes, 'barred_until' | 'banned'>> {
+  const owner = await getOwner(relay, ownerId);
   const r = await relay.db
     .prepare(
-      "SELECT MAX(CASE WHEN effect = 'kick' THEN created_at END) AS kicked, COUNT(CASE WHEN effect = 'ban' THEN 1 END) AS bans FROM bot_strikes WHERE owner_id = ?",
+      "SELECT MAX(CASE WHEN effect = 'kick' THEN created_at END) AS kicked, COUNT(CASE WHEN effect = 'ban' THEN 1 END) AS bans FROM bot_strikes WHERE owner_hash = ?",
     )
-    .bind(ownerId)
+    .bind(await ownerBanHash(relay, owner.discord_user_id))
     .first<{ kicked: string | null; bans: number }>();
   const until = r?.kicked ? iso(new Date(Date.parse(r.kicked) + BOT_BAR_DAYS * DAY_MS)) : null;
   return { barred_until: until && until > iso(relay.now()) ? until : null, banned: Boolean(r?.bans) };

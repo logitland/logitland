@@ -6,7 +6,7 @@ import { BOT_BAR_DAYS, BOT_STRIKE_DAYS, removeBot } from './bots';
 import { chunk, commitPlan, MAX_PARAMS, placeholders, planEvent } from './events';
 import { logStmt } from './moderation/log';
 import { contentHash } from './moderation/rows';
-import { banOwnerForGoodStmt } from './origins';
+import { banOwnerForGoodStmt, ownerBanHash } from './origins';
 import { scrubMessage } from './scrub';
 import { getSettings } from './settings';
 
@@ -106,11 +106,15 @@ async function done(relay: Relay, what: string, call: () => Promise<unknown>): P
 
 async function enforce(relay: Relay, o: Offense): Promise<void> {
   const now = relay.now();
+  const agent = await relay.db
+    .prepare('SELECT a.name, o.discord_user_id AS owner FROM agents a LEFT JOIN owners o ON o.id = a.owner_id WHERE a.id = ?')
+    .bind(o.agentId)
+    .first<{ name: string; owner: string | null }>();
   // The strike, decided and recorded in one statement so offenses handled at once can't both count as the same step.
   const { results } = await relay.db
     .prepare(
-      `INSERT OR IGNORE INTO bot_strikes (source_key, agent_id, owner_id, bot_user_id, message_id, effect, created_at, expires_at)
-       SELECT ?1, a.id, a.owner_id, ?2, ?3,
+      `INSERT OR IGNORE INTO bot_strikes (source_key, agent_id, owner_hash, bot_user_id, message_id, effect, created_at, expires_at)
+       SELECT ?1, a.id, ?8, ?2, ?3,
          CASE WHEN EXISTS (SELECT 1 FROM bot_strikes s WHERE s.agent_id = a.id AND s.effect IS NOT NULL AND s.created_at >= ?4) THEN NULL
            ELSE CASE (SELECT COUNT(*) FROM bot_strikes s WHERE s.agent_id = a.id AND s.effect IS NOT NULL AND s.expires_at > ?5)
              WHEN 0 THEN 'notice' WHEN 1 THEN 'timeout' WHEN 2 THEN 'kick' ELSE 'ban' END END,
@@ -118,7 +122,16 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
        FROM agents a WHERE a.id = ?7
        RETURNING effect`,
     )
-    .bind(o.sourceKey, o.botUserId, o.messageId, o.at, iso(now), iso(new Date(now.getTime() + BOT_STRIKE_DAYS * DAY_MS)), o.agentId)
+    .bind(
+      o.sourceKey,
+      o.botUserId,
+      o.messageId,
+      o.at,
+      iso(now),
+      iso(new Date(now.getTime() + BOT_STRIKE_DAYS * DAY_MS)),
+      o.agentId,
+      agent?.owner ? await ownerBanHash(relay, agent.owner) : null,
+    )
     .all<{ effect: BotStrikeEffect | null }>();
   const [row] = results;
   if (!row) return;
@@ -136,10 +149,6 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
     await scrubMessage(relay, o.messageId, 'moderator', { channelId: o.channelId });
   }
 
-  const agent = await relay.db
-    .prepare('SELECT a.name, o.discord_user_id AS owner FROM agents a LEFT JOIN owners o ON o.id = a.owner_id WHERE a.id = ?')
-    .bind(o.agentId)
-    .first<{ name: string; owner: string | null }>();
   const strikes = effect ? await activeStrikes(relay, o.agentId) : 0;
   const guildId = relay.config.discord.guildId;
   const stmts: Stmt[] = [];
