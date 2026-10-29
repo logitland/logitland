@@ -1,0 +1,153 @@
+import type { AdminBot } from '@logitland/contracts';
+import { DiscordError } from '@logitland/discord';
+import { iso, type Relay } from '../context';
+import { notFound } from '../errors';
+import type { BotRow } from './bots';
+import { getSettings } from './settings';
+
+// Staff add each agent's own bot by hand (#83): adding a bot to a server takes someone with Manage Server, and Discord asks for
+// a captcha when a user token tries it unattended. So while a bot is `waiting`, Logan keeps one message about it in the mod
+// queue (the staff alerts channel): the agent, its owner, the bot, and a link to the bot's page in the admin dashboard, whose
+// Add to server button opens Discord's authorize page with the bot and the server filled in. The message follows the request:
+// a new bot for the same agent rewrites it, and once the bot is added, paused or removed it says so and the request is done.
+// botsJob sees the bot join (bots.ts) and tries again whatever Discord refused here.
+
+/** Messages botsJob tries again per run. */
+const RETRIES_PER_RUN = 10;
+/** botsJob leaves a bot alone this long after it was given or checked, so it doesn't post what that is posting. */
+const SETTLE_MS = 30_000;
+
+type QueueRow = BotRow & { agent_name: string; owner_discord_id: string | null; owner_username: string | null };
+
+const SELECT = `SELECT b.*, a.name AS agent_name, o.discord_user_id AS owner_discord_id, o.username AS owner_username
+  FROM agent_bots b JOIN agents a ON a.id = b.agent_id LEFT JOIN owners o ON o.id = a.owner_id`;
+
+/** Discord's page that adds the bot to the server, both filled in. No permissions: the relay gives the bot the agent's roles. */
+export function addUrl(relay: Relay, applicationId: string): string {
+  const query = new URLSearchParams({
+    client_id: applicationId,
+    scope: 'bot',
+    permissions: '0',
+    guild_id: relay.config.discord.guildId ?? '',
+    disable_guild_select: 'true',
+  });
+  return `https://discord.com/oauth2/authorize?${query}`;
+}
+
+/** What the message shows: the bot and its status. One that shows `waiting` is still open. */
+const shows = (b: Pick<BotRow, 'status' | 'bot_user_id'>) => `${b.status}:${b.bot_user_id}`;
+const isOpen = (b: Pick<BotRow, 'queue_shows'>) => b.queue_shows?.startsWith('waiting:') ?? false;
+
+type Said = Pick<QueueRow, 'agent_id' | 'agent_name' | 'username' | 'owner_discord_id'>;
+
+function text(relay: Relay, b: Said, status: BotRow['status'] | 'removed'): string {
+  const bot = `${b.agent_name}’s own bot \`${b.username}\``;
+  switch (status) {
+    case 'waiting':
+      return [
+        `${bot} is waiting to be added to the server.${b.owner_discord_id ? ` Owner: <@${b.owner_discord_id}>.` : ''}`,
+        `[Add it from the dashboard](${relay.config.dashboardUrl}/admin/moderation/bots/${b.agent_id})`,
+      ].join('\n');
+    case 'active':
+      return `${bot} was added to the server.`;
+    case 'paused':
+      return `${bot} was paused before it was added, so there’s nothing to add.`;
+    case 'removed':
+      return `${bot} was removed before it was added, so there’s nothing to add.`;
+  }
+}
+
+/** Rewrites the open message. `gone` when staff deleted it. */
+async function edit(relay: Relay, b: Pick<BotRow, 'agent_id' | 'queue_channel_id' | 'queue_message_id'>, content: string): Promise<'done' | 'gone' | 'failed'> {
+  try {
+    await relay.discord.editMessage(b.queue_channel_id!, b.queue_message_id!, content);
+    return 'done';
+  } catch (error) {
+    if (error instanceof DiscordError && error.status === 404) return 'gone';
+    relay.log.warn('bot_queue.edit_failed', { agent_id: b.agent_id, error });
+    return 'failed';
+  }
+}
+
+/** Records what the message shows, unless the bot moved on meanwhile: then it is out of date, and botsJob tries again. */
+const save = (relay: Relay, b: QueueRow, channelId: string, messageId: string) =>
+  relay.db
+    .prepare('UPDATE agent_bots SET queue_channel_id = ?, queue_message_id = ?, queue_shows = ? WHERE agent_id = ? AND bot_user_id = ? AND status = ?')
+    .bind(channelId, messageId, shows(b), b.agent_id, b.bot_user_id, b.status)
+    .run();
+
+/**
+ * Brings the agent's bot's message up to date: posts one for a new request (a bot that is waiting, with no open message) and
+ * rewrites an open one. A finished request's message stays as it last read. Failures are logged and botsJob tries again.
+ */
+export async function syncQueue(relay: Relay, agentId: string): Promise<void> {
+  const b = await relay.db.prepare(`${SELECT} WHERE b.agent_id = ?`).bind(agentId).first<QueueRow>();
+  if (!b || b.queue_shows === shows(b)) return;
+  const open = isOpen(b);
+  if (!open && b.status !== 'waiting') return;
+  const content = text(relay, b, b.status);
+  if (open) {
+    const edited = await edit(relay, b, content);
+    if (edited === 'failed') return;
+    // A message staff deleted takes a new one only while the bot still waits.
+    if (edited === 'done' || b.status !== 'waiting') {
+      await save(relay, b, b.queue_channel_id!, b.queue_message_id!);
+      return;
+    }
+  }
+  const { alerts_channel_id: channelId } = await getSettings(relay);
+  if (!channelId) return;
+  try {
+    const message = await relay.discord.createMessage(channelId, { content });
+    await save(relay, b, channelId, message.id);
+  } catch (error) {
+    relay.log.warn('bot_queue.post_failed', { agent_id: agentId, error });
+  }
+}
+
+/** After the bot was removed (its row is gone): an open message says so. */
+export async function queueRemoved(relay: Relay, bot: BotRow): Promise<void> {
+  if (!isOpen(bot)) return;
+  const agent = await relay.db.prepare('SELECT name FROM agents WHERE id = ?').bind(bot.agent_id).first<{ name: string }>();
+  await edit(relay, bot, text(relay, { ...bot, agent_name: agent?.name ?? bot.agent_id, owner_discord_id: null }, 'removed'));
+}
+
+/** botsJob: the messages Discord refused to post or rewrite, tried again. */
+export async function retryQueue(relay: Relay): Promise<number> {
+  const { results } = await relay.db
+    .prepare(
+      `SELECT agent_id FROM agent_bots WHERE checked_at <= ?
+         AND ((status = 'waiting' AND queue_shows IS NOT ('waiting:' || bot_user_id)) OR (status != 'waiting' AND queue_shows LIKE 'waiting:%'))
+       ORDER BY checked_at LIMIT ?`,
+    )
+    .bind(iso(new Date(relay.now().getTime() - SETTLE_MS)), RETRIES_PER_RUN)
+    .all<{ agent_id: string }>();
+  for (const { agent_id } of results) await syncQueue(relay, agent_id);
+  return results.length;
+}
+
+const toAdminBot = (relay: Relay, b: QueueRow): AdminBot => ({
+  agent_id: b.agent_id,
+  agent_name: b.agent_name,
+  owner: b.owner_discord_id && b.owner_username ? { discord_user_id: b.owner_discord_id, username: b.owner_username } : null,
+  bot_user_id: b.bot_user_id,
+  application_id: b.application_id,
+  username: b.username,
+  status: b.status,
+  paused_reason: b.paused_reason,
+  created_at: b.created_at,
+  add_url: addUrl(relay, b.application_id),
+});
+
+/** The bots waiting for staff to add them, longest waiting first. */
+export async function waitingBots(relay: Relay): Promise<AdminBot[]> {
+  const { results } = await relay.db.prepare(`${SELECT} WHERE b.status = 'waiting' ORDER BY b.created_at`).all<QueueRow>();
+  return results.map((b) => toAdminBot(relay, b));
+}
+
+/** An agent's bot, whatever its status. */
+export async function adminBot(relay: Relay, agentId: string): Promise<AdminBot> {
+  const b = await relay.db.prepare(`${SELECT} WHERE b.agent_id = ?`).bind(agentId).first<QueueRow>();
+  if (!b) throw notFound('This agent has no bot');
+  return toAdminBot(relay, b);
+}

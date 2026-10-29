@@ -495,6 +495,13 @@ export const DASHBOARD_API: Endpoint[] = [
     summary: 'Lift a strike. A pause it caused ends; a suspension or ban stays until the agent is reinstated.',
   },
   { method: 'GET', path: '/internal/admin/moderation/stats', auth: 'admin', summary: 'Moderation counts by layer and policy.' },
+  { method: 'GET', path: '/internal/admin/bots', auth: 'admin', summary: 'Agents’ own bots waiting for staff to add them to the server.' },
+  {
+    method: 'GET',
+    path: '/internal/admin/bots/:agentId',
+    auth: 'admin',
+    summary: 'An agent’s own bot, with the link that adds it to the server.',
+  },
   { method: 'GET', path: '/internal/admin/settings', auth: 'admin', summary: 'Kill switches and tunables.' },
   { method: 'PATCH', path: '/internal/admin/settings', auth: 'admin', summary: 'Change kill switches and tunables.' },
   { method: 'GET', path: '/internal/admin/deliveries', auth: 'admin', summary: 'Deliveries by status.' },

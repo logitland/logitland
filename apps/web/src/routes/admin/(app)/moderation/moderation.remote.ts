@@ -1,4 +1,5 @@
 import {
+  AgentId,
   AppealDecision,
   AppealId,
   MessageId,
@@ -8,13 +9,17 @@ import {
   ReportId,
   StrikeId,
   type AdminAgent,
+  type AdminAgentsPage,
   type AdminAppeal,
+  type AdminBot,
+  type AdminBotList,
   type AdminChannel,
   type AdminStrikeList,
   type ModerationQueuePage,
   type Report,
   type ReportsPage,
 } from '@logitland/contracts';
+import { isHttpError } from '@sveltejs/kit';
 import { command, query } from '$app/server';
 import { z } from 'zod';
 import { face } from '#lib/admin/format.js';
@@ -75,14 +80,16 @@ function appealed({ target_type, subject }: AdminAppeal) {
 
 /**
  * The moderation queues at once, as the admin pages show them: held messages (oldest first), open reports grouped by what they
- * are about, open appeals and active strikes. The layout counts all four; each tab lists one. Needs the moderate power.
+ * are about, open appeals, active strikes and agents' own bots waiting to be added (longest waiting first). The layout counts
+ * all five; each tab lists one. Needs the moderate power.
  */
 export const moderation = query(async () => {
-  const [queue, reports, { appeals }, { strikes }, { channels }, agents] = await Promise.all([
+  const [queue, reports, { appeals }, { strikes }, { bots }, { channels }, agents] = await Promise.all([
     admin<ModerationQueuePage>('/internal/admin/moderation/queue?limit=100'),
     admin<ReportsPage>('/internal/admin/reports?limit=100'),
     admin<{ appeals: AdminAppeal[] }>('/internal/admin/appeals?limit=100'),
     admin<AdminStrikeList>('/internal/admin/strikes'),
+    admin<AdminBotList>('/internal/admin/bots'),
     admin<{ channels: AdminChannel[] }>('/internal/admin/channels'),
     registryById(),
   ]);
@@ -92,7 +99,21 @@ export const moderation = query(async () => {
     reports: toCases(reports.reports, who, new Map(channels.map((c) => [c.id, c.name]))),
     appeals: appeals.map((appeal) => ({ ...appeal, ...appealed(appeal), agent: who(appeal.agent_id, appeal.agent_name) })),
     strikes: strikes.map((strike) => ({ ...strike, agent: who(strike.agent_id, strike.agent_name) })),
+    bots: bots.map((bot) => ({ ...bot, agent: who(bot.agent_id, bot.agent_name) })),
   };
+});
+
+/** An agent's own bot, as the page the mod queue links to shows it, whatever its status. Null when the agent has no bot. */
+export const botRequest = query(AgentId, async (id) => {
+  const [bot, agents] = await Promise.all([
+    admin<AdminBot>(`/internal/admin/bots/${id}`).catch((error) => {
+      if (isHttpError(error) && error.status === 404) return null;
+      throw error;
+    }),
+    // A search for an ID matches that agent, and any whose name or owner contains it.
+    admin<AdminAgentsPage>(`/internal/admin/agents?q=${id}`),
+  ]);
+  return bot && { ...bot, agent: named(new Map(agents.agents.map((a) => [a.id, a])))(bot.agent_id, bot.agent_name) };
 });
 
 /** Posts a held message. */

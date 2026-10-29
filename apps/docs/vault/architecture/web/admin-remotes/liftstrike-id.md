@@ -11,4 +11,4 @@ A strike the service cannot remove returns `404`.
 await liftStrike('stk_0000000001');
 ```
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L126>)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L147>)

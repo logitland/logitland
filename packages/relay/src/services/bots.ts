@@ -9,6 +9,7 @@ import type { AgentRecord } from '../types';
 import { agentRoleIds, anyAgentRoleIds } from './access';
 import { auditStmt, type AuditInput } from './audit';
 import { readAvatar } from './avatars';
+import { queueRemoved, retryQueue, syncQueue } from './bot-queue';
 import { agentRoles } from './channels';
 import { getAgent, getOwner } from './identity';
 import { enforce } from './limits';
@@ -21,8 +22,8 @@ import { ownerBanHash } from './origins';
 // name and avatar.
 //
 // The bot must be private (only its owner may add it anywhere) and in no other server. The relay connects it to the Gateway
-// once (Discord wants that before a bot sends anything) and gives it the agent's identity. Staff add it to the server (#83);
-// until then it is `waiting` and the agent posts through webhooks. botsJob sees it join and makes it `active`, with the
+// once (Discord wants that before a bot sends anything) and gives it the agent's identity. Staff add it to the server from the
+// mod queue (#83, bot-queue.ts); until then it is `waiting` and the agent posts through webhooks. botsJob sees it join and makes it `active`, with the
 // agent's roles. Turning public, joining another server, or a token Discord stops accepting pauses it: the agent posts
 // through webhooks again until a token is given again. What the relay gave the bot in Discord (roles, private threads) is
 // kept in bot_grants and taken back once the bot no longer warrants it (revokeGrants). Whatever the bot posts or edits outside the
@@ -40,6 +41,10 @@ export interface BotRow {
   checked_at: string;
   created_at: string;
   updated_at: string;
+  /** Its message in the mod queue, and what that shows (bot-queue.ts). */
+  queue_channel_id: string | null;
+  queue_message_id: string | null;
+  queue_shows: string | null;
 }
 
 /** Sealed to its agent (reseal.ts re-seals it under a new key the same way). */
@@ -281,6 +286,7 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   if (previous && previous.bot_user_id !== user.id) await revokeGrants(relay, previous.bot_user_id);
   await syncIdentity(relay, agent.id);
   if (status === 'active') await syncBotRoles(relay, agent.id);
+  await syncQueue(relay, agent.id);
   return botSetting(relay, agent);
 }
 
@@ -307,6 +313,7 @@ export async function removeBot(
       diff: { bot_user_id: { from: bot.bot_user_id, to: null } },
     }),
   ]);
+  await queueRemoved(relay, bot);
   await revokeGrants(relay, bot.bot_user_id);
   const guildId = relay.config.discord.guildId;
   if (!guildId) return true;
@@ -502,6 +509,7 @@ async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
     reason,
     diff: { status: { from: bot.status, to: 'paused' } },
   }).run();
+  await syncQueue(relay, bot.agent_id);
   await revokeGrants(relay, bot.bot_user_id);
 }
 
@@ -541,15 +549,17 @@ async function check(relay: Relay, bot: BotRow): Promise<void> {
   if (status !== bot.status) relay.log.info('bots.status', { agent_id: bot.agent_id, from: bot.status, to: status });
   await syncIdentity(relay, bot.agent_id);
   if (status === 'active') await syncBotRoles(relay, bot.agent_id);
+  // Added: the mod queue's message says so and the request is done. Gone from the server again: a new request.
+  if (status !== bot.status) await syncQueue(relay, bot.agent_id);
 }
 
 /**
- * Cron. Takes back what bots no longer warrant, then checks the bots that are due: waiting ones every run, active ones every
- * quarter hour. Returns how many grants and bots it went through.
+ * Cron. Takes back what bots no longer warrant and tries again the mod-queue messages Discord refused, then checks the bots
+ * that are due: waiting ones every run, active ones every quarter hour. Returns how many grants, messages and bots it went through.
  */
 export async function botsJob(relay: Relay, ctx: { deadline: number }): Promise<number> {
   if (!relay.config.discord.guildId) return 0;
-  const revoked = await revokeGrants(relay);
+  const revoked = (await revokeGrants(relay)) + (await retryQueue(relay));
   const now = relay.now().getTime();
   const { results } = await relay.db
     .prepare("SELECT * FROM agent_bots WHERE (status = 'waiting' AND checked_at <= ?) OR (status = 'active' AND checked_at <= ?) ORDER BY checked_at LIMIT ?")

@@ -242,13 +242,14 @@ describe('Markdown for agents', () => {
   });
 
   it('lists every page in llms.txt by its Markdown URL', async () => {
-    const routes = Object.keys(import.meta.glob('../src/routes/**/+page.svelte'));
+    // Pages that reset their layout (+page@(app).svelte) count too.
+    const routes = Object.keys(import.meta.glob('../src/routes/**/+page*.svelte'));
     const paths = routes
       .map(
         (file) =>
           file
             .replace('../src/routes', '')
-            .replace('/+page.svelte', '')
+            .replace(/\/\+page[^/]*\.svelte$/, '')
             .replace(/\/\([^)]+\)/g, '')
             .replace(/\[(\w+)\]/g, '{$1}') || '/',
       )
