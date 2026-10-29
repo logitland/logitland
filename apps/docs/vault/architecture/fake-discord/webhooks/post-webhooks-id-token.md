@@ -9,11 +9,13 @@ operation:
   parameters:
     - name: id
       in: path
+      required: true
       type: string
       description: The webhook ID.
       example: '100000000000000050'
     - name: token
       in: path
+      required: true
       type: string
       description: The webhook token.
       example: local-hook-token
@@ -39,14 +41,17 @@ operation:
           maxLength: 2000
         embeds:
           type: array
+          maxItems: 10
         components:
           type: array
+          maxItems: 5
         poll:
           type: object
         allowed_mentions:
           type: object
         tts:
           type: boolean
+          default: false
         username:
           type: string
           minLength: 1
@@ -60,14 +65,13 @@ operation:
           maxItems: 5
           items:
             type: string
-      examples:
-        - content: Hello
-          username: Visitor
     example:
       content: A new idea
       thread_name: Improve onboarding
       applied_tags:
         - '100000000000000070'
+      allowed_mentions:
+        parse: []
   responses:
     '200':
       contentType: application/json
@@ -75,16 +79,18 @@ operation:
     '204':
       description: Message created without a response body when `wait` is not `true`.
     '400':
-      description: Empty message (`50006`), invalid thread ID (`50035`), forum/thread rule violation (`220001`, `220002`, `220003`), or unknown forum tag (`10087`).
+      description: Empty message (`50006`), invalid fields/thread ID (`50035`), forum/thread rule violation (`220001`, `220002`, `220003`), or unknown forum tag (`10087`).
+    '401':
+      description: Wrong webhook token (`50027`).
     '404':
-      description: Unknown thread or thread from another parent (`10003`).
+      description: Unknown webhook (`10015`), or unknown channel/thread or thread from another parent (`10003`).
 source:
   - label: execution fields and forum rules
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L457
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L534-L590
   - label: thread target
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L187
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L187-L200
   - label: forum creation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L622
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L625-L645
 ---
 
 Handles a webhook route using the token in the path. No Authorization header is required.
@@ -94,7 +100,13 @@ Without `with_components=true`, execution validates components but drops them be
 
 ## Execute body
 
-Execution shares [message validation](../messages-threads/post-channel-messages.md#message-body) for `content`, `embeds`, `components`, `poll`, `allowed_mentions`, and `tts`. `username` overrides the author name and accepts 1–80 characters. Whitespace-only names fail validation. By default, names containing `clyde` or `discord` also fail, regardless of case. `strictUsernames: false` in the TypeScript startup options disables that reserved-word execution check. `avatar_url` and other unhandled fields have no effect.
+Execution shares [message validation](../messages-threads/post-channel-messages.md#message-body) for `content`, `embeds`, `components`, `poll`, `allowed_mentions`, and `tts`. The same empty-body check accepts a `sticker_ids` array, but stores no stickers. Unlike bot message creation, webhook execution ignores `message_reference`. The example suppresses mention parsing with `allowed_mentions: { parse: [] }`.
+
+### Author name
+
+`username` overrides the author name and accepts 1–80 characters. Whitespace-only names fail validation. By default, names containing `clyde` or `discord` also fail, regardless of case. `strictUsernames: false` in the TypeScript startup options disables that reserved-word execution check. `avatar_url` and other unhandled fields have no effect.
+
+### Forum and thread targeting
 
 `thread_name` accepts 1–100 characters. In a forum or media channel, it creates a post. `applied_tags` accepts up to five snowflake strings and applies them to that new post. The fake rejects unknown forum tags with `400/10087`.
 
@@ -109,3 +121,5 @@ Send that body to a webhook on a forum with the example tag, using `?wait=true`.
 | `thread_id` is unknown, not a thread, or belongs to another parent | `404/10003`  |
 
 Posting to an archived target thread unarchives it.
+
+`applied_tags` affects only a newly created post, not an existing `thread_id` target. [Shared REST rules](../index.md#rest-authentication-and-responses) cover JSON bodies, rate-limit headers, and injected failures.

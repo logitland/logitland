@@ -22,7 +22,7 @@ operation:
       in: header
       required: true
       type: string
-      description: Discord bot authorization header.
+      description: Relay bot authorization header.
       example: Bot fake-local
   requestBody:
     schema:
@@ -32,8 +32,11 @@ operation:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 100
         auto_archive_duration:
           type: integer
+          description: Minutes; defaults to the parent's value, or 1440.
           enum:
             - 60
             - 1440
@@ -50,16 +53,18 @@ operation:
     '401':
       description: Missing or wrong bot token.
     '403':
-      description: The bot lacks Create Public Threads.
+      description: The bot lacks Create Public Threads (`50013`), or the token belongs to another bot (`50001`).
     '404':
       description: Unknown channel or message.
 source:
   - label: channel.messages.thread
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L377
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L436-L452
   - label: message threads
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L600
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L603-L619
 ---
 
 `/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. Messages receive generated IDs. Replace the message ID with one returned by an earlier request.
 
-A text parent creates a public thread, type `11`; an announcement parent creates type `10`. `name` is required and 1–100 characters. `auto_archive_duration` defaults to the parent's value, or `1440`. [Shared REST rules](../index.md#rest-authentication-and-responses) cover JSON bodies, rate-limit headers, and injected failures.
+A text parent creates a public thread, type `11`; an announcement parent creates type `10`.
+
+[Shared REST rules](../index.md#rest-authentication-and-responses) cover JSON bodies, rate-limit headers, and injected failures.
