@@ -30,10 +30,15 @@ operation:
       example:
         ok: true
     '400':
-      description: Invalid input or a world error.
+      description: Invalid input, an unknown channel, or a missing message.
       example:
-        error: message
+        error: Unknown Message
 source:
   - label: bulk delete
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L194
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L203-L210
+  - label: World.deleteMessages
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L506-L517
 ---
+
+Every distinct ID must exist in the channel; if any is missing, no messages are deleted.
+Duplicate IDs are deleted once. This control action accepts an empty list and imposes no message-count or age limit.

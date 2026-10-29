@@ -30,12 +30,14 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: The edited Message.
+      description: The edited Message; MESSAGE_UPDATE was emitted.
     '400':
-      description: Invalid input or a missing message.
+      description: Invalid input, an unknown channel, or a missing message.
       example:
         error: Unknown Message
 source:
   - label: message edit
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L203
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L212
+  - label: World.editMessage
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L479-L495
 ---

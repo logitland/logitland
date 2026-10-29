@@ -24,6 +24,7 @@ operation:
           type: boolean
         tags:
           type: array
+          description: Replaces applied_tags; an empty array clears the tags.
           items:
             type: string
     example:
@@ -32,16 +33,16 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: The updated Channel.
+      description: The updated Channel; THREAD_UPDATE was emitted.
     '400':
       description: Invalid input, an unknown channel, or a non-thread channel.
       example:
         error: message
 source:
   - label: thread edit
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L227
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L236-L246
   - label: thread mutations
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L644
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L647-L659
 ---
 
-Omitted fields stay unchanged. Control thread edits pass tags straight to the world without REST's tag validation.
+Omitted or `null` fields stay unchanged. Applied tag IDs are not validated against the parent channel's available tags.
