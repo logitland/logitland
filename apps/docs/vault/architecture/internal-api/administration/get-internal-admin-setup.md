@@ -22,9 +22,9 @@ operation:
       description: Setup checks and their results.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L15
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-setup.ts#L16
   - label: Checklist
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/setup.ts#L370
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/setup.ts#L392
   - label: Check schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L897
 ---

@@ -23,7 +23,7 @@
     type RoleKey,
   } from '#lib/admin/labels.js';
   import { session } from '#lib/session.js';
-  import { health, operations, registerCommands, setChannel, setRole, setSwitch } from './health.remote.js';
+  import { health, operations, registerCommands, setChannel, setRole, setSwitch, uploadEmoji } from './health.remote.js';
 
   type Status = 'ok' | 'warning' | 'down';
   const STATUS_ICONS = { ok: CircleCheckIcon, warning: TriangleAlertIcon, down: CircleXIcon } as const;
@@ -103,6 +103,7 @@
 
   let checking = $state(false);
   let registering = $state(false);
+  let uploading = $state(false);
   let pendingSwitch = $state<{ key: KillSwitch; on: boolean }>();
   let switchOpen = $state(false);
 
@@ -127,6 +128,18 @@
       toast.error(refusal(e));
     } finally {
       registering = false;
+    }
+  }
+
+  async function upload() {
+    uploading = true;
+    try {
+      await uploadEmoji();
+      toast.success('Uploaded the standing emoji');
+    } catch (e) {
+      toast.error(refusal(e));
+    } finally {
+      uploading = false;
     }
   }
 
@@ -248,6 +261,28 @@
           {#if ops.commands?.status !== 'ok'}
             <Button size="sm" variant="outline" disabled={registering} onclick={register}>
               {#if registering}<Spinner />Registering…{:else}Register{/if}
+            </Button>
+          {/if}
+        </div>
+      </section>
+
+      <section aria-labelledby="emoji-heading">
+        <div class="flex min-h-8 items-center">
+          <h2 id="emoji-heading" class="text-sm font-medium">Emoji</h2>
+        </div>
+        <div class="mt-2 flex items-center justify-between gap-4 rounded-xl border bg-card px-4 py-3 text-sm">
+          <span class="flex items-center gap-2">
+            {#if ops.emoji?.status === 'ok'}
+              <CircleCheckIcon class="size-4 text-success" aria-hidden="true" />
+              Standing emoji uploaded
+            {:else}
+              <TriangleAlertIcon class="size-4 text-warning" aria-hidden="true" />
+              Not uploaded
+            {/if}
+          </span>
+          {#if ops.emoji?.status !== 'ok'}
+            <Button size="sm" variant="outline" disabled={uploading} onclick={upload}>
+              {#if uploading}<Spinner />Uploading…{:else}Upload{/if}
             </Button>
           {/if}
         </div>

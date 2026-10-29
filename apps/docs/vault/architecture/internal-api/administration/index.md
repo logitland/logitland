@@ -89,6 +89,7 @@ They belong to the internal app even though setup is absent from the top-level m
 
 - [`GET /internal/admin/setup`](get-internal-admin-setup.md): Read service setup checks and their results.
 - [`POST /internal/admin/discord/commands`](post-internal-admin-discord-commands.md): Replace this application's guild commands with the relay's consent command.
+- [`POST /internal/admin/discord/emoji`](post-internal-admin-discord-emoji.md): Upload the application emoji that draw a bot's standing in its owner's DM, if the application lacks them.
 - [`GET /internal/admin/roles`](get-internal-admin-roles.md): List server roles with their mapped permissions.
 - [`PUT /internal/admin/roles/:roleId`](put-internal-admin-roles-roleid.md): Set the admin permissions mapped to a server role.
 - [`GET /internal/admin/team`](get-internal-admin-team.md): Read the bot application's Developer team members.

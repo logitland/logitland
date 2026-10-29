@@ -1,7 +1,7 @@
 // The relay's own DiscordRest client, pointed at the fake: every call in packages/discord/src/rest.ts, plus the refusals
 // the relay depends on (Discord's error codes, rate limits, 5xx, slow and dropped connections).
 
-import { DiscordError, DiscordRest, MESSAGE_CONTENT_FLAGS, RateLimitedError, UncertainSendError, type WebhookRef } from '@logitland/discord';
+import { DiscordError, DiscordRest, IS_COMPONENTS_V2, MESSAGE_CONTENT_FLAGS, RateLimitedError, UncertainSendError, type WebhookRef } from '@logitland/discord';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ChannelType, Permission, snowflakeTime, type DiscordFake } from '../src/index.ts';
 import { fixture, sleep, type Fixture } from './helpers.ts';
@@ -539,6 +539,46 @@ describe('bot messages and threads', () => {
     const m = fake.say(f.text.id, { as: f.alice, content: 'x' });
     expect(await refusal(bot.startThreadFromMessage(f.text.id, m.id, { name: '' }))).toMatchObject({ code: 50035 });
     expect(await refusal(bot.startThreadFromMessage(f.text.id, m.id, { name: 'ok', auto_archive_duration: 5 as 60 }))).toMatchObject({ code: 50035 });
+  });
+});
+
+describe('direct messages', () => {
+  const layout = (...inside: unknown[]) => [{ type: 17, accent_color: 0xff55ff, components: inside }];
+
+  it('opens one DM per person and takes a Components V2 layout there, but not text beside it or more than 40 components', async () => {
+    const dm = await bot.createDmChannel(f.alice.id);
+    expect(await bot.createDmChannel(f.alice.id)).toEqual(dm);
+    const components = layout(
+      { type: 9, components: [{ type: 10, content: '### Standing' }], accessory: { type: 11, media: { url: 'https://example.com/a.png' } } },
+      { type: 14, divider: true, spacing: 1 },
+      { type: 1, components: [{ type: 2, style: 5, label: 'Open', url: 'https://example.com' }] },
+    );
+    const sent = await bot.createMessage(dm.id, { flags: IS_COMPONENTS_V2, components });
+    expect(sent).toMatchObject({ channel_id: dm.id, content: '', author: { id: fake.world.botUser.id } });
+    expect(fake.world.messages.get(dm.id)).toEqual([expect.objectContaining({ flags: IS_COMPONENTS_V2, components })]);
+
+    const withText = await refusal(bot.createMessage(dm.id, { content: 'hi', flags: IS_COMPONENTS_V2, components }));
+    expect(withText.code).toBe(50035);
+    const tooMany = layout(...Array.from({ length: 40 }, () => ({ type: 10, content: 'x' })));
+    expect((await refusal(bot.createMessage(dm.id, { flags: IS_COMPONENTS_V2, components: tooMany }))).code).toBe(50035);
+  });
+
+  it('refuses someone who takes no DMs with 50007', async () => {
+    fake.world.closedDms.add(f.bob.id);
+    const dm = await bot.createDmChannel(f.bob.id);
+    const err = await refusal(bot.createMessage(dm.id, { content: 'hello' }));
+    expect([err.status, err.code]).toEqual([403, 50007]);
+    fake.world.closedDms.delete(f.bob.id);
+  });
+});
+
+describe('application emoji', () => {
+  it('creates emoji by name, lists them, and refuses a name already taken', async () => {
+    const app = fake.application.id;
+    const image = 'data:image/png;base64,iVBORw0KGgo=';
+    const made = await bot.createApplicationEmoji(app, 'dot_on', image);
+    expect(await bot.listApplicationEmojis(app)).toEqual([expect.objectContaining({ id: made.id, name: 'dot_on' })]);
+    expect((await refusal(bot.createApplicationEmoji(app, 'dot_on', image))).code).toBe(50035);
   });
 });
 
