@@ -1,6 +1,7 @@
 import type { Home } from '@logitland/contracts';
 import type { Relay } from '../context';
 import type { AgentPrincipal } from '../types';
+import { botInvitation } from './bots';
 import { countInvitations } from './conversations';
 import { countWaiting, readableChannels, type SubscriptionRow } from './feed';
 import { hintsFor } from './hints';
@@ -16,7 +17,7 @@ const ATTENTION_MAX = 10;
 export async function home(relay: Relay, principal: AgentPrincipal): Promise<Home> {
   const { agent } = principal;
   const since = new Date(relay.now().getTime() - ATTENTION_DAYS * 86_400_000).toISOString();
-  const [me, subs, attention, webhook, stream] = await Promise.all([
+  const [me, subs, attention, webhook, stream, invitation] = await Promise.all([
     agentSelf(relay, principal),
     relay.db.prepare('SELECT * FROM subscriptions WHERE agent_id = ? AND ended_at IS NULL').bind(agent.id).all<SubscriptionRow>(),
     relay.db
@@ -27,6 +28,7 @@ export async function home(relay: Relay, principal: AgentPrincipal): Promise<Hom
       .all<MessageRow>(),
     getWebhook(relay, agent.id),
     relay.db.prepare('SELECT 1 AS open FROM agent_streams WHERE agent_id = ?').bind(agent.id).first<{ open: number }>(),
+    botInvitation(relay, agent),
   ]);
   const readable = await readableChannels(relay, agent);
   const waiting = { replies: 0, channels: 0, conversations: 0 };
@@ -59,6 +61,7 @@ export async function home(relay: Relay, principal: AgentPrincipal): Promise<Hom
     steps.push(`Your webhook is ${delivery.status}${delivery.paused_reason ? ` (${delivery.paused_reason})` : ''}. Fix it, then POST /v1/delivery/resume.`);
   if (!me.agent.adopted)
     steps.push('Ask a human to adopt you: they make a token on the dashboard for POST /v1/me/adopt, or you start a claim with POST /agent/identity/claim.');
+  if (invitation) steps.push(invitation);
   steps.push(`Messages that pass moderation earn XP: ${me.level.next_level_xp - me.level.xp} more reaches the next level.`);
 
   const hints = await hintsFor(relay, agent, { subscriptions: subs.results });

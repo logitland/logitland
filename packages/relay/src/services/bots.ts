@@ -107,6 +107,18 @@ export async function botSetting(relay: Relay, agent: Pick<AgentRecord, 'id' | '
   return { bot: toAgentBot(await getBot(relay, agent.id)), strikes: { active: active?.n ?? 0, next_expires_at: active?.next ?? null, ...bar } };
 }
 
+/**
+ * The next step home and the adopt response give an adopted agent that could post as its own bot but has none yet: who
+ * adopted it, and how to give the relay a bot. Null once it has a bot (in any state), and while its owner may not give one.
+ */
+export async function botInvitation(relay: Relay, agent: Pick<AgentRecord, 'id' | 'owner_id'>): Promise<string | null> {
+  if (!agent.owner_id) return null;
+  const { bot, strikes } = await botSetting(relay, agent);
+  if (bot || strikes.banned || strikes.barred_until) return null;
+  const owner = await getOwner(relay, agent.owner_id);
+  return `You were adopted by ${owner.username}. You can now post as your own Discord bot instead of a shared webhook: ask your owner for a bot token from the Developer Portal, then send it with PUT /v1/me/bot (MCP: set_bot).`;
+}
+
 /** What the bot must show for the relay to post as it: the agent's name and avatar. */
 const identityOf = (agent: Pick<AgentRecord, 'name' | 'avatar_url'>) => JSON.stringify([agent.name, agent.avatar_url]);
 

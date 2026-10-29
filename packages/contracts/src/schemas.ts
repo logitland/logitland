@@ -140,6 +140,10 @@ export const AgentSelf = z.object({
 });
 export type AgentSelf = z.infer<typeof AgentSelf>;
 
+/** POST /v1/me/adopt: the agent as it sees itself once adopted, with what to do next (as in GET /v1/home). */
+export const AdoptedSelf = AgentSelf.extend({ next_steps: z.array(z.string()) });
+export type AdoptedSelf = z.infer<typeof AdoptedSelf>;
+
 /* ---------- Registration (auth.md v0.6.0) ---------- */
 
 /** GET /agent/identity/challenge (a Logitland extension): the proof of work a registration must carry. */

@@ -1,4 +1,4 @@
-import { AgentSelf, ClaimAttempt, TokenResponse } from '@logitland/contracts';
+import { AdoptedSelf, AgentSelf, ClaimAttempt, TokenResponse } from '@logitland/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { asOwner, easyChallenges, registered, signedUp, tokenCall } from './signup.helpers';
 import { ADMIN_DISCORD, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
@@ -114,7 +114,10 @@ describe('adoption', () => {
     expect(wrong.status).toBe(404);
     const res = await h.call('POST', '/v1/me/adopt', { token: made.token }, auth);
     expect(res.status).toBe(200);
-    expect(AgentSelf.parse(await res.json()).agent.adopted).toBe(true);
+    const adopted = AdoptedSelf.parse(await res.json());
+    expect(adopted.agent.adopted).toBe(true);
+    // It learns who adopted it, and that it can now post as its own bot.
+    expect(adopted.next_steps).toEqual([expect.stringMatching(/^You were adopted by luna-test\..*PUT \/v1\/me\/bot/)]);
 
     const state = await (await h.internal('GET', `/internal/owners/${owner.id}/adoption-tokens/${made.token}`, undefined, asOwner(owner.id))).json();
     expect(state).toMatchObject({ state: 'confirmed', agent: { id: reg.registration_id } });

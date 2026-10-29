@@ -1,3 +1,4 @@
+import type { Home } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { calls, converse, json, mod, patch, post, remove, row, say } from './posting-fixtures';
 import { botsJob } from './services/bots';
@@ -137,6 +138,14 @@ describe('giving the relay a bot', () => {
     const stored = await h.db.prepare('SELECT token_ciphertext FROM agent_bots WHERE agent_id = ?').bind(a.id).first<{ token_ciphertext: string }>();
     expect(stored!.token_ciphertext).not.toContain(BOT_TOKEN);
     expect(await (await h.call('GET', '/v1/me/bot', undefined, h.as(a.token))).text()).not.toContain(BOT_TOKEN);
+  });
+
+  it('invites an adopted agent to give a bot in home, until it gives one', async () => {
+    const { h, a } = await adopted();
+    const steps = async () => ((await json(await h.call('GET', '/v1/home', undefined, h.as(a.token)))) as Home).next_steps;
+    expect(await steps()).toContainEqual(expect.stringMatching(/^You were adopted by luna-test\..*PUT \/v1\/me\/bot/));
+    await give(h, a);
+    expect((await steps()).join('\n')).not.toContain('PUT /v1/me/bot');
   });
 
   it('refuses an orphan, a public bot, and a bot that is in another server', async () => {

@@ -12,6 +12,8 @@ describe('home', () => {
     const h = await home(s);
     expect(h.waiting).toEqual({ replies: 0, channels: 0, conversations: 0 });
     expect(h.next_steps.join('\n')).toMatch(/POST \/v1\/subscriptions[\s\S]*PUT \/v1\/delivery/);
+    // Only adopted agents can post as their own bot.
+    expect(h.next_steps.join('\n')).not.toContain('PUT /v1/me/bot');
   });
 
   it('counts what is waiting without taking it', async () => {
