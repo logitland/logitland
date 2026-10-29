@@ -20,8 +20,8 @@ operation:
         code_challenge: { type: string, minLength: 43, maxLength: 128, pattern: '^[A-Za-z0-9_-]{43,128}$' }
         code_challenge_method: { type: string, const: S256 }
         state: { type: string, maxLength: 1024 }
-        scope: { type: string, maxLength: 256 }
-        resource: { type: string, format: uri, maxLength: 2048 }
+        scope: { type: string, maxLength: 256, description: Accepted but not used to select scopes. Tokens always carry logan. }
+        resource: { type: string, format: uri, maxLength: 2048, description: Must equal the Logan MCP URL, allowing one trailing slash. }
     example:
       response_type: code
       client_id: lgc_0000000001
@@ -33,7 +33,7 @@ operation:
     '303':
       description: Redirect to the registered client with an authorization code, issuer, and optional state.
       headers:
-        Location: https://client.example/callback?code=example-code&iss=https://relay.example/oauth2/admin&state=example-state
+        Location: https://client.example/callback?state=example-state&iss=https%3A%2F%2Frelay.example%2Foauth2%2Fadmin&code=llc_example
     '400': { description: Invalid authorization fields or client request., contentType: text/html }
     '401': { description: Session expired., contentType: text/html }
     '403': { description: Missing logan permission., contentType: text/html }
@@ -42,24 +42,14 @@ source:
   - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L134
 ---
 
-This is the SvelteKit named form action `allow`.
-Send form data containing the same authorization fields as the GET query.
-The server adds `decision: "allow"` and calls the internal authorization route.
-The relay revalidates the client request and requires the owner's `logan` permission.
-The response redirects `303` to the returned registered client URI, carrying an authorization code, issuer, and optional state.
+The SvelteKit named action `allow` submits Logan consent. Send the authorization fields from the
+[consent page](get-oauth-authorize.md) as form data, using the actual registered client and PKCE challenge, not the example placeholders.
+The session supplies the owner ID; the server adds `decision: "allow"`. Neither comes from untrusted form fields.
 
-```html
-<form method="post" action="?/allow">
-  <input type="hidden" name="response_type" value="code" />
-  <input type="hidden" name="client_id" value="lgc_0000000001" />
-  <input type="hidden" name="redirect_uri" value="https://client.example/callback" />
-  <input type="hidden" name="code_challenge" value="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" />
-  <input type="hidden" name="code_challenge_method" value="S256" />
-  <input type="hidden" name="state" value="example-state" />
-  <button>Allow</button>
-</form>
-```
+The relay revalidates the request and requires the owner's `logan` permission. Success redirects `303` to the validated
+client URI with a single-use authorization code, issuer, and optional state. The code expires after five minutes;
+the client [exchanges it with its PKCE verifier](post-oauth2-admin-token.md).
 
-The form works only for an actual registered client and signed-in owner.
-An expired session produces `401`, not a sign-in redirect.
-Invalid fields/client/redirect/PKCE produce `400`. Missing `logan` produces `403`.
+- An expired session produces `401`, not a sign-in redirect. Start again from the MCP client.
+- Invalid fields, client, redirect, PKCE challenge, or resource produce `400`, without redirecting to an unverified client URI.
+- Missing `logan` permission produces `403`.
