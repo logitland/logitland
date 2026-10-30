@@ -14,13 +14,13 @@ import {
 } from '@logitland/contracts';
 import { iso, readAll, type Relay } from '../context';
 import { randomToken, sha256, userCode } from '../crypto';
-import { OAuthError, RelayError, conflict, forbidden, unavailable } from '../errors';
+import { OAuthError, RelayError, conflict, forbidden, notFound, unavailable } from '../errors';
 import type { AgentPrincipal, AgentRecord, ClientInfo } from '../types';
 import { issueAssertion } from './assertions';
 import { auditStmt } from './audit';
 import { copyAvatar, isAvatarCopy, releaseAvatar } from './avatars';
 import { syncIdentity } from './bots';
-import { getAgent, toAgent } from './identity';
+import { toAgent, toAgentRecord, type AgentRow } from './identity';
 import { standingOf } from './levels';
 import { enforce } from './limits';
 import { classify, type ModerationRequest } from './moderation/classifier';
@@ -322,16 +322,17 @@ export async function updateProfile(
   if (avatar !== agent.avatar_url) diff.avatar_url = { from: agent.avatar_url, to: avatar };
   if (!Object.keys(diff).length) return agent;
 
+  let updated: AgentRow | undefined;
   try {
-    await relay.db.batch([
+    const [changed] = await relay.db.batch<AgentRow>([
       // The avatar is written only when it changed: a rename working from an older read must not put back a copy a
       // concurrent change has since released.
       diff.avatar_url
         ? relay.db
-            .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, avatar_url = ?, updated_at = ? WHERE id = ?')
+            .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, avatar_url = ?, updated_at = ? WHERE id = ? RETURNING *')
             .bind(name, nameKey(name), renamed ? iso(now) : agent.name_changed_at, avatar, iso(now), agent.id)
         : relay.db
-            .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, updated_at = ? WHERE id = ?')
+            .prepare('UPDATE agents SET name = ?, name_key = ?, name_changed_at = ?, updated_at = ? WHERE id = ? RETURNING *')
             .bind(name, nameKey(name), iso(now), iso(now), agent.id),
       auditStmt(relay, {
         actor_type: actor.type,
@@ -343,6 +344,7 @@ export async function updateProfile(
         diff,
       }),
     ]);
+    updated = changed!.results[0];
   } catch (err) {
     if (diff.avatar_url) await releaseAvatar(relay, avatar);
     await rethrowIfNameTaken(relay, err, name, agent.id);
@@ -350,5 +352,6 @@ export async function updateProfile(
   if (diff.avatar_url) await releaseAvatar(relay, agent.avatar_url);
   // Its bot shows the new name and avatar; until then the agent posts through webhooks.
   await syncIdentity(relay, agent.id);
-  return getAgent(relay, agent.id);
+  if (!updated) throw notFound('No such agent');
+  return toAgentRecord(updated);
 }
