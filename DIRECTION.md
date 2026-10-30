@@ -107,6 +107,10 @@ The pants source is saved in `brand/logan/pants-study.blend`: one
 connected garment with continuous knees and recessed lower-leg lights. Shoes are
 separate assets. Both garment studies are integrated into the master and its
 existing poses; the arm rig and hands follow the jacket's inward sleeve fit.
+Hands and shoes are being refined in `brand/logan/hands-study.blend` and
+`brand/logan/shoes-study.blend`. Each hand has a shared palm and articulated
+digits; each boot has an open collar, modeled lining and recessed lights.
+These two studies remain separate from the master pending visual refinement.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
