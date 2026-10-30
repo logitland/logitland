@@ -32,7 +32,7 @@ def geometry(obj, graph):
         pending.extend(neighbors[current] - reached)
     assert len(reached) == len(vertices), f'Disconnected mesh islands: {obj.name}'
     closed = set(edges.values()) == {2}
-    if obj.name.startswith(('Sleeve / continuous.', 'Trouser / continuous.', 'Jacket / torso')):
+    if obj.name.startswith(('Sleeve / continuous.', 'Trouser / continuous', 'Jacket / torso')):
         assert all(p.area > 1e-9 for p in data.polygons), f'Collapsed cloth face: {obj.name}'
         assert closed, f'Open garment mesh: {obj.name}'
     tree = BVHTree.FromPolygons(vertices, polygons)
@@ -67,9 +67,10 @@ def touches(a, b):
 
 
 head_study = bpy.data.scenes.get('HEAD STUDY')
-scene = head_study or bpy.data.scenes.get('JACKET STUDY') or bpy.data.scenes['LOGAN']
+pants_study = bpy.data.scenes.get('PANTS STUDY')
+scene = head_study or pants_study or bpy.data.scenes.get('JACKET STUDY') or bpy.data.scenes['LOGAN']
 collection = 'HEAD · isolated shape study' if head_study else '01 · Logan / meshes'
-root = 'Head / faceted shell study' if head_study else 'Jacket / torso'
+root = 'Head / faceted shell study' if head_study else 'Trouser / continuous pants' if pants_study else 'Jacket / torso'
 objects = [o for o in bpy.data.collections[collection].objects if o.type == 'MESH']
 failures = []
 for frame in ([1] if head_study else [1, 40]):
