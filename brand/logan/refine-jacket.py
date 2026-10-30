@@ -126,7 +126,6 @@ for z,width,depth in sections:
 sides = len(profile)
 faces = [tuple(reversed(range(sides)))]
 indices = [0]
-armholes = [0]
 for row in range(len(sections)-1):
     z = sections[row][0]
     for col,(u,v,is_front) in enumerate(profile):
@@ -157,18 +156,10 @@ for row in range(len(sections)-1):
                 (row+1)*sides+(col+1)%sides,(row+1)*sides+col)
         faces.append(quad)
         indices.append(index)
-        side = 0
-        if 4.12 <= z < 4.94 and abs(mid) >= (.63 if is_front and following[2] else .5):
-            side = 1 if mid>0 else 2
-        armholes.append(side)
 faces.append(tuple(range((len(sections)-1)*sides,len(sections)*sides)))
 indices.append(0)
-armholes.append(0)
 torso = bpy.data.objects['Jacket / torso']
 data = replace_mesh(torso,vertices,faces,[cloth,dark,light,pink,logo,rear_trim,back_panel],indices)
-attribute = data.attributes.new('armhole_side','INT','FACE')
-for item, side in zip(attribute.data,armholes):
-    item.value = side
 uv = data.uv_layers.new(name='Original SVG')
 for loop in data.loops:
     p = data.vertices[loop.vertex_index].co
