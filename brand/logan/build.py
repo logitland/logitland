@@ -1016,6 +1016,7 @@ runpy.run_path(str(ASSET_DIR/'integrate-head.py'))
 runpy.run_path(str(ASSET_DIR/'integrate-clothes.py'))
 runpy.run_path(str(ASSET_DIR/'integrate-hands.py'))
 runpy.run_path(str(ASSET_DIR/'integrate-shoes.py'))
+runpy.run_path(str(ASSET_DIR/'fit-body.py'))
 bpy.ops.wm.save_as_mainfile(filepath=str(ASSET_DIR/'logan.blend'),compress=True)
 result={'blend':str(ASSET_DIR/'logan.blend'),'objects':len(scene.objects),'bones':len(arm_data.bones)}
 print(result)

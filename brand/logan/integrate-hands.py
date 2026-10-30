@@ -3,7 +3,7 @@ from pathlib import Path
 from math import radians
 import bpy
 import bmesh
-from mathutils import Matrix, Vector
+from mathutils import Matrix
 
 HERE = Path(__file__).resolve().parent
 scene = bpy.data.scenes['LOGAN']
@@ -45,27 +45,6 @@ for obj in old:
 for name,obj in zip(names,parts):
     obj.name = name
     obj.parent = rig
-    # Extend the closed wrist into the cuff lining. The extra attachment loop
-    # is buried inside the sleeve; the visible wrist and palm stay unchanged.
-    wrist = study_rig.data.bones['hand.'+name[-1]]
-    direction = (wrist.tail_local-wrist.head_local).normalized()
-    bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    deform = bm.verts.layers.deform.verify()
-    forearm_group = obj.vertex_groups.new(name='forearm.'+name[-1])
-    across = Vector((-direction.z,0,direction.x)).normalized()
-    caps = [face for face in bm.faces if all(abs((v.co-wrist.head_local).dot(direction)-.07)<1e-5 for v in face.verts)]
-    extruded = bmesh.ops.extrude_face_region(bm,geom=caps)['geom']
-    for vertex in [item for item in extruded if isinstance(item,bmesh.types.BMVert)]:
-        vertex.co -= direction*.18
-        edge = abs((vertex.co-wrist.head_local).dot(across))/.215
-        vertex.co.y = wrist.head_local.y+(vertex.co.y-wrist.head_local.y)*3.04*(1-.25*edge**4)
-        vertex[deform].clear()
-        vertex[deform][forearm_group.index] = 1
-    bmesh.ops.delete(bm,geom=caps,context='FACES_ONLY')
-    bmesh.ops.recalc_face_normals(bm,faces=list(bm.faces))
-    bm.to_mesh(obj.data)
-    bm.free()
     obj.data.transform(fits[name[-1]])
     obj.hide_render = False
     collection.objects.link(obj)
@@ -73,6 +52,17 @@ for name,obj in zip(names,parts):
     for modifier in obj.modifiers:
         if modifier.type=='ARMATURE':
             modifier.object = rig
+    # The clamped bevel produces microscopic slivers at finger webbing that
+    # collapse under float precision when rotated. Remove them before skinning.
+    bevel = obj.modifiers.get('Broad edge chamfers')
+    if bevel:
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.modifier_apply(modifier=bevel.name)
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bmesh.ops.dissolve_degenerate(bm, dist=.0001, edges=list(bm.edges))
+        bm.to_mesh(obj.data)
+        bm.free()
 for obj in set(bpy.data.objects)-before-set(parts):
     bpy.data.objects.remove(obj,do_unlink=True)
 # The original wave closed the outer fingers toward each other. Use the study's

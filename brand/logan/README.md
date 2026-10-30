@@ -12,10 +12,11 @@ neutral and wave poses; the pants study's knee-bend pose remains in that study.
 `integrate-clothes.py` refreshes both garments from their saved study files;
 `build.py` imports them automatically after the head, followed by the approved hands
 and shoes. `integrate-shoes.py` refreshes the boots from their saved study while
-preserving the master's foot poses.
+preserving the master's foot poses. Run `fit-body.py` after refreshing studies
+to rebuild the internal body and reconnect clothing clearance modifiers.
 
 ```sh
-blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-clothes.py --python brand/logan/verify.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-clothes.py --python brand/logan/fit-body.py --python brand/logan/verify-fit.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
 ```
 
 ## Isolated jacket study
@@ -77,8 +78,8 @@ them. The right hand is hidden in the initial close-up; enable it in the Outline
 to inspect the pair. Both hands use the master's bone names; integration fits their wrists to the cuffs.
 The palm occupies more of the hand's length; the fingers taper straight toward
 their tips. The approved hands are integrated into `logan.blend` at the fitted
-cuffs. `integrate-hands.py` aligns their wrists with the forearms, seats their
-palms beyond the cuff rims and extends the hidden wrist surfaces into the lining.
+cuffs. `integrate-hands.py` aligns their wrists with the forearms and seats their
+palms beyond the cuff rims. The underlying arms extend into the hands.
 It imports matching finger/thumb rest joints and sets the wave's outward finger
 spread while preserving the body animation.
 
@@ -104,7 +105,33 @@ view in `renders/shoes-sole.png`. `renders/logan-wrists.png` records front, side
 and rear close-ups of the fitted hands in neutral and wave poses.
 
 ```sh
-blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-hands.py --python brand/logan/verify.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-hands.py --python brand/logan/fit-body.py --python brand/logan/verify-fit.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
+```
+
+## Internal body and clothing clearance
+
+The `Body /` meshes form a simple graphite torso, continuous arms and continuous
+legs. They overlap the neck, pelvis, hands and boots and follow the existing rig,
+with blended elbow, knee and wrist weights. Hide the jacket, collar, cuffs and
+trousers to inspect them; `renders/logan-body.png` shows this view.
+
+Cuffs flex with the wrists and have a driven corrective shape for sideways bends.
+The tucked trouser hems follow the feet, blending into the shins. `Clearance ·`
+Shrinkwrap modifiers push penetrating clothing vertices outside the hands, boots
+and head after skinning; the lining is generated afterward. Simple subdivision
+adds contact samples while preserving the faceted silhouette. These are live,
+editable corrections with no simulation bake.
+
+`verify-fit.py` checks that the body supports its extremities without clothing
+and that the cuffs/hands, sleeves/hands, hems/boots and collar/head do not intersect
+in neutral, wave and 16 sampled joint poses: wrist flexion ±40°, sideways wrist
+bends ±25°, ankle flexion ±35°, and head pitch/tilt ±35°. These individual samples
+do not guarantee every intermediate, combined or more extreme pose; inspect
+those before rendering. `render-fit.py` produces close-ups of the corrections.
+
+```sh
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/verify-fit.py
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/render-fit.py
 ```
 
 ## Isolated head study
@@ -161,7 +188,7 @@ parts even when they line up convincingly in the front view.
 carries the face and headset. Torso and sleeves share one mesh; both trouser legs
 share one pants mesh, with blended joint weights and volume-preserving deformation
 at elbows and knees.
-The head, boots, cuffs, and hand segments remain rigid.
+The head and boots remain rigid; the cuffs flex at the wrists.
 The sleeves have fitted shoulder caps, stepped surface panels, and recessed emissive
 lining across the whole outer side, wrapping onto the front and rear seams.
 The lining and its dark cavity walls share the sleeve's deforming mesh.
