@@ -102,7 +102,7 @@ def hand(side):
             wrist = origin + down*.07 + across*((col/5-.5)*.43)
             center = wrist.lerp(end, t)
             for surface, sign in ((0, 1), (1, -1)):
-                depth = (.135, .175, .128)[row]
+                depth = (.125, .145, .115)[row]
                 grid[row,col,surface] = vertex(center + front*sign*depth)
     for row in range(2):
         for col in range(5):
@@ -130,21 +130,22 @@ def hand(side):
         first_direction = (bone.tail_local-bone.head_local).normalized()
         second_direction = (second.tail_local-second.head_local).normalized()
         previous = socket
-        # Narrow joint loops make a flexible crease in one watertight surface.
-        samples = [(bone.head_local+first_direction*.025, first_direction, 1.02, .10, 0),
-                   (bone.head_local.lerp(bone.tail_local,.38), first_direction, 1, .9, 0),
-                   (bone.head_local.lerp(bone.tail_local,.70), first_direction, .90, .8, .2),
-                   (bone.tail_local, (first_direction+second_direction).normalized(), .72, .5, .5),
-                   (second.head_local.lerp(second.tail_local,.32), second_direction, .90, .2, .8),
-                   (second.head_local.lerp(second.tail_local,.73), second_direction, .93, 0, 1),
-                   (second.head_local.lerp(second.tail_local,.94), second_direction, .77, 0, 1),
-                   (second.tail_local, second_direction, .55, 0, 1)]
+        # The silhouette tapers continuously. Joint loops control bending without
+        # cinching the knuckle or inflating the next phalanx into a separate bulb.
+        samples = [(bone.head_local+first_direction*.025, first_direction, 1, .10, 0),
+                   (bone.head_local.lerp(bone.tail_local,.38), first_direction, .97, .9, 0),
+                   (bone.head_local.lerp(bone.tail_local,.70), first_direction, .94, .8, .2),
+                   (bone.tail_local, (first_direction+second_direction).normalized(), .91, .5, .5),
+                   (second.head_local.lerp(second.tail_local,.32), second_direction, .88, .2, .8),
+                   (second.head_local.lerp(second.tail_local,.73), second_direction, .84, 0, 1),
+                   (second.head_local.lerp(second.tail_local,.94), second_direction, .80, 0, 1),
+                   (second.tail_local, second_direction, .68, 0, 1)]
         for index,(center, direction, scale, w1, w2) in enumerate(samples):
             if is_thumb:
                 center = center + across*(.08 if thumb_col==5 else -.08)
             u = Vector((-direction.z, 0, direction.x)).normalized()
-            width = (.085 if is_thumb else .098)*scale
-            depth = (.11 if is_thumb else .105)*scale
+            width = (.080 if is_thumb else .090)*scale
+            depth = .095*scale
             values = {palm_bone.name:1-w1-w2, bone.name:w1, second.name:w2}
             ring = [vertex(center+u*x*width+front*y*depth,values)
                     for x,y in [(-1,1),(1,1),(1,-1),(-1,-1)]]
@@ -159,7 +160,7 @@ def hand(side):
                 permutation = [canonical.index(i) for i in ring]
             else:
                 ring = [ring[i] for i in permutation]
-            bridge(previous,ring,1 if index in (3,4) else 0)
+            bridge(previous,ring)
             previous = ring
         face(previous,1)
 
@@ -169,7 +170,7 @@ def hand(side):
     digit(thumb,thumb_socket,True)
     obj = mesh_object('Hand / continuous.'+side,vertices,faces,indices,weights)
     bevel = obj.modifiers.new('Broad edge chamfers','BEVEL')
-    bevel.width = .032
+    bevel.width = .022
     bevel.segments = 1
     bevel.limit_method = 'ANGLE'
     bevel.angle_limit = radians(30)
