@@ -17,6 +17,8 @@ views = [
 ]
 if kind=='hands':
     views.append(('spread',(3,-12,5),70,True))
+else:
+    views.append(('sole',(4,-5,-12),1,True))
 for name,direction,frame,single in views:
     scene.frame_set(frame)
     for obj in collection.objects:
@@ -35,5 +37,9 @@ for name,direction,frame,single in views:
     scene.camera.location = target+Vector(direction)
     scene.camera.rotation_euler = rotation.to_euler()
     scene.camera.data.ortho_scale = max(high.x-low.x,high.y-low.y)*1.2
+    if name=='sole':
+        light = bpy.data.objects['Studio / key softbox']
+        light.location = target+Vector((-2,-4,-3))
+        light.rotation_euler = (target-light.location).to_track_quat('-Z','Y').to_euler()
     scene.render.filepath = str(Path(bpy.data.filepath).parent/'renders'/f'{kind}-{name}.png')
     bpy.ops.render.render(write_still=True)
