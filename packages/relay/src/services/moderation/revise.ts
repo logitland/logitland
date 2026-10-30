@@ -9,10 +9,11 @@ import { getChannel, openWebhook, usableChannel } from '../channels';
 import { hit } from '../limits';
 import { scrubMessage } from '../scrub';
 import { getSettings } from '../settings';
-import { addStrike, escalateRuleBlocks } from '../strikes';
+import { activeStrikeCount, addStrike, escalateRuleBlocks } from '../strikes';
 import { standingOf } from '../levels';
 import { assertMayPost, countAttempt, findDuplicate } from './admission';
 import { Trail, logStmt, writeLog } from './log';
+import { recentConversation } from './loops';
 import { decide } from './pipeline';
 import { EDITS_PER_MINUTE, EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
 import { contentHash, discordContent, getRow, normalise, toRelayMessage, webhookThread, type MessageRow } from './rows';
@@ -57,8 +58,7 @@ function discordFailure(err: unknown, verb: 'edit' | 'delete'): never {
  */
 export async function editMessage(relay: Relay, principal: AgentPrincipal, id: string, content: string): Promise<RelayMessage> {
   const { agent } = principal;
-  const row = await ownMessage(relay, agent.id, id);
-  const settings = await getSettings(relay);
+  const [row, settings] = await Promise.all([ownMessage(relay, agent.id, id), getSettings(relay)]);
   assertMayPost(relay, agent, settings);
   if (row.status === 'removed') throw conflict('This message was deleted, so it can’t be edited.');
   if (row.status !== 'sent' || !row.discord_message_id) throw conflict(`Only a message that was posted can be edited, and this one is ${row.status}.`);
@@ -121,13 +121,18 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   if (ruling.verdict !== 'pass') await refuse(ruling.policy!, ruling.reason!, true);
 
   const textHash = await contentHash(content);
-  const dup = await findDuplicate(relay, { agentId: agent.id, channelId: row.channel_id, textHash, excludeId: row.id, length: normalise(content).length });
+  // The duplicate check and what the classifier reads, at once.
+  const [dup, conversation, strikes] = await Promise.all([
+    findDuplicate(relay, { agentId: agent.id, channelId: row.channel_id, textHash, excludeId: row.id, length: normalise(content).length }),
+    recentConversation(relay, row.channel_id, row.thread_id),
+    activeStrikeCount(relay, agent.id),
+  ]);
   if (dup) {
     trail.add('limits', dup.verdict, dup.policy, `Edit: ${dup.reason}`, 'limits');
     await refuse(dup.policy, 'This text is the same as another recent message in this channel, so the edit is refused.');
   }
 
-  const decision = await decide(relay, { ...row, content, thread_name: null }, agent, { probation, channel: where });
+  const decision = await decide(relay, { ...row, content, thread_name: null }, agent, { probation, conversation, channel: where, strikes });
   if (decision.kind === 'unavailable') {
     trail.add('classifier', 'block', 'outage', `Edit: ${decision.reason}`, decision.source, decision.latencyMs);
     await writeLog(relay, agent.id, row.id, trail.entries);
