@@ -66,6 +66,32 @@ The builder replaces the pants study from the full-body source. It leaves the
 approved jacket study and full-body master unchanged. The renders are
 `pants-front.png`, `pants-three-quarter.png`, `pants-rear.png` and `pants-bent.png`.
 
+## Hands and shoes studies
+
+`hands-study.blend` contains two continuous, articulated hands. Each has three
+fingers and a thumb joined through palm webbing, broad chamfers, and flexible
+knuckle creases. Frame **1** is rest, **40** curls the fingers, and **70** spreads
+them. The right hand is hidden in the initial close-up; enable it in the Outliner
+to inspect the pair. Both hands retain the master's bone names and wrist positions.
+
+`shoes-study.blend` contains two boots with sloping insteps, faceted toe boxes,
+molded soles and open ankle collars. Each boot includes its inner lining and
+recessed emissive panels in one continuous mesh. Frame **40** rotates the feet
+to inspect their articulation. The study contains only shoes, their rig and studio.
+
+```sh
+blender --background --python-exit-code 1 --python brand/logan/hands-shoes-study.py -- hands
+blender --background --python-exit-code 1 --python brand/logan/hands-shoes-study.py -- shoes
+blender --background brand/logan/hands-study.blend --python-exit-code 1 --python brand/logan/verify.py --python brand/logan/render-hands-shoes.py
+blender --background brand/logan/shoes-study.blend --python-exit-code 1 --python brand/logan/verify.py --python brand/logan/render-hands-shoes.py
+```
+
+These studies remain separate from `logan.blend`. Their fit was checked in a
+temporary full-body assembly. When integrating, use the hand study's outward
+finger-spread angles for the wave: the legacy wave brings the outer fingers
+toward the middle finger. The study's curl and spread poses pass checks for
+connected surfaces, collapsed faces and self-intersections.
+
 ## Isolated head study
 
 `head-study.blend` is a separate head-shape study. Its casing is a convex,

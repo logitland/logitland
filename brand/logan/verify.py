@@ -32,10 +32,15 @@ def geometry(obj, graph):
         pending.extend(neighbors[current] - reached)
     assert len(reached) == len(vertices), f'Disconnected mesh islands: {obj.name}'
     closed = set(edges.values()) == {2}
-    if obj.name.startswith(('Sleeve / continuous.', 'Trouser / continuous', 'Jacket / torso')):
-        assert all(p.area > 1e-9 for p in data.polygons), f'Collapsed cloth face: {obj.name}'
-        assert closed, f'Open garment mesh: {obj.name}'
+    if obj.name.startswith(('Sleeve / continuous.', 'Trouser / continuous', 'Jacket / torso',
+                            'Hand / continuous.', 'Boot / continuous.')):
+        assert all(p.area > 1e-9 for p in data.polygons), f'Collapsed surface face: {obj.name}'
+        assert closed, f'Open solid surface: {obj.name}'
     tree = BVHTree.FromPolygons(vertices, polygons)
+    if obj.name.startswith(('Hand / continuous.', 'Boot / continuous.')):
+        crossing = [(a,b) for a,b in tree.overlap(tree)
+                    if a<b and not set(polygons[a]).intersection(polygons[b])]
+        assert not crossing, f'Intersecting extremity surfaces: {obj.name}: {crossing[:3]}'
     bounds = [(min(p[i] for p in vertices), max(p[i] for p in vertices)) for i in range(3)]
     evaluated.to_mesh_clear()
     return {'tree': tree, 'vertices': vertices, 'bounds': bounds, 'closed': closed}
@@ -68,12 +73,16 @@ def touches(a, b):
 
 head_study = bpy.data.scenes.get('HEAD STUDY')
 pants_study = bpy.data.scenes.get('PANTS STUDY')
-scene = head_study or pants_study or bpy.data.scenes.get('JACKET STUDY') or bpy.data.scenes['LOGAN']
+extremity_study = bpy.data.scenes.get('HANDS STUDY') or bpy.data.scenes.get('SHOES STUDY')
+scene = head_study or pants_study or extremity_study or bpy.data.scenes.get('JACKET STUDY') or bpy.data.scenes['LOGAN']
 collection = 'HEAD · isolated shape study' if head_study else '01 · Logan / meshes'
 root = 'Head / faceted shell study' if head_study else 'Trouser / continuous pants' if pants_study else 'Jacket / torso'
 objects = [o for o in bpy.data.collections[collection].objects if o.type == 'MESH']
+if extremity_study:
+    prefix = 'Hand' if scene.name=='HANDS STUDY' else 'Boot'
+    assert {o.name for o in objects} == {f'{prefix} / continuous.L', f'{prefix} / continuous.R'}
 failures = []
-for frame in ([1] if head_study else [1, 40]):
+for frame in ([1] if head_study else [1,40,70] if scene.name=='HANDS STUDY' else [1,40]):
     scene.frame_set(frame)
     bpy.context.view_layer.update()
     graph = bpy.context.evaluated_depsgraph_get()
@@ -84,7 +93,9 @@ for frame in ([1] if head_study else [1, 40]):
             adjacent[a].add(b)
             adjacent[b].add(a)
     reached = set()
-    pending = [root]
+    # A pair study intentionally has two separate sides; each must still be one
+    # connected, closed surface after skinning, bevels and lining are evaluated.
+    pending = list(meshes) if extremity_study else [root]
     while pending:
         current = pending.pop()
         if current in reached:
@@ -95,6 +106,7 @@ for frame in ([1] if head_study else [1, 40]):
     if detached:
         failures.append(f'Frame {frame}: detached parts {detached}')
     else:
-        print(f'PASS frame {frame}: all {len(meshes)} mesh objects connect to {root}')
+        print(f'PASS frame {frame}: {len(meshes)} connected extremities' if extremity_study
+              else f'PASS frame {frame}: all {len(meshes)} mesh objects connect to {root}')
 assert not failures, '\n'.join(failures)
 scene.frame_set(1)
