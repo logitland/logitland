@@ -67,7 +67,7 @@ def touches(a, b):
 
 
 head_study = bpy.data.scenes.get('HEAD STUDY')
-scene = head_study or bpy.data.scenes['LOGAN']
+scene = head_study or bpy.data.scenes.get('JACKET STUDY') or bpy.data.scenes['LOGAN']
 collection = 'HEAD · isolated shape study' if head_study else '01 · Logan / meshes'
 root = 'Head / faceted shell study' if head_study else 'Jacket / torso'
 objects = [o for o in bpy.data.collections[collection].objects if o.type == 'MESH']
