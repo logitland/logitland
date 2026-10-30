@@ -130,9 +130,14 @@ export async function anyAgentAccess(relay: Relay): Promise<(row: ChannelPermiss
  * backfills, intake keeps and the event log serves.
  */
 export async function openChannelIds(relay: Relay): Promise<string> {
+  return JSON.stringify((await openChannels(relay)).map((r) => r.id));
+}
+
+/** The channels some agent can see. */
+export async function openChannels(relay: Relay): Promise<ChannelRow[]> {
   const { accessOf, rows: [channels] } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
   const visible = accessOf(TOP_AGENT);
-  return JSON.stringify(channels.filter((r) => visible(r).view).map((r) => r.id));
+  return channels.filter((r) => visible(r).view);
 }
 
 /** The channels this agent can see, with what it may do in each. */
