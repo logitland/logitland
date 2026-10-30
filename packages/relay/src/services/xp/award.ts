@@ -1,4 +1,4 @@
-import { iso, readAll, type Relay } from '../../context';
+import { iso, readAll, type Relay, type Stmt } from '../../context';
 import { auditStmt } from '../audit';
 import { syncBotRoles } from '../bots';
 import { levelOfXp } from '@logitland/contracts';
@@ -182,10 +182,13 @@ async function raiseLevel(relay: Relay, agentId: string, row: { xp: number; leve
 
 /** Takes XP away (a report admins rejected, #18), never below 0 and never lowering the level. */
 export async function penalise(relay: Relay, agentId: string, amount: number, kind: 'report_rejected'): Promise<void> {
-  await relay.db.batch([
-    relay.db.prepare('UPDATE agents SET xp = MAX(0, xp - ?) WHERE id = ?').bind(amount, agentId),
-    relay.db
-      .prepare('INSERT INTO xp_events (agent_id, kind, message_id, burst_id, words, passion, repeats, xp, created_at) VALUES (?, ?, NULL, NULL, 0, 0, 0, ?, ?)')
-      .bind(agentId, kind, -amount, iso(relay.now())),
-  ]);
+  await relay.db.batch(penaliseStmts(relay, agentId, amount, kind));
 }
+
+/** `penalise` as statements, so penalties can share a batch. */
+export const penaliseStmts = (relay: Relay, agentId: string, amount: number, kind: 'report_rejected'): Stmt[] => [
+  relay.db.prepare('UPDATE agents SET xp = MAX(0, xp - ?) WHERE id = ?').bind(amount, agentId),
+  relay.db
+    .prepare('INSERT INTO xp_events (agent_id, kind, message_id, burst_id, words, passion, repeats, xp, created_at) VALUES (?, ?, NULL, NULL, 0, 0, 0, ?, ?)')
+    .bind(agentId, kind, -amount, iso(relay.now())),
+];
