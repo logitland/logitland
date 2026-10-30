@@ -1,139 +1,101 @@
-"""Sew the sleeve openings into actual armholes, creating one continuous coat mesh.
+"""Join the shaped sleeve caps to the coat along their actual contact seams.
 
-Run after refine-jacket.py. Removes the buried sleeve caps and torso armhole
-faces, bridges their boundary loops, and retains blended elbow skinning.
+Keep the shoulder crown and armhole crease. Union removes buried cap/torso
+faces, yielding one closed mesh; skin weights blend across the resulting seam.
 """
 from pathlib import Path
-from math import atan2, pi
 
 import bmesh
 import bpy
 from mathutils import Vector
+from mathutils.kdtree import KDTree
 
 HERE = Path(__file__).resolve().parent
 scene = bpy.data.scenes['JACKET STUDY']
 scene.frame_set(1)
+rig = bpy.data.objects['LOGAN · Pose me']
 torso = bpy.data.objects['Jacket / torso']
 assert not torso.get('continuous_sleeves'), 'Sleeves are already sewn into the torso'
-bm = bmesh.new()
-bm.from_mesh(torso.data)
-deform = bm.verts.layers.deform.verify()
-hole_tag = bm.faces.layers.int['armhole_side']
+rig.data.pose_position = 'REST'
+bpy.context.view_layer.update()
+bpy.ops.object.select_all(action='DESELECT')
+torso.select_set(True)
+bpy.context.view_layer.objects.active = torso
+torso.modifiers.clear()
+source_weights = []
+for vertex in torso.data.vertices:
+    source_weights.append((vertex.co.copy(), {'torso':1.0}))
 
-
-def angular_loop(edges, axis):
-    """Order an armhole boundary in a common plane, retaining recessed corners."""
-    vertices = {v for edge in edges for v in edge.verts}
-    across = Vector((0,1,0)).cross(axis).normalized()
-    center_x = (min(v.co.dot(across) for v in vertices)+max(v.co.dot(across) for v in vertices))/2
-    center_y = (min(v.co.y for v in vertices)+max(v.co.y for v in vertices))/2
-    angles = {v: atan2(v.co.y-center_y,v.co.dot(across)-center_x) for v in vertices}
-    adjacency = {v: [e.other_vert(v) for e in edges if v in e.verts] for v in vertices}
-    first = min(vertices,key=lambda v: angles[v])
-    ordered = [first]
-    current = min(adjacency[first],key=lambda v: (angles[v]-angles[first])%(2*pi))
-    while current != first:
-        ordered.append(current)
-        current = next(v for v in adjacency[current] if v != ordered[-2])
-    result = []
-    for vertex in ordered:
-        angle = angles[vertex]
-        if result and angle <= result[-1][0]:
-            angle = result[-1][0]+1e-5
-        result.append((angle,vertex))
-    assert result[-1][0]-result[0][0] < 2*pi
-    return result
-
-
-def resample_loop(loop, angles):
-    """Split existing boundary edges so two loops have matching angular stations."""
-    output = []
-    for angle in angles:
-        match = next((v for a,v in loop if abs(a-angle)<1e-8),None)
-        if match is not None:
-            output.append(match)
-            continue
-        position = angle if angle>loop[0][0] else angle+2*pi
-        extended = loop+[(loop[0][0]+2*pi,loop[0][1])]
-        for (a,start),(b,end) in zip(extended,extended[1:]):
-            if a<position<b:
-                edge = next(e for e in start.link_edges if end in e.verts)
-                _,vertex = bmesh.utils.edge_split(edge,start,(position-a)/(b-a))
-                output.append(vertex)
-                loop.append((angle,vertex))
-                loop.sort(key=lambda item:item[0])
-                break
-        else:
-            raise ValueError('Could not resample shoulder boundary')
-    return output
-
-for side, sign, tag in [('L',1,1),('R',-1,2)]:
+for side,sign in [('L',1),('R',-1)]:
     sleeve = bpy.data.objects['Sleeve / continuous.'+side]
-    groups = {}
-    for group in sleeve.vertex_groups:
-        target = torso.vertex_groups.get(group.name) or torso.vertex_groups.new(name=group.name)
-        groups[group.index] = target.index
-
-    patch = [f for f in bm.faces if f[hole_tag] == tag]
-    perimeter = {e for f in patch for e in f.edges if sum(face in patch for face in e.link_faces)==1}
-    bmesh.ops.delete(bm,geom=patch,context='FACES')
-    body_loop = [e for e in perimeter if e.is_valid and e.is_boundary]
-    assert body_loop, f'Missing armhole on {side}'
-    # Remove the first 23 percent of the old sleeve, including its capped
-    # shoulder and transverse pink shoulder strip. Keep the outer lining below.
+    # Dark fabric retains the raised cap and seam silhouette. Emission starts
+    # below the shoulder, on the recessed outer-arm lining.
     start = Vector((sign*.85,0,3.78))
     joint = Vector((sign*1.57,0,3.08))
     end = Vector((sign*2.18,-.015,2.48))
-    pivot = (joint-start).length / ((joint-start).length+(end-joint).length)
-    points,progress = {},{}
-    for v in sleeve.data.vertices:
-        p = sleeve.matrix_world @ v.co
-        points[v.index] = p
+    pivot = (joint-start).length/((joint-start).length+(end-joint).length)
+    for face in sleeve.data.polygons:
+        p = sleeve.matrix_world @ face.center
         raw = Vector((p.x/1.05,p.y/1.20,(p.z-2.9)/1.28+2.2))
-        progress[v.index] = (raw-start).dot(joint-start)/(joint-start).length_squared*pivot
-    keep = [f for f in sleeve.data.polygons if all(progress[i]>=.23-1e-5 for i in f.vertices)]
-    used = {i for face in keep for i in face.vertices}
-    vertices = {}
-    for index in used:
-        v = bm.verts.new(points[index])
-        for group in sleeve.data.vertices[index].groups:
-            v[deform][groups[group.group]] = group.weight
-        vertices[index] = v
-    sleeve_faces = []
-    for polygon in keep:
-        face = bm.faces.new([vertices[i] for i in polygon.vertices])
-        # All retained pink is the recessed outer lining; shoulder fabric is dark.
-        face.material_index = polygon.material_index if polygon.material_index<4 else 0
-        face[hole_tag] = 0
-        sleeve_faces.append(face)
-    sleeve_loop = list({e for f in sleeve_faces for e in f.edges if e.is_boundary})
-    axis = Vector((sign*.72*1.05,0,-.70*1.28)).normalized()
-    body_angles = angular_loop(body_loop,axis)
-    sleeve_angles = angular_loop(sleeve_loop,axis)
-    angles = sorted(set(a for a,v in body_angles+sleeve_angles))
-    body_ring = resample_loop(body_angles,angles)
-    sleeve_ring = resample_loop(sleeve_angles,angles)
-    middle = []
-    for a,b in zip(body_ring,sleeve_ring):
-        v = bm.verts.new(a.co.lerp(b.co,.5))
-        for index in set(a[deform].keys())|set(b[deform].keys()):
-            v[deform][index] = .5*a[deform].get(index,0)+.5*b[deform].get(index,0)
-        middle.append(v)
-    for first,second in ((body_ring,middle),(middle,sleeve_ring)):
-        for j in range(len(angles)):
-            next_j = (j+1)%len(angles)
-            face = bm.faces.new((first[j],first[next_j],second[next_j],second[j]))
+        t = (raw-start).dot(joint-start)/(joint-start).length_squared*pivot
+        if face.material_index==4 or (face.material_index==3 and t<.23):
             face.material_index = 0
-            face[hole_tag] = 0
+    for vertex in sleeve.data.vertices:
+        weights = {sleeve.vertex_groups[g.group].name:g.weight for g in vertex.groups}
+        source_weights.append((sleeve.matrix_world @ vertex.co,weights))
+    # Join undeformed surfaces; restore the armature after the seam is sewn.
+    sleeve.modifiers.clear()
+    union = torso.modifiers.new('Sewn shoulder '+side,'BOOLEAN')
+    union.operation = 'UNION'
+    union.solver = 'EXACT'
+    union.object = sleeve
+    bpy.ops.object.modifier_apply(modifier=union.name)
     bpy.data.objects.remove(sleeve,do_unlink=True)
 
+tree = KDTree(len(source_weights))
+for index,(point,weights) in enumerate(source_weights):
+    tree.insert(point,index)
+tree.balance()
+weights = []
+seam = set()
+for vertex in torso.data.vertices:
+    _,index,distance = tree.find(vertex.co)
+    weights.append(source_weights[index][1].copy())
+    if distance>1e-5:
+        seam.add(vertex.index)
+neighbors = {v.index:set() for v in torso.data.vertices}
+for edge in torso.data.edges:
+    a,b = edge.vertices
+    neighbors[a].add(b)
+    neighbors[b].add(a)
+transition = seam | {n for i in seam for n in neighbors[i]}
+for iteration in range(3):
+    updated = [value.copy() for value in weights]
+    for index in transition:
+        nearby = [index]+list(neighbors[index])
+        keys = {name for i in nearby for name in weights[i]}
+        updated[index] = {name:sum(weights[i].get(name,0) for i in nearby)/len(nearby) for name in keys}
+    weights = updated
+torso.vertex_groups.clear()
+groups = {name:torso.vertex_groups.new(name=name) for name in sorted({key for value in weights for key in value})}
+for index,value in enumerate(weights):
+    for name,weight in value.items():
+        if weight>0:
+            groups[name].add([index],weight,'REPLACE')
+modifier = torso.modifiers.new('Continuous jacket deformation','ARMATURE')
+modifier.object = rig
+modifier.use_deform_preserve_volume = True
+rig.data.pose_position = 'POSE'
+
+bm = bmesh.new()
+bm.from_mesh(torso.data)
+assert all(edge.is_manifold for edge in bm.edges), 'The sewn coat must be closed'
 bmesh.ops.recalc_face_normals(bm,faces=list(bm.faces))
-assert all(e.is_manifold for e in bm.edges), 'The sewn coat must have no open or doubled edges'
 bm.to_mesh(torso.data)
 bm.free()
 torso.data.update()
 torso['continuous_sleeves'] = True
-torso['construction'] = 'Torso and both sleeves share welded armhole loops'
+torso['construction'] = 'Shaped shoulder caps sewn to torso along shared contact seams'
 bpy.context.view_layer.update()
 bpy.ops.wm.save_as_mainfile(filepath=str(HERE/'jacket-study.blend'),compress=True)
-print('Sewn both sleeves into the torso; removed shoulder caps and their pink trim')
+print('Joined shaped shoulder caps with shared seams; removed shoulder pink')
