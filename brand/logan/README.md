@@ -73,6 +73,9 @@ fingers and a thumb joined through palm webbing, broad chamfers, and flexible
 knuckle creases. Frame **1** is rest, **40** curls the fingers, and **70** spreads
 them. The right hand is hidden in the initial close-up; enable it in the Outliner
 to inspect the pair. Both hands retain the master's bone names and wrist positions.
+The palm occupies more of the hand's length; the fingers taper straight toward
+their tips. Finger and thumb rest joints follow these proportions and must be
+copied from the study rig when integrating the meshes into the master.
 
 `shoes-study.blend` contains two boots with sloping insteps, faceted toe boxes,
 molded soles and open ankle collars. Each boot includes its inner lining and
