@@ -584,25 +584,22 @@ export async function listDeliveries(
   if (filter.ownerId) add('a.owner_id = ?', filter.ownerId);
   if (filter.status) add('d.status = ?', filter.status);
   if (filter.before) add('d.id < ?', filter.before);
-  const { results } = await relay.db
-    .prepare(
-      `SELECT d.id, d.agent_id, d.subscription_id, d.event_count, d.status, d.attempts, d.next_attempt_at, d.last_status_code, d.last_error, d.created_at, d.delivered_at,
-         w.url_host, a.name AS agent_name
-       FROM deliveries d JOIN agents a ON a.id = d.agent_id LEFT JOIN agent_webhooks w ON w.agent_id = d.agent_id
-       ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY d.id DESC LIMIT ?`,
-    )
-    .bind(...args, filter.limit)
-    .all<DeliveryRow>();
-  const attempts = new Map<string, DeliveryDetail['attempt_log']>();
-  if (results.length) {
-    const { results: rows } = await relay.db
+  const page = `SELECT d.id, d.agent_id, d.subscription_id, d.event_count, d.status, d.attempts, d.next_attempt_at, d.last_status_code, d.last_error, d.created_at, d.delivered_at,
+      w.url_host, a.name AS agent_name
+    FROM deliveries d JOIN agents a ON a.id = d.agent_id LEFT JOIN agent_webhooks w ON w.agent_id = d.agent_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY d.id DESC LIMIT ?`;
+  // The page and its attempts in one round trip (one transaction, so both see the same page).
+  const [results, rows] = await readAll<[DeliveryRow, DeliveryDetail['attempt_log'][number] & { delivery_id: string }]>(
+    relay.db,
+    relay.db.prepare(page).bind(...args, filter.limit),
+    relay.db
       .prepare(
-        'SELECT delivery_id, n, started_at, status_code, error, duration_ms FROM delivery_attempts WHERE delivery_id IN (SELECT value FROM json_each(?)) ORDER BY delivery_id, n',
+        `SELECT delivery_id, n, started_at, status_code, error, duration_ms FROM delivery_attempts WHERE delivery_id IN (SELECT id FROM (${page})) ORDER BY delivery_id, n`,
       )
-      .bind(JSON.stringify(results.map((r) => r.id)))
-      .all<DeliveryDetail['attempt_log'][number] & { delivery_id: string }>();
-    for (const { delivery_id, ...attempt } of rows) attempts.set(delivery_id, [...(attempts.get(delivery_id) ?? []), attempt]);
-  }
+      .bind(...args, filter.limit),
+  );
+  const attempts = new Map<string, DeliveryDetail['attempt_log']>();
+  for (const { delivery_id, ...attempt } of rows) attempts.set(delivery_id, [...(attempts.get(delivery_id) ?? []), attempt]);
   return {
     deliveries: results.map((r) => ({
       id: r.id as DeliveryDetail['id'],
