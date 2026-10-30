@@ -2,6 +2,8 @@
 from pathlib import Path
 from math import radians
 import bpy
+import bmesh
+from mathutils import Matrix, Vector
 
 HERE = Path(__file__).resolve().parent
 scene = bpy.data.scenes['LOGAN']
@@ -18,16 +20,24 @@ with bpy.data.libraries.load(str(HERE/'hands-study.blend'),link=False) as (sourc
     target.objects = names.copy()
 parts = target.objects
 study_rig = parts[0].parent
+fits = {}
 for side in ('L','R'):
-    difference = rig.data.bones['hand.'+side].matrix_local - study_rig.data.bones['hand.'+side].matrix_local
-    assert all(abs(v)<1e-5 for row in difference for v in row), 'Hand study wrist must match the fitted cuff'
+    difference = rig.data.bones['forearm.'+side].matrix_local - study_rig.data.bones['forearm.'+side].matrix_local
+    assert all(abs(v)<1e-5 for row in difference for v in row), 'Hand study forearm must match the fitted cuff'
+    # The study's palm starts inside the cuff. Seat its narrow wrist in the
+    # opening, with the broad palm and thumb root beyond the sleeve rim.
+    forearm = rig.data.bones['forearm.'+side]
+    wrist = study_rig.data.bones['hand.'+side]
+    direction = (forearm.tail_local-forearm.head_local).normalized()
+    rotation = (wrist.tail_local-wrist.head_local).normalized().rotation_difference(direction).to_matrix().to_4x4()
+    fits[side] = Matrix.Translation(forearm.tail_local+direction*.12) @ rotation @ Matrix.Translation(-wrist.head_local)
 bpy.context.view_layer.objects.active = rig
 rig.select_set(True)
 bpy.ops.object.mode_set(mode='EDIT')
 for bone in rig.data.edit_bones:
-    if bone.name.startswith(('finger','thumb')):
+    if bone.name.startswith(('hand.','finger','thumb')):
         source = study_rig.data.bones[bone.name]
-        bone.matrix = source.matrix_local.copy()
+        bone.matrix = fits[bone.name[-1]] @ source.matrix_local
         bone.length = source.length
 bpy.ops.object.mode_set(mode='OBJECT')
 for obj in old:
@@ -35,6 +45,28 @@ for obj in old:
 for name,obj in zip(names,parts):
     obj.name = name
     obj.parent = rig
+    # Extend the closed wrist into the cuff lining. The extra attachment loop
+    # is buried inside the sleeve; the visible wrist and palm stay unchanged.
+    wrist = study_rig.data.bones['hand.'+name[-1]]
+    direction = (wrist.tail_local-wrist.head_local).normalized()
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    deform = bm.verts.layers.deform.verify()
+    forearm_group = obj.vertex_groups.new(name='forearm.'+name[-1])
+    across = Vector((-direction.z,0,direction.x)).normalized()
+    caps = [face for face in bm.faces if all(abs((v.co-wrist.head_local).dot(direction)-.07)<1e-5 for v in face.verts)]
+    extruded = bmesh.ops.extrude_face_region(bm,geom=caps)['geom']
+    for vertex in [item for item in extruded if isinstance(item,bmesh.types.BMVert)]:
+        vertex.co -= direction*.18
+        edge = abs((vertex.co-wrist.head_local).dot(across))/.215
+        vertex.co.y = wrist.head_local.y+(vertex.co.y-wrist.head_local.y)*3.04*(1-.25*edge**4)
+        vertex[deform].clear()
+        vertex[deform][forearm_group.index] = 1
+    bmesh.ops.delete(bm,geom=caps,context='FACES_ONLY')
+    bmesh.ops.recalc_face_normals(bm,faces=list(bm.faces))
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.transform(fits[name[-1]])
     obj.hide_render = False
     collection.objects.link(obj)
     obj.hide_set(False)
