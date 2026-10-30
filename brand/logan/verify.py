@@ -66,10 +66,13 @@ def touches(a, b):
     return contains(a, b['vertices'][0]) or contains(b, a['vertices'][0])
 
 
-scene = bpy.data.scenes['LOGAN']
-objects = [o for o in bpy.data.collections['01 · Logan / meshes'].objects if o.type == 'MESH']
+head_study = bpy.data.scenes.get('HEAD STUDY')
+scene = head_study or bpy.data.scenes['LOGAN']
+collection = 'HEAD · isolated shape study' if head_study else '01 · Logan / meshes'
+root = 'Head / faceted shell study' if head_study else 'Jacket / torso'
+objects = [o for o in bpy.data.collections[collection].objects if o.type == 'MESH']
 failures = []
-for frame in [1, 40]:
+for frame in ([1] if head_study else [1, 40]):
     scene.frame_set(frame)
     bpy.context.view_layer.update()
     graph = bpy.context.evaluated_depsgraph_get()
@@ -80,7 +83,7 @@ for frame in [1, 40]:
             adjacent[a].add(b)
             adjacent[b].add(a)
     reached = set()
-    pending = ['Jacket / torso']
+    pending = [root]
     while pending:
         current = pending.pop()
         if current in reached:
@@ -91,6 +94,6 @@ for frame in [1, 40]:
     if detached:
         failures.append(f'Frame {frame}: detached parts {detached}')
     else:
-        print(f'PASS frame {frame}: all {len(meshes)} mesh objects touch the coat assembly')
+        print(f'PASS frame {frame}: all {len(meshes)} mesh objects connect to {root}')
 assert not failures, '\n'.join(failures)
 scene.frame_set(1)
