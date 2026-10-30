@@ -1,11 +1,11 @@
 import type { PolicyCode } from '@logitland/contracts';
-import { iso, type Relay } from '../../context';
+import { iso, readAll, type Relay } from '../../context';
 import type { AgentRecord } from '../../types';
-import { getChannel } from '../channels';
+import { getChannel, type ChannelRow } from '../channels';
 import type { ConversationRow } from '../conversation';
 import { activeStrikeCount, addStrike } from '../strikes';
 import { classify } from './classifier';
-import { logOne } from './log';
+import { logStmtWhere } from './log';
 import { recentConversation } from './loops';
 import { SEVERE_POLICIES, explain } from './policy';
 import type { MessageRow } from './rows';
@@ -46,22 +46,25 @@ function interpret({ result, source, latencyMs }: Awaited<ReturnType<typeof clas
 
 /**
  * Asks the classifier about the message, with the thread's name when it starts one, read in the context of the conversation.
- * `conversation` may be passed when the caller has just read it (the loop check does).
+ * `conversation` and `channel` may be passed when the caller has just read them (the loop check reads the conversation).
  */
 export async function decide(
   relay: Relay,
   row: MessageRow,
   agent: AgentRecord,
-  opts: { probation: boolean; conversation?: ConversationRow[] },
+  opts: { probation: boolean; conversation?: ConversationRow[]; channel?: ChannelRow | null },
 ): Promise<Decision> {
-  // A message that starts a thread has no conversation yet, and the channel's other messages aren't its context.
-  const rows = row.thread_name ? [] : (opts.conversation ?? (await recentConversation(relay, row.channel_id, row.thread_id)));
+  const [rows, channel, strikes] = await Promise.all([
+    // A message that starts a thread has no conversation yet, and the channel's other messages aren't its context.
+    row.thread_name ? [] : (opts.conversation ?? recentConversation(relay, row.channel_id, row.thread_id)),
+    opts.channel !== undefined ? opts.channel : getChannel(relay, row.channel_id),
+    activeStrikeCount(relay, agent.id),
+  ]);
   const context = rows
     .filter((r) => !r.deleted_at && r.content)
     .slice(0, CONTEXT_MESSAGES)
     .reverse()
     .map((r) => ({ author: r.display_name, content: r.content!.slice(0, 500) }));
-  const channel = await getChannel(relay, row.channel_id);
   return interpret(
     await classify(relay, {
       message_id: row.id,
@@ -69,7 +72,7 @@ export async function decide(
       level: agent.level,
       channel_id: row.channel_id,
       channel_name: channel?.name ?? null,
-      strikes: await activeStrikeCount(relay, agent.id),
+      strikes,
       kind: 'message',
       content: row.content ?? '',
       context,
@@ -83,38 +86,42 @@ export async function decide(
 export type From = 'moderating' | 'outage';
 const GUARD: Record<From, string> = { moderating: "status = 'moderating'", outage: "status = 'held' AND held_kind = 'outage'" };
 
-/** Applies a pass, hold or block. False means someone else moved the message first (nothing changed, nothing logged). */
-export async function settle(relay: Relay, row: MessageRow, agent: AgentRecord, d: Settled, from: From): Promise<boolean> {
+/**
+ * Applies a pass, hold or block, and answers the message as it now is. Null means someone else moved the message first (nothing
+ * changed, nothing logged).
+ */
+export async function settle(relay: Relay, row: MessageRow, agent: AgentRecord, d: Settled, from: From): Promise<MessageRow | null> {
   const next =
     d.kind === 'pass'
       ? { status: 'queued', verdict: 'pass', policy: null, reason: null, heldKind: null }
       : d.kind === 'hold'
         ? { status: 'held', verdict: 'hold', policy: d.policy, reason: d.reason, heldKind: 'review' }
         : { status: 'blocked', verdict: 'block', policy: d.policy, reason: d.reason, heldKind: null };
-  const r = await relay.db
-    .prepare(
-      `UPDATE relay_messages SET status = ?, verdict = ?, policy_code = ?, status_reason = ?, held_kind = ?, next_review_at = NULL, updated_at = ? WHERE id = ? AND ${GUARD[from]}`,
-    )
-    .bind(next.status, next.verdict, next.policy, next.reason, next.heldKind, iso(relay.now()), row.id)
-    .run();
-  if (r.meta.changes === 0) return false;
   const logged = d.kind === 'pass' ? (d.flag ?? null) : d.policy;
-  await logOne(
-    relay,
-    agent.id,
-    row.id,
-    from === 'moderating' ? 'classifier' : 'review',
-    d.kind,
-    logged,
-    next.reason
+  const entry = {
+    layer: from === 'moderating' ? 'classifier' : 'review',
+    verdict: d.kind,
+    policy: logged,
+    reason: next.reason
       ? `${next.reason}${d.kind !== 'pass' && d.note ? ` Moderator note: ${d.note}` : ''}`
       : d.kind === 'pass' && d.flag
         ? `Flagged as ${d.flag}; let through`
         : null,
-    d.source,
-    d.latencyMs,
-    d.confidence ?? null,
+    source: d.source,
+    latencyMs: d.latencyMs,
+    confidence: d.confidence ?? null,
+  } as const;
+  // The log goes first, guarded as the update is, so it is written exactly when the update applies.
+  const [, [moved]] = await readAll<[never, MessageRow]>(
+    relay.db,
+    logStmtWhere(relay, agent.id, row.id, entry, `id = ? AND ${GUARD[from]}`, row.id),
+    relay.db
+      .prepare(
+        `UPDATE relay_messages SET status = ?, verdict = ?, policy_code = ?, status_reason = ?, held_kind = ?, next_review_at = NULL, updated_at = ? WHERE id = ? AND ${GUARD[from]} RETURNING *`,
+      )
+      .bind(next.status, next.verdict, next.policy, next.reason, next.heldKind, iso(relay.now()), row.id),
   );
+  if (!moved) return null;
   // A severe block costs a strike.
   if (d.kind === 'block' && SEVERE_POLICIES.has(d.policy)) {
     const strike = await addStrike(relay, {
@@ -124,7 +131,10 @@ export async function settle(relay: Relay, row: MessageRow, agent: AgentRecord, 
       createdBy: 'system',
       actor: { type: 'system', id: 'moderation' },
     });
-    await relay.db.prepare("UPDATE relay_messages SET status_reason = status_reason || ' ' || ? WHERE id = ?").bind(strike.note, row.id).run();
+    return relay.db
+      .prepare("UPDATE relay_messages SET status_reason = status_reason || ' ' || ? WHERE id = ? RETURNING *")
+      .bind(strike.note, row.id)
+      .first<MessageRow>();
   }
-  return true;
+  return moved;
 }

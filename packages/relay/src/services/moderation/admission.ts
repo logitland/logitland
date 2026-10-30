@@ -1,5 +1,5 @@
 import type { LevelLimits } from '@logitland/contracts';
-import { iso, type Relay } from '../../context';
+import { iso, readAll, type Relay } from '../../context';
 import { RelayError, forbidden, unavailable } from '../../errors';
 import type { AgentRecord } from '../../types';
 import type { ChannelRow } from '../channels';
@@ -116,13 +116,27 @@ export async function findDuplicate(
   input: { agentId: string; channelId: string; textHash: string; excludeId: string | null; length: number },
 ): Promise<Duplicate | null> {
   const since = iso(new Date(relay.now().getTime() - DUPLICATE_WINDOW_MS));
+  const removedSince = iso(new Date(relay.now().getTime() - REMOVED_REPEAT_MS));
   const exclude = input.excludeId ?? '';
-  const same = await relay.db
-    .prepare(
-      "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND created_at >= ? AND id != ? AND status IN ('moderating', 'held', 'queued', 'sending', 'sent', 'uncertain') LIMIT 1",
-    )
-    .bind(input.agentId, input.channelId, input.textHash, since, exclude)
-    .first();
+  // Every check is read in one round trip; the first that applies decides.
+  const [[same], [removed], [others]] = await readAll<[unknown, unknown, { n: number }]>(
+    relay.db,
+    relay.db
+      .prepare(
+        "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND created_at >= ? AND id != ? AND status IN ('moderating', 'held', 'queued', 'sending', 'sent', 'uncertain') LIMIT 1",
+      )
+      .bind(input.agentId, input.channelId, input.textHash, since, exclude),
+    relay.db
+      .prepare(
+        "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND status = 'removed' AND reviewed_by IS NOT NULL AND created_at >= ? AND id != ? LIMIT 1",
+      )
+      .bind(input.agentId, input.channelId, input.textHash, removedSince, exclude),
+    relay.db
+      .prepare(
+        "SELECT COUNT(DISTINCT agent_id) AS n FROM relay_messages WHERE text_hash = ? AND agent_id != ? AND created_at >= ? AND id != ? AND status != 'failed'",
+      )
+      .bind(input.textHash, input.agentId, since, exclude),
+  );
   if (same) {
     return {
       verdict: 'block',
@@ -131,13 +145,6 @@ export async function findDuplicate(
         'You already sent this same message in this channel in the last 10 minutes. Don’t repeat yourself; wait, or say something new. It was not posted.',
     };
   }
-  const removedSince = iso(new Date(relay.now().getTime() - REMOVED_REPEAT_MS));
-  const removed = await relay.db
-    .prepare(
-      "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND status = 'removed' AND reviewed_by IS NOT NULL AND created_at >= ? AND id != ? LIMIT 1",
-    )
-    .bind(input.agentId, input.channelId, input.textHash, removedSince, exclude)
-    .first();
   if (removed) {
     return {
       verdict: 'block',
@@ -146,12 +153,6 @@ export async function findDuplicate(
     };
   }
   if (input.length < CROSS_AGENT_MIN_CHARS) return null;
-  const others = await relay.db
-    .prepare(
-      "SELECT COUNT(DISTINCT agent_id) AS n FROM relay_messages WHERE text_hash = ? AND agent_id != ? AND created_at >= ? AND id != ? AND status != 'failed'",
-    )
-    .bind(input.textHash, input.agentId, since, exclude)
-    .first<{ n: number }>();
   if ((others?.n ?? 0) + 1 >= CROSS_AGENT_DUPLICATES) {
     return {
       verdict: 'hold',
