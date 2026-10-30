@@ -21,13 +21,16 @@ with bpy.data.libraries.load(str(HERE/'hands-study.blend'),link=False) as (sourc
 parts = target.objects
 study_rig = parts[0].parent
 fits = {}
+# The approved study labels are anatomically reversed: transfer each complete
+# hand to the opposite wrist, including its finger joints and skin weights.
+source_side = {'L': 'R', 'R': 'L'}
 for side in ('L','R'):
     difference = rig.data.bones['forearm.'+side].matrix_local - study_rig.data.bones['forearm.'+side].matrix_local
     assert all(abs(v)<1e-5 for row in difference for v in row), 'Hand study forearm must match the fitted cuff'
     # The study's palm starts inside the cuff. Seat its narrow wrist in the
     # opening, with the broad palm and thumb root beyond the sleeve rim.
     forearm = rig.data.bones['forearm.'+side]
-    wrist = study_rig.data.bones['hand.'+side]
+    wrist = study_rig.data.bones['hand.'+source_side[side]]
     direction = (forearm.tail_local-forearm.head_local).normalized()
     rotation = (wrist.tail_local-wrist.head_local).normalized().rotation_difference(direction).to_matrix().to_4x4()
     fits[side] = Matrix.Translation(forearm.tail_local+direction*.12) @ rotation @ Matrix.Translation(-wrist.head_local)
@@ -36,13 +39,16 @@ rig.select_set(True)
 bpy.ops.object.mode_set(mode='EDIT')
 for bone in rig.data.edit_bones:
     if bone.name.startswith(('hand.','finger','thumb')):
-        source = study_rig.data.bones[bone.name]
+        source = study_rig.data.bones[bone.name[:-1]+source_side[bone.name[-1]]]
         bone.matrix = fits[bone.name[-1]] @ source.matrix_local
         bone.length = source.length
 bpy.ops.object.mode_set(mode='OBJECT')
 for obj in old:
     bpy.data.objects.remove(obj,do_unlink=True)
-for name,obj in zip(names,parts):
+for name,obj in zip(names,reversed(parts)):
+    for group in obj.vertex_groups:
+        if group.name.endswith(('.L','.R')):
+            group.name = group.name[:-1]+name[-1]
     obj.name = name
     obj.parent = rig
     obj.data.transform(fits[name[-1]])
