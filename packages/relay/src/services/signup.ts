@@ -128,7 +128,7 @@ export async function register(relay: Relay, req: RegistrationRequest, client: C
     throw new OAuthError(400, req.type === 'service' ? 'service_auth_not_enabled' : 'issuer_not_enabled', 'This relay offers anonymous registration only.');
   const h = await clientHashes(relay, client);
   const asked = req.name === undefined ? null : canonicalName(req.name);
-  // The checks read in one round trip, and refuse in this order.
+  // The checks read at once (the ban, challenge and name in one round trip, beside the settings), then refuse in this order.
   const [settings, [banned, challenge, taken]] = await Promise.all([
     getSettings(relay),
     readAll<[unknown, ChallengeRow, unknown]>(relay.db, originBanStmt(relay, h), challengeStmt(relay, req.pow.challenge), nameTakenStmt(relay, asked ?? '')),
