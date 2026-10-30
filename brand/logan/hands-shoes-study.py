@@ -25,6 +25,24 @@ for obj in list(scene.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
 collection = bpy.data.collections['01 · Logan / meshes']
 
+if kind=='hands':
+    # Keep wrist and fingertips fixed while allocating more length to the palm.
+    # Move the actual hinges with the shortened digits so curls remain seated.
+    bpy.context.view_layer.objects.active = rig
+    rig.select_set(True)
+    bpy.ops.object.mode_set(mode='EDIT')
+    for side in ('L','R'):
+        for digit in ('finger1','finger2','finger3','thumb'):
+            first = rig.data.edit_bones[f'{digit}.01.{side}']
+            second = rig.data.edit_bones[f'{digit}.02.{side}']
+            tip = second.tail.copy()
+            length_ratio = .90 if digit=='thumb' else .80
+            points = [tip+(point-tip)*length_ratio
+                      for point in (first.head.copy(),first.tail.copy(),second.tail.copy())]
+            first.head, first.tail = points[:2]
+            second.head, second.tail = points[1:]
+    bpy.ops.object.mode_set(mode='OBJECT')
+
 
 def material(name, color, metallic, roughness, emission=0):
     mat = bpy.data.materials.new(name)
