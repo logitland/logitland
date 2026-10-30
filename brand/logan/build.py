@@ -86,7 +86,7 @@ pink = material("Pink · anodised trim", (.8, .012, .66), .35, .45)
 light_pink = material("Pink · lit inlay", (.8, .008, .68), .15, .35, 2.2)
 screen_mat = material("Screen · hot pink", (.8, .008, .68), 0, .5, 1.7)
 highlight = material("Screen · eye pixels", (.95, .025, .8), 0, .35, .5)
-ground_mat = material("Studio · warm grey", (.44, .45, .48), 0, .8, .23)
+ground_mat = material("Studio · warm grey", (.44, .45, .48), 0, .8, 1.2)
 
 
 def gradient_metal(name, stops, axis='X'):
@@ -184,33 +184,34 @@ def outline(width, height, cut):
 
 
 def monitor_head():
-    """A rectangular recessed face with a broad sloping crown and narrow side chamfers."""
-    # The crown rises behind the face. The front silhouette has almost square corners.
-    rings=[(2.84,2.10,5.35,-.12,.12),
-           (2.56,1.75,5.29,-.67,.025),
-           (2.31,1.47,5.31,-.675,.012),
-           (2.31,1.47,5.31,-.57,.012),
-           (2.84,2.10,5.35,1.18,.18)]
+    """A tall monitor face, sloped crown, bowed shoulders and tapered rear shell."""
+    rings=[(2.60,2.08,5.36,-.29,.10),
+           (2.40,1.80,5.29,-.67,.025),
+           (2.19,1.50,5.31,-.675,.012),
+           (2.19,1.50,5.31,-.57,.012),
+           (2.66,2.12,5.37,.25,.16),
+           (2.52,1.94,5.34,.78,.19),
+           (2.26,1.70,5.32,1.00,.16)]
     verts=[(x,y,z+center_z) for w,h,center_z,y,c in rings for x,z in outline(w,h,c)]
     faces=[]
     # Outer slope, dark inner lip, screen recess, casing sides, rear cap.
-    for a,b in [(0,1),(1,2),(2,3),(4,0)]:
+    for a,b in [(0,1),(1,2),(2,3),(4,0),(5,4),(6,5)]:
         faces.extend((a*8+j,a*8+(j+1)%8,b*8+(j+1)%8,b*8+j) for j in range(8))
-    faces.append(tuple(range(32,40)))
+    faces.append(tuple(reversed(range(48,56))))
     obj=mesh('Head / chamfered monitor housing',verts,faces,shell,'head',.018)
     obj.data.materials.append(head_gradient)
     obj.data.materials.append(side_gradient)
     for poly in obj.data.polygons:
         if poly.index<8:
             poly.material_index=1 if poly.index in (0,3,4,5) else 2
-        elif 24<=poly.index<32:
-            poly.material_index=1 if poly.index==28 else 2
+        elif 24<=poly.index<48:
+            poly.material_index=1 if poly.index%8 in (3,4,5) else 2
     return obj
 
 
-def panel(name, points, y, mat, bone, bevel=.012):
+def panel(name, points, y, mat, bone, bevel=.012, depth=.035):
     """Extruded XZ silhouette, useful for the face and jacket's fitted panels."""
-    verts = [(x,y,z) for x,z in points] + [(x,y+.035,z) for x,z in points]
+    verts = [(x,y,z) for x,z in points] + [(x,y+depth,z) for x,z in points]
     n = len(points)
     faces = [tuple(reversed(range(n))), tuple(range(n,2*n))]
     faces.extend((i,(i+1)%n,(i+1)%n+n,i+n) for i in range(n))
@@ -333,6 +334,118 @@ def continuous_limb(name, start, joint, end, rings, bones, side, stripe=True):
     return obj
 
 
+def tailored_sleeve(name, start, joint, end, bones, side):
+    """Reference sleeve: fitted cap, long edge inlay and angular forearm, all one skin."""
+    start,joint,end=map(Vector,(start,joint,end))
+    pivot=(joint-start).length/((joint-start).length+(end-joint).length)
+    profile=[(-.30,-.50),(.30,-.50),(.50,-.30),(.50,.30),
+             (.30,.50),(-.30,.50),(-.50,.30),(-.50,-.30)]
+    rings=[(0,.60,.66),(.07,.79,.83),(.20,.80,.80),(.215,.78,.78),
+           (.23,.72,.74),(.32,.74,.74),(.44,.75,.74),(.53,.76,.75),
+           (.61,.78,.76),(.66,.79,.76),(.675,.82,.80),
+           (.86,.81,.72),(1,.68,.62)]
+    rings=[(t,w*.90,d*.90) for t,w,d in rings]
+    def surface_point(t,width,depth,x,y,offset=0):
+        # The forearm seam descends along the inner front edge in the concept.
+        slope=max(0,min(1,(t-.53)/.13,(.86-t)/.185))
+        t+=.14*slope*max(0,min(1,(side*x+.30)/.60))
+        center=start.lerp(joint,t/pivot) if t<=pivot else joint.lerp(end,(t-pivot)/(1-pivot))
+        blend=max(0,min(1,(t-pivot+.17)/.34))
+        blend=blend*blend*(3-2*blend)
+        rotation=segment_rotation((joint-start).normalized().lerp((end-joint).normalized(),blend))
+        return center+rotation @ Vector((width*x,depth*y-offset,0)),blend
+    verts=[]
+    weights=[]
+    for t,width,depth in rings:
+        for x,y in profile:
+            point,blend=surface_point(t,width,depth,x,y)
+            verts.append(point)
+            weights.append(blend)
+    faces=[tuple(reversed(range(8)))]
+    indices=[0]
+    outer=7 if side==1 else 1
+    for row in range(len(rings)-1):
+        t=rings[row][0]
+        for j in range(8):
+            a=row*8+j
+            b=row*8+(j+1)%8
+            c=(row+1)*8+(j+1)%8
+            d=(row+1)*8+j
+            accented=(j==outer and .215<=t<.66) or (t in (.20,.66) and j in (0,outer))
+            # The shoulder crown has a coloured bevel, with a dark broad front panel.
+            material_index=3 if accented else (4 if t<.20 and j==outer else (1 if j==0 else 0))
+            if row in (10,11) and j==0:
+                faces.extend([(a,b,c),(a,c,d)])
+                indices.extend([material_index,2 if row==11 else material_index])
+            else:
+                faces.append((a,b,c,d))
+                indices.append(material_index)
+    faces.append(tuple(range((len(rings)-1)*8,len(rings)*8)))
+    indices.append(0)
+    obj=mesh(name,verts,faces,cloth)
+    for mat in [cloth_dark,cloth_light,light_pink,pink]:
+        obj.data.materials.append(mat)
+    for face,index in zip(obj.data.polygons,indices):
+        face.material_index=index
+    deform_bindings.append((obj,bones,weights))
+    # The reference's front panel steps inward beneath the shoulder. Split it at
+    # the same stations as the skin so the notch follows the elbow deformation.
+    panel_verts=[]
+    panel_weights=[]
+    stations=[r for r in rings if .215<=r[0]<=.66]
+    for t,width,depth in stations:
+        for u in [-side*.30,0,side*.30]:
+            point,blend=surface_point(t,width,depth,u,-.5,.025)
+            panel_verts.append(point)
+            panel_weights.append(blend)
+    panel_faces=[]
+    for row in range(len(stations)-1):
+        for col in range(2 if stations[row][0]<.32 else 1):
+            a=row*3+col
+            face=(a,a+1,a+4,a+3)
+            panel_faces.append(face if side==1 else tuple(reversed(face)))
+    used=sorted({v for face in panel_faces for v in face})
+    remap={old:new for new,old in enumerate(used)}
+    panel_verts=[panel_verts[i] for i in used]
+    panel_weights=[panel_weights[i] for i in used]
+    panel_faces=[tuple(remap[v] for v in face) for face in panel_faces]
+    front=mesh('Sleeve / stepped panel.'+name.rsplit('.',1)[1],panel_verts,panel_faces,cloth_light)
+    deform_bindings.append((front,bones,panel_weights))
+    return obj
+
+
+def tailored_coat():
+    """Elliptical jacket with a fitted waist and flared skirt, under a broad front placket."""
+    profile=[(.5*cos(-pi/2+j*pi/6),.5*sin(-pi/2+j*pi/6)) for j in range(12)]
+    rings=[(2.18,2.13,1.10),(2.30,2.15,1.12),(2.62,1.95,1.05),
+           (3.03,1.78,.99),(3.48,1.97,1.10),(3.78,1.91,.99),
+           (3.94,1.54,.86)]
+    verts=[(x*w,y*d,z) for z,w,d in rings for x,y in profile]
+    faces=[tuple(reversed(range(12)))]
+    for row in range(len(rings)-1):
+        for j in range(12):
+            a=row*12+j
+            b=row*12+(j+1)%12
+            c=(row+1)*12+(j+1)%12
+            d=(row+1)*12+j
+            if j in (1,9,10) and row in (1,3):
+                faces.extend([(a,b,c),(a,c,d)])
+            else:
+                faces.append((a,b,c,d))
+    faces.append(tuple(range((len(rings)-1)*12,len(rings)*12)))
+    obj=mesh('Jacket / torso',verts,faces,cloth,'torso')
+    return obj
+
+
+def hollow_collar():
+    """Flared elliptical collar with a real opening around the neck."""
+    rings=[(1.63,.91,3.98),(1.96,1.10,4.23),(1.62,.76,4.23),(1.28,.59,3.98)]
+    verts=[(w*.5*cos(2*pi*j/12),d*.5*sin(2*pi*j/12),z) for w,d,z in rings for j in range(12)]
+    faces=[(row*12+j,row*12+(j+1)%12,((row+1)%4)*12+(j+1)%12,((row+1)%4)*12+j)
+           for row in range(4) for j in range(12)]
+    return mesh('Collar / raised band',verts,faces,shell,'torso',.008)
+
+
 def cylinder(name, center, radius, depth, mat, bone, axis='Y', vertices=12):
     bpy.ops.mesh.primitive_cylinder_add(vertices=vertices, radius=radius, depth=depth, location=center)
     obj=bpy.context.object
@@ -371,8 +484,8 @@ bone('torso',(0,0,2.56),(0,0,3.85),'pelvis')
 bone('head',(0,0,4.12),(0,0,5.65),'torso')
 arm_points={}
 for side,s in [('L',1),('R',-1)]:
-    shoulder=(s*1.10,0,3.78)
-    elbow=(s*1.72,0,3.08)
+    shoulder=(s*.85,0,3.78)
+    elbow=(s*1.57,0,3.08)
     wrist=(s*2.18,-.015,2.48)
     palm=(s*2.35,-.015,2.16)
     arm_points[side]=(shoulder,elbow,wrist,palm)
@@ -405,10 +518,10 @@ for pbone in rig.pose.bones:
 
 # The gradients belong to the sloped housing itself, with no raised crown patch.
 monitor_head()
-box('Screen / glass',(0,-.59,5.31),(2.32,.07,1.48),screen_mat,.018,'head')
+box('Screen / glass',(0,-.59,5.31),(2.20,.07,1.51),screen_mat,.018,'head')
 for s in [-1,1]:
     for z in [5.0,5.16,5.32]:
-        box('Head / rear vent',(s*.87,1.195,z),(.54,.025,.045),rubber,.008,'head')
+        box('Head / rear vent',(s*.72,1.015,z),(.45,.025,.045),rubber,.008,'head')
 
 # Headset on Logan's left; faceted ear cup and rectangular antenna.
 box('Headset / mount',(1.43,.02,5.10),(.28,.65,.89),rubber,.09,'head')
@@ -416,8 +529,8 @@ box('Headset / pink gasket',(1.59,-.015,5.10),(.18,.72,.88),pink,.06,'head')
 box('Headset / ear cup',(1.70,-.015,5.10),(.12,.65,.78),shell,.06,'head')
 box('Headset / glowing outer pixel',(1.766,-.02,5.10),(.015,.25,.30),light_pink,.006,'head')
 box('Headset / antenna socket',(1.52,.12,5.65),(.25,.26,.16),rubber,.025,'head')
-box('Headset / antenna',(1.52,.12,5.99),(.12,.14,.62),shell,.018,'head')
-box('Headset / antenna lamp',(1.52,.12,6.34),(.23,.23,.24),light_pink,.012,'head')
+box('Headset / antenna',(1.52,.12,5.86),(.12,.14,.30),shell,.018,'head')
+box('Headset / antenna lamp',(1.52,.12,6.08),(.23,.23,.24),light_pink,.012,'head')
 
 # Each eye group can blink about its own centre, keeping its square highlight attached.
 eye_objects=[]
@@ -433,7 +546,7 @@ mouth_verts=[(-.25,-.659,4.94)]
 for i in range(1,24):
     t=i/24
     top=4.94+.105*t-.07*sin(pi*t)
-    mouth_verts.extend([(-.25+.5*t,-.659,top),(-.25+.5*t,-.659,top-.05*sin(pi*t))])
+    mouth_verts.extend([(-.25+.5*t,-.659,top),(-.25+.5*t,-.659,top-.075*sin(pi*t))])
 mouth_verts.append((.25,-.659,5.045))
 mouth_faces=[(0,1,2)]
 mouth_faces.extend((1+i*2,3+i*2,4+i*2,2+i*2) for i in range(22))
@@ -442,19 +555,16 @@ mesh('Face / smirk',mouth_verts,mouth_faces,black,'head')
 
 # Neck and jacket: fitted torso, broad raised collar, hem, lapels and glowing pockets.
 cylinder('Neck / swivel',(0,0,4.18),.35,.34,rubber,'head','Z')
-faceted_segment('Jacket / torso',(0,0,2.19),(0,0,3.88),
-                [(0,2.28,1.09),(.12,2.25,1.08),(.57,1.88,.95),(1,2.04,.97)],'torso')
+tailored_coat()
 box('Pelvis / waist joint',(0,0,2.20),(1.39,.71,.40),rubber,.10,'pelvis')
-faceted_segment('Collar / raised band',(0,0,3.89),(0,0,4.23),
-                [(0,1.54,.91),(.40,1.98,1.12),(1,2.10,1.18)],'torso',shell)
-box('Collar / gradient inset',(.43,-.565,4.08),(.37,.008,.32),trim_gradient,.002,'torso')
-panel('Jacket / left lapel',[(-.91,3.83),(-.54,3.83),(-.30,3.18),(-.60,3.35)],-.535,edge,'torso')
-panel('Jacket / right lapel',[(.91,3.83),(.54,3.83),(.30,3.18),(.60,3.35)],-.535,edge,'torso')
-panel('Jacket / centre placket',[(-.44,2.16),(.44,2.16),(.36,3.88),(-.36,3.83)],-.60,cloth_dark,'torso')
-box('Jacket / hem',(0,-.015,2.20),(2.29,1.08,.12),shell,.025,'torso')
+hollow_collar()
+box('Collar / gradient inset',(.43,-.565,4.105),(.32,.008,.24),trim_gradient,.002,'torso')
+panel('Jacket / centre placket',[(-.49,2.16),(.49,2.16),(.46,3.88),(-.43,3.83)],-.60,cloth_dark,'torso')
+faceted_segment('Jacket / hem',(0,0,2.15),(0,0,2.29),
+                [(0,2.14,1.08),(1,2.15,1.10)],'torso',cloth)
 for s,side in [(-1,'R'),(1,'L')]:
     pts=[(s*.69,2.36),(s*1.02,2.40),(s*.81,3.15),(s*.55,3.04)]
-    panel('Pocket / housing.'+side,pts,-.59,shell,'torso',.028)
+    panel('Pocket / housing.'+side,pts,-.59,shell,'torso',.028,.20)
     pts=[(s*.72,2.49),(s*.91,2.52),(s*.76,3.00),(s*.60,2.94)]
     panel('Pocket / inlay.'+side,pts,-.625,light_pink,'torso',.005)
     pts=[(s*.55,3.01),(s*.86,3.10),(s*.82,3.23),(s*.52,3.12)]
@@ -467,17 +577,16 @@ links=gradient.node_tree.links
 coord=nodes.new('ShaderNodeTexCoord')
 separate=nodes.new('ShaderNodeSeparateXYZ')
 ramp=nodes.new('ShaderNodeValToRGB')
-ramp.color_ramp.elements[0].color=(1,.04,.82,1)
-ramp.color_ramp.elements[1].color=(.004,.002,.005,1)
+ramp.color_ramp.elements[0].color=(.055,.002,.04,1)
+ramp.color_ramp.elements[1].color=(.65,.012,.52,1)
 links.new(coord.outputs['Generated'],separate.inputs[0])
 links.new(separate.outputs['X'],ramp.inputs[0])
 links.new(ramp.outputs['Color'],nodes.get('Principled BSDF').inputs['Base Color'])
-# Match the original 280x280 SVG's placement within the badge.
-unit=.91/280
-for name,x,z,w,h,mat in [('trail',60,60,80,120,gradient),('stem',140,60,40,120,light_pink),
-                         ('foot trail',100,180,80,40,gradient),('foot pixel',180,180,40,40,light_pink)]:
-    box('Logo / '+name,((x+w/2-140)*unit,-.627,3.47+(140-z-h/2)*unit),
-        (w*unit,.015,h*unit),mat,.001,'torso')
+# Match the concept's two diagonal pixels and their broad fading trail.
+for name,x,z,w,h,mat in [('trail',-.14,3.56,.74,.60,gradient),
+                         ('stem',.10,3.685,.26,.35,light_pink),
+                         ('foot pixel',.36,3.38,.26,.26,light_pink)]:
+    box('Logo / '+name,(x,-.627 if name=='trail' else -.643,z),(w,.015,h),mat,.001,'torso')
 
 # Articulated sleeves, wrist bands, palms and individually jointed digits.
 for side,s in [('L',1),('R',-1)]:
@@ -485,26 +594,13 @@ for side,s in [('L',1),('R',-1)]:
     upper='upper_arm.'+side
     lower='forearm.'+side
     hand='hand.'+side
-    cylinder('Shoulder / swivel.'+side,shoulder,.29,.71,rubber,upper)
-    continuous_limb('Sleeve / continuous.'+side,shoulder,elbow,wrist,
-                    [(0,.71,.80),(.18,.85,.89),(.36,.85,.85),(.48,.83,.82),
-                     (.59,.85,.83),(.74,1.00,.97),(.84,1.05,1.00),
-                     (1,.72,.72)],(upper,lower),s)
-    cap_end=shoulder.lerp(elbow,.52)
-    cap=faceted_segment('Shoulder / fitted cap.'+side,shoulder,cap_end,
-                       [(0,.82,.96),(.24,1.08,1.20),(.93,1.10,1.20),
-                        (1,1.08,1.18)],upper,shell)
-    cap.data.materials.append(pink)
-    for face in cap.data.polygons:
-        t=(face.center-shoulder).dot(cap_end-shoulder)/(cap_end-shoulder).length_squared
-        if t<.24 and face.normal.z>.25:
-            face.material_index=1
+    tailored_sleeve('Sleeve / continuous.'+side,shoulder,elbow,wrist,(upper,lower),s)
     cuff_dir=(wrist-elbow).normalized()
     a=wrist-cuff_dir*.035
     b=wrist+cuff_dir*.20
-    faceted_segment('Cuff / band.'+side,a,b,[(0,.92,.90),(1,.93,.91)],lower,shell)
-    segment_box('Cuff / light.'+side,a+Vector((0,-.467,0))+cuff_dir*.06,
-                b+Vector((0,-.467,0))-cuff_dir*.06,.58,.04,light_pink,lower,.008)
+    faceted_segment('Cuff / band.'+side,a,b,[(0,.69,.68),(1,.70,.69)],lower,shell)
+    segment_box('Cuff / light.'+side,a+Vector((0,-.351,0))+cuff_dir*.06,
+                b+Vector((0,-.351,0))-cuff_dir*.06,.45,.04,light_pink,lower,.008)
     faceted_segment('Hand / palm.'+side,wrist+cuff_dir*.14,palm,
                     [(0,.46,.29),(1,.61,.33)],hand,shell)
     for index in range(1,4):
@@ -550,7 +646,7 @@ for side,s in [('L',1),('R',-1)]:
 def reference_proportions(point, is_head=False):
     p=Vector(point)
     if is_head:
-        return Vector((p.x*.95,p.y,5.273+(p.z-4.3)*.9))
+        return Vector((p.x*.82,p.y*.94,5.50+(p.z-4.3)*.80))
     p.x*=1.05
     p.y*=1.20
     if p.z<=.85:
@@ -558,11 +654,11 @@ def reference_proportions(point, is_head=False):
     if p.z<2.2:
         p.z=.85+(p.z-.85)*(2.9-.85)/(2.2-.85)
     elif p.z<4.3:
-        p.z=2.9+(p.z-2.2)*1.13
+        p.z=2.9+(p.z-2.2)*1.28
     else:
         p.x*=.9
         p.y*=.9
-        p.z=5.273+(p.z-4.3)*.9
+        p.z=5.50+(p.z-4.3)*.80
     return p
 
 
@@ -614,7 +710,7 @@ for side,eye,glint in eye_objects:
         variable.targets[0].id=rig
         variable.targets[0].data_path=f'["blink_{side}"]'
     driver=glint.driver_add('location',2).driver
-    driver.expression=f'{reference_proportions((0,0,5.27)).z} + {0.13*.9} * (1-blink)'
+    driver.expression=f'{reference_proportions((0,0,5.27),True).z} + {0.13*.80} * (1-blink)'
     variable=driver.variables.new()
     variable.name='blink'
     variable.targets[0].id=rig
@@ -684,8 +780,8 @@ def area(name,position,energy,color,size,target=(0,0,3.2)):
 
 area('Studio / key softbox',(-4,-6,9),1000,(1,.93,.96),5)
 area('Studio / fill softbox',(5,-3,5),500,(.79,.85,1),4)
-area('Studio / magenta rim',(3,3,6),350,(1,.015,.75),3)
-area('Studio / crown',(-3,1,9),200,(1,.025,.8),3)
+area('Studio / magenta rim',(3,3,6),80,(1,.015,.75),3)
+area('Studio / crown',(-3,1,9),130,(1,.025,.8),3)
 camera_data=bpy.data.cameras.new('Logan · portrait camera')
 camera=bpy.data.objects.new('Camera / portrait',camera_data)
 studio.objects.link(camera)
@@ -734,7 +830,8 @@ scene.view_layers[0].update_render_passes()
 glow=compositor.nodes.new('CompositorNodeGlare')
 glow.inputs['Type'].default_value='Fog Glow'
 glow.inputs['Quality'].default_value='High'
-glow.inputs['Threshold'].default_value=.22
+# Keep the neutral studio floor below the optical-glow threshold.
+glow.inputs['Threshold'].default_value=.8
 glow.inputs['Strength'].default_value=.85
 glow.inputs['Size'].default_value=.9
 add=compositor.nodes.new('ShaderNodeMix')
