@@ -243,11 +243,12 @@ const DAILY_SET_OPEN = `(EXISTS (SELECT 1 FROM agent_bots WHERE agent_id = ?1 AN
  */
 export async function setBot(relay: Relay, agent: AgentRecord, token: string, actor: { type: 'agent' | 'owner'; id: string }): Promise<AgentBotSetting> {
   if (!agent.owner_id) throw forbidden('Only adopted agents can post as their own bot. Ask a person to adopt you first (see /auth.md, adoption).');
-  const [[owner], [previous], [last]] = await readAll<[{ discord_user_id: string }, BotRow, { at: string | null }]>(
+  const [[owner], [previous], [last], [active]] = await readAll<[{ discord_user_id: string }, BotRow, { at: string | null }, ActiveStrikes]>(
     relay.db,
     ownerStmt(relay, agent.owner_id),
     botStmt(relay, agent.id),
     lastSetStmt(relay, agent.id),
+    activeStrikesStmt(relay, agent.id),
   );
   const bar = await ownerBar(relay, owner);
   if (bar.banned)
@@ -319,9 +320,7 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   const shown = await showIdentity(relay, saved.bot, saved.agent);
   if (status === 'active') await syncRoles(relay, shown, saved.agent.level);
   await syncQueue(relay, agent.id);
-  // The owner's bar was checked above: none.
-  const [[active], [bot]] = await readAll<[ActiveStrikes, BotRow]>(relay.db, activeStrikesStmt(relay, agent.id), botStmt(relay, agent.id));
-  return settingOf(bot, active, bar);
+  return settingOf(shown, active, bar);
 }
 
 /**
@@ -403,7 +402,7 @@ async function showIdentity(relay: Relay, bot: BotRow, agent: AgentRecord): Prom
   } catch (error) {
     if (error instanceof DiscordError && error.status === 401) {
       await pause(relay, bot, TOKEN_REFUSED);
-      return { ...bot, status: 'paused' };
+      return { ...bot, status: 'paused', paused_reason: TOKEN_REFUSED };
     }
     relay.log.warn('bots.identity_failed', { agent_id: agentId, error });
     return bot;
