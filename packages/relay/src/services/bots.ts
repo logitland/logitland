@@ -316,8 +316,8 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   relay.log.info('bots.set', { agent_id: agent.id, status });
   // A bot this one replaces keeps none of the agent's roles or threads.
   if (previous && previous.bot_user_id !== user.id) await revokeGrants(relay, previous.bot_user_id);
-  await showIdentity(relay, saved.bot, saved.agent);
-  if (status === 'active') await syncBotRoles(relay, agent.id);
+  const shown = await showIdentity(relay, saved.bot, saved.agent);
+  if (status === 'active') await syncRoles(relay, shown, saved.agent.level);
   await syncQueue(relay, agent.id);
   // The owner's bar was checked above: none.
   const [[active], [bot]] = await readAll<[ActiveStrikes, BotRow]>(relay.db, activeStrikesStmt(relay, agent.id), botStmt(relay, agent.id));
@@ -387,12 +387,12 @@ export async function syncIdentity(relay: Relay, agentId: string): Promise<void>
   if (found) await showIdentity(relay, found.bot, found.agent);
 }
 
-/** syncIdentity, for a bot and agent already read. */
-async function showIdentity(relay: Relay, bot: BotRow, agent: AgentRecord): Promise<void> {
-  if (bot.status === 'paused') return;
+/** syncIdentity, for a bot and agent already read. Answers the bot as it now stands: paused if Discord refused its token. */
+async function showIdentity(relay: Relay, bot: BotRow, agent: AgentRecord): Promise<BotRow> {
+  if (bot.status === 'paused') return bot;
   const agentId = agent.id;
   const identity = identityOf(agent);
-  if (bot.identity === identity) return;
+  if (bot.identity === identity) return bot;
   try {
     await (
       await clientOf(relay, bot)
@@ -401,14 +401,18 @@ async function showIdentity(relay: Relay, bot: BotRow, agent: AgentRecord): Prom
       avatar: await avatarData(relay, agent),
     });
   } catch (error) {
-    if (error instanceof DiscordError && error.status === 401) return pause(relay, bot, TOKEN_REFUSED);
+    if (error instanceof DiscordError && error.status === 401) {
+      await pause(relay, bot, TOKEN_REFUSED);
+      return { ...bot, status: 'paused' };
+    }
     relay.log.warn('bots.identity_failed', { agent_id: agentId, error });
-    return;
+    return bot;
   }
   await relay.db
     .prepare('UPDATE agent_bots SET identity = ?, username = ?, updated_at = ? WHERE agent_id = ? AND bot_user_id = ?')
     .bind(identity, agent.name, iso(relay.now()), agentId, bot.bot_user_id)
     .run();
+  return { ...bot, identity, username: agent.name };
 }
 
 const UNKNOWN_CHANNEL = 10003;
@@ -462,9 +466,13 @@ async function syncRolesOf(relay: Relay, botUserId: string, level: number | null
 /** The agent's roles on its bot while the relay posts as it, none otherwise. Called when the agent's level changes. */
 export async function syncBotRoles(relay: Relay, agentId: string): Promise<void> {
   const found = await botOf(relay, agentId);
-  if (!found) return;
-  if (found.bot.status === 'active') await syncRolesOf(relay, found.bot.bot_user_id, found.agent.level);
-  else await revokeGrants(relay, found.bot.bot_user_id);
+  if (found) await syncRoles(relay, found.bot, found.agent.level);
+}
+
+/** syncBotRoles, for a bot already read and its agent's level. */
+async function syncRoles(relay: Relay, bot: BotRow, level: number): Promise<void> {
+  if (bot.status === 'active') await syncRolesOf(relay, bot.bot_user_id, level);
+  else await revokeGrants(relay, bot.bot_user_id);
 }
 
 /**
@@ -596,8 +604,10 @@ async function check(relay: Relay, bot: BotRow): Promise<void> {
       .bind(status, now, status, now, bot.agent_id, bot.bot_user_id),
   ]);
   if (status !== bot.status) relay.log.info('bots.status', { agent_id: bot.agent_id, from: bot.status, to: status });
-  if (found) await showIdentity(relay, found.bot, found.agent);
-  if (status === 'active') await syncBotRoles(relay, bot.agent_id);
+  if (found) {
+    const shown = await showIdentity(relay, found.bot, found.agent);
+    if (status === 'active') await syncRoles(relay, shown, found.agent.level);
+  }
   // Added: the mod queue's message says so and the request is done. Gone from the server again: a new request.
   if (status !== bot.status) await syncQueue(relay, bot.agent_id);
 }
