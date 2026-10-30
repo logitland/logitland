@@ -4,7 +4,7 @@ Run after refine-jacket.py. Removes the buried sleeve caps and torso armhole
 faces, bridges their boundary loops, and retains blended elbow skinning.
 """
 from pathlib import Path
-from math import atan2, pi, sin, cos, radians
+from math import atan2, pi, sin, cos
 
 import bmesh
 import bpy
@@ -15,6 +15,12 @@ scene = bpy.data.scenes['JACKET STUDY']
 scene.frame_set(1)
 torso = bpy.data.objects['Jacket / torso']
 assert not torso.get('continuous_sleeves'), 'Sleeves are already sewn into the torso'
+# Retain the full torso volume when the inward sleeves meet the side panels.
+body_volume = torso.copy()
+body_volume.data = torso.data.copy()
+bpy.context.collection.objects.link(body_volume)
+body_volume.modifiers.clear()
+SLEEVE_INSET = .18
 bm = bmesh.new()
 bm.from_mesh(torso.data)
 deform = bm.verts.layers.deform.verify()
@@ -88,7 +94,7 @@ for side, sign, tag in [('L',1,1),('R',-1,2)]:
     points,progress = {},{}
     for v in sleeve.data.vertices:
         p = sleeve.matrix_world @ v.co
-        points[v.index] = p
+        points[v.index] = p - Vector((sign*SLEEVE_INSET,0,0))
         raw = Vector((p.x/1.05,p.y/1.20,(p.z-2.9)/1.28+2.2))
         progress[v.index] = (raw-start).dot(joint-start)/(joint-start).length_squared*pivot
     keep = [f for f in sleeve.data.polygons if all(progress[i]>=.23-1e-5 for i in f.vertices)]
@@ -150,15 +156,41 @@ bm.free()
 torso.data.update()
 torso['continuous_sleeves'] = True
 torso['construction'] = 'Rounded cloth shoulders with shared armhole loops and blended joint weights'
-# Relax the hanging arms toward the body while retaining the waving arm pose.
+# Trim buried cloth where the laterally translated sleeves overlap the body.
+bpy.ops.object.select_all(action='DESELECT')
+torso.select_set(True)
+bpy.context.view_layer.objects.active = torso
+union = torso.modifiers.new('Joined cloth at underarms','BOOLEAN')
+union.operation = 'UNION'
+union.solver = 'EXACT'
+union.use_self = True
+union.object = body_volume
+while torso.modifiers.find(union.name)>0:
+    bpy.ops.object.modifier_move_up(modifier=union.name)
+bpy.ops.object.modifier_apply(modifier=union.name)
+bpy.data.objects.remove(body_volume,do_unlink=True)
+bm = bmesh.new()
+bm.from_mesh(torso.data)
+bmesh.ops.remove_doubles(bm,verts=list(bm.verts),dist=1e-5)
+bmesh.ops.dissolve_degenerate(bm,edges=list(bm.edges),dist=1e-6)
+bmesh.ops.recalc_face_normals(bm,faces=list(bm.faces))
+bm.to_mesh(torso.data)
+bm.free()
+
+# Move the arm skeleton and cuffs by the same lateral offset; pose angles stay
+# unchanged, including the neutral arm spread and raised-arm animation.
 rig = bpy.data.objects['LOGAN · Pose me']
-for frame, sides in [(1, [('L',-1),('R',1)]), (40, [('R',1)])]:
-    scene.frame_set(frame)
-    for side, sign in sides:
-        bone = rig.pose.bones['upper_arm.'+side]
-        bone.rotation_euler.z = sign*radians(8)
-        bone.keyframe_insert('rotation_euler',frame=frame,group=bone.name)
-scene.frame_set(1)
+bpy.context.view_layer.objects.active = rig
+rig.select_set(True)
+bpy.ops.object.mode_set(mode='EDIT')
+for side, sign in [('L',1),('R',-1)]:
+    upper = rig.data.edit_bones['upper_arm.'+side]
+    for bone in [upper]+list(upper.children_recursive):
+        bone.head.x -= sign*SLEEVE_INSET
+        bone.tail.x -= sign*SLEEVE_INSET
+bpy.ops.object.mode_set(mode='OBJECT')
+for side, sign in [('L',1),('R',-1)]:
+    bpy.data.objects['Cuff / band.'+side].location.x -= sign*SLEEVE_INSET
 bpy.context.view_layer.update()
 bpy.ops.wm.save_as_mainfile(filepath=str(HERE/'jacket-study.blend'),compress=True)
 print('Built rounded cloth shoulders around the arm joints; removed block caps')
