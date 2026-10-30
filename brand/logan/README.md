@@ -5,6 +5,21 @@ rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
 and the packed full-body concept image. The side and back geometry interpret the
 supplied front reference.
 
+## Isolated jacket study
+
+`jacket-study.blend` contains the torso, collar, sleeves and cuffs, with the
+original materials, logo, pocket hems and continuous sleeve weights. The rig
+retains the neutral and wave poses at frames 1 and 40. Edit this file to refine
+the jacket separately; the full-body master remains independent.
+
+```sh
+blender --background --python-exit-code 1 --python brand/logan/jacket-study.py
+blender --background brand/logan/jacket-study.blend --python-exit-code 1 --python brand/logan/verify.py
+```
+
+The extraction command creates a fresh study from `logan.blend`, replacing any
+existing `jacket-study.blend`. F12 renders its framed three-quarter view.
+
 ## Isolated head study
 
 `head-study.blend` is a separate head-shape study. Its casing is a convex,

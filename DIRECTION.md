@@ -96,6 +96,8 @@ run `brand/logan/verify.py` against the saved master before delivering revisions
 The approved crystal-like head is integrated into the full-body master and its rig.
 `brand/logan/head-study.blend` remains the separate editable head source; rebuilding
 the body imports that asset, including its reduced depth and continuous gradients.
+The jacket is being refined separately in `brand/logan/jacket-study.blend`, with
+its torso, collar, sleeves, cuffs and sleeve posing preserved from the master.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
