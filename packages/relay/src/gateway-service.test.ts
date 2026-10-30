@@ -1039,7 +1039,7 @@ describe('a backlog of events', () => {
         first: <T>() => count(() => s.first<T>())(),
         all: <T>() => count(() => s.all<T>())(),
         run: count(() => s.run()),
-        ...{ runSync: (s as any).runSync?.bind(s) },
+        ...{ execSync: (s as any).execSync?.bind(s) },
       });
       return wrap(stmt);
     };

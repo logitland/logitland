@@ -1,4 +1,5 @@
 import type { Relay } from '../context';
+import { unit } from '../memo';
 import { takeDigests } from './feed';
 import { hintsFor } from './hints';
 import { getAgent } from './identity';
@@ -17,7 +18,11 @@ export type StreamTake =
   | { frames: string[]; /** When to look again (epoch ms): the soonest subscription due later. */ nextDueMs: number | null };
 
 /** What an agent's stream sends now: its due digests, or a reason to close when the agent may no longer read. */
-export async function streamTake(relay: Relay, agentId: string): Promise<StreamTake> {
+export function streamTake(relay: Relay, agentId: string): Promise<StreamTake> {
+  return unit(() => take(relay, agentId));
+}
+
+async function take(relay: Relay, agentId: string): Promise<StreamTake> {
   const agent = await getAgent(relay, agentId).catch(() => null);
   if (!agent || agent.status !== 'active' || !agent.scopes.includes('messages:read'))
     return { close: { code: CLOSE_NOT_ACTIVE, reason: 'This agent can’t receive events now.' } };

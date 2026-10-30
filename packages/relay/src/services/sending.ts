@@ -9,6 +9,7 @@ import {
   type RateLimit,
 } from '@logitland/discord';
 import { iso, type Relay } from '../context';
+import { unit } from '../memo';
 import type { AgentRecord } from '../types';
 import { audit } from './audit';
 import { botClient, readyForThread, syncBotRoles, tokenRefused } from './bots';
@@ -176,7 +177,11 @@ function heldBack(relay: Relay, agent: AgentRecord, settings: Settings): keyof t
  * Everything that can fail without Discord having been asked is read first and the message is claimed last, so a read that
  * throws leaves it `queued` for the next try instead of stranding it in `sending` (where the sweeper would call it uncertain).
  */
-export async function processSend(relay: Relay, messageId: string): Promise<SendResult> {
+export function processSend(relay: Relay, messageId: string): Promise<SendResult> {
+  return unit(() => sendQueued(relay, messageId));
+}
+
+async function sendQueued(relay: Relay, messageId: string): Promise<SendResult> {
   const row = await getRow(relay, messageId);
   if (!row || row.status !== 'queued') return {};
   const agent = await getAgent(relay, row.agent_id);

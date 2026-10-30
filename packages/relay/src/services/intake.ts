@@ -1,6 +1,7 @@
 import type { Author } from '@logitland/contracts';
 import { z } from 'zod';
 import { iso, type Relay, type Stmt } from '../context';
+import { unit } from '../memo';
 import { hmac, sha256 } from '../crypto';
 import { auditStmt } from './audit';
 import { queueDeleted } from './bot-queue';
@@ -215,7 +216,12 @@ export interface IngestResult {
   invalid: number;
 }
 
-export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestResult> {
+/** Records a batch of Gateway or backfill events, as one unit of work. */
+export function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestResult> {
+  return unit(() => ingestBatch(relay, batch));
+}
+
+async function ingestBatch(relay: Relay, batch: IntakeBatch): Promise<IngestResult> {
   const { source, events: raw, history } = IntakeBatch.parse(batch);
   const total: IngestResult = { recorded: 0, ignored: 0, invalid: 0 };
   const events: IntakeEvent[] = [];

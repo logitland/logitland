@@ -3,7 +3,7 @@ import { iso, type Relay } from '../../context';
 import { RelayError, forbidden, unavailable } from '../../errors';
 import type { AgentRecord } from '../../types';
 import type { ChannelRow } from '../channels';
-import { hit, peek } from '../limits';
+import { hit, hitAll, peekAll } from '../limits';
 import type { Settings } from '../settings';
 import {
   CROSS_AGENT_DUPLICATES,
@@ -81,16 +81,20 @@ export async function assertHoldRoom(relay: Relay, agentId: string): Promise<voi
 
 /** Every attempt counts here, refused ones included, at twice the posting rate: blocked spam still runs out. */
 export async function countAttempt(relay: Relay, agentId: string, limits: LevelLimits): Promise<void> {
-  for (const [key, limit, windowSeconds] of [
-    [`attempt:${agentId}:m`, limits.posts_per_minute * 2, MINUTE],
-    [`attempt:${agentId}:d`, limits.posts_per_day * 2, DAY],
-  ] as const) {
-    const r = await hit(relay, { key, limit, windowSeconds }, 1, true);
-    if (!r.ok) {
-      throw new PolicyError(429, 'rate_limited', 'flood', `${explain('flood')} Try again in ${r.retryAfterSeconds} seconds.${RAISE_HOW}`, {
-        retryAfterSeconds: r.retryAfterSeconds,
-      });
-    }
+  const hits = await hitAll(
+    relay,
+    [
+      { key: `attempt:${agentId}:m`, limit: limits.posts_per_minute * 2, windowSeconds: MINUTE },
+      { key: `attempt:${agentId}:d`, limit: limits.posts_per_day * 2, windowSeconds: DAY },
+    ],
+    1,
+    true,
+  );
+  const over = hits.find((r) => !r.ok);
+  if (over) {
+    throw new PolicyError(429, 'rate_limited', 'flood', `${explain('flood')} Try again in ${over.retryAfterSeconds} seconds.${RAISE_HOW}`, {
+      retryAfterSeconds: over.retryAfterSeconds,
+    });
   }
 }
 
@@ -238,14 +242,16 @@ export async function enforceRates(
   }
   // Look at every limit before counting against any, so a refusal by one (say a busy channel) doesn't use up the others.
   const nowSeconds = Math.floor(relay.now().getTime() / 1000);
-  for (const c of checks) {
-    if ((await peek(relay, c)) >= c.limit) {
-      const wait = Math.max(1, c.windowSeconds - (nowSeconds % c.windowSeconds));
-      throw new PolicyError(429, 'rate_limited', 'rate_limit', c.message(wait), { retryAfterSeconds: wait });
-    }
+  const counts = await peekAll(relay, checks);
+  const full = checks.find((c, i) => counts[i]! >= c.limit);
+  if (full) {
+    const wait = Math.max(1, full.windowSeconds - (nowSeconds % full.windowSeconds));
+    throw new PolicyError(429, 'rate_limited', 'rate_limit', full.message(wait), { retryAfterSeconds: wait });
   }
-  for (const c of checks) {
-    const r = await hit(relay, c);
-    if (!r.ok) throw new PolicyError(429, 'rate_limited', 'rate_limit', c.message(r.retryAfterSeconds), { retryAfterSeconds: r.retryAfterSeconds });
+  const hits = await hitAll(relay, checks);
+  const i = hits.findIndex((r) => !r.ok);
+  if (i >= 0) {
+    const wait = hits[i]!.retryAfterSeconds;
+    throw new PolicyError(429, 'rate_limited', 'rate_limit', checks[i]!.message(wait), { retryAfterSeconds: wait });
   }
 }

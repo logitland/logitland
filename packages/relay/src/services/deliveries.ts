@@ -1,6 +1,7 @@
 import { LIMITS, newId, type DeliveryDetail, type DeliveryStatus } from '@logitland/contracts';
 import { signHeaders } from '@logitland/webhooks';
 import { iso, type DeliveryMessage, type Relay, type Stmt } from '../context';
+import { unit } from '../memo';
 import { audit } from './audit';
 import { DestinationRefused, preflightDestination } from './destinations';
 import { refreshDigest, takeDigests } from './feed';
@@ -462,10 +463,13 @@ export async function replayDelivery(relay: Relay, deliveryId: string, adminId?:
  * handled on its own: one that throws is retried after 60 seconds. A delivery that wants a retry is handed back to the
  * Queue with its delay. While deliveries are paused the messages are acknowledged; the cron scan sends everything later.
  */
-export async function handleDeliveryBatch(
-  relay: Relay,
-  messages: readonly { body: unknown; ack(): void; retry(options?: { delaySeconds?: number }): void }[],
-): Promise<AttemptResult[]> {
+export function handleDeliveryBatch(relay: Relay, messages: readonly QueuedMessage[]): Promise<AttemptResult[]> {
+  return unit(() => deliverBatch(relay, messages));
+}
+
+type QueuedMessage = { body: unknown; ack(): void; retry(options?: { delaySeconds?: number }): void };
+
+async function deliverBatch(relay: Relay, messages: readonly QueuedMessage[]): Promise<AttemptResult[]> {
   const out: AttemptResult[] = [];
   if (await deliveriesPaused(relay)) {
     const ids = messages.map((m) => (m.body as { delivery_id?: unknown } | null)?.delivery_id).filter((id): id is string => typeof id === 'string');

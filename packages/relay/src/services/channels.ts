@@ -2,6 +2,7 @@ import type { AgentChannel, Channel } from '@logitland/contracts';
 import { parseWebhookUrl, type Role, type WebhookRef } from '@logitland/discord';
 import type { Relay } from '../context';
 import { forbidden, notFound } from '../errors';
+import { once } from '../memo';
 import { NO_ACCESS, accessIn, agentRoleIds, anyAgentRoleIds, type Access, type AgentRoles } from './access';
 import { listLevels } from './levels';
 import { getSettings } from './settings';
@@ -66,10 +67,13 @@ export async function agentRoles(relay: Relay): Promise<AgentRoles> {
   return { agents: settings.agents_role_id, levels };
 }
 
-export async function guildRoles(relay: Relay): Promise<Role[]> {
-  const { results } = await relay.db.prepare('SELECT id, permissions FROM guild_roles').all<Role>();
-  return results;
+/** Every role's permissions, read once per unit of work. */
+export function guildRoles(relay: Relay): Promise<Role[]> {
+  return once(GUILD_ROLES, async () => (await relay.db.prepare('SELECT id, permissions FROM guild_roles').all<Role>()).results);
 }
+
+/** What `guildRoles` keeps; a write to guild_roles forgets it. */
+export const GUILD_ROLES = 'guild_roles';
 
 /** Who is asking: an agent's level decides which roles it counts as holding. */
 export type Viewer = { level: number };

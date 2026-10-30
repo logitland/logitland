@@ -1,4 +1,6 @@
 import { iso, type Relay, type Stmt } from '../context';
+import { forget } from '../memo';
+import { GUILD_ROLES } from './channels';
 import { commitPlan, planEvent, type PlannedEvent } from './events';
 import { refreshShowcase } from './showcase';
 import type { IntakeEvent } from './intake';
@@ -112,6 +114,7 @@ export async function applyGuildEvents(relay: Relay, events: GuildEvent[]): Prom
     );
   }
   await commitPlan(relay, stmts, planned);
+  forget(GUILD_ROLES);
   if (planned.length) relay.log.info('guild.channels_deleted', { count: planned.length });
   // Which channels every agent can read may have changed, and the home page shows only those.
   await refreshShowcase(relay);
