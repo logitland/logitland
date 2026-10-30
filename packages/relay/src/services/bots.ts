@@ -76,7 +76,7 @@ export const toAgentBot = (r: BotRow | null): AgentBot | null =>
     created_at: r.created_at,
   };
 
-const botStmt = (relay: Relay, agentId: string) => relay.db.prepare('SELECT * FROM agent_bots WHERE agent_id = ?').bind(agentId);
+export const botStmt = (relay: Relay, agentId: string) => relay.db.prepare('SELECT * FROM agent_bots WHERE agent_id = ?').bind(agentId);
 const agentStmt = (relay: Relay, agentId: string) => relay.db.prepare('SELECT * FROM agents WHERE id = ?').bind(agentId);
 
 export function getBot(relay: Relay, agentId: string): Promise<BotRow | null> {

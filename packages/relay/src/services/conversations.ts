@@ -1,14 +1,14 @@
 import type { AdminConversationsPage, Conversation, ConversationList, ConversationPage, OpenConversationRequest } from '@logitland/contracts';
 import { DiscordError, RateLimitedError } from '@logitland/discord';
-import { iso, type Relay, type Stmt } from '../context';
+import { iso, readAll, type Relay, type Stmt } from '../context';
 import { conflict, forbidden, invalid, notFound, rateLimited, unavailable } from '../errors';
 import type { AgentRecord } from '../types';
 import { auditStmt } from './audit';
-import { getBot, revokeGrants } from './bots';
+import { botStmt, revokeGrants, type BotRow } from './bots';
 import { accessFor, getChannel, usableChannel, type ChannelRow } from './channels';
 import { readPage } from './conversation';
 import { commitPlan, planEvent, placeholders, type PlannedEvent } from './events';
-import { getAgent } from './identity';
+import { toAgentRecord, type AgentRow } from './identity';
 import { standingOf } from './levels';
 import { enforce } from './limits';
 
@@ -55,15 +55,16 @@ async function getConversation(relay: Relay, id: string): Promise<ConversationRo
 }
 
 type Membership = 'invited' | 'joined' | 'left' | null;
+type MembershipRow = { joined_at: string | null; left_at: string | null };
+
+const membershipStmt = (relay: Relay, threadId: string, agentId: string) =>
+  relay.db.prepare('SELECT joined_at, left_at FROM conversation_members WHERE thread_id = ? AND agent_id = ?').bind(threadId, agentId);
+
+const membershipOf = (row: MembershipRow | null | undefined): Membership => (row ? (row.left_at ? 'left' : row.joined_at ? 'joined' : 'invited') : null);
 
 /** Where an agent stands in a private conversation; null when it was never in it. */
 export async function membership(relay: Relay, threadId: string, agentId: string): Promise<Membership> {
-  const row = await relay.db
-    .prepare('SELECT joined_at, left_at FROM conversation_members WHERE thread_id = ? AND agent_id = ?')
-    .bind(threadId, agentId)
-    .first<{ joined_at: string | null; left_at: string | null }>();
-  if (!row) return null;
-  return row.left_at ? 'left' : row.joined_at ? 'joined' : 'invited';
+  return membershipOf(await membershipStmt(relay, threadId, agentId).first<MembershipRow>());
 }
 
 /** Whether a thread is a private conversation. */
@@ -71,11 +72,23 @@ export async function isPrivate(relay: Relay, threadId: string): Promise<boolean
   return Boolean(await relay.db.prepare('SELECT 1 AS x FROM threads WHERE id = ? AND private = 1').bind(threadId).first());
 }
 
-/** The conversation, if this agent is in it as `need` says: anything else looks like a conversation that doesn't exist. */
-async function conversationFor(relay: Relay, agentId: string, id: string, need: Membership[]): Promise<ConversationRow> {
-  const row = await getConversation(relay, id);
-  if (!row || !need.includes(await membership(relay, row.id, agentId))) throw notFound(MISSING);
-  return row;
+/**
+ * The conversation and where this agent stands in it, if that is as `need` says: anything else looks like a conversation that
+ * doesn't exist.
+ */
+async function conversationFor(relay: Relay, agentId: string, id: string, need: Membership[]): Promise<ConversationRow & { membership: Membership }> {
+  const row = /^\d{17,20}$/.test(id)
+    ? await relay.db
+        .prepare(
+          `SELECT ${CONVERSATION_COLUMNS}, m.thread_id IS NOT NULL AS member, m.joined_at, m.left_at FROM threads t JOIN channels ch ON ch.id = t.parent_id
+           LEFT JOIN conversation_members m ON m.thread_id = t.id AND m.agent_id = ? WHERE t.id = ? AND t.private = 1 AND t.deleted_at IS NULL`,
+        )
+        .bind(agentId, id)
+        .first<ConversationRow & MembershipRow & { member: number }>()
+    : null;
+  const standing = row?.member ? membershipOf(row) : null;
+  if (!row || !need.includes(standing)) throw notFound(MISSING);
+  return { ...row, membership: standing };
 }
 
 async function present(relay: Relay, rows: ConversationRow[]): Promise<Conversation[]> {
@@ -129,23 +142,27 @@ export async function countInvitations(relay: Relay, agentId: string): Promise<n
   );
 }
 
-/** A level caps conversations the agent started and hasn't left, excluding deleted threads. */
-async function assertRoom(relay: Relay, agent: AgentRecord): Promise<void> {
-  const max = (await standingOf(relay, agent)).limits.private_conversations;
-  const row = await relay.db
+/** Conversations the agent started and hasn't left, excluding deleted threads. */
+const startedStmt = (relay: Relay, agentId: string) =>
+  relay.db
     .prepare(
       'SELECT COUNT(*) AS n FROM conversation_members m JOIN threads t ON t.id = m.thread_id WHERE m.agent_id = ? AND t.creator_agent_id = m.agent_id AND m.joined_at IS NOT NULL AND m.left_at IS NULL AND t.deleted_at IS NULL',
     )
-    .bind(agent.id)
-    .first<{ n: number }>();
-  if ((row?.n ?? 0) >= max)
+    .bind(agentId);
+
+/** A level caps the conversations the agent started and hasn't left (startedStmt's row). */
+async function assertRoom(relay: Relay, agent: AgentRecord, started: { n: number } | undefined): Promise<void> {
+  const max = (await standingOf(relay, agent)).limits.private_conversations;
+  if ((started?.n ?? 0) >= max)
     throw conflict(`Your level allows ${max} private conversations you started to stay open. Leave one first (POST /v1/conversations/:id/leave).`);
 }
 
-/** Who may be invited: an active agent that can read the conversation's channel. */
-async function invitee(relay: Relay, inviter: AgentRecord, agentId: string, channel: ChannelRow | null): Promise<AgentRecord> {
+const agentsStmt = (relay: Relay, ids: string[]) => relay.db.prepare('SELECT * FROM agents WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids));
+
+/** Who may be invited: an active agent (`row`, read by agentsStmt) that can read the conversation's channel. */
+async function invitee(relay: Relay, inviter: AgentRecord, agentId: string, row: AgentRow | undefined, channel: ChannelRow | null): Promise<AgentRecord> {
   if (agentId === inviter.id) throw invalid('You can’t invite yourself.');
-  const agent = await getAgent(relay, agentId).catch(() => null);
+  const agent = row ? toAgentRecord(row) : null;
   if (!agent || agent.kind !== 'agent' || agent.deleted_at) throw notFound(`There is no agent ${agentId}.`);
   if (agent.status !== 'active') throw conflict(`${agent.name} can’t be invited right now.`);
   if (!channel || !(await accessFor(relay, agent))(channel).read) throw forbidden(`${agent.name} can’t read the channel this conversation is in.`);
@@ -211,18 +228,15 @@ function discordFailure(err: unknown, what: string): never {
   throw unavailable(`Discord didn’t answer, so ${what}. Try again in a minute.`, 60);
 }
 
-/** A thread Discord archived (a quiet week, or the last agent leaving) is opened again before its members change or someone posts. */
-export async function reopen(relay: Relay, threadId: string): Promise<void> {
-  const row = await relay.db.prepare('SELECT archived FROM threads WHERE id = ? AND private = 1').bind(threadId).first<{ archived: number }>();
-  if (!row?.archived) return;
+/**
+ * A thread Discord archived (a quiet week, or the last agent leaving) is opened again before its members change or someone
+ * posts. `archived` is the private thread's flag, read just before.
+ */
+async function reopen(relay: Relay, threadId: string, archived: number | null): Promise<void> {
+  if (!archived) return;
   await relay.discord.setThreadArchived(threadId, false);
   await relay.db.prepare('UPDATE threads SET archived = 0, updated_at = ? WHERE id = ?').bind(iso(relay.now()), threadId).run();
 }
-
-const ownerDiscordId = async (relay: Relay, ownerId: string | null) =>
-  ownerId
-    ? ((await relay.db.prepare('SELECT discord_user_id FROM owners WHERE id = ?').bind(ownerId).first<{ discord_user_id: string }>())?.discord_user_id ?? null)
-    : null;
 
 /**
  * Brings the thread's people in line with a member joining (`add`) or leaving: a joined agent's owner is added, and an owner
@@ -230,19 +244,23 @@ const ownerDiscordId = async (relay: Relay, ownerId: string | null) =>
  * relays only owners of joined members whatever Discord's member list says.
  */
 async function syncOwner(relay: Relay, threadId: string, agent: AgentRecord, add: boolean): Promise<void> {
-  const person = await ownerDiscordId(relay, agent.owner_id);
-  if (!person) return;
-  if (!add) {
-    const another = await relay.db
-      .prepare(
-        'SELECT 1 AS x FROM conversation_members m JOIN agents a ON a.id = m.agent_id WHERE m.thread_id = ? AND a.owner_id = ? AND m.joined_at IS NOT NULL AND m.left_at IS NULL',
-      )
-      .bind(threadId, agent.owner_id)
-      .first();
-    if (another) return;
-  }
+  if (!agent.owner_id) return;
+  // The owner's Discord account, whether another of their agents is still in, and whether the thread is archived.
+  const owner = await relay.db
+    .prepare(
+      `SELECT o.discord_user_id,
+         EXISTS (SELECT 1 FROM conversation_members m JOIN agents a ON a.id = m.agent_id
+           WHERE m.thread_id = ?1 AND a.owner_id = o.id AND m.joined_at IS NOT NULL AND m.left_at IS NULL) AS another,
+         (SELECT archived FROM threads WHERE id = ?1 AND private = 1) AS archived
+       FROM owners o WHERE o.id = ?2`,
+    )
+    .bind(threadId, agent.owner_id)
+    .first<{ discord_user_id: string; another: number; archived: number | null }>();
+  if (!owner) return;
+  const person = owner.discord_user_id;
+  if (!add && owner.another) return;
   try {
-    await reopen(relay, threadId);
+    await reopen(relay, threadId, owner.archived);
     if (add) await relay.discord.addThreadMember(threadId, person);
     else await relay.discord.removeThreadMember(threadId, person);
   } catch (error) {
@@ -260,9 +278,11 @@ export async function openConversation(relay: Relay, agent: AgentRecord, req: Op
   const { row: channel, access } = await usableChannel(relay, agent, req.channel_id, 'send');
   if (channel.type !== 'text') throw invalid('Private conversations open under a text channel. Pick one from GET /v1/channels.');
   if (!access.postInThreads) throw forbidden('Agents at your level can’t post in this channel’s threads, so you can’t open a conversation here.');
-  await assertRoom(relay, agent);
+  const ids = [...new Set(req.invite)];
+  const [[started], rows] = await readAll<[{ n: number }, AgentRow]>(relay.db, startedStmt(relay, agent.id), agentsStmt(relay, ids));
+  await assertRoom(relay, agent, started);
   const invited: AgentRecord[] = [];
-  for (const id of new Set(req.invite)) invited.push(await invitee(relay, agent, id, channel));
+  for (const id of ids) invited.push(await invitee(relay, agent, id, rows.find((r) => r.id === id), channel));
   await enforce(
     relay,
     [{ key: `conversation:open:${agent.id}:h`, limit: OPENS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
@@ -294,16 +314,17 @@ export async function openConversation(relay: Relay, agent: AgentRecord, req: Op
   );
   relay.log.info('conversation.opened', { thread_id: thread.id, channel_id: channel.id, invited: invited.length });
   await syncOwner(relay, thread.id, agent, true);
-  return (await present(relay, [(await getConversation(relay, thread.id))!]))[0]!;
+  return (await present(relay, [{ ...conv, created_at: now, archived: 0, creator_agent_id: agent.id }]))[0]!;
 }
 
 /** POST /v1/conversations/:id/invites, by a joined member. Inviting someone already invited changes nothing. */
 export async function invite(relay: Relay, agent: AgentRecord, id: string, agentId: string): Promise<Conversation> {
   const conv = await conversationFor(relay, agent.id, id, ['joined']);
-  const already = await membership(relay, conv.id, agentId);
+  const [[row], agents] = await readAll<[MembershipRow, AgentRow]>(relay.db, membershipStmt(relay, conv.id, agentId), agentsStmt(relay, [agentId]));
+  const already = membershipOf(row);
   if (already === 'joined') throw conflict('That agent is already in this conversation.');
   if (already !== 'invited') {
-    const other = await invitee(relay, agent, agentId, await getChannel(relay, conv.parent_id));
+    const other = await invitee(relay, agent, agentId, agents[0], await getChannel(relay, conv.parent_id));
     await enforce(
       relay,
       [{ key: `conversation:invite:${agent.id}:h`, limit: INVITES_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
@@ -317,7 +338,7 @@ export async function invite(relay: Relay, agent: AgentRecord, id: string, agent
 /** POST /v1/conversations/:id/accept. Accepting again changes nothing. */
 export async function accept(relay: Relay, agent: AgentRecord, id: string): Promise<Conversation> {
   const conv = await conversationFor(relay, agent.id, id, ['invited', 'joined']);
-  if ((await membership(relay, conv.id, agent.id)) === 'invited') {
+  if (conv.membership === 'invited') {
     await relay.db.batch([
       relay.db
         .prepare('UPDATE conversation_members SET joined_at = ? WHERE thread_id = ? AND agent_id = ? AND joined_at IS NULL AND left_at IS NULL')
@@ -332,17 +353,17 @@ export async function accept(relay: Relay, agent: AgentRecord, id: string): Prom
 /** POST /v1/conversations/:id/leave, or declining an invitation. The last agent out archives the thread. */
 export async function leave(relay: Relay, agent: AgentRecord, id: string): Promise<void> {
   const conv = await conversationFor(relay, agent.id, id, ['invited', 'joined']);
-  const was = await membership(relay, conv.id, agent.id);
-  await relay.db.batch([
+  const [, , [bot]] = await readAll<[unknown, unknown, BotRow]>(
+    relay.db,
     relay.db
       .prepare('UPDATE conversation_members SET left_at = ? WHERE thread_id = ? AND agent_id = ? AND left_at IS NULL')
       .bind(iso(relay.now()), conv.id, agent.id),
     auditStmt(relay, { actor_type: 'agent', actor_id: agent.id, action: 'conversation.left', target_type: 'conversation', target_id: conv.id }),
-  ]);
-  if (was !== 'joined') return;
+    botStmt(relay, agent.id),
+  );
+  if (conv.membership !== 'joined') return;
   await syncOwner(relay, conv.id, agent, false);
   // The agent's own bot leaves with it (it joined to post here).
-  const bot = await getBot(relay, agent.id);
   if (bot) await revokeGrants(relay, bot.bot_user_id);
   const left = await relay.db
     .prepare('SELECT COUNT(*) AS n FROM conversation_members WHERE thread_id = ? AND joined_at IS NOT NULL AND left_at IS NULL')
