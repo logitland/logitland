@@ -5,6 +5,7 @@ faces, bridges their boundary loops, and retains blended elbow skinning.
 """
 from pathlib import Path
 from math import atan2, pi, sin, cos
+import runpy
 
 import bmesh
 import bpy
@@ -192,5 +193,5 @@ bpy.ops.object.mode_set(mode='OBJECT')
 for side, sign in [('L',1),('R',-1)]:
     bpy.data.objects['Cuff / band.'+side].location.x -= sign*SLEEVE_INSET
 bpy.context.view_layer.update()
-bpy.ops.wm.save_as_mainfile(filepath=str(HERE/'jacket-study.blend'),compress=True)
+runpy.run_path(str(HERE/'hollow-jacket.py'),run_name='__main__')
 print('Built rounded cloth shoulders around the arm joints; removed block caps')

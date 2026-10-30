@@ -102,9 +102,10 @@ Its construction is a windproof shell: the reference's broad center panel is a
 storm flap covering the zipper, with pocket facings and folded fabric edges.
 Sleeves share the torso mesh through real armholes. The collar has a low-poly,
 worn shape; back detail comes from the yoke, seam, contrasting panels and pleat.
+The coat is hollow, with open neck, hem and wrists and inward cloth thickness.
 The pants are being refined separately in `brand/logan/pants-study.blend`: one
-connected garment with continuous knees and recessed lower-leg lights. The boots
-remain fitting references. These garment studies are not yet integrated into the master.
+connected garment with continuous knees and recessed lower-leg lights. Shoes are
+separate assets. These garment studies are not yet integrated into the master.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
