@@ -25,7 +25,7 @@ for obj in list(scene.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
 collection = bpy.data.collections['01 · Logan / meshes']
 
-if kind=='hands':
+if kind=='hands' and not scene.get('approved_hands'):
     # Keep wrist and fingertips fixed while allocating more length to the palm.
     # Move the actual hinges with the shortened digits so curls remain seated.
     bpy.context.view_layer.objects.active = rig
@@ -60,6 +60,9 @@ materials = [material('Extremities · graphite shell', (.025,.028,.037), .25, .4
              material('Extremities · flexible graphite', (.011,.013,.018), .03, .63),
              material('Extremities · edge panels', (.042,.046,.058), .2, .48),
              material('Extremities · inset pink light', (.8,.008,.68), .1, .4, 2.2)]
+if kind=='shoes':
+    materials.extend([material('Boot · molded slate midsole',(.070,.075,.093),.08,.65),
+                      material('Boot · aubergine quarter panels',(.042,.019,.049),.18,.51)])
 
 
 def mesh_object(name, vertices, faces, indices, weights):
@@ -207,75 +210,115 @@ def shoe(side):
     vertices, faces, indices = [], [], []
     # Ring widths/depths preserve the chunky footprint, then retreat over the
     # toe into the ankle. This makes an instep instead of stacked cuboids.
-    rings = [(1.08,1.66,-.20,.065), (1.08,1.66,-.20,.15),
-             (1.06,1.64,-.20,.26), (.98,1.52,-.19,.49),
-             (.83,.83,.025,.82), (.94,.92,.025,.89),
-             (.94,.92,.025,1.04), (.89,.86,.025,1.08)]
+    rings = [(1.12,1.72,-.20,.065), (1.18,1.80,-.20,.15),
+             (1.14,1.74,-.20,.255), (1.10,1.68,-.20,.33),
+             (1.02,1.54,-.19,.49), (.85,.85,.025,.80),
+             (.96,.94,.025,.91), (.96,.94,.025,1.04),
+             (.90,.88,.025,1.08)]
     for row,(width,depth,center_y,z) in enumerate(rings):
         for x,y in profile:
             height = z
             if row==0:
-                height += .065*max(0,1-abs(y)/.62)
-            if row==3:
+                height += .085*max(0,1-abs(y)/.62)+.035*max(0,-y)
+            if row in (2,3):
+                height += .045*(y+1)/2
+            if row==4:
                 height += .14*(y+1)/2
+            if row>=6:
+                height -= .055*max(0,-y)
             vertices.append((center_x+x*width/2,center_y+y*depth/2,height))
 
-    def face(loop, mat=0, recess=False, narrow=False):
-        if not recess:
+    def face(loop, mat=0, recess=False, narrow=False, raised=False, tread=False, straps=False):
+        if not (recess or raised or tread or straps):
             faces.append(tuple(loop))
             indices.append(mat)
             return
         points = [Vector(vertices[i]) for i in loop]
         center = sum(points,Vector())/len(points)
         normal = (points[1]-points[0]).cross(points[2]-points[0]).normalized()
+        if straps:
+            # Two broad closures rise directly from the instep surface. Their
+            # bevels and surrounding fabric share edges with the shoe upper.
+            corners = [center+(point-center)*.86 for point in points]
+            rows = []
+            for t,lift in [(0,0),(.18,0),(.25,.035),(.39,.035),(.46,0),
+                           (.59,0),(.66,.035),(.80,.035),(.87,0),(1,0)]:
+                row = []
+                for a,b in ((corners[0],corners[3]),(corners[1],corners[2])):
+                    row.append(len(vertices))
+                    vertices.append(tuple(a.lerp(b,t)+normal*lift))
+                rows.append(row)
+            for k in range(len(rows)-1):
+                faces.append((rows[k][0],rows[k][1],rows[k+1][1],rows[k+1][0]))
+                indices.append(2 if k in (2,6) else 1 if k in (1,3,5,7) else 0)
+            faces.extend([(loop[0],loop[1],rows[0][1],rows[0][0]),
+                          (loop[3],rows[-1][0],rows[-1][1],loop[2])])
+            indices.extend([0,0])
+            for side,a,b in ((0,loop[0],loop[3]),(1,loop[1],loop[2])):
+                for k in range(len(rows)-1):
+                    faces.append((a,rows[k][side],rows[k+1][side]))
+                    indices.append(0)
+                faces.append((a,rows[-1][side],b))
+                indices.append(0)
+            return
         # Ring order runs anticlockwise when viewed from above; bridge faces
         # therefore point outwards with this winding.
         inset = []
         for point in points:
             inset.append(len(vertices))
-            delta = (point-center)*.72
+            delta = (point-center)*(.88 if raised else .74 if tread else .72)
             if narrow:
                 delta.y *= .48
                 delta.z *= 1.16
-            vertices.append(tuple(center+delta-normal*.025))
+                if len(loop)==6:
+                    delta.y += .16*delta.z
+            displacement = .025 if raised or tread else -.025
+            vertices.append(tuple(center+delta+normal*displacement))
         for j in range(len(loop)):
             faces.append((loop[j],loop[(j+1)%len(loop)],inset[(j+1)%len(loop)],inset[j]))
-            indices.append(1)
+            indices.append(1 if tread or recess else 0)
         faces.append(tuple(inset))
-        indices.append(3)
+        indices.append(3 if recess else mat)
 
     n = len(profile)
     for row in range(len(rings)-1):
         for j in range(n):
             loop = [row*n+j,row*n+(j+1)%n,(row+1)*n+(j+1)%n,(row+1)*n+j]
             outer = 3 if sign==1 else 7
-            if row in (2,3) and j==outer:
+            if row in (3,4) and j==outer:
                 continue
-            toe = row==1 and j==0
+            toe = row==2 and j==0
             sole_pixel = row==1 and j==(2 if sign==1 else 8)
-            instep = row==3 and j==(1 if sign==1 else 9)
-            mat = 1 if row<2 else 2 if row in (2,5) else 0
-            face(loop,mat,toe or sole_pixel or instep,sole_pixel)
+            instep = row==4 and j==(1 if sign==1 else 9)
+            heel_signal = row==5 and j==5
+            mat = 1 if row==0 else 4 if row==1 else 1 if row==2 else 2 if row in (3,6) else 0
+            if row==4 and j in (4,5,6):
+                mat=5
+            reinforced = (row==4 and j==5) or (row==6 and j==0)
+            face(loop,mat,toe or sole_pixel or instep or heel_signal,
+                 sole_pixel,reinforced,straps=(row==4 and j==0))
     j = 3 if sign==1 else 7
-    face([2*n+j,2*n+(j+1)%n,3*n+(j+1)%n,4*n+(j+1)%n,4*n+j,3*n+j],
+    face([3*n+j,3*n+(j+1)%n,4*n+(j+1)%n,5*n+(j+1)%n,5*n+j,4*n+j],
          recess=True,narrow=True)
-    # A shallow concave underside supports the arch without a floating heel block.
-    center = len(vertices)
-    vertices.append((center_x,-.2,.12))
-    for j in range(n):
-        face((center,(j+1)%n,j),1)
+    # Four transverse tread pads rise out of the sole; the grooves between them
+    # and the higher midfoot keep the underside from being a flat slab.
+    bottom_rows = [(0,1),(9,2),(8,3),(7,4),(6,5)]
+    for (left,right),(next_left,next_right) in zip(bottom_rows,bottom_rows[1:]):
+        face((left,next_left,next_right,right),1,tread=True)
     # A smooth inner last gives the inserts physical backing without forcing
     # solidify to offset the narrow recess walls into each other.
-    previous = list(range(7*n,8*n))
-    for source_row in (7,5,4,3,2):
+    previous = list(range(8*n,9*n))
+    for source_row in (8,6,5,4,3):
         width,depth,center_y,z = rings[source_row]
-        width -= .14 if source_row>=4 else .22
-        depth -= .14 if source_row>=4 else .22
+        width -= .14 if source_row>=5 else .22
+        depth -= .14 if source_row>=5 else .22
         inner = []
         for x,y in profile:
-            height = z if source_row==7 else z-.035 if source_row>=3 else .31
-            if source_row==3:
+            height = z if source_row==8 else z-.035 if source_row>=4 else .36
+            if source_row==4:
                 height += .14*(y+1)/2
+            if source_row>=6:
+                height -= .055*max(0,-y)
             inner.append(len(vertices))
             vertices.append((center_x+x*width/2,center_y+y*depth/2,height))
         for j in range(n):

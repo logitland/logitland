@@ -10,7 +10,7 @@ retain their hollow construction, materials and deformation weights. The hands
 and arm bones follow the jacket's inward sleeve position. The master keeps its
 neutral and wave poses; the pants study's knee-bend pose remains in that study.
 `integrate-clothes.py` refreshes both garments from their saved study files;
-`build.py` imports them automatically after the head.
+`build.py` imports them automatically after the head, followed by the approved hands.
 
 ```sh
 blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-clothes.py --python brand/logan/verify.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
@@ -74,12 +74,15 @@ knuckle creases. Frame **1** is rest, **40** curls the fingers, and **70** sprea
 them. The right hand is hidden in the initial close-up; enable it in the Outliner
 to inspect the pair. Both hands retain the master's bone names and wrist positions.
 The palm occupies more of the hand's length; the fingers taper straight toward
-their tips. Finger and thumb rest joints follow these proportions and must be
-copied from the study rig when integrating the meshes into the master.
+their tips. The approved hands are integrated into `logan.blend` at the fitted
+cuffs. `integrate-hands.py` imports the meshes and their finger/thumb rest joints,
+and sets the wave's outward finger spread while preserving the body animation.
 
-`shoes-study.blend` contains two boots with sloping insteps, faceted toe boxes,
-molded soles and open ankle collars. Each boot includes its inner lining and
-recessed emissive panels in one continuous mesh. Frame **40** rotates the feet
+`shoes-study.blend` contains two boots with sloping insteps, two integral raised
+straps, faceted toe boxes, layered soles and open ankle collars. Four transverse
+tread pads are extruded from each sole. Aubergine heel panels and recessed pink
+lights shape the rear and outer quarters. Each boot includes its inner lining and
+all details in one continuous mesh. Frame **40** rotates the feet
 to inspect their articulation. The study contains only shoes, their rig and studio.
 
 ```sh
@@ -89,11 +92,15 @@ blender --background brand/logan/hands-study.blend --python-exit-code 1 --python
 blender --background brand/logan/shoes-study.blend --python-exit-code 1 --python brand/logan/verify.py --python brand/logan/render-hands-shoes.py
 ```
 
-These studies remain separate from `logan.blend`. Their fit was checked in a
-temporary full-body assembly. When integrating, use the hand study's outward
-finger-spread angles for the wave: the legacy wave brings the outer fingers
-toward the middle finger. The study's curl and spread poses pass checks for
-connected surfaces, collapsed faces and self-intersections.
+The shoes remain a separate study for visual review. The hands retain their
+separate editable source after integration; refreshing garments preserves their
+approved rest joints. The hand study's curl and spread poses and the master's
+neutral and wave poses pass geometry checks. The shoe renders include an underside
+view in `renders/shoes-sole.png`.
+
+```sh
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-hands.py --python brand/logan/verify.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
+```
 
 ## Isolated head study
 
