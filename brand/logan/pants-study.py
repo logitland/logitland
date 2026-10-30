@@ -15,7 +15,7 @@ scene = bpy.data.scenes['LOGAN']
 scene.name = 'PANTS STUDY'
 scene.frame_set(1)
 rig = bpy.data.objects['LOGAN · Pose me']
-source = bpy.data.objects['Trouser / continuous.L']
+source = bpy.data.objects.get('Trouser / continuous pants') or bpy.data.objects['Trouser / continuous.L']
 materials = list(source.data.materials)
 for obj in list(scene.objects):
     if not (obj.name.startswith(('Studio /','Camera /','Reference /')) or obj.type=='ARMATURE'):

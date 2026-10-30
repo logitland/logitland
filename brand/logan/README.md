@@ -5,6 +5,17 @@ rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
 and the packed full-body concept image. The side and back geometry interpret the
 supplied front reference.
 
+The saved jacket and pants studies are integrated into the master. Both garments
+retain their hollow construction, materials and deformation weights. The hands
+and arm bones follow the jacket's inward sleeve position. The master keeps its
+neutral and wave poses; the pants study's knee-bend pose remains in that study.
+`integrate-clothes.py` refreshes both garments from their saved study files;
+`build.py` imports them automatically after the head.
+
+```sh
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-clothes.py --python brand/logan/verify.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
+```
+
 ## Isolated jacket study
 
 `jacket-study.blend` contains one continuous torso-and-sleeves mesh, plus the
@@ -23,14 +34,15 @@ The neck, hem, sleeves and cuffs are open, with inward cloth thickness and a dar
 
 ```sh
 blender --background --python-exit-code 1 --python brand/logan/jacket-study.py
-blender --background brand/logan/jacket-study.blend --python-exit-code 1 --python brand/logan/refine-jacket.py --python brand/logan/join-jacket-sleeves.py
 blender --background brand/logan/jacket-study.blend --python-exit-code 1 --python brand/logan/verify.py
 blender --background brand/logan/jacket-study.blend --python-exit-code 1 --python brand/logan/render-jacket.py
 ```
 
 The extraction command creates a fresh study from `logan.blend`, replacing any
 existing `jacket-study.blend`. F12 renders its framed three-quarter view.
-`refine-jacket.py` rebuilds the extracted torso and collar and applies the fabric
+The historical `refine-jacket.py` and `join-jacket-sleeves.py` require a legacy
+extraction with separate sleeves, before garment integration. Do not run them on
+the current connected jacket. `refine-jacket.py` rebuilds the torso and collar and applies the fabric
 finish. `join-jacket-sleeves.py` cuts torso armholes, removes the sleeve caps,
 and builds curved shoulder loops with blended torso/arm skin weights. It trims
 buried surfaces where the sleeves overlap the torso into one continuous mesh.
@@ -105,8 +117,9 @@ parts even when they line up convincingly in the front view.
    set to 1200 × 1200 for quicker previews.
 
 `root` moves the whole character. `torso` carries the jacket and arms; `head`
-carries the face and headset. Each sleeve and trouser leg is one connected mesh,
-with blended joint weights and volume-preserving deformation at elbows and knees.
+carries the face and headset. Torso and sleeves share one mesh; both trouser legs
+share one pants mesh, with blended joint weights and volume-preserving deformation
+at elbows and knees.
 The head, boots, cuffs, and hand segments remain rigid.
 The sleeves have fitted shoulder caps, stepped surface panels, and recessed emissive
 lining across the whole outer side, wrapping onto the front and rear seams.
