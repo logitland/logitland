@@ -125,6 +125,11 @@ for z,width,depth in sections:
         # Raising this inner shoulder avoids a saddle between neck and deltoid.
         if z == 4.94:
             height += .14 * min(1, a/.70)
+        # Tuck the side seam inside the sleeve's inner wall. A full-width torso
+        # here turns the connecting surface back on itself into an underarm lip.
+        if z in (3.85,4.12) and a > .63:
+            tuck = .08 if z == 3.85 else .26
+            x -= (1 if u>0 else -1)*tuck*((a-.63)/.37)
         vertices.append((x,y,height))
 
 sides = len(profile)
