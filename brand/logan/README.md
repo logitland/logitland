@@ -10,6 +10,8 @@ supplied front reference.
 `head-study.blend` is a separate head-shape study. Its casing is a convex,
 faceted volume with a narrow crown, wide side shoulders and a narrow lower keel.
 The front and rear cross-sections and crown/keel retain half-turn symmetry.
+Magenta-to-graphite gradients continue across the roof and underside and through
+the depth of the side facets.
 The display, facial features and headset remain attached to the casing.
 `logan.blend` retains the full-body master until the head shape is settled.
 
@@ -19,7 +21,8 @@ blender --background brand/logan/head-study.blend --python-exit-code 1 --python 
 blender --background brand/logan/head-study.blend --python-exit-code 1 --python brand/logan/verify.py
 ```
 
-The renders are `head-front.png`, `head-side.png` and `head-three-quarter.png`.
+The renders are `head-front.png`, `head-side.png`, `head-three-quarter.png` and
+`head-rear.png`; the high rear view exposes the roof and side finish.
 The side view shows the side without the headset so the shell silhouette is visible.
 
 ## Construction rules

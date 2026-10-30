@@ -11,6 +11,7 @@ import bpy
 from mathutils import Vector
 
 HERE=Path(__file__).resolve().parent
+DEPTH_SCALE=.88
 bpy.ops.wm.open_mainfile(filepath=str(HERE/'logan.blend'))
 scene=bpy.data.scenes['LOGAN']
 scene.frame_set(1)
@@ -115,12 +116,29 @@ bm.to_mesh(data)
 bm.free()
 data.materials.append(bpy.data.materials['Head · brushed graphite casing'])
 data.materials.append(bpy.data.materials['Head · twin magenta fades'])
-data.materials.append(bpy.data.materials['Head · edge fade'])
+# Carry the finish through the middle of the casing, rather than limiting pink
+# to its end chamfers. The roof keeps the forehead's continuous X-axis bands;
+# the side facets fade along depth, with a magenta undertone throughout.
+side_finish=bpy.data.materials['Head · edge fade'].copy()
+side_finish.name='Head · continuous depth fade'
+nodes=side_finish.node_tree.nodes
+separate=next(n for n in nodes if n.bl_idname=='ShaderNodeSeparateXYZ')
+ramp=next(n for n in nodes if n.bl_idname=='ShaderNodeValToRGB')
+while len(ramp.color_ramp.elements)>1:
+    ramp.color_ramp.elements.remove(ramp.color_ramp.elements[-1])
+for index,(position,color) in enumerate([
+    (0,(.35,.006,.27)),(.30,(.10,.003,.075)),
+    (.70,(.035,.002,.028)),(1,(.28,.006,.22))]):
+    stop=ramp.color_ramp.elements[0] if index==0 else ramp.color_ramp.elements.new(position)
+    stop.position=position
+    stop.color=(*color,1)
+side_finish.node_tree.links.new(separate.outputs['Y'],ramp.inputs[0])
+data.materials.append(side_finish)
 data.update()
 for face in data.polygons:
     n=face.normal
     centre=face.center
-    if (centre.z>6.15 and n.y<-.12 and n.z>.2) or (centre.z<4.82 and n.y>.12 and n.z<-.2):
+    if (centre.z>6.15 and n.z>.2) or (centre.z<4.82 and n.z<-.2):
         face.material_index=1
     elif abs(n.x)>.3:
         face.material_index=2
@@ -132,11 +150,22 @@ bevel=shell.modifiers.new('Fine edge highlight','BEVEL')
 bevel.width=.004
 bevel.segments=1
 
+# Shorten the whole assembled head about its display plane. Applying the same
+# affine transform to accessories and casing preserves their existing overlaps.
+front_y=world((0,-.67,0))[1]
+for obj in head_collection.objects:
+    inverse=obj.matrix_world.inverted()
+    for vertex in obj.data.vertices:
+        p=obj.matrix_world @ vertex.co
+        p.y=front_y+(p.y-front_y)*DEPTH_SCALE
+        vertex.co=inverse @ p
+
 # Everything remains part of the same physical head assembly. The socket sits
 # in the sloping side, and the original face and magenta surface fades remain.
 controller=bpy.data.objects.new('HEAD · rotate to inspect',None)
 head_collection.objects.link(controller)
 controller.location=world((0,.165,5.47))
+controller.location.y=front_y+(controller.location.y-front_y)*DEPTH_SCALE
 bpy.context.view_layer.update()
 for obj in head_collection.objects:
     if obj is not controller:
