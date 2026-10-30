@@ -35,6 +35,24 @@ and builds curved shoulder loops with blended torso/arm skin weights. It trims
 buried surfaces where the sleeves overlap the torso into one continuous mesh.
 Save hand edits separately before rebuilding.
 
+## Isolated pants study
+
+`pants-study.blend` contains one hollow cloth shell with an open waistband,
+shared crotch and seat, and two continuous legs. Broad diagonal facets shape the
+knee folds, the lower legs fill out above tucked hems, and short pink windows
+wrap the outer calves in beveled recesses. A rear yoke shapes the upper seat.
+The original boots remain visible as fitting references.
+Frame **1** is neutral; frame **40** bends the left hip and knee.
+
+```sh
+blender --background --python-exit-code 1 --python brand/logan/pants-study.py
+blender --background brand/logan/pants-study.blend --python-exit-code 1 --python brand/logan/verify.py --python brand/logan/render-pants.py
+```
+
+The builder replaces the pants study from the full-body source. It leaves the
+approved jacket study and full-body master unchanged. The renders are
+`pants-front.png`, `pants-three-quarter.png`, `pants-rear.png` and `pants-bent.png`.
+
 ## Isolated head study
 
 `head-study.blend` is a separate head-shape study. Its casing is a convex,
