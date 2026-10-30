@@ -112,6 +112,11 @@ export function getOwner(relay: Relay, ownerId: string): Promise<Owner> {
   });
 }
 
+/** Keeps an owner read with something else (a join) for the unit of work, so `getOwner` doesn't read it again. */
+export function keepOwner(owner: Owner): void {
+  void once(ownerKey(owner.id), () => Promise.resolve(owner));
+}
+
 const DAY_MS = 86_400_000;
 /** The first second of 2015: Discord snowflakes count milliseconds from here (docs.discord.com, "Snowflakes"). */
 const DISCORD_EPOCH = 1_420_070_400_000n;
