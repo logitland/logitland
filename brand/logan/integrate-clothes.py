@@ -50,7 +50,7 @@ for filename, prefixes, expected in (
         for side in ('L', 'R'):
             upper = rig.data.edit_bones['upper_arm.' + side]
             for bone in [upper] + list(upper.children_recursive):
-                if scene.get('approved_hands') and bone.name.startswith(('hand.','finger','thumb')):
+                if scene.get('approved_hands') and bone.name.startswith(('hand.','finger','thumb','wrist_cuff.')):
                     bone.head += hand_offsets[side]
                     bone.tail += hand_offsets[side]
                     continue

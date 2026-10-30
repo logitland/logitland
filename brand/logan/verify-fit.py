@@ -52,6 +52,20 @@ try:
     for frame in (1, 40):
         scene.frame_set(frame)
         check_pose(f'frame {frame}')
+    if scene.get('jacket_motion'):
+        for frame in (10,20,30):
+            scene.frame_set(frame)
+            check_pose(f'coat draw-up frame {frame}')
+        for side, sign in (('L',1),('R',-1)):
+            for angle in (30,60,78):
+                scene.frame_set(1)
+                rig.pose.bones['upper_arm.'+side].rotation_euler.z = radians(sign*angle)
+                rig.pose.bones['forearm.'+side].rotation_euler.z = radians(sign*38*angle/78)
+                check_pose(f'coat shoulder.{side} {angle} degrees')
+            for angle in (-45,45):
+                scene.frame_set(1)
+                rig.pose.bones['upper_arm.'+side].rotation_euler.x = radians(angle)
+                check_pose(f'coat forward/back.{side} {angle} degrees')
     for bone, axes, angle in [('hand.L', (0,), 40), ('hand.R', (0,), 40),
                               ('hand.L', (2,), 25), ('hand.R', (2,), 25),
                               ('foot.L', (0,), 35), ('foot.R', (0,), 35),
