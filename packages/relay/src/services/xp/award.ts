@@ -1,4 +1,4 @@
-import { iso, type Relay } from '../../context';
+import { iso, readAll, type Relay } from '../../context';
 import { auditStmt } from '../audit';
 import { syncBotRoles } from '../bots';
 import { levelOfXp } from '@logitland/contracts';
@@ -30,30 +30,36 @@ const REPEAT_WINDOW_MS = 10 * 60_000;
 export async function awardPost(relay: Relay, post: { agentId: string; messageId: string; text: string; clean: boolean }): Promise<number> {
   if (!post.clean) return 0;
   const now = relay.now();
-  const recent = await relay.db
-    .prepare("SELECT content FROM relay_messages WHERE agent_id = ? AND status = 'sent' AND sent_at >= ? AND id != ? AND content IS NOT NULL LIMIT 50")
-    .bind(post.agentId, iso(new Date(now.getTime() - REPEAT_WINDOW_MS)), post.messageId)
-    .all<{ content: string }>();
+  // The agent's last post entry and every entry of its burst, read together.
+  const ledger = [
+    relay.db.prepare("SELECT id, burst_id, created_at FROM xp_events WHERE agent_id = ? AND kind = 'post' ORDER BY id DESC LIMIT 1").bind(post.agentId),
+    relay.db
+      .prepare(
+        "SELECT words, passion, repeats, xp FROM xp_events WHERE agent_id = ? AND burst_id = (SELECT burst_id FROM xp_events WHERE agent_id = ? AND kind = 'post' ORDER BY id DESC LIMIT 1)",
+      )
+      .bind(post.agentId, post.agentId),
+  ] as const;
+  let [recent, [last], lastBurst] = await readAll<[{ content: string }, LastPost, Ledger]>(
+    relay.db,
+    relay.db
+      .prepare("SELECT content FROM relay_messages WHERE agent_id = ? AND status = 'sent' AND sent_at >= ? AND id != ? AND content IS NOT NULL LIMIT 50")
+      .bind(post.agentId, iso(new Date(now.getTime() - REPEAT_WINDOW_MS)), post.messageId),
+    ...ledger,
+  );
   const words = wordCount(post.text);
   const passion = Math.abs(compound(post.text));
   const repeats = nearDuplicates(
     post.text,
-    recent.results.map((r) => r.content),
+    recent.map((r) => r.content),
   );
 
   // Confirmations of one agent's posts can run at once (each channel sends on its own), so the award is a compare-and-set on
   // the agent's last post entry: if another post landed after it was read, read the burst again. It ends: every lost try is
   // another post's entry landing, and the agent has only so many posts in flight.
   for (;;) {
-    const last = await relay.db
-      .prepare("SELECT id, burst_id, created_at FROM xp_events WHERE agent_id = ? AND kind = 'post' ORDER BY id DESC LIMIT 1")
-      .bind(post.agentId)
-      .first<Pick<Ledger, 'burst_id' | 'created_at'> & { id: number }>();
     const burstId = last && now.getTime() - Date.parse(last.created_at) <= XP.burstMs ? last.burst_id : post.messageId;
-    const { results: before } = await relay.db
-      .prepare('SELECT words, passion, repeats, xp FROM xp_events WHERE burst_id = ? AND agent_id = ?')
-      .bind(burstId, post.agentId)
-      .all<Ledger>();
+    // A new burst has no entries yet: its first is this post's own.
+    const before = last && burstId === last.burst_id ? lastBurst : [];
     const all = [...before, { words, passion, repeats, xp: 0 }];
     const totalWords = all.reduce((n, e) => n + e.words, 0);
     // The burst reads as one text: its length, its words' average passion, and its worst repetition.
@@ -73,21 +79,31 @@ export async function awardPost(relay: Relay, post: { agentId: string; messageId
       return delta;
     }
     // Already earned (the other confirmation path got there first), or the ledger moved: read it again.
-    const counted = await relay.db.prepare('SELECT 1 FROM xp_events WHERE message_id = ?').bind(post.messageId).first();
-    if (counted) return 0;
+    let counted: unknown[];
+    [counted, [last], lastBurst] = await readAll<[unknown, LastPost, Ledger]>(
+      relay.db,
+      relay.db.prepare('SELECT 1 FROM xp_events WHERE message_id = ?').bind(post.messageId),
+      ...ledger,
+    );
+    if (counted.length) return 0;
   }
 }
+
+type LastPost = Pick<Ledger, 'burst_id' | 'created_at'> & { id: number };
+
+/** What awarding a sent message needs from its row; `RETURNING ${SENT_COLUMNS}` on the update that sends it gives it. */
+export const SENT_COLUMNS = 'agent_id, content, verdict, reviewed_by';
+export type SentRow = { agent_id: string; content: string | null; verdict: string | null; reviewed_by: string | null };
 
 /**
  * XP for a message just confirmed sent, by whichever path saw it first (the webhook's answer or the Gateway). Clean means it
  * passed moderation on its own: one a reviewer released earns nothing. XP is a bonus to sending, so a failure is logged, not thrown.
+ * `sent` is the row as the update that sent it returned it; without it, the row is read.
  */
-export async function awardSent(relay: Relay, messageId: string): Promise<void> {
+export async function awardSent(relay: Relay, messageId: string, sent?: SentRow | null): Promise<void> {
   try {
-    const row = await relay.db
-      .prepare("SELECT agent_id, content, verdict, reviewed_by FROM relay_messages WHERE id = ? AND status = 'sent'")
-      .bind(messageId)
-      .first<{ agent_id: string; content: string | null; verdict: string | null; reviewed_by: string | null }>();
+    const row =
+      sent ?? (await relay.db.prepare(`SELECT ${SENT_COLUMNS} FROM relay_messages WHERE id = ? AND status = 'sent'`).bind(messageId).first<SentRow>());
     if (!row) return;
     await awardPost(relay, { agentId: row.agent_id, messageId, text: row.content ?? '', clean: row.verdict === 'pass' && !row.reviewed_by });
   } catch (error) {
