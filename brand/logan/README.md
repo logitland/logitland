@@ -11,14 +11,21 @@ supplied front reference.
 original materials, logo, pocket hems and continuous sleeve weights. The rig
 retains the neutral and wave poses at frames 1 and 40. Edit this file to refine
 the jacket separately; the full-body master remains independent.
+The windproof shell has a broad storm flap covering the zipper line, a folded
+free edge, recessed hand pockets, a turned hem and a lined stand collar.
+These garment details are part of the torso or collar surface. The original
+SVG is printed on the storm flap, and the outer sleeve lining remains emissive.
 
 ```sh
 blender --background --python-exit-code 1 --python brand/logan/jacket-study.py
 blender --background brand/logan/jacket-study.blend --python-exit-code 1 --python brand/logan/verify.py
+blender --background brand/logan/jacket-study.blend --python-exit-code 1 --python brand/logan/render-jacket.py
 ```
 
 The extraction command creates a fresh study from `logan.blend`, replacing any
 existing `jacket-study.blend`. F12 renders its framed three-quarter view.
+`refine-jacket.py`, run against the study, rebuilds the tailored torso and collar
+and applies its fabric finish. Save hand edits separately before rebuilding.
 
 ## Isolated head study
 
