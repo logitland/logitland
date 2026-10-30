@@ -1,12 +1,13 @@
 import { LIMITS, newId, type DeliveryDetail, type DeliveryStatus } from '@logitland/contracts';
 import { signHeaders } from '@logitland/webhooks';
-import { iso, type DeliveryMessage, type Relay, type Stmt } from '../context';
+import { iso, readAll, type DeliveryMessage, type Relay, type Stmt } from '../context';
 import { unit } from '../memo';
 import { audit } from './audit';
+import { accessWith, listChannelsStmt, type ChannelRow, type Viewer } from './channels';
 import { DestinationRefused, preflightDestination } from './destinations';
-import { refreshDigest, takeDigests } from './feed';
+import { readableIn, refreshDigest, takeDigests, type SubscriptionRow } from './feed';
 import { getSettings } from './settings';
-import { wakeStreams } from './streams';
+import { dueStreamsStmt, notifyStreams } from './streams';
 import { previousSecretAad, secretAad, urlAad, type WebhookRow } from './webhook';
 
 // Webhook delivery (#11): each digest an agent's subscriptions are due to give it becomes one signed POST to its webhook,
@@ -73,13 +74,18 @@ async function send(relay: Relay, bodies: { body: DeliveryMessage; delaySeconds?
  */
 export async function wake(relay: Relay): Promise<void> {
   const now = relay.now().getTime();
-  const { results } = await relay.db
-    .prepare(
-      `SELECT s.agent_id, MIN(s.next_due_ms) AS due FROM subscriptions s JOIN agent_webhooks w ON w.agent_id = s.agent_id AND w.status = 'active'
-       WHERE s.next_due_ms IS NOT NULL AND s.next_due_ms < ? GROUP BY s.agent_id`,
-    )
-    .bind(now + 60_000)
-    .all<{ agent_id: string; due: number }>();
+  // The streams are read with the webhooks, so before any push below runs; one a push serves is told anyway and finds
+  // nothing due, as it would with the push on the Queue.
+  const [results, streams] = await readAll<[{ agent_id: string; due: number }, { agent_id: string }]>(
+    relay.db,
+    relay.db
+      .prepare(
+        `SELECT s.agent_id, MIN(s.next_due_ms) AS due FROM subscriptions s JOIN agent_webhooks w ON w.agent_id = s.agent_id AND w.status = 'active'
+         WHERE s.next_due_ms IS NOT NULL AND s.next_due_ms < ? GROUP BY s.agent_id`,
+      )
+      .bind(now + 60_000),
+    dueStreamsStmt(relay),
+  );
   if (results.length) {
     if (relay.queue && !(await deliveriesPaused(relay))) {
       await send(
@@ -90,7 +96,7 @@ export async function wake(relay: Relay): Promise<void> {
       for (const r of results) if (r.due <= now) await pushDue(relay, r.agent_id);
     }
   }
-  await wakeStreams(relay);
+  if (relay.streams) await notifyStreams(relay, streams);
 }
 
 interface PushAgent {
@@ -197,22 +203,34 @@ function retryAfterSeconds(header: string | null, now: Date): number | undefined
 export async function attemptDelivery(relay: Relay, deliveryId: string, opts: { paused?: boolean } = {}): Promise<AttemptResult> {
   if (opts.paused ?? (await deliveriesPaused(relay))) return { outcome: 'skipped', reason: PAUSED };
   const now = relay.now();
-  const waiting = await relay.db
-    .prepare(
-      `UPDATE deliveries SET next_attempt_at = ? WHERE id = ? AND status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-         AND EXISTS (SELECT 1 FROM agent_webhooks w JOIN agents a ON a.id = w.agent_id WHERE w.agent_id = deliveries.agent_id AND (w.status = 'paused' OR a.status != 'active'))`,
-    )
-    .bind(iso(new Date(now.getTime() + WAIT_WHILE_STOPPED_MS)), deliveryId, iso(now))
-    .run();
-  if (waiting.meta.changes > 0) return { outcome: 'skipped', reason: 'The webhook is paused or the agent is off; the delivery waits' };
-  const claim = await relay.db
-    .prepare(
-      `UPDATE deliveries SET attempts = attempts + 1, next_attempt_at = ?
-       WHERE id = ? AND status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-       RETURNING agent_id, body, attempts, attempt_limit`,
-    )
-    .bind(iso(new Date(now.getTime() + LEASE_MS)), deliveryId, iso(now))
-    .first<Claim>();
+  const ofDelivery = (column: string) => `(SELECT ${column} FROM deliveries WHERE id = ?)`;
+  // One round trip: the wait (which moves next_attempt_at past now, so the claim after it finds the row not due), the claim,
+  // and what the attempt reads: the webhook, and what the digest's subscription and agent may still send.
+  const {
+    accessOf,
+    rows: [waiting, [claim], [hook], [sub], [viewer], channels],
+  } = await accessWith<[{ id: string }, Claim, WebhookRow, SubscriptionRow, Viewer, ChannelRow]>(
+    relay,
+    relay.db
+      .prepare(
+        `UPDATE deliveries SET next_attempt_at = ? WHERE id = ? AND status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+           AND EXISTS (SELECT 1 FROM agent_webhooks w JOIN agents a ON a.id = w.agent_id WHERE w.agent_id = deliveries.agent_id AND (w.status = 'paused' OR a.status != 'active'))
+         RETURNING id`,
+      )
+      .bind(iso(new Date(now.getTime() + WAIT_WHILE_STOPPED_MS)), deliveryId, iso(now)),
+    relay.db
+      .prepare(
+        `UPDATE deliveries SET attempts = attempts + 1, next_attempt_at = ?
+         WHERE id = ? AND status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+         RETURNING agent_id, body, attempts, attempt_limit`,
+      )
+      .bind(iso(new Date(now.getTime() + LEASE_MS)), deliveryId, iso(now)),
+    relay.db.prepare(`SELECT * FROM agent_webhooks WHERE agent_id = ${ofDelivery('agent_id')}`).bind(deliveryId),
+    relay.db.prepare(`SELECT * FROM subscriptions WHERE id = ${ofDelivery('subscription_id')}`).bind(deliveryId),
+    relay.db.prepare(`SELECT level, owner_id FROM agents WHERE id = ${ofDelivery('agent_id')}`).bind(deliveryId),
+    listChannelsStmt(relay),
+  );
+  if (waiting.length) return { outcome: 'skipped', reason: 'The webhook is paused or the agent is off; the delivery waits' };
   if (!claim) return { outcome: 'skipped', reason: 'Not due, or already handled' };
 
   const attempt: Attempt = {
@@ -224,19 +242,26 @@ export async function attemptDelivery(relay: Relay, deliveryId: string, opts: { 
     failingSince: null,
   };
   try {
-    return await deliver(relay, attempt, claim.body);
+    return await deliver(relay, attempt, claim.body, hook ?? null, sub ?? null, viewer ? readableIn(channels, accessOf(viewer)) : null);
   } catch (error) {
     relay.log.error('delivery.attempt_crashed', { delivery_id: deliveryId, attempt: attempt.n, error });
     return settle(relay, attempt, retryOrFail(attempt, null, GENERIC_ERROR));
   }
 }
 
-async function deliver(relay: Relay, a: Attempt, stored: string): Promise<AttemptResult> {
-  const hook = await relay.db.prepare('SELECT * FROM agent_webhooks WHERE agent_id = ?').bind(a.agentId).first<WebhookRow>();
+/** Sends a claimed delivery to `hook`; `sub` and `readable` are as refreshDigest takes them. */
+async function deliver(
+  relay: Relay,
+  a: Attempt,
+  stored: string,
+  hook: WebhookRow | null,
+  sub: SubscriptionRow | null,
+  readable: string | null,
+): Promise<AttemptResult> {
   if (!hook || hook.status === 'disabled') return settle(relay, a, { status: 'dropped', error: 'The webhook was removed or disabled' });
   a.failingSince = hook.failing_since;
   // Read again at every attempt: a removal since the digest was taken must not leave with it.
-  const body = await refreshDigest(relay, a.agentId, stored);
+  const body = await refreshDigest(relay, stored, sub, readable);
   if (!body) return settle(relay, a, { status: 'dropped', error: 'Nothing in the digest may be sent any more' });
 
   const target = await relay.secrets.open(hook.url_ciphertext, urlAad(hook));
@@ -383,13 +408,23 @@ export async function drainDue(relay: Relay, ctx: { deadline?: number } = {}): P
   if (await deliveriesPaused(relay)) return 0;
   const now = relay.now();
   const late = () => ctx.deadline !== undefined && Date.now() >= ctx.deadline;
-  const { results: agents } = await relay.db
-    .prepare(
-      `SELECT DISTINCT s.agent_id FROM subscriptions s JOIN agent_webhooks w ON w.agent_id = s.agent_id AND w.status = 'active'
-       WHERE s.next_due_ms IS NOT NULL AND s.next_due_ms <= ? LIMIT ?`,
-    )
-    .bind(now.getTime(), DRAIN_ROWS)
-    .all<{ agent_id: string }>();
+  const queued = Boolean(relay.queue);
+  // Both at once: the pushes below make deliveries of their own, but attempt them too, so none of those is due here.
+  const [agents, due] = await readAll<[{ agent_id: string }, { id: string }]>(
+    relay.db,
+    relay.db
+      .prepare(
+        `SELECT DISTINCT s.agent_id FROM subscriptions s JOIN agent_webhooks w ON w.agent_id = s.agent_id AND w.status = 'active'
+         WHERE s.next_due_ms IS NOT NULL AND s.next_due_ms <= ? LIMIT ?`,
+      )
+      .bind(now.getTime(), DRAIN_ROWS),
+    relay.db
+      .prepare(
+        `SELECT id FROM deliveries WHERE status IN ('pending', 'retrying') AND next_attempt_at <= ? ${queued ? 'AND (enqueued_at IS NULL OR enqueued_at < ?)' : ''}
+         ORDER BY next_attempt_at LIMIT ?`,
+      )
+      .bind(iso(now), ...(queued ? [iso(new Date(now.getTime() - REENQUEUE_AFTER_MS))] : []), DRAIN_ROWS),
+  );
   if (relay.queue)
     await send(
       relay,
@@ -397,14 +432,6 @@ export async function drainDue(relay: Relay, ctx: { deadline?: number } = {}): P
     );
   else for (const a of agents) if (!late()) await pushDue(relay, a.agent_id);
 
-  const queued = Boolean(relay.queue);
-  const { results: due } = await relay.db
-    .prepare(
-      `SELECT id FROM deliveries WHERE status IN ('pending', 'retrying') AND next_attempt_at <= ? ${queued ? 'AND (enqueued_at IS NULL OR enqueued_at < ?)' : ''}
-       ORDER BY next_attempt_at LIMIT ?`,
-    )
-    .bind(iso(now), ...(queued ? [iso(new Date(now.getTime() - REENQUEUE_AFTER_MS))] : []), DRAIN_ROWS)
-    .all<{ id: string }>();
   if (queued) {
     if (
       due.length &&

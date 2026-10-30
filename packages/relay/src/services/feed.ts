@@ -1,7 +1,8 @@
 import type { Digest, Frequency, RelayEvent, SubscriptionKind } from '@logitland/contracts';
-import { iso, type Relay, type Stmt } from '../context';
-import { accessFor, listChannels, type Viewer } from './channels';
-import { eventTail } from './events';
+import { iso, readAll, type Relay, type Stmt } from '../context';
+import type { Access } from './access';
+import { accessWith, listChannelsStmt, type ChannelRow, type Viewer } from './channels';
+import { eventTailStmt } from './events';
 import { hit, peek } from './limits';
 import { resolveMentions } from './mentions';
 
@@ -68,9 +69,13 @@ const BULK_REPLY = `(e.type = 'message.bulk_deleted' AND EXISTS (SELECT 1 FROM j
  * deliver. Removals go to it either way.
  */
 export async function readableChannels(relay: Relay, viewer: Viewer): Promise<string> {
-  const access = await accessFor(relay, viewer);
-  return JSON.stringify((await listChannels(relay)).filter((r) => access(r).read).map((r) => r.id));
+  const { accessOf, rows: [channels] } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
+  return readableIn(channels, accessOf(viewer));
 }
+
+/** readableChannels, for channels and access already read (accessWith). */
+export const readableIn = (channels: ChannelRow[], access: (row: ChannelRow) => Access): string =>
+  JSON.stringify(channels.filter((r) => access(r).read).map((r) => r.id));
 
 /**
  * Which events belong to a subscription, as SQL over `events e`. A channel subscription: the channel's events, its own posts
@@ -108,21 +113,48 @@ function belongs(sub: SubscriptionRow, readable: string): { sql: string; args: u
   };
 }
 
-/** Stored events as they are served: with their cursor, and messages with the names their tags stand for, as of now. */
-async function toEvents(relay: Relay, rows: { seq: number; payload: string }[]): Promise<RelayEvent[]> {
-  const events = rows.map((row) => ({ ...JSON.parse(row.payload), cursor: String(row.seq) }) as RelayEvent);
+type EventRow = { seq: number; payload: string };
+
+/**
+ * Stored events as they are served: with their cursor, and messages with the names their tags stand for, as of now. Takes
+ * several pages at once, so their tags are looked up together.
+ */
+async function toEvents(relay: Relay, pages: EventRow[][]): Promise<RelayEvent[][]> {
+  const events = pages.map((rows) => rows.map((row) => ({ ...JSON.parse(row.payload), cursor: String(row.seq) }) as RelayEvent));
   const content = (e: RelayEvent) => (e.type === 'message.created' || e.type === 'message.updated' ? e.data.content : undefined);
-  const mentionsOf = await resolveMentions(relay, events.map(content));
-  return events.map((e) => {
-    const mentions = mentionsOf(content(e));
-    return mentions ? ({ ...e, data: { ...e.data, mentions } } as RelayEvent) : e;
-  });
+  const mentionsOf = await resolveMentions(relay, events.flat().map(content));
+  return events.map((page) =>
+    page.map((e) => {
+      const mentions = mentionsOf(content(e));
+      return mentions ? ({ ...e, data: { ...e.data, mentions } } as RelayEvent) : e;
+    }),
+  );
+}
+
+/**
+ * A subscription's events after `after`, oldest first, one more than `limit`. Read in one transaction with the log's tail
+ * (eventTailStmt), so it sees nothing past it.
+ */
+function pageStmt(relay: Relay, sub: SubscriptionRow, after: number, limit: number, readable: string): Stmt {
+  const where = belongs(sub, readable);
+  return relay.db
+    .prepare(`SELECT e.seq, e.payload FROM events e WHERE e.seq > ? AND ${where.sql} ORDER BY e.seq LIMIT ?`)
+    .bind(after, ...where.args, limit + 1);
+}
+
+/**
+ * A page's rows and how far it reached: with nothing more, the log's tail when it was read, so events that didn't belong to
+ * the subscription are never looked at again.
+ */
+function paged(results: EventRow[], tail: number, after: number, limit: number): { rows: EventRow[]; last: number; more: boolean } {
+  const rows = results.slice(0, limit);
+  const more = results.length > limit;
+  return { rows, last: more ? rows[rows.length - 1]!.seq : Math.max(tail, after), more };
 }
 
 /**
  * A page of a subscription's events after `after`, oldest first, for an agent that may read `readable` (readableChannels).
- * `last` is how far the page reached: with nothing more, the log's tail when it was read, so events that didn't belong to
- * the subscription are never looked at again.
+ * `last` is how far the page reached (paged).
  */
 export async function readFeed(
   relay: Relay,
@@ -131,30 +163,17 @@ export async function readFeed(
   limit: number,
   readable: string,
 ): Promise<{ events: RelayEvent[]; last: number; more: boolean }> {
-  // The tail first: anything committed before it is visible to the query, so nothing up to it can be missed.
-  const tail = await eventTail(relay);
-  const where = belongs(sub, readable);
-  const { results } = await relay.db
-    .prepare(`SELECT e.seq, e.payload FROM events e WHERE e.seq > ? AND e.seq <= ? AND ${where.sql} ORDER BY e.seq LIMIT ?`)
-    .bind(after, tail, ...where.args, limit + 1)
-    .all<{ seq: number; payload: string }>();
-  const page = results.slice(0, limit);
-  const more = results.length > limit;
-  return {
-    events: await toEvents(relay, page),
-    last: more ? page[page.length - 1]!.seq : Math.max(tail, after),
-    more,
-  };
+  const [[tail], results] = await readAll<[{ n: number }, EventRow]>(relay.db, eventTailStmt(relay), pageStmt(relay, sub, after, limit, readable));
+  const { rows, last, more } = paged(results, tail!.n, after, limit);
+  return { events: (await toEvents(relay, [rows]))[0]!, last, more };
 }
 
-/** How many events wait after the subscription's cursor, counted up to DIGEST_MAX. */
-export async function countWaiting(relay: Relay, sub: SubscriptionRow, readable: string): Promise<number> {
+/** How many events wait after the subscription's cursor, counted up to DIGEST_MAX: one `{ n }` row. */
+export function countWaitingStmt(relay: Relay, sub: SubscriptionRow, readable: string): Stmt {
   const where = belongs(sub, readable);
-  const row = await relay.db
+  return relay.db
     .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM events e WHERE e.seq > ? AND ${where.sql} LIMIT ?)`)
-    .bind(sub.cursor, ...where.args, DIGEST_MAX)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
+    .bind(sub.cursor, ...where.args, DIGEST_MAX);
 }
 
 /**
@@ -164,59 +183,76 @@ export async function countWaiting(relay: Relay, sub: SubscriptionRow, readable:
 export type Handoff = (digest: Digest, from: number) => Stmt;
 
 /**
- * Takes the next digest off a subscription and moves its cursor past it, or null when there is nothing (or another taker
- * got there first: the move is a compare-and-set on the cursor). Clearing `next_due_ms` checks the log again in the same
- * statement, so an event recorded while this ran keeps the subscription due.
+ * Moves a subscription's cursor past a page it took (`digest`, null for an empty page), as one or two statements: a
+ * compare-and-set on the cursor, so another taker that got there first wins; with a digest, `handoff`'s statement goes
+ * ahead of it. Clearing `next_due_ms` checks the log again in the same statement, so an event recorded since the page was
+ * read keeps the subscription due.
  */
-async function take(relay: Relay, sub: SubscriptionRow, readable: string, handoff?: Handoff): Promise<Digest | null> {
-  const nowMs = relay.now().getTime();
-  const page = await readFeed(relay, sub, sub.cursor, DIGEST_MAX, readable);
+function moveStmts(relay: Relay, sub: SubscriptionRow, readable: string, last: number, digest: Digest | null, handoff?: Handoff): Stmt[] {
+  const now = relay.now();
+  const nowMs = now.getTime();
   const rest = belongs(sub, readable);
   const pending = `EXISTS (SELECT 1 FROM events e WHERE e.seq > ? AND ${rest.sql})`;
-  if (!page.events.length) {
-    if (sub.ended_at) await relay.db.prepare('DELETE FROM subscriptions WHERE id = ? AND cursor = ?').bind(sub.id, sub.cursor).run();
-    else
-      await relay.db
-        .prepare(`UPDATE subscriptions SET cursor = ?, next_due_ms = CASE WHEN ${pending} THEN next_due_ms ELSE NULL END WHERE id = ? AND cursor = ?`)
-        .bind(page.last, page.last, ...rest.args, sub.id, sub.cursor)
-        .run();
-    return null;
-  }
-  const digest: Digest = {
-    type: 'digest',
-    subscription_id: sub.id as Digest['subscription_id'],
-    events: page.events,
-    cursor: String(page.last),
-    more: page.more,
-  };
+  if (!digest)
+    return [
+      sub.ended_at
+        ? relay.db.prepare('DELETE FROM subscriptions WHERE id = ? AND cursor = ?').bind(sub.id, sub.cursor)
+        : relay.db
+            .prepare(`UPDATE subscriptions SET cursor = ?, next_due_ms = CASE WHEN ${pending} THEN next_due_ms ELSE NULL END WHERE id = ? AND cursor = ?`)
+            .bind(last, last, ...rest.args, sub.id, sub.cursor),
+    ];
   const move = relay.db
     .prepare(
       `UPDATE subscriptions SET cursor = ?, last_delivered_ms = ?, updated_at = ?,
          next_due_ms = CASE WHEN ${pending} THEN MAX(?, ? + frequency_seconds * 1000) ELSE NULL END
        WHERE id = ? AND cursor = ?`,
     )
-    .bind(page.last, nowMs, iso(relay.now()), page.last, ...rest.args, nowMs, nowMs, sub.id, sub.cursor);
-  const moved = handoff ? (await relay.db.batch([handoff(digest, sub.cursor), move]))[1]! : await move.run();
-  return moved.meta.changes === 0 ? null : digest;
+    .bind(last, nowMs, iso(now), last, ...rest.args, nowMs, nowMs, sub.id, sub.cursor);
+  return handoff ? [handoff(digest, sub.cursor), move] : [move];
+}
+
+/**
+ * Takes the next digest off each subscription and moves its cursor past it: the pages are read in one round trip, and the
+ * moves made in another. A subscription with nothing waiting, or that another taker got to first, gives no digest.
+ */
+async function take(relay: Relay, subs: SubscriptionRow[], readable: string, handoff?: Handoff): Promise<Digest[]> {
+  const [[tail], ...results] = await readAll<[{ n: number }, ...EventRow[]]>(
+    relay.db,
+    eventTailStmt(relay),
+    ...subs.map((sub) => pageStmt(relay, sub, sub.cursor, DIGEST_MAX, readable)),
+  );
+  const pages = subs.map((sub, i) => ({ sub, ...paged(results[i]!, tail!.n, sub.cursor, DIGEST_MAX) }));
+  const events = await toEvents(
+    relay,
+    pages.map((p) => p.rows),
+  );
+  const stmts: Stmt[] = [];
+  const moves: { at: number; digest: Digest }[] = [];
+  pages.forEach(({ sub, rows, last, more }, i) => {
+    const digest: Digest | null = rows.length
+      ? { type: 'digest', subscription_id: sub.id as Digest['subscription_id'], events: events[i]!, cursor: String(last), more }
+      : null;
+    stmts.push(...moveStmts(relay, sub, readable, last, digest, handoff));
+    if (digest) moves.push({ at: stmts.length - 1, digest });
+  });
+  const moved = await relay.db.batch(stmts);
+  return moves.filter(({ at }) => moved[at]!.meta.changes > 0).map(({ digest }) => digest);
 }
 
 /**
  * A stored digest as it may be sent now: its events read again from the log, so whatever happened since it was taken (a
- * removal, the agent leaving a conversation or losing a channel) applies to it too. A subscription
- * that is gone still owes its removals. Null when nothing in it may go.
+ * removal, the agent leaving a conversation or losing a channel) applies to it too. `sub` is its subscription and
+ * `readable` what its agent may read now (readableChannels); a subscription or agent that is gone (null) still owes its
+ * removals. Null when nothing in it may go.
  */
-export async function refreshDigest(relay: Relay, agentId: string, body: string): Promise<string | null> {
+export async function refreshDigest(relay: Relay, body: string, sub: SubscriptionRow | null, readable: string | null): Promise<string | null> {
   const digest = JSON.parse(body) as Digest;
-  const [sub, viewer] = await Promise.all([
-    relay.db.prepare('SELECT * FROM subscriptions WHERE id = ?').bind(digest.subscription_id).first<SubscriptionRow>(),
-    relay.db.prepare('SELECT level, owner_id FROM agents WHERE id = ?').bind(agentId).first<Viewer>(),
-  ]);
-  const where = sub && viewer ? belongs(sub, await readableChannels(relay, viewer)) : { sql: REMOVALS, args: [] };
+  const where = sub && readable !== null ? belongs(sub, readable) : { sql: REMOVALS, args: [] };
   const { results } = await relay.db
     .prepare(`SELECT e.seq, e.payload FROM events e WHERE e.seq IN (SELECT value FROM json_each(?)) AND ${where.sql} ORDER BY e.seq`)
     .bind(JSON.stringify(digest.events.map((e) => Number(e.cursor))), ...where.args)
-    .all<{ seq: number; payload: string }>();
-  return results.length ? JSON.stringify({ ...digest, events: await toEvents(relay, results) } satisfies Digest) : null;
+    .all<EventRow>();
+  return results.length ? JSON.stringify({ ...digest, events: (await toEvents(relay, [results]))[0]! } satisfies Digest) : null;
 }
 
 /** Events an agent was given today (UTC), against its owner's daily cap (#24). The window is a UTC day, so it resets at midnight. */
@@ -247,17 +283,18 @@ export async function takeDigests(
       .run();
     return { digests: [], capped: true };
   }
-  const { results: subs } = await relay.db
-    .prepare(`SELECT * FROM subscriptions WHERE agent_id = ? ${mode === 'due' ? 'AND next_due_ms <= ?' : ''} ORDER BY kind DESC, created_at`)
-    .bind(agent.id, ...(mode === 'due' ? [now.getTime()] : []))
-    .all<SubscriptionRow>();
+  const {
+    accessOf,
+    rows: [subs, channels],
+  } = await accessWith<[SubscriptionRow, ChannelRow]>(
+    relay,
+    relay.db
+      .prepare(`SELECT * FROM subscriptions WHERE agent_id = ? ${mode === 'due' ? 'AND next_due_ms <= ?' : ''} ORDER BY kind DESC, created_at`)
+      .bind(agent.id, ...(mode === 'due' ? [now.getTime()] : [])),
+    listChannelsStmt(relay),
+  );
   if (!subs.length) return { digests: [], capped: false };
-  const readable = await readableChannels(relay, agent);
-  const digests: Digest[] = [];
-  for (const sub of subs) {
-    const digest = await take(relay, sub, readable, handoff);
-    if (digest) digests.push(digest);
-  }
+  const digests = await take(relay, subs, readableIn(channels, accessOf(agent)), handoff);
   const count = digests.reduce((n, d) => n + d.events.length, 0);
   if (count) await hit(relay, deliveredToday(agent.id), count);
   return { digests, capped: false };

@@ -128,8 +128,9 @@ export const register: RegisterRoutes = (app, relay) => {
     const take = () => takeDigests(relay, agent, 'all');
     let { digests, capped } = await take();
     const deadline = Date.now() + wait * 1000;
-    let tail = await eventTail(relay);
+    let tail: number | undefined;
     while (!digests.length && !capped && Date.now() < deadline) {
+      tail ??= await eventTail(relay);
       await sleep(Math.min(deadline - Date.now(), POLL_MS + Math.random() * POLL_JITTER_MS));
       const now = await eventTail(relay);
       if (now === tail) continue;

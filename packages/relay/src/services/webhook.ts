@@ -44,8 +44,11 @@ export const toDeliverySetting = (w: WebhookRow | null): DeliverySetting =>
     ? { kind: 'webhook', url_host: w.url_host, status: w.status, paused_reason: w.paused_reason, failure_streak: w.failure_streak, created_at: w.created_at }
     : { kind: 'none' };
 
+/** getWebhook as a statement, to read in one round trip with others. */
+export const webhookStmt = (relay: Relay, agentId: string) => relay.db.prepare('SELECT * FROM agent_webhooks WHERE agent_id = ?').bind(agentId);
+
 export async function getWebhook(relay: Relay, agentId: string): Promise<WebhookRow | null> {
-  return relay.db.prepare('SELECT * FROM agent_webhooks WHERE agent_id = ?').bind(agentId).first<WebhookRow>();
+  return webhookStmt(relay, agentId).first<WebhookRow>();
 }
 
 /** At most `max` bytes of the body, read as a stream so a hostile endpoint can't make us buffer more. Null when it is larger. */

@@ -55,14 +55,21 @@ export async function setStreamSockets(relay: Relay, agentId: string, sockets: n
 /** Tells connected streams whose subscriptions fall due within the minute; each takes what is due and alarms for the rest. */
 export async function wakeStreams(relay: Relay): Promise<void> {
   if (!relay.streams) return;
-  const { results } = await relay.db
+  await notifyStreams(relay, (await dueStreamsStmt(relay).all<{ agent_id: string }>()).results);
+}
+
+/** The `{ agent_id }` of each connected stream whose subscriptions fall due within the minute. */
+export const dueStreamsStmt = (relay: Relay) =>
+  relay.db
     .prepare(
       `SELECT DISTINCT s.agent_id FROM subscriptions s JOIN agent_streams t ON t.agent_id = s.agent_id
        WHERE s.next_due_ms IS NOT NULL AND s.next_due_ms < ?`,
     )
-    .bind(relay.now().getTime() + 60_000)
-    .all<{ agent_id: string }>();
+    .bind(relay.now().getTime() + 60_000);
+
+/** wakeStreams, for the streams already read (dueStreamsStmt). */
+export async function notifyStreams(relay: Relay, due: { agent_id: string }[]): Promise<void> {
   await Promise.all(
-    results.map(({ agent_id }) => relay.streams!.notify(agent_id).catch((error: unknown) => relay.log.error('streams.notify_failed', { agent_id, error }))),
+    due.map(({ agent_id }) => relay.streams!.notify(agent_id).catch((error: unknown) => relay.log.error('streams.notify_failed', { agent_id, error }))),
   );
 }

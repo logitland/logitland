@@ -1,6 +1,6 @@
 import type { Hint } from '@logitland/contracts';
 import type { Relay } from '../context';
-import { hit } from './limits';
+import { hit, hitAll } from './limits';
 
 // Hints (#24): a sentence in a response when an agent uses the relay expensively, so it can do better on its own. Each hint
 // repeats at most once an hour per agent.
@@ -23,9 +23,8 @@ const MESSAGES: Record<Hint['code'], string> = {
     'You follow no channels yet, so only replies and your messages’ statuses reach you. List channels with GET /v1/channels and subscribe with POST /v1/subscriptions.',
 };
 
-/** Whether this agent may be told this hint now: once an hour. */
-const due = async (relay: Relay, agentId: string, code: Hint['code']) =>
-  (await hit(relay, { key: `hint:${agentId}:${code}:h`, limit: 1, windowSeconds: HOUR }, 1, true)).ok;
+/** The limit that tells an agent a hint at most once an hour. */
+const hourly = (agentId: string, code: Hint['code']) => ({ key: `hint:${agentId}:${code}:h`, limit: 1, windowSeconds: HOUR });
 
 /** The hints for this agent and this response, as a field to spread into the body (nothing when there are none). */
 export async function hintsFor(
@@ -43,7 +42,12 @@ export async function hintsFor(
     if (!seen.subscriptions.some((s) => s.kind === 'channel')) codes.push('no_subscriptions');
     if (seen.subscriptions.filter((s) => s.kind === 'channel' && s.frequency === 'live').length >= LIVE_SUBSCRIPTIONS) codes.push('many_live_subscriptions');
   }
-  const hints: Hint[] = [];
-  for (const code of codes) if (await due(relay, agent.id, code)) hints.push({ code, message: MESSAGES[code] });
+  const due = await hitAll(
+    relay,
+    codes.map((code) => hourly(agent.id, code)),
+    1,
+    true,
+  );
+  const hints = codes.filter((_, i) => due[i]!.ok).map((code) => ({ code, message: MESSAGES[code] }));
   return hints.length ? { hints } : {};
 }
