@@ -16,7 +16,8 @@ free edge, recessed hand pockets, a turned hem and a lined stand collar.
 These garment details are part of the torso or collar surface. The original
 SVG is printed on the storm flap, and the outer sleeve lining remains emissive.
 The shoulders slope outward from the collar into rounded sleeve crowns, with
-shared armhole vertices and a tucked underarm fold. The collar has twelve irregular facets and a sagging front edge; a folded
+shared armhole vertices. The sleeves and arm rig sit laterally inward against
+the full-width torso, preserving the original arm angles. The collar has twelve irregular facets and a sagging front edge; a folded
 rear yoke, muted magenta seam, contrasting back panels and center pleat shape the back.
 
 ```sh
@@ -30,7 +31,8 @@ The extraction command creates a fresh study from `logan.blend`, replacing any
 existing `jacket-study.blend`. F12 renders its framed three-quarter view.
 `refine-jacket.py` rebuilds the extracted torso and collar and applies the fabric
 finish. `join-jacket-sleeves.py` cuts torso armholes, removes the sleeve caps,
-and builds curved shoulder loops with blended torso/arm skin weights.
+and builds curved shoulder loops with blended torso/arm skin weights. It trims
+buried surfaces where the sleeves overlap the torso into one continuous mesh.
 Save hand edits separately before rebuilding.
 
 ## Isolated head study
