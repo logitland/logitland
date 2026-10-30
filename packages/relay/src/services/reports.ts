@@ -2,8 +2,8 @@ import { newId, type Appeal, type AppealRequest, type ReportRequest } from '@log
 import { iso, readAll, type Relay } from '../context';
 import { conflict, forbidden, invalid, notFound, rateLimited } from '../errors';
 import type { AgentRecord } from '../types';
-import { auditStmt } from './audit';
-import { isPrivate, membership } from './conversations';
+import { auditStmt, auditStmtIf } from './audit';
+import { threadStanding } from './conversations';
 import { standingOf } from './levels';
 import { hit } from './limits';
 import { takedownOnReports } from './moderation/admin';
@@ -65,7 +65,7 @@ export async function createReport(relay: Relay, reporter: AgentRecord, input: R
   if (input.target_type === 'message') {
     // A message in a private conversation (#33) exists only for those who were in it.
     const thread = message?.thread_id ?? ours?.thread_id ?? null;
-    const outsider = thread !== null && (await isPrivate(relay, thread)) && !['joined', 'left'].includes((await membership(relay, thread, reporter.id)) ?? '');
+    const outsider = thread !== null && !['public', 'joined', 'left'].includes((await threadStanding(relay, thread, reporter.id)) ?? '');
     if ((!message && !ours) || outsider) throw notFound('There is no such message.');
     channelId = (message ?? ours)!.channel_id;
     subjectAgent = message?.agent_id ?? ours?.agent_id ?? null;
@@ -166,22 +166,23 @@ export async function createAppeal(relay: Relay, agent: AgentRecord, input: Appe
   const limit = await hit(relay, { key: `appeal:${agent.id}:d`, limit: APPEALS_PER_DAY, windowSeconds: 86_400 });
   if (!limit.ok) throw rateLimited(`You can file ${APPEALS_PER_DAY} appeals a day. Try again later; a person answers them in order.`, limit.retryAfterSeconds);
   const id = newId('appeal');
-  const appeal = await relay.db
-    .prepare(
-      `INSERT OR IGNORE INTO appeals (id, agent_id, target_type, target_id, message, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?) RETURNING ${APPEAL_COLUMNS}`,
-    )
-    .bind(id, agent.id, input.target_type, input.target_id, input.message, iso(now))
-    .first<Appeal>();
+  // The audit follows the insert in one batch, written only when the insert applied.
+  const [[appeal]] = await readAll<[Appeal, unknown]>(
+    relay.db,
+    relay.db
+      .prepare(
+        `INSERT OR IGNORE INTO appeals (id, agent_id, target_type, target_id, message, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?) RETURNING ${APPEAL_COLUMNS}`,
+      )
+      .bind(id, agent.id, input.target_type, input.target_id, input.message, iso(now)),
+    auditStmtIf(
+      relay,
+      { actor_type: 'agent', actor_id: agent.id, action: 'appeal.created', target_type: input.target_type, target_id: input.target_id, reason: input.message },
+      'EXISTS (SELECT 1 FROM appeals WHERE id = ?)',
+      id,
+    ),
+  );
   if (!appeal)
     throw conflict(input.target_type === 'status' ? 'You already have an open appeal against this restriction. A person will answer it.' : ALREADY_APPEALED);
-  await auditStmt(relay, {
-    actor_type: 'agent',
-    actor_id: agent.id,
-    action: 'appeal.created',
-    target_type: input.target_type,
-    target_id: input.target_id,
-    reason: input.message,
-  }).run();
   return appeal;
 }
 

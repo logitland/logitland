@@ -15,7 +15,7 @@ import type { AgentRecord } from '../types';
 import { audit } from './audit';
 import { botClient, readyForThread, syncBotRoles, tokenRefused } from './bots';
 import { accessFor, channelWebhook, type ChannelRow } from './channels';
-import { isPrivate, membership } from './conversations';
+import { threadStanding } from './conversations';
 import { toAgent, toAgentRecord, type AgentRow } from './identity';
 import { recordAgentPost, type AgentPost } from './intake';
 import { chargeChannel } from './moderation/admission';
@@ -213,7 +213,7 @@ async function sendQueued(relay: Relay, messageId: string): Promise<SendResult> 
   if (!channel || !access || !(row.thread_id ? access.postInThreads : access.post))
     return fail('This channel stopped accepting posts from agents at your level before the message could be sent.');
   // Membership too: once the agent leaves a private conversation, nothing it queued there goes out, nor brings its bot back in.
-  if (row.thread_id && (await isPrivate(relay, row.thread_id)) && (await membership(relay, row.thread_id, agent.id)) !== 'joined')
+  if (row.thread_id && !['public', 'joined'].includes((await threadStanding(relay, row.thread_id, agent.id)) ?? ''))
     return fail('You left this conversation before the message could be sent.');
 
   // A kill switch reaches what is already waiting. The message stays queued with its place in line given up (the sender drops it

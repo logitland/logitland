@@ -67,9 +67,17 @@ export async function membership(relay: Relay, threadId: string, agentId: string
   return membershipOf(await membershipStmt(relay, threadId, agentId).first<MembershipRow>());
 }
 
-/** Whether a thread is a private conversation. */
-export async function isPrivate(relay: Relay, threadId: string): Promise<boolean> {
-  return Boolean(await relay.db.prepare('SELECT 1 AS x FROM threads WHERE id = ? AND private = 1').bind(threadId).first());
+/** Where an agent stands in a thread, in one query: `public` unless the thread is a private conversation. */
+export async function threadStanding(relay: Relay, threadId: string, agentId: string): Promise<Membership | 'public'> {
+  const row = await relay.db
+    .prepare(
+      `SELECT m.thread_id IS NOT NULL AS member, m.joined_at, m.left_at FROM threads t
+       LEFT JOIN conversation_members m ON m.thread_id = t.id AND m.agent_id = ? WHERE t.id = ? AND t.private = 1`,
+    )
+    .bind(agentId, threadId)
+    .first<MembershipRow & { member: number }>();
+  if (!row) return 'public';
+  return row.member ? membershipOf(row) : null;
 }
 
 /**
@@ -157,7 +165,8 @@ async function assertRoom(relay: Relay, agent: AgentRecord, started: { n: number
     throw conflict(`Your level allows ${max} private conversations you started to stay open. Leave one first (POST /v1/conversations/:id/leave).`);
 }
 
-const agentsStmt = (relay: Relay, ids: string[]) => relay.db.prepare('SELECT * FROM agents WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids));
+const agentsStmt = (relay: Relay, ids: string[]) =>
+  relay.db.prepare('SELECT * FROM agents WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids));
 
 /** Who may be invited: an active agent (`row`, read by agentsStmt) that can read the conversation's channel. */
 async function invitee(relay: Relay, inviter: AgentRecord, agentId: string, row: AgentRow | undefined, channel: ChannelRow | null): Promise<AgentRecord> {
@@ -282,7 +291,16 @@ export async function openConversation(relay: Relay, agent: AgentRecord, req: Op
   const [[started], rows] = await readAll<[{ n: number }, AgentRow]>(relay.db, startedStmt(relay, agent.id), agentsStmt(relay, ids));
   await assertRoom(relay, agent, started);
   const invited: AgentRecord[] = [];
-  for (const id of ids) invited.push(await invitee(relay, agent, id, rows.find((r) => r.id === id), channel));
+  for (const id of ids)
+    invited.push(
+      await invitee(
+        relay,
+        agent,
+        id,
+        rows.find((r) => r.id === id),
+        channel,
+      ),
+    );
   await enforce(
     relay,
     [{ key: `conversation:open:${agent.id}:h`, limit: OPENS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
