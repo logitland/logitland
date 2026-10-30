@@ -1,14 +1,15 @@
 import type { AdminAgent, AdminAgentsPage, Agent, AgentStatus, AgentStatusAction, Owner, PublicAgent, Scope } from '@logitland/contracts';
 import { LIMITS, newId } from '@logitland/contracts';
-import { iso, type Relay, type Stmt } from '../context';
+import { iso, readAll, type Relay, type Stmt } from '../context';
 import { hmac } from '../crypto';
 import { conflict, forbidden, invalid, notFound } from '../errors';
+import { forget, once } from '../memo';
 import type { AgentRecord } from '../types';
 import type { AuditInput } from './audit';
 import { auditStmt } from './audit';
 import { releaseAvatar } from './avatars';
 import { dropBots, syncBotRoles, syncIdentity } from './bots';
-import { assertOwnerNotBarred, banOriginStmts, banOwnerStmt, liftOriginBanStmt } from './origins';
+import { banOriginStmts, banOwnerStmt, liftOriginBanStmt, ownerBarStmt, refuseBarredOwner } from './origins';
 import { nameKey } from './names';
 import { setPersonRole, syncParentRole } from './people-roles';
 import { revokeAdoptionXp } from './xp/award';
@@ -90,19 +91,25 @@ export async function listOwnerAgents(relay: Relay, ownerId: string): Promise<Ag
 
 /** Called after Discord OAuth. Ownership binds to the Discord user ID; the username is presentation. */
 export async function upsertOwner(relay: Relay, discordUserId: string, username: string): Promise<Owner> {
-  await relay.db
+  const owner = (await relay.db
     .prepare(
-      'INSERT INTO owners (id, discord_user_id, username, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (discord_user_id) DO UPDATE SET username = excluded.username',
+      'INSERT INTO owners (id, discord_user_id, username, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (discord_user_id) DO UPDATE SET username = excluded.username RETURNING *',
     )
     .bind(newId('owner'), discordUserId, username, iso(relay.now()))
-    .run();
-  return (await relay.db.prepare('SELECT * FROM owners WHERE discord_user_id = ?').bind(discordUserId).first<Owner>())!;
+    .first<Owner>())!;
+  forget(ownerKey(owner.id));
+  return owner;
 }
 
-export async function getOwner(relay: Relay, ownerId: string): Promise<Owner> {
-  const owner = await relay.db.prepare('SELECT * FROM owners WHERE id = ?').bind(ownerId).first<Owner>();
-  if (!owner) throw notFound('No such owner');
-  return owner;
+const ownerKey = (ownerId: string) => `owner:${ownerId}`;
+
+/** Read once per unit of work: only `upsertOwner` and `deleteOwner` write owners. */
+export function getOwner(relay: Relay, ownerId: string): Promise<Owner> {
+  return once(ownerKey(ownerId), async () => {
+    const owner = await relay.db.prepare('SELECT * FROM owners WHERE id = ?').bind(ownerId).first<Owner>();
+    if (!owner) throw notFound('No such owner');
+    return owner;
+  });
 }
 
 const DAY_MS = 86_400_000;
@@ -112,8 +119,14 @@ const DISCORD_EPOCH = 1_420_070_400_000n;
 /** When a Discord account was created: the timestamp in the top 42 bits of its ID. */
 export const discordAccountCreated = (discordUserId: string): Date => new Date(Number((BigInt(discordUserId) >> 22n) + DISCORD_EPOCH));
 
-/** Adopting needs an owner with some history: a Discord account at least ownerMinAccountAgeDays old. Throwaway accounts are the cheap way round the limits. */
-export async function assertOwnerEstablished(relay: Relay, ownerId: string): Promise<Owner> {
+/** One Discord account vouches for this many agents at most. */
+const MAX_AGENTS_PER_OWNER = 10;
+
+/**
+ * Adopting needs an owner with some history, a Discord account at least ownerMinAccountAgeDays old (throwaway accounts are
+ * the cheap way round the limits), that isn't barred and has room for another agent.
+ */
+export async function assertOwnerCanAdopt(relay: Relay, ownerId: string): Promise<Owner> {
   const owner = await getOwner(relay, ownerId);
   const oldEnough = new Date(discordAccountCreated(owner.discord_user_id).getTime() + LIMITS.ownerMinAccountAgeDays * DAY_MS);
   if (oldEnough.getTime() > relay.now().getTime()) {
@@ -121,21 +134,16 @@ export async function assertOwnerEstablished(relay: Relay, ownerId: string): Pro
       `Adopting an agent needs a Discord account at least ${LIMITS.ownerMinAccountAgeDays} days old. Yours will be old enough on ${iso(oldEnough).slice(0, 10)}.`,
     );
   }
-  await assertOwnerNotBarred(relay, owner.discord_user_id);
-  return owner;
-}
-
-/** One Discord account vouches for this many agents at most. */
-const MAX_AGENTS_PER_OWNER = 10;
-
-export async function assertOwnerHasRoom(relay: Relay, ownerId: string): Promise<void> {
-  const row = await relay.db
-    .prepare("SELECT COUNT(*) AS n FROM agents WHERE owner_id = ? AND status IN ('active', 'off', 'suspended')")
-    .bind(ownerId)
-    .first<{ n: number }>();
-  if ((row?.n ?? 0) >= MAX_AGENTS_PER_OWNER) {
+  const [barred, [room]] = await readAll<[unknown, { n: number }]>(
+    relay.db,
+    await ownerBarStmt(relay, owner.discord_user_id),
+    relay.db.prepare("SELECT COUNT(*) AS n FROM agents WHERE owner_id = ? AND status IN ('active', 'off', 'suspended')").bind(ownerId),
+  );
+  refuseBarredOwner(barred);
+  if (room!.n >= MAX_AGENTS_PER_OWNER) {
     throw forbidden(`One Discord account can own ${MAX_AGENTS_PER_OWNER} agents. Revoke one you no longer use first.`);
   }
+  return owner;
 }
 
 /**
@@ -152,11 +160,10 @@ export async function ownerLimitKey(relay: Relay, discordUserId: string, name: s
  * keeps only the owner ID, which no longer points at anyone. Their Logan sign-ins and requests go with them.
  */
 export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> {
-  const owner = await getOwner(relay, ownerId);
-  const { results: agents } = await relay.db
-    .prepare('SELECT id, status FROM agents WHERE owner_id = ?')
-    .bind(ownerId)
-    .all<{ id: string; status: AgentStatus }>();
+  const [owner, { results: agents }] = await Promise.all([
+    getOwner(relay, ownerId),
+    relay.db.prepare('SELECT id, status FROM agents WHERE owner_id = ?').bind(ownerId).all<{ id: string; status: AgentStatus }>(),
+  ]);
   const wasOff = agents.filter((a) => a.status === 'off').map((a) => a.id);
   const exists = 'EXISTS (SELECT 1 FROM owners WHERE id = ?)';
   const results = await relay.db.batch([
@@ -187,6 +194,7 @@ export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> 
     ),
     relay.db.prepare('DELETE FROM owners WHERE id = ?').bind(ownerId),
   ]);
+  forget(ownerKey(ownerId));
   if (results.at(-1)!.meta.changes === 0) throw notFound('No such owner');
   relay.log.info('owner.deleted', { owner_id: owner.id, agents: agents.length });
   await revokeAdoptionXp(

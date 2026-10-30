@@ -3,7 +3,7 @@ import { iso, type Relay } from '../context';
 import { userCode } from '../crypto';
 import { conflict, forbidden, notFound, rateLimited } from '../errors';
 import type { AgentRecord } from '../types';
-import { assertOwnerEstablished, assertOwnerHasRoom, auditIf, getAgent, ownerLimitKey, toPublicAgent } from './identity';
+import { assertOwnerCanAdopt, auditIf, getAgent, ownerLimitKey, toPublicAgent } from './identity';
 import { enforce, hit, peek } from './limits';
 import { syncParentRole } from './people-roles';
 import { grantAdoptionXp } from './xp/award';
@@ -37,8 +37,7 @@ async function toToken(relay: Relay, r: TokenRow): Promise<AdoptionToken> {
 }
 
 export async function createAdoptionToken(relay: Relay, ownerId: string): Promise<AdoptionToken> {
-  const owner = await assertOwnerEstablished(relay, ownerId);
-  await assertOwnerHasRoom(relay, ownerId);
+  const owner = await assertOwnerCanAdopt(relay, ownerId);
   await enforce(
     relay,
     [{ key: await ownerLimitKey(relay, owner.discord_user_id, 'adoption-token'), limit: TOKENS_PER_OWNER_PER_HOUR, windowSeconds: 3600 }],
@@ -93,22 +92,24 @@ export async function confirmAdoption(relay: Relay, agent: AgentRecord, raw: str
   if (agent.owner_id) throw conflict('You already have an owner.');
   if (agent.kind !== 'agent') throw forbidden('Only agents can be adopted.');
   const miss = missKey(agent.id);
-  if ((await peek(relay, miss)) >= miss.limit) throw rateLimited('Too many tokens that didn’t work. Ask your owner for a new one later.', 3600);
   const code = raw.trim().toUpperCase();
   const now = iso(relay.now());
-  const row = UserCode.safeParse(code).success
-    ? await relay.db
-        .prepare('SELECT * FROM adoption_tokens WHERE code = ? AND used_at IS NULL AND cancelled_at IS NULL AND expires_at > ?')
-        .bind(code, now)
-        .first<TokenRow>()
-    : null;
+  const [misses, row] = await Promise.all([
+    peek(relay, miss),
+    UserCode.safeParse(code).success
+      ? relay.db
+          .prepare('SELECT * FROM adoption_tokens WHERE code = ? AND used_at IS NULL AND cancelled_at IS NULL AND expires_at > ?')
+          .bind(code, now)
+          .first<TokenRow>()
+      : null,
+  ]);
+  if (misses >= miss.limit) throw rateLimited('Too many tokens that didn’t work. Ask your owner for a new one later.', 3600);
   if (!row) {
     await hit(relay, miss);
     throw notFound('That adoption token isn’t valid: it may be mistyped, expired, cancelled or used. Ask your owner for a new one.');
   }
   if (!(await getSettings(relay)).signup_open) throw forbidden('Adoption is paused while signups are closed. Try again later.');
-  await assertOwnerEstablished(relay, row.owner_id);
-  await assertOwnerHasRoom(relay, row.owner_id);
+  await assertOwnerCanAdopt(relay, row.owner_id);
   const open = 'code = ? AND used_at IS NULL AND cancelled_at IS NULL AND expires_at > ?';
   const [, used, linked] = await relay.db.batch([
     auditIf(

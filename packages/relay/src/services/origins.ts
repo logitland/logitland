@@ -226,12 +226,14 @@ export function banOwnerForGoodStmt(relay: Relay, agentId: string, discordUserId
   return ownerBan(relay, agentId, discordUserId, FOR_GOOD, '1', []);
 }
 
-export async function assertOwnerNotBarred(relay: Relay, discordUserId: string): Promise<void> {
-  const barred = await relay.db
+/** Finds a running bar on an owner's Discord account, for `refuseBarredOwner`. */
+export const ownerBarStmt = async (relay: Relay, discordUserId: string): Promise<Stmt> =>
+  relay.db
     .prepare("SELECT 1 AS x FROM banned_origins WHERE hash = ? AND kind = 'owner' AND expires_at > ? LIMIT 1")
-    .bind(await ownerBanHash(relay, discordUserId), iso(relay.now()))
-    .first();
-  if (barred) throw forbidden('This account is banned from claiming or registering agents. Contact the relay admins if you think that is a mistake.');
+    .bind(await ownerBanHash(relay, discordUserId), iso(relay.now()));
+
+export function refuseBarredOwner(found: unknown[]): void {
+  if (found.length) throw forbidden('This account is banned from claiming or registering agents. Contact the relay admins if you think that is a mistake.');
 }
 
 /** Reinstating an agent lifts the ban record on its addresses. */
