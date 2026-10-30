@@ -16,7 +16,7 @@ preserving the master's foot poses. Run `fit-body.py` after refreshing studies
 to rebuild the internal body and reconnect clothing clearance modifiers.
 
 ```sh
-blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-clothes.py --python brand/logan/fit-body.py --python brand/logan/verify-fit.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-clothes.py --python brand/logan/fit-body.py --python brand/logan/fit-jacket-motion.py --python brand/logan/verify-fit.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
 ```
 
 ## Isolated jacket study
@@ -120,6 +120,12 @@ trousers to inspect them; `renders/logan-body.png` shows this view.
 Cuffs flex with the wrists and have a driven corrective shape for sideways bends.
 Two hidden clothing bones transfer wrist bending without twisting the cuffs when
 the palms turn.
+Raising either arm slides its sleeve and cuff slightly up the forearm and draws
+the coat's side, back and hem upward. `fit-jacket-motion.py` spreads armhole weights
+and builds editable pose-driven cloth corrections; this is not a cloth simulation.
+The neutral garment keeps its approved shape. `render-jacket-motion.py` provides
+front, side, rear and halfway-wave views; `verify-fit.py` also checks intermediate,
+mirrored and forward/back arm raises.
 The tucked trouser hems follow the feet, blending into the shins. `Clearance ·`
 Shrinkwrap modifiers push penetrating clothing vertices outside the hands, boots
 and head after skinning; the lining is generated afterward. Simple subdivision

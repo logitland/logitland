@@ -103,6 +103,7 @@ storm flap covering the zipper, with pocket facings and folded fabric edges.
 Sleeves share the torso mesh through real armholes. The collar has a low-poly,
 worn shape; back detail comes from the yoke, seam, contrasting panels and pleat.
 The coat is hollow, with open neck, hem and wrists and inward cloth thickness.
+Raised arms slide the sleeves up slightly and draw the coat body upward, spreading cloth tension through the shoulder and torso.
 The pants source is saved in `brand/logan/pants-study.blend`: one
 connected garment with continuous knees and recessed lower-leg lights. Shoes are
 separate assets. Both garment studies are integrated into the master and its
