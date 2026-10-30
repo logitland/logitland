@@ -14,6 +14,8 @@ HERE=Path(__file__).resolve().parent
 DEPTH_SCALE=.88
 bpy.ops.wm.open_mainfile(filepath=str(HERE/'logan.blend'))
 scene=bpy.data.scenes['LOGAN']
+if scene.get('approved_head'):
+    raise RuntimeError('The approved head is now integrated. Edit head-study.blend directly; this historical generator requires the pre-integration body master.')
 scene.frame_set(1)
 rig=bpy.data.objects['LOGAN · Pose me']
 rig.animation_data_clear()
