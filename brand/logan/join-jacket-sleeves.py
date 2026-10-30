@@ -4,7 +4,7 @@ Run after refine-jacket.py. Removes the buried sleeve caps and torso armhole
 faces, bridges their boundary loops, and retains blended elbow skinning.
 """
 from pathlib import Path
-from math import atan2, pi, sin, cos
+from math import atan2, pi, sin, cos, radians
 
 import bmesh
 import bpy
@@ -108,7 +108,9 @@ for side, sign, tag in [('L',1,1),('R',-1,2)]:
         sleeve_faces.append(face)
     sleeve_loop = list({e for f in sleeve_faces for e in f.edges if e.is_boundary})
     axis = Vector((sign*.72*1.05,0,-.70*1.28)).normalized()
-    body_angles = angular_loop(body_loop,axis)
+    # Each opening uses its own normal: projecting the vertical body armhole
+    # onto the inclined arm plane folds its lower boundary back on itself.
+    body_angles = angular_loop(body_loop,Vector((sign,0,0)))
     sleeve_angles = angular_loop(sleeve_loop,axis)
     angles = sorted(set(a for a,v in body_angles+sleeve_angles))
     body_ring = resample_loop(body_angles,angles)
@@ -123,8 +125,10 @@ for side, sign, tag in [('L',1,1),('R',-1,2)]:
         blend = t*t*(3-2*t)
         for angle,a,b in zip(angles,body_ring,sleeve_ring):
             radial = across*cos(angle) + Vector((0,.55*sin(angle),0))
-            crown = .10 if radial.z>0 else .065
-            point = a.co.lerp(b.co,t) + radial*(crown*sin(pi*t))
+            # The crown bulges over the joint; the underarm rises into a soft
+            # arch instead of jutting outward past the sleeve's inner wall.
+            offset = radial*.10 if radial.z>0 else Vector((0,0,.075*abs(cos(angle))))
+            point = a.co.lerp(b.co,t) + offset*sin(pi*t)
             v = bm.verts.new(point)
             for index in set(a[deform].keys())|set(b[deform].keys()):
                 v[deform][index] = (1-blend)*a[deform].get(index,0)+blend*b[deform].get(index,0)
@@ -146,6 +150,15 @@ bm.free()
 torso.data.update()
 torso['continuous_sleeves'] = True
 torso['construction'] = 'Rounded cloth shoulders with shared armhole loops and blended joint weights'
+# Relax the hanging arms toward the body while retaining the waving arm pose.
+rig = bpy.data.objects['LOGAN · Pose me']
+for frame, sides in [(1, [('L',-1),('R',1)]), (40, [('R',1)])]:
+    scene.frame_set(frame)
+    for side, sign in sides:
+        bone = rig.pose.bones['upper_arm.'+side]
+        bone.rotation_euler.z = sign*radians(8)
+        bone.keyframe_insert('rotation_euler',frame=frame,group=bone.name)
+scene.frame_set(1)
 bpy.context.view_layer.update()
 bpy.ops.wm.save_as_mainfile(filepath=str(HERE/'jacket-study.blend'),compress=True)
 print('Built rounded cloth shoulders around the arm joints; removed block caps')
