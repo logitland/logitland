@@ -1,6 +1,6 @@
 """Build an isolated, continuous pair of Logan's trousers around the existing rig.
 
-Reads logan.blend without modifying it. Boots remain as fitting references.
+Reads logan.blend without modifying it. Contains only the trousers and their rig.
 """
 from math import cos, sin, radians
 from pathlib import Path
@@ -18,7 +18,7 @@ rig = bpy.data.objects['LOGAN · Pose me']
 source = bpy.data.objects['Trouser / continuous.L']
 materials = list(source.data.materials)
 for obj in list(scene.objects):
-    if not (obj.name.startswith(('Boot /','Studio /','Camera /','Reference /')) or obj.type=='ARMATURE'):
+    if not (obj.name.startswith(('Studio /','Camera /','Reference /')) or obj.type=='ARMATURE'):
         bpy.data.objects.remove(obj,do_unlink=True)
 if 'approved_head' in scene:
     del scene['approved_head']
@@ -212,8 +212,8 @@ links.new(mix.outputs[0],nodes['World Output'].inputs['Surface'])
 bpy.data.objects['Studio / floor'].hide_render = True
 bpy.data.objects['Studio / floor'].hide_set(True)
 scene.camera.location = (4,-12,4.2)
-scene.camera.rotation_euler = (Vector((0,0,1.65))-scene.camera.location).to_track_quat('-Z','Y').to_euler()
-scene.camera.data.ortho_scale = 4.1
+scene.camera.rotation_euler = (Vector((0,0,2.10))-scene.camera.location).to_track_quat('-Z','Y').to_euler()
+scene.camera.data.ortho_scale = 3.05
 scene.render.resolution_x = scene.render.resolution_y = 1200
 scene.render.film_transparent = False
 scene.render.filepath = str(HERE/'renders/pants-three-quarter.png')
@@ -223,7 +223,7 @@ notes.clear()
 notes.write('''PANTS STUDY
 
 One connected pair of trousers: waist, seat, legs and recessed calf lights.
-Boots are the unchanged master geometry, included as fitting references.
+The waistband and ankle hems are open, with an inward cloth lining.
 Frame 1: neutral. Frame 40: knee bend. The original leg rig remains editable.
 This study does not modify the approved coat or the full-body master.
 F12 renders the study; pants-study.py rebuilds it from logan.blend.
