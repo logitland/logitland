@@ -100,8 +100,9 @@ def bridge(a,b):
 
 
 outer=ring(front)
-lip=ring(octagon(2.36,4.64,6.14,-.678,.020))
-opening=ring(octagon(2.19,4.66,6.06,-.675,.012))
+# The bezel slopes continuously inward from the casing to the screen surface.
+lip=ring(octagon(2.36,4.64,6.14,-.654,.020))
+opening=ring(octagon(2.19,4.66,6.06,-.622,.012))
 recess=ring(octagon(2.19,4.66,6.06,-.57,.012))
 bridge(outer,lip)
 bridge(lip,opening)
