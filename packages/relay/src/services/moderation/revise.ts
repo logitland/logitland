@@ -1,9 +1,9 @@
 import type { RelayMessage } from '@logitland/contracts';
 import { DiscordError, RateLimitedError } from '@logitland/discord';
-import { iso, type Relay } from '../../context';
+import { iso, readAll, type Relay } from '../../context';
 import { RelayError, conflict, forbidden, invalid, notFound, rateLimited, unavailable } from '../../errors';
 import type { AgentPrincipal } from '../../types';
-import { audit, auditStmt } from '../audit';
+import { auditStmtIf } from '../audit';
 import { deleteBotPost, postingBot } from '../bots';
 import { getChannel, openWebhook, usableChannel } from '../channels';
 import { hit } from '../limits';
@@ -12,7 +12,7 @@ import { getSettings } from '../settings';
 import { activeStrikeCount, addStrike, escalateRuleBlocks } from '../strikes';
 import { standingOf } from '../levels';
 import { assertMayPost, countAttempt, findDuplicate } from './admission';
-import { Trail, logStmt, writeLog } from './log';
+import { Trail, logStmtWhere, writeLog } from './log';
 import { recentConversation } from './loops';
 import { decide } from './pipeline';
 import { EDITS_PER_MINUTE, EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
@@ -178,15 +178,23 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
       discordFailure(err, 'edit');
     }
   }
-  const changed = await relay.db
-    .prepare("UPDATE relay_messages SET content = ?, content_hash = ?, text_hash = ?, updated_at = ? WHERE id = ? AND status = 'sent' RETURNING *")
-    .bind(content, await contentHash(text), textHash, iso(relay.now()), row.id)
-    .first<MessageRow>();
+  // The trail and audit go first, guarded as the update is, so they are written exactly when the update applies.
+  const sent = "id = ? AND status = 'sent'";
+  const written = await readAll<MessageRow[]>(
+    relay.db,
+    ...trail.entries.map((e) => logStmtWhere(relay, agent.id, row.id, e, sent, row.id)),
+    auditStmtIf(
+      relay,
+      { actor_type: 'agent', actor_id: agent.id, action: 'message.edited', target_type: 'message', target_id: row.id },
+      `EXISTS (SELECT 1 FROM relay_messages WHERE ${sent})`,
+      row.id,
+    ),
+    relay.db
+      .prepare(`UPDATE relay_messages SET content = ?, content_hash = ?, text_hash = ?, updated_at = ? WHERE ${sent} RETURNING *`)
+      .bind(content, await contentHash(text), textHash, iso(relay.now()), row.id),
+  );
+  const changed = written.at(-1)![0];
   if (!changed) throw conflict('This message was removed while you were editing it.');
-  await relay.db.batch([
-    ...trail.entries.map((e) => logStmt(relay, agent.id, row.id, e)),
-    auditStmt(relay, { actor_type: 'agent', actor_id: agent.id, action: 'message.edited', target_type: 'message', target_id: row.id }),
-  ]);
   return toRelayMessage(changed);
 }
 
@@ -201,21 +209,30 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
   const { agent } = principal;
   const row = await ownMessage(relay, agent.id, id);
   const gone = async (status: string, reason: string): Promise<MessageRow> => {
-    const removed = await relay.db
-      .prepare(
-        "UPDATE relay_messages SET status = 'removed', removed_by = 'author', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ? RETURNING *",
-      )
-      .bind(reason, iso(relay.now()), row.id, status)
-      .first<MessageRow>();
+    // The audit goes first, guarded as the update is, so it is written exactly when the update applies.
+    const [, [removed]] = await readAll<[unknown, MessageRow]>(
+      relay.db,
+      auditStmtIf(
+        relay,
+        {
+          actor_type: 'agent',
+          actor_id: agent.id,
+          action: 'message.deleted',
+          target_type: 'message',
+          target_id: row.id,
+          diff: { status: { from: status, to: 'removed' } },
+        },
+        'EXISTS (SELECT 1 FROM relay_messages WHERE id = ? AND status = ?)',
+        row.id,
+        status,
+      ),
+      relay.db
+        .prepare(
+          "UPDATE relay_messages SET status = 'removed', removed_by = 'author', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ? RETURNING *",
+        )
+        .bind(reason, iso(relay.now()), row.id, status),
+    );
     if (!removed) throw conflict('This message changed while you were deleting it. Look at it again and retry.');
-    await audit(relay, {
-      actor_type: 'agent',
-      actor_id: agent.id,
-      action: 'message.deleted',
-      target_type: 'message',
-      target_id: row.id,
-      diff: { status: { from: status, to: 'removed' } },
-    });
     return removed;
   };
 

@@ -12,7 +12,7 @@ import type {
 import { DiscordError, RateLimitedError } from '@logitland/discord';
 import { iso, readAll, type Relay, type Stmt } from '../../context';
 import { conflict, invalid, notFound, rateLimited } from '../../errors';
-import { audit, auditStmt } from '../audit';
+import { audit, auditStmt, auditStmtIf } from '../audit';
 import { deleteBotPost } from '../bots';
 import { getChannel, openWebhook } from '../channels';
 import { adminAct, getAgent } from '../identity';
@@ -198,25 +198,30 @@ export async function takedownOnReports(relay: Relay, messageId: string): Promis
     relay.log.error('reports.takedown_failed', { message_id: row.id, error });
     return false;
   }
-  const r = await relay.db
-    .prepare(
-      "UPDATE relay_messages SET status = 'held', verdict = 'hold', policy_code = 'manual', held_kind = 'reports', status_reason = ?, discord_message_id = NULL, updated_at = ? WHERE id = ? AND status = 'sent'",
-    )
-    .bind(REPORTED_REASON, iso(relay.now()), row.id)
-    .run();
+  // The audit goes first, guarded as the update is, so it is written exactly when the update applies.
+  const [, r] = await relay.db.batch([
+    auditStmtIf(
+      relay,
+      {
+        actor_type: 'system',
+        actor_id: 'reports',
+        action: 'message.taken_down',
+        target_type: 'message',
+        target_id: row.id,
+        reason: REPORTED_REASON,
+        diff: { status: { from: 'sent', to: 'held' } },
+      },
+      "EXISTS (SELECT 1 FROM relay_messages WHERE id = ? AND status = 'sent')",
+      row.id,
+    ),
+    relay.db
+      .prepare(
+        "UPDATE relay_messages SET status = 'held', verdict = 'hold', policy_code = 'manual', held_kind = 'reports', status_reason = ?, discord_message_id = NULL, updated_at = ? WHERE id = ? AND status = 'sent'",
+      )
+      .bind(REPORTED_REASON, iso(relay.now()), row.id),
+  ]);
   await scrubMessage(relay, row.discord_message_id, 'moderator', { channelId: row.channel_id });
-  if (r.meta.changes > 0) {
-    await auditStmt(relay, {
-      actor_type: 'system',
-      actor_id: 'reports',
-      action: 'message.taken_down',
-      target_type: 'message',
-      target_id: row.id,
-      reason: REPORTED_REASON,
-      diff: { status: { from: 'sent', to: 'held' } },
-    }).run();
-  }
-  return r.meta.changes > 0;
+  return r!.meta.changes > 0;
 }
 
 const REPORTED_REASON = `Taken down after reports from ${TAKEDOWN_REPORTERS} independent agents. A moderator will restore it or confirm the takedown.`;
