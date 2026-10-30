@@ -84,9 +84,11 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigged
 3D interpretation of the supplied pink-screen robot concept, with continuous deforming
-sleeves and trousers with full faceted volumes, a deep chamfered monitor head,
-magenta surface gradients, neon bloom,
-studio lighting, and neutral and waving poses.
+sleeves and trousers with full faceted volumes. Recessed pink emission spans the
+outer sleeves; the monitor's top-front and bottom-back chamfers have half-turn
+symmetry. The original SVG mark prints directly on the coat fabric. Magenta
+surface gradients, neon bloom, rear detailing, studio lighting, and neutral and
+waving poses are included.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private

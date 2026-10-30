@@ -21,10 +21,17 @@ supplied front reference.
 carries the face and headset. Each sleeve and trouser leg is one connected mesh,
 with blended joint weights and volume-preserving deformation at elbows and knees.
 The head, boots, cuffs, and hand segments remain rigid.
-The sleeves have fitted shoulder caps, stepped front panels, outer bevel inlays,
-and thin seams above the forearms, tapering into octagonal cuffs. The coat has an
-elliptical body, fitted waist, flared hem and hollow collar. The head's crown and
-side contours transition through a wider shoulder into a tapered rear shell.
+The sleeves have fitted shoulder caps, stepped front panels, and recessed emissive
+lining across the whole outer side, wrapping onto the front and rear seams.
+The lining and its dark cavity walls share the sleeve's deforming mesh.
+The coat has an elliptical body, fitted waist, flared hem, hollow collar, rear
+yoke and pleats. The chest fabric follows the torso surface. Its logo uses the
+original `apps/web/src/lib/assets/logit.svg`, rasterized intact with resvg into
+`reference/logit-texture.png` and packed into the Blender material. UVs preserve
+the mark's proportions; its black canvas leaves the underlying cloth visible.
+The head has steep top-front and bottom-back chamfers related by a 180-degree
+rotation in side profile, with magenta gradients on both and an inset rear
+service panel, vent rows and fasteners.
 The hidden Reference collection contains the source image. The original image
 also lives in `reference/logan.png`; `logan-original.png` retains the first concept.
 The crown and head edges use surface gradients. The compositor adds bloom from
@@ -39,6 +46,7 @@ blender --background --python brand/logan/build.py
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- neutral
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- hello
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- three-quarter
+blender --background brand/logan/logan.blend --python brand/logan/render.py -- rear
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- transparent
 ```
 
