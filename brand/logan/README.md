@@ -5,6 +5,20 @@ rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
 and the packed full-body concept image. The side and back geometry interpret the
 supplied front reference.
 
+## Construction rules
+
+- Every visible part must share surface geometry, be extruded from it, or overlap
+  its supporting part. Flat colour and logo details use materials. Parenting to a bone
+  alone does not attach geometry.
+- Garment details follow the cloth: pocket openings, folded hems, sleeve panels,
+  collar colour and coat seams must remain attached through posing.
+- Check front, side, rear and bent poses. Contact is necessary; protruding edges
+  and the silhouette still need close-up render inspection against the reference.
+
+`verify.py` checks evaluated geometry for a connected assembly in neutral and
+wave poses, and closed sleeve, trouser and torso meshes. It catches separated
+parts even when they line up convincingly in the front view.
+
 ## Pose and render
 
 1. Choose frame **1** for neutral or **40** for the wave.
@@ -21,11 +35,12 @@ supplied front reference.
 carries the face and headset. Each sleeve and trouser leg is one connected mesh,
 with blended joint weights and volume-preserving deformation at elbows and knees.
 The head, boots, cuffs, and hand segments remain rigid.
-The sleeves have fitted shoulder caps, stepped front panels, and recessed emissive
+The sleeves have fitted shoulder caps, stepped surface panels, and recessed emissive
 lining across the whole outer side, wrapping onto the front and rear seams.
 The lining and its dark cavity walls share the sleeve's deforming mesh.
-The coat has an elliptical body, fitted waist, flared hem, hollow collar, rear
-yoke and pleats. The chest fabric follows the torso surface. Its logo uses the
+The coat is one continuous elliptical body, including the fitted waist, flared hem,
+pocket linings, folded pocket hems, rear yoke, centre seam and pleats. The hollow collar overlaps the
+coat and neck, with its pink stripe assigned to its own faces. The chest logo uses the
 original `apps/web/src/lib/assets/logit.svg`, rasterized intact with resvg into
 `reference/logit-texture.png` and packed into the Blender material. UVs preserve
 the mark's proportions; its black canvas leaves the underlying cloth visible.
@@ -48,6 +63,7 @@ blender --background brand/logan/logan.blend --python brand/logan/render.py -- h
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- three-quarter
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- rear
 blender --background brand/logan/logan.blend --python brand/logan/render.py -- transparent
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/verify.py
 ```
 
 Rebuilding replaces `logan.blend`; save hand-edited work under another name first.
