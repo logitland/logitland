@@ -162,6 +162,30 @@ if not pants.get('fitted_boot_hems'):
 for side, sign in (('L', 1), ('R', -1)):
     hand = bpy.data.objects['Hand / continuous.'+side]
     cuff = bpy.data.objects['Cuff / band.'+side]
+    # Cloth follows wrist flexion/deviation, while the hand can turn inside its
+    # opening. Passing pronation into cuff skinning winds the fabric into a knot.
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode='EDIT')
+    name = 'wrist_cuff.'+side
+    helper = rig.data.edit_bones.get(name) or rig.data.edit_bones.new(name)
+    helper.length = .20
+    helper.matrix = rig.data.edit_bones['hand.'+side].matrix.copy()
+    helper.parent = rig.data.edit_bones['forearm.'+side]
+    helpers = rig.data.collections.get('Clothing deformation') or rig.data.collections.new('Clothing deformation')
+    helpers.assign(helper)
+    helpers.is_visible = False
+    bpy.ops.object.mode_set(mode='OBJECT')
+    pose = rig.pose.bones[name]
+    bend = pose.constraints.get('Wrist bend without twist') or pose.constraints.new('COPY_ROTATION')
+    bend.name = 'Wrist bend without twist'
+    bend.target = rig
+    bend.subtarget = 'hand.'+side
+    bend.owner_space = bend.target_space = 'LOCAL'
+    bend.euler_order = 'XYZ'
+    bend.use_y = False
+    old_group = cuff.vertex_groups.get('hand.'+side)
+    if old_group:
+        old_group.name = name
     if not cuff.data.shape_keys:
         cuff.shape_key_add(name='Basis')
         opening = cuff.shape_key_add(name='Wrist side clearance')
@@ -184,7 +208,7 @@ for side, sign in (('L', 1), ('R', -1)):
         variable.targets[0].id = rig
         variable.targets[0].data_path = f'pose.bones["hand.{side}"].rotation_euler[2]'
     if not cuff.get('flexible_wrist'):
-        hand_group = cuff.vertex_groups.get('hand.'+side) or cuff.vertex_groups.new(name='hand.'+side)
+        hand_group = cuff.vertex_groups.get(name) or cuff.vertex_groups.new(name=name)
         forearm_group = cuff.vertex_groups['forearm.'+side]
         # Four existing cuff rings: the sleeve end stays put, while its opening
         # shares the wrist bend instead of behaving like a rigid metal bracelet.
