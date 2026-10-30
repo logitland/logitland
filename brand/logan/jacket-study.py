@@ -20,7 +20,7 @@ for obj in list(scene.objects):
             or obj.type == 'ARMATURE'):
         bpy.data.objects.remove(obj, do_unlink=True)
 garment = [o for o in scene.objects if o.type == 'MESH' and o.name.startswith(prefixes)]
-assert len(garment) == 6, 'Expected torso, collar, two sleeves and two cuffs'
+assert len(garment) in (4, 6), 'Expected torso, collar, cuffs and optionally separate legacy sleeves'
 scene.name = 'JACKET STUDY'
 if 'approved_head' in scene:
     del scene['approved_head']
