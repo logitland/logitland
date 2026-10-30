@@ -113,6 +113,9 @@ Each has a shared palm and articulated, tapered digits. The approved boots from
 `brand/logan/shoes-study.blend` are integrated into the foot rig: integral instep
 straps, layered soles, transverse tread, open lined collars and recessed pink lights.
 The studies remain separate editable sources for the integrated assets.
+A skinned graphite torso, arms and legs support the head, hands and boots beneath
+the clothes. Flexible cuffs, ankle-following hems and live surface clearance
+reduce garment clipping; extreme or combined poses still require visual checks.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
