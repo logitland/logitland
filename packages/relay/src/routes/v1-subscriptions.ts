@@ -1,9 +1,10 @@
 import { CreateSubscriptionRequest, DeliveryId, DeliveryRequest, DeliveryStatus, SubscriptionPatch } from '@logitland/contracts';
-import { invalid, parse } from '../errors';
+import { invalid, notFound, parse } from '../errors';
+import { accessWith, listChannelsStmt, type ChannelRow } from '../services/channels';
 import { listDeliveries } from '../services/deliveries';
-import { DIGEST_MAX, readFeed, readableChannels } from '../services/feed';
+import { DIGEST_MAX, readFeed, readableIn, type SubscriptionRow } from '../services/feed';
 import { hintsFor } from '../services/hints';
-import { listSubscriptions, ownSubscription, subscribe, unsubscribe, updateSubscription } from '../services/subscriptions';
+import { listSubscriptions, ownSubscriptionStmt, subscribe, unsubscribe, updateSubscription } from '../services/subscriptions';
 import { getWebhook, removeWebhook, resumeWebhook, rotateWebhookSecret, setWebhook, toDeliverySetting } from '../services/webhook';
 import { agentAuth, body, countRead, intQuery, requireScope, type RegisterRoutes } from './shared';
 
@@ -43,10 +44,14 @@ export const register: RegisterRoutes = (app, relay) => {
     requireScope(c, 'messages:read');
     await countRead(relay, c);
     const { agent } = c.get('principal');
-    const sub = await ownSubscription(relay, agent.id, c.req.param('id'));
+    const {
+      accessOf,
+      rows: [[sub], channels],
+    } = await accessWith<[SubscriptionRow, ChannelRow]>(relay, ownSubscriptionStmt(relay, agent.id, c.req.param('id')), listChannelsStmt(relay));
+    if (!sub) throw notFound('No such subscription');
     const raw = c.req.query('after');
     if (raw !== undefined && !/^\d{1,15}$/.test(raw)) throw invalid('after must be a cursor from an earlier digest or event');
-    const readable = await readableChannels(relay, agent);
+    const readable = readableIn(channels, accessOf(agent));
     const page = await readFeed(relay, sub, raw === undefined ? sub.cursor : Number(raw), intQuery(c, 'limit', DIGEST_MAX, 1, DIGEST_MAX), readable);
     c.header('cache-control', 'no-store');
     return c.json({ events: page.events, cursor: String(page.last), more: page.more });

@@ -74,10 +74,14 @@ export async function listSubscriptions(relay: Relay, agentId: string): Promise<
 
 /** The agent's own subscription, or 404. Other agents' subscriptions look the same as missing ones. */
 export async function ownSubscription(relay: Relay, agentId: string, id: string): Promise<SubscriptionRow> {
-  const row = await relay.db.prepare('SELECT * FROM subscriptions WHERE id = ? AND agent_id = ?').bind(id, agentId).first<SubscriptionRow>();
+  const row = await ownSubscriptionStmt(relay, agentId, id).first<SubscriptionRow>();
   if (!row) throw notFound('No such subscription');
   return row;
 }
+
+/** ownSubscription as a statement (no row is a 404), to read in one round trip with others. */
+export const ownSubscriptionStmt = (relay: Relay, agentId: string, id: string) =>
+  relay.db.prepare('SELECT * FROM subscriptions WHERE id = ? AND agent_id = ?').bind(id, agentId);
 
 const existingStmt = (relay: Relay, agentId: string, kind: SubscriptionKind, channelId: string | null) =>
   relay.db

@@ -1,6 +1,6 @@
 import { ChallengeResponse, LIMITS, type CreatedDelivery, type DeliverySetting, type RotatedSecret, type WebhookStatus } from '@logitland/contracts';
 import { generateSecret, signHeaders } from '@logitland/webhooks';
-import { iso, type Relay } from '../context';
+import { iso, readAll, type Relay } from '../context';
 import { randomToken } from '../crypto';
 import { RelayError, conflict, notFound, unavailable } from '../errors';
 import { audit, auditStmt } from './audit';
@@ -138,13 +138,15 @@ export async function setWebhook(relay: Relay, agentId: string, rawUrl: string):
   const now = iso(relay.now());
   const row = { agent_id: agentId, created_at: now };
   const [urlCiphertext, secretCiphertext] = await Promise.all([relay.secrets.seal(url.toString(), urlAad(row)), relay.secrets.seal(secret, secretAad(row))]);
-  await relay.db.batch([
+  const [[set]] = await readAll<[WebhookRow, never, never]>(
+    relay.db,
     relay.db
       .prepare(
         `INSERT INTO agent_webhooks (agent_id, url_ciphertext, url_host, secret_ciphertext, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)
          ON CONFLICT (agent_id) DO UPDATE SET url_ciphertext = excluded.url_ciphertext, url_host = excluded.url_host, secret_ciphertext = excluded.secret_ciphertext,
            secret_previous_ciphertext = NULL, secret_previous_until = NULL, status = 'active', paused_reason = NULL, paused_at = NULL, failure_streak = 0,
-           failing_since = NULL, created_at = excluded.created_at, updated_at = excluded.updated_at`,
+           failing_since = NULL, created_at = excluded.created_at, updated_at = excluded.updated_at
+         RETURNING *`,
       )
       .bind(agentId, urlCiphertext, url.host, secretCiphertext, now, now),
     dropOpenStmt(relay, agentId, 'The webhook was replaced'),
@@ -156,8 +158,8 @@ export async function setWebhook(relay: Relay, agentId: string, rawUrl: string):
       target_id: agentId,
       diff: { url_host: { from: null, to: url.host } },
     }),
-  ]);
-  return { delivery: toDeliverySetting(await getWebhook(relay, agentId)), secret };
+  );
+  return { delivery: toDeliverySetting(set!), secret };
 }
 
 /** Deliveries not yet through, dropped (in a batch with the change that stops them). */
@@ -197,13 +199,13 @@ export async function resumeWebhook(relay: Relay, agentId: string): Promise<Deli
   );
   const resumed = await relay.db
     .prepare(
-      "UPDATE agent_webhooks SET status = 'active', failure_streak = 0, failing_since = NULL, paused_reason = NULL, paused_at = NULL, updated_at = ? WHERE agent_id = ? AND status = 'paused'",
+      "UPDATE agent_webhooks SET status = 'active', failure_streak = 0, failing_since = NULL, paused_reason = NULL, paused_at = NULL, updated_at = ? WHERE agent_id = ? AND status = 'paused' RETURNING *",
     )
     .bind(iso(relay.now()), agentId)
-    .run();
-  if (resumed.meta.changes > 0)
-    await audit(relay, { actor_type: 'agent', actor_id: agentId, action: 'webhook.resumed', target_type: 'agent', target_id: agentId });
-  return toDeliverySetting(await getWebhook(relay, agentId));
+    .first<WebhookRow>();
+  if (!resumed) return toDeliverySetting(await getWebhook(relay, agentId));
+  await audit(relay, { actor_type: 'agent', actor_id: agentId, action: 'webhook.resumed', target_type: 'agent', target_id: agentId });
+  return toDeliverySetting(resumed);
 }
 
 /** New secret now; the previous one keeps signing alongside it for 24 hours so the receiver can switch without a gap. */
