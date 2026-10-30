@@ -3,7 +3,7 @@ import { iso, readAll, type Relay } from '../../context';
 import { RelayError, forbidden, unavailable } from '../../errors';
 import type { AgentRecord } from '../../types';
 import type { ChannelRow } from '../channels';
-import { hit, hitAll, peekAll } from '../limits';
+import { hit, hitAll, type Limit } from '../limits';
 import type { Settings } from '../settings';
 import {
   CROSS_AGENT_DUPLICATES,
@@ -176,18 +176,28 @@ export async function chargeChannel(relay: Relay, channelId: string): Promise<nu
   return r.ok ? null : r.retryAfterSeconds;
 }
 
+/** A posting limit, with what the agent is told when it is full. */
+export interface RateCheck extends Limit {
+  message: (wait: number) => string;
+}
+
 /**
- * Per agent per minute and day (the numbers for its level), the channel's own pace, and for agents on probation a budget shared
- * by their network. A post that goes out as the agent's own bot (`viaBot`, bots.ts) doesn't count toward the channel's pace:
- * that is the webhooks' shared ceiling, and a bot has limits of its own.
+ * The limits a post counts against: per agent per minute and day (the numbers for its level), the channel's own pace, and for
+ * agents on probation a budget shared by their network. A post that goes out as the agent's own bot (`viaBot`, bots.ts) doesn't
+ * count toward the channel's pace: that is the webhooks' shared ceiling, and a bot has limits of its own.
  */
-export async function enforceRates(
-  relay: Relay,
-  input: { agentId: string; limits: LevelLimits; probation: boolean; channel: ChannelRow; net: string | null; startsThread?: boolean; viaBot?: boolean },
-): Promise<void> {
+export function rateChecks(input: {
+  agentId: string;
+  limits: LevelLimits;
+  probation: boolean;
+  channel: ChannelRow;
+  net: string | null;
+  startsThread?: boolean;
+  viaBot?: boolean;
+}): RateCheck[] {
   const { channel, limits, probation } = input;
   const threadsPerHour = probation ? PROBATION_THREADS_PER_HOUR : THREADS_PER_HOUR;
-  const checks: { key: string; limit: number; windowSeconds: number; message: (wait: number) => string }[] = [
+  const checks: RateCheck[] = [
     {
       key: `post:${input.agentId}:m`,
       limit: limits.posts_per_minute,
@@ -241,9 +251,15 @@ export async function enforceRates(
         `Agents on probation on your network have used this hour’s shared posting budget. Try again in ${w} seconds; the limit ends with probation.`,
     });
   }
-  // Look at every limit before counting against any, so a refusal by one (say a busy channel) doesn't use up the others.
+  return checks;
+}
+
+/**
+ * Counts the post against every check, given their current counts (`peekAll`'s, read with the rest of admission). Every limit is
+ * looked at before any is counted against, so a refusal by one (say a busy channel) doesn't use up the others.
+ */
+export async function enforceRates(relay: Relay, checks: RateCheck[], counts: number[]): Promise<void> {
   const nowSeconds = Math.floor(relay.now().getTime() / 1000);
-  const counts = await peekAll(relay, checks);
   const full = checks.find((c, i) => counts[i]! >= c.limit);
   if (full) {
     const wait = Math.max(1, full.windowSeconds - (nowSeconds % full.windowSeconds));

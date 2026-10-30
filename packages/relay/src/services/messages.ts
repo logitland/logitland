@@ -6,11 +6,10 @@ import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
 import { activeBot } from './bots';
 import { usableChannel, type ChannelRow } from './channels';
-import type { ConversationRow } from './conversation';
-import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds } from './moderation/admission';
-import { hit } from './limits';
+import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds, rateChecks } from './moderation/admission';
+import { hit, peekAll } from './limits';
 import { Trail, logStmt, logStmtWhere, writeLog, type LogEntry } from './moderation/log';
-import { checkLoop } from './moderation/loops';
+import { checkLoop, recentConversation } from './moderation/loops';
 import { decide, settle } from './moderation/pipeline';
 import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PROBATION_MAX_AUTO_ARCHIVE_MINUTES, PolicyError, isOnProbation } from './moderation/policy';
 import { standingOf } from './levels';
@@ -19,7 +18,7 @@ import { evaluateRules, judge } from './moderation/rules';
 import { checkLive, checkShape, isForum, replyLine, type Target } from './moderation/target';
 import { dispatch } from './sending';
 import { getSettings, type Settings } from './settings';
-import { escalateRuleBlocks } from './strikes';
+import { activeStrikeCount, escalateRuleBlocks } from './strikes';
 
 // POST /v1/messages and what happens to a message afterwards. The order is the point:
 // kill switches, channel and thread rules, the idempotency lookup, then (for a new attempt only) attempt counting,
@@ -278,42 +277,45 @@ async function run(
     });
   }
 
-  const dup = await findDuplicate(relay, {
+  // What the rest of admission and the classifier read, read at once; the checks then decide in order: duplicates, the loop
+  // breaker, rates. A new forum or media post joins no conversation.
+  const rates = rateChecks({
     agentId: agent.id,
-    channelId: channel.id,
-    textHash: draft.textHash,
-    excludeId: draft.existing?.id ?? null,
-    length: normalise(draft.target.text ?? '').length,
+    limits,
+    probation,
+    channel,
+    net: draft.net,
+    startsThread: Boolean(req.thread_name),
+    viaBot: Boolean(draft.botUserId),
   });
+  const [dup, conversation, strikes, counts] = await refusing(() =>
+    Promise.all([
+      findDuplicate(relay, {
+        agentId: agent.id,
+        channelId: channel.id,
+        textHash: draft.textHash,
+        excludeId: draft.existing?.id ?? null,
+        length: normalise(draft.target.text ?? '').length,
+      }),
+      req.thread_name && isForum(channel) ? [] : recentConversation(relay, channel.id, req.thread_id ?? null),
+      activeStrikeCount(relay, agent.id),
+      peekAll(relay, rates),
+    ]),
+  );
   trail.add('limits', dup?.verdict ?? 'pass', dup?.policy ?? null, dup?.reason ?? null, 'limits');
   if (dup?.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (dup) return decided({ status: dup.verdict === 'block' ? 'blocked' : 'held', verdict: dup.verdict, policy: dup.policy, reason: dup.reason });
 
-  const conversation: ConversationRow[] = await refusing(() =>
-    checkLoop(relay, {
-      agentId: agent.id,
-      channelId: channel.id,
-      threadId: req.thread_id ?? null,
-      startsThread: Boolean(req.thread_name) && isForum(channel),
-    }),
-  );
-  await refusing(() =>
-    enforceRates(relay, {
-      agentId: agent.id,
-      limits,
-      probation,
-      channel,
-      net: draft.net,
-      startsThread: Boolean(req.thread_name),
-      viaBot: Boolean(draft.botUserId),
-    }),
-  );
+  await refusing(async () => {
+    checkLoop(conversation, agent.id, relay.now());
+    await enforceRates(relay, rates, counts);
+  });
   trail.add('admission', 'pass', null, null, 'limits');
 
   const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null }, trail.entries);
   if (!row) return winner(relay, agent.id, draft.idempotencyKey, draft.digest);
 
-  const decision = await decide(relay, row, agent, { probation, conversation, channel });
+  const decision = await decide(relay, row, agent, { probation, conversation, channel, strikes });
   const wouldHold = decision.kind === 'hold' || (decision.kind === 'unavailable' && relay.config.moderationOutage === 'hold');
   if (wouldHold && (await pendingHolds(relay, agent.id)) >= MAX_PENDING_HOLDS) await refuseHold(relay, row, agent.id);
   // Null when someone else (the sweeper) moved the message first: then it is read as they left it.

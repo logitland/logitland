@@ -46,19 +46,19 @@ function interpret({ result, source, latencyMs }: Awaited<ReturnType<typeof clas
 
 /**
  * Asks the classifier about the message, with the thread's name when it starts one, read in the context of the conversation.
- * `conversation` and `channel` may be passed when the caller has just read them (the loop check reads the conversation).
+ * `conversation`, `channel` and the agent's active `strikes` may be passed when the caller has just read them (admission does).
  */
 export async function decide(
   relay: Relay,
   row: MessageRow,
   agent: AgentRecord,
-  opts: { probation: boolean; conversation?: ConversationRow[]; channel?: ChannelRow | null },
+  opts: { probation: boolean; conversation?: ConversationRow[]; channel?: ChannelRow | null; strikes?: number },
 ): Promise<Decision> {
   const [rows, channel, strikes] = await Promise.all([
     // A message that starts a thread has no conversation yet, and the channel's other messages aren't its context.
     row.thread_name ? [] : (opts.conversation ?? recentConversation(relay, row.channel_id, row.thread_id)),
     opts.channel !== undefined ? opts.channel : getChannel(relay, row.channel_id),
-    activeStrikeCount(relay, agent.id),
+    opts.strikes ?? activeStrikeCount(relay, agent.id),
   ]);
   const context = rows
     .filter((r) => !r.deleted_at && r.content)

@@ -36,17 +36,10 @@ export function inLoop(rowsNewestFirst: ConversationRow[], senderId: string, now
 }
 
 /**
- * Throws the 429 for a loop. Returns the rows it read so the classifier can use them as context. A new forum or media post
- * (`startsThread`) is not part of any loop and has no conversation to read, so nothing is read for it. A thread started in a
- * text channel is not that: its first message lands in the channel itself.
+ * Throws the 429 for a loop, given the conversation the message would join (recentConversation's rows). A new forum or media
+ * post is not part of any loop and has no conversation, so it is checked against none. A thread started in a text channel is not
+ * that: its first message lands in the channel itself.
  */
-export async function checkLoop(
-  relay: Relay,
-  input: { agentId: string; channelId: string; threadId: string | null; startsThread?: boolean },
-): Promise<ConversationRow[]> {
-  if (input.startsThread) return [];
-  const rows = await recentConversation(relay, input.channelId, input.threadId);
-  if (inLoop(rows, input.agentId, relay.now()))
-    throw new PolicyError(429, 'rate_limited', 'loop', explain('loop'), { retryAfterSeconds: LOOP.retryAfterSeconds });
-  return rows;
+export function checkLoop(rows: ConversationRow[], agentId: string, now: Date): void {
+  if (inLoop(rows, agentId, now)) throw new PolicyError(429, 'rate_limited', 'loop', explain('loop'), { retryAfterSeconds: LOOP.retryAfterSeconds });
 }
