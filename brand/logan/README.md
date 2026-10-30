@@ -5,6 +5,23 @@ rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
 and the packed full-body concept image. The side and back geometry interpret the
 supplied front reference.
 
+## Isolated head study
+
+`head-study.blend` is a separate head-shape study. Its casing is a convex,
+faceted volume with a narrow crown, wide side shoulders and a narrow lower keel.
+The front and rear cross-sections and crown/keel retain half-turn symmetry.
+The display, facial features and headset remain attached to the casing.
+`logan.blend` retains the full-body master until the head shape is settled.
+
+```sh
+blender --background --python-exit-code 1 --python brand/logan/head-study.py
+blender --background brand/logan/head-study.blend --python-exit-code 1 --python brand/logan/render-head.py
+blender --background brand/logan/head-study.blend --python-exit-code 1 --python brand/logan/verify.py
+```
+
+The renders are `head-front.png`, `head-side.png` and `head-three-quarter.png`.
+The side view shows the side without the headset so the shell silhouette is visible.
+
 ## Construction rules
 
 - Every visible part must share surface geometry, be extruded from it, or overlap

@@ -93,6 +93,9 @@ Every visible mascot detail must share the supporting surface, be extruded from
 it, or overlap it. Garment hems and openings belong to the cloth mesh; colour
 graphics belong in materials. Inspect attachment in side and bent views, and
 run `brand/logan/verify.py` against the saved master before delivering revisions.
+Head proportions are being refined separately in `brand/logan/head-study.blend`:
+a faceted crystal-like volume around the rectangular display. Settle this isolated
+shape against the reference before integrating it into the full-body master.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
