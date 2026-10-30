@@ -1,10 +1,10 @@
 import { LIMITS } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { getAgent } from './identity';
-import { logStmt, writeLog } from './moderation/log';
+import { logStmt, logStmtWhere } from './moderation/log';
 import { decide, settle } from './moderation/pipeline';
 import { OUTAGE_BACKOFF_MINUTES, isOnProbation } from './moderation/policy';
-import { getRow } from './moderation/rows';
+import type { MessageRow } from './moderation/rows';
 import { dispatch } from './sending';
 import { getSettings } from './settings';
 
@@ -28,13 +28,12 @@ const NOT_REVIEWED = `Not reviewed within ${LIMITS.heldReviewHours} hours`;
 
 async function recheck(relay: Relay, id: string, dueAt: string): Promise<boolean> {
   const lease = iso(new Date(relay.now().getTime() + LEASE_MS));
-  const claimed = await relay.db
-    .prepare("UPDATE relay_messages SET next_review_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'outage' AND next_review_at = ?")
+  const row = await relay.db
+    .prepare("UPDATE relay_messages SET next_review_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'outage' AND next_review_at = ? RETURNING *")
     .bind(lease, id, dueAt)
-    .run();
-  if (claimed.meta.changes === 0) return false;
+    .first<MessageRow>();
+  if (!row) return false;
 
-  const row = (await getRow(relay, id))!;
   const agent = await getAgent(relay, row.agent_id);
   const d = await decide(relay, row, agent, { probation: isOnProbation(agent) });
 
@@ -42,16 +41,22 @@ async function recheck(relay: Relay, id: string, dueAt: string): Promise<boolean
     const attempts = row.review_attempts + 1;
     const at = iso(relay.now());
     if (attempts >= LIMITS.outageRecheckAttempts) {
-      const r = await relay.db
-        .prepare(
-          "UPDATE relay_messages SET status = 'failed', verdict = NULL, policy_code = 'outage', status_reason = ?, held_kind = NULL, review_attempts = ?, next_review_at = NULL, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'outage'",
-        )
-        .bind(STILL_UNAVAILABLE, attempts, at, id)
-        .run();
-      if (r.meta.changes > 0)
-        await writeLog(relay, agent.id, id, [
+      // The log goes first, guarded as the update is, so it is written exactly when the update applies.
+      await relay.db.batch([
+        logStmtWhere(
+          relay,
+          agent.id,
+          id,
           { layer: 'review', verdict: 'block', policy: 'outage', reason: `${STILL_UNAVAILABLE} (${d.reason})`, source: d.source, latencyMs: d.latencyMs },
-        ]);
+          "id = ? AND status = 'held' AND held_kind = 'outage'",
+          id,
+        ),
+        relay.db
+          .prepare(
+            "UPDATE relay_messages SET status = 'failed', verdict = NULL, policy_code = 'outage', status_reason = ?, held_kind = NULL, review_attempts = ?, next_review_at = NULL, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'outage'",
+          )
+          .bind(STILL_UNAVAILABLE, attempts, at, id),
+      ]);
       return true;
     }
     const wait = OUTAGE_BACKOFF_MINUTES[Math.min(attempts - 1, OUTAGE_BACKOFF_MINUTES.length - 1)]!;
