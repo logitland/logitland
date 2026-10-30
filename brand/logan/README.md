@@ -15,8 +15,8 @@ The windproof shell has a broad storm flap covering the zipper line, a folded
 free edge, recessed hand pockets, a turned hem and a lined stand collar.
 These garment details are part of the torso or collar surface. The original
 SVG is printed on the storm flap, and the outer sleeve lining remains emissive.
-Raised dark shoulder caps meet the torso at shared armhole seams, retaining the
-reference's shoulder crown and crease. The collar has twelve irregular facets and a sagging front edge; a folded
+The shoulders slope outward from the collar into rounded sleeve crowns, with
+shared armhole vertices and a tucked underarm fold. The collar has twelve irregular facets and a sagging front edge; a folded
 rear yoke, muted magenta seam, contrasting back panels and center pleat shape the back.
 
 ```sh
@@ -29,8 +29,8 @@ blender --background brand/logan/jacket-study.blend --python-exit-code 1 --pytho
 The extraction command creates a fresh study from `logan.blend`, replacing any
 existing `jacket-study.blend`. F12 renders its framed three-quarter view.
 `refine-jacket.py` rebuilds the extracted torso and collar and applies the fabric
-finish. `join-jacket-sleeves.py` removes buried shoulder faces and joins the
-shaped caps at their contact seams, with blended torso/arm skin weights.
+finish. `join-jacket-sleeves.py` cuts torso armholes, removes the sleeve caps,
+and builds curved shoulder loops with blended torso/arm skin weights.
 Save hand edits separately before rebuilding.
 
 ## Isolated head study
