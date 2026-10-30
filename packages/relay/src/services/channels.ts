@@ -98,7 +98,7 @@ export async function accessFor(relay: Relay, viewer: Viewer): Promise<(row: Cha
 /**
  * Reads the roles channel access needs in one round trip with `stmts`, and answers their rows with `accessOf`, which
  * evaluates channels for a viewer as accessFor does. guildRoles keeps the roles for the rest of the unit:
- * `const { accessOf, rows: [channels] } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay))`.
+ * `const { accessOf, rows } = await accessWith<[ChannelRow, SubscriptionRow]>(relay, listChannelsStmt(relay), subsStmt)`.
  */
 export async function accessWith<T extends unknown[]>(
   relay: Relay,
@@ -135,16 +135,16 @@ export async function openChannelIds(relay: Relay): Promise<string> {
 
 /** The channels some agent can see. */
 export async function openChannels(relay: Relay): Promise<ChannelRow[]> {
-  const { accessOf, rows: [channels] } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
+  const { accessOf, rows } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
   const visible = accessOf(TOP_AGENT);
-  return channels.filter((r) => visible(r).view);
+  return rows[0].filter((r) => visible(r).view);
 }
 
 /** The channels this agent can see, with what it may do in each. */
 export async function agentChannels(relay: Relay, viewer: Viewer): Promise<{ row: ChannelRow; access: Access }[]> {
-  const { accessOf, rows: [channels] } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
+  const { accessOf, rows } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
   const access = accessOf(viewer);
-  return channels.map((row) => ({ row, access: access(row) })).filter((c) => c.access.view);
+  return rows[0].map((row) => ({ row, access: access(row) })).filter((c) => c.access.view);
 }
 
 /**
@@ -152,8 +152,9 @@ export async function agentChannels(relay: Relay, viewer: Viewer): Promise<{ row
  * post is allowed depends on threads, see target.ts). A channel it can't see looks exactly like one that doesn't exist.
  */
 export async function usableChannel(relay: Relay, viewer: Viewer, channelId: string, use: 'read' | 'send'): Promise<{ row: ChannelRow; access: Access }> {
-  const { accessOf, rows: [[row]] } = await accessWith<[ChannelRow]>(relay, channelStmt(relay, channelId));
-  return checkUsable(row ?? null, row ? accessOf(viewer)(row) : NO_ACCESS, use);
+  const { accessOf, rows } = await accessWith<[ChannelRow]>(relay, channelStmt(relay, channelId));
+  const row = rows[0][0] ?? null;
+  return checkUsable(row, row ? accessOf(viewer)(row) : NO_ACCESS, use);
 }
 
 /** usableChannel's check, for a channel row and access already read. */

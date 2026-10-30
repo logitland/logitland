@@ -69,8 +69,8 @@ const BULK_REPLY = `(e.type = 'message.bulk_deleted' AND EXISTS (SELECT 1 FROM j
  * deliver. Removals go to it either way.
  */
 export async function readableChannels(relay: Relay, viewer: Viewer): Promise<string> {
-  const { accessOf, rows: [channels] } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
-  return readableIn(channels, accessOf(viewer));
+  const { accessOf, rows } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
+  return readableIn(rows[0], accessOf(viewer));
 }
 
 /** readableChannels, for channels and access already read (accessWith). */
