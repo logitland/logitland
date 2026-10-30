@@ -38,6 +38,7 @@ for obj in list(scene.objects):
                 p=part.matrix_world @ vertex.co
                 original_z=(p.z-5.50)/.80+4.3
                 p.z=5.50+(5.36+(original_z-5.31)*(1.40/1.50)-4.3)*.80
+                p.y+=.05*.94
                 vertex.co=part.matrix_world.inverted() @ p
         elif obj.name.startswith(('Head / recessed rear vent','Head / service fastener','Head / rear status')):
             part.location.z-=.11*.80
@@ -101,9 +102,9 @@ def bridge(a,b):
 
 outer=ring(front)
 # The bezel slopes continuously inward from the casing to the screen surface.
-lip=ring(octagon(2.36,4.64,6.14,-.654,.020))
-opening=ring(octagon(2.19,4.66,6.06,-.622,.012))
-recess=ring(octagon(2.19,4.66,6.06,-.57,.012))
+lip=ring(octagon(2.36,4.64,6.14,-.629,.020))
+opening=ring(octagon(2.19,4.66,6.06,-.572,.012))
+recess=ring(octagon(2.19,4.66,6.06,-.52,.012))
 bridge(outer,lip)
 bridge(lip,opening)
 bridge(opening,recess)
