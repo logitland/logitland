@@ -647,8 +647,7 @@ solid=mouth.modifiers.new('Ink embedded in glass','SOLIDIFY')
 solid.thickness=.012
 solid.offset=0
 
-# Neck and jacket: fitted torso, broad raised collar, hem, lapels and glowing pockets.
-cylinder('Neck / swivel',(0,0,4.23),.35,.40,rubber,'head','Z')
+# Jacket: fitted torso, broad raised collar, hem, lapels and glowing pockets.
 coat=tailored_coat()
 box('Pelvis / waist joint',(0,0,2.20),(1.39,.71,.40),rubber,.10,'pelvis')
 hollow_collar()
@@ -1017,6 +1016,7 @@ runpy.run_path(str(ASSET_DIR/'integrate-clothes.py'))
 runpy.run_path(str(ASSET_DIR/'integrate-hands.py'))
 runpy.run_path(str(ASSET_DIR/'integrate-shoes.py'))
 runpy.run_path(str(ASSET_DIR/'fit-body.py'))
+runpy.run_path(str(ASSET_DIR/'rig-arms.py'))
 bpy.ops.wm.save_as_mainfile(filepath=str(ASSET_DIR/'logan.blend'),compress=True)
 result={'blend':str(ASSET_DIR/'logan.blend'),'objects':len(scene.objects),'bones':len(arm_data.bones)}
 print(result)

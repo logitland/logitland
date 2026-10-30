@@ -1,6 +1,6 @@
 # Logan
 
-Open **logan.blend** in Blender 5.2 or newer. It contains the character, a 32-bone
+Open **logan.blend** in Blender 5.2 or newer. It contains the character, a 36-bone
 rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
 and the packed full-body concept image. The side and back geometry interpret the
 supplied front reference.
@@ -111,8 +111,9 @@ blender --background brand/logan/logan.blend --python-exit-code 1 --python brand
 ## Internal body and clothing clearance
 
 The `Body /` meshes form a simple graphite torso, continuous arms and continuous
-legs. They overlap the neck, pelvis, hands and boots and follow the existing rig,
-with blended elbow, knee and wrist weights. Hide the jacket, collar, cuffs and
+legs. They overlap the pelvis, hands and boots and follow the existing rig,
+with blended elbow, knee and wrist weights. The head deliberately floats above
+the collar; there is no neck mesh. Hide the jacket, collar, cuffs and
 trousers to inspect them; `renders/logan-body.png` shows this view.
 
 Cuffs flex with the wrists and have a driven corrective shape for sideways bends.
@@ -128,6 +129,8 @@ in neutral, wave and 16 sampled joint poses: wrist flexion ±40°, sideways wris
 bends ±25°, ankle flexion ±35°, and head pitch/tilt ±35°. These individual samples
 do not guarantee every intermediate, combined or more extreme pose; inspect
 those before rendering. `render-fit.py` produces close-ups of the corrections.
+The arm checks also cover 90°/120° elbow bends and IK reaches in two planes on
+both sides. `render-arms.py` shows those elbows with the sleeves on and off.
 
 ```sh
 blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/verify-fit.py
@@ -162,13 +165,14 @@ The side view shows the side without the headset so the shell silhouette is visi
 
 - Every visible part must share surface geometry, be extruded from it, or overlap
   its supporting part. Flat colour and logo details use materials. Parenting to a bone
-  alone does not attach geometry.
+  alone does not attach geometry. The floating head is the deliberate exception;
+  its face and headset remain attached to its casing.
 - Garment details follow the cloth: pocket openings, folded hems, sleeve panels,
   collar colour and coat seams must remain attached through posing.
 - Check front, side, rear and bent poses. Contact is necessary; protruding edges
   and the silhouette still need close-up render inspection against the reference.
 
-`verify.py` checks evaluated geometry for a connected assembly in neutral and
+`verify.py` checks evaluated geometry for connected body and head assemblies in neutral and
 wave poses, and closed sleeve, trouser and torso meshes. It catches separated
 parts even when they line up convincingly in the front view.
 
@@ -177,7 +181,8 @@ parts even when they line up convincingly in the front view.
 1. Choose frame **1** for neutral or **40** for the wave.
 2. Select **LOGAN · Pose me** in the Pose rig collection. Enable viewport Overlays
    and enter **Pose Mode**. Rotate the named body, arm, leg, hand, and finger bones.
-   This is an FK rig: move the legs and feet with their bones.
+   The saved poses use FK: rotate `upper_arm` at the shoulder and `forearm` around
+   local Z at the elbow. Move the legs and feet with their bones.
 3. Set **blink_L**, **blink_R** (0–1), and **screen_brightness** under the rig's
    **Object Properties → Custom Properties**. Insert keyframes after editing the
    animated pose, before rendering or moving along the timeline.
@@ -189,6 +194,12 @@ carries the face and headset. Torso and sleeves share one mesh; both trouser leg
 share one pants mesh, with blended joint weights and volume-preserving deformation
 at elbows and knees.
 The head and boots remain rigid; the cuffs flex at the wrists.
+For arm IK, start at frame 1 and set **arm_ik_L** or **arm_ik_R** to **1** on the
+rig's Custom Properties. In the **Arm controls** bone collection, move
+**CTRL wrist.L/R** to position the hand and **CTRL elbow.L/R** to choose the bend
+direction. Rotate **hand.L/R** for wrist orientation. IK does not stretch the arms.
+Set the property back to **0** for FK; switching from an arbitrary pose requires
+matching the controls first. `rig-arms.py` recreates the controls after a rebuild.
 The sleeves have fitted shoulder caps, stepped surface panels, and recessed emissive
 lining across the whole outer side, wrapping onto the front and rear seams.
 The lining and its dark cavity walls share the sleeve's deforming mesh.

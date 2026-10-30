@@ -8,13 +8,15 @@ from math import radians
 from pathlib import Path
 import runpy
 import bpy
+from mathutils import Vector
 
 checks = runpy.run_path(str(Path(__file__).with_name('verify.py')))
 geometry, touches = checks['geometry'], checks['touches']
 scene = bpy.data.scenes['LOGAN']
 rig = bpy.data.objects['LOGAN · Pose me']
 parts = [obj for obj in bpy.data.collections['01 · Logan / meshes'].objects
-         if obj.name.startswith(('Body /', 'Neck /', 'Pelvis /', 'Hand /', 'Boot /', 'Head / faceted shell'))]
+         if obj.name.startswith(('Body /', 'Pelvis /', 'Hand /', 'Boot /'))]
+assert not any(obj.name.startswith('Neck /') for obj in scene.objects), 'The head must float above the collar'
 pairs = [('Collar / raised band', 'Head / faceted shell')]
 for side in ('L', 'R'):
     pairs.extend([(f'Cuff / band.{side}', f'Hand / continuous.{side}'),
@@ -59,5 +61,38 @@ try:
                 scene.frame_set(1)
                 rig.pose.bones[bone].rotation_euler[axis] = radians(sign*angle)
                 check_pose(f'{bone} {"XYZ"[axis]} {sign*angle} degrees')
+    if scene.get('arm_controls'):
+        for side, sign in (('L',1),('R',-1)):
+            lower = rig.pose.bones['forearm.'+side]
+            for angle in (90,120):
+                scene.frame_set(1)
+                lower.rotation_euler.z = radians(sign*angle)
+                check_pose(f'elbow.{side} FK {angle} degrees')
+            # Ask IK to reproduce a reachable FK endpoint and elbow plane.
+            scene.frame_set(1)
+            lower.rotation_euler.z = radians(sign*90)
+            rig.update_tag()
+            bpy.context.view_layer.update()
+            endpoint = lower.tail.copy()
+            scene.frame_set(1)
+            control = rig.pose.bones['CTRL wrist.'+side]
+            original = control.matrix_basis.copy()
+            matrix = control.matrix.copy()
+            matrix.translation = endpoint
+            control.matrix = matrix
+            rig['arm_ik_'+side] = 1.0
+            check_pose(f'elbow.{side} IK reach')
+            assert (lower.tail-endpoint).length < .005, f'{side}: IK missed its wrist target'
+            endpoint += Vector((0,-.4,0))
+            matrix = control.matrix.copy()
+            matrix.translation = endpoint
+            control.matrix = matrix
+            check_pose(f'elbow.{side} IK forward reach')
+            assert (lower.tail-endpoint).length < .005, f'{side}: IK missed its forward target'
+            rig['arm_ik_'+side] = 0.0
+            control.matrix_basis = original
 finally:
+    for side in ('L','R'):
+        if 'arm_ik_'+side in rig:
+            rig['arm_ik_'+side] = 0.0
     scene.frame_set(1)

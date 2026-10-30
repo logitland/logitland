@@ -1,4 +1,4 @@
-"""Proves that Logan's visible parts touch the assembled character in both saved poses.
+"""Proves connected geometry within Logan's body and deliberately floating head.
 
 Run against a saved master with Blender --background FILE --python-exit-code 1
 --python brand/logan/verify.py. This checks evaluated geometry, including bevels
@@ -33,11 +33,11 @@ def geometry(obj, graph):
     assert len(reached) == len(vertices), f'Disconnected mesh islands: {obj.name}'
     closed = set(edges.values()) == {2}
     if obj.name.startswith(('Sleeve / continuous.', 'Trouser / continuous', 'Jacket / torso',
-                            'Hand / continuous.', 'Boot / continuous.')):
+                            'Hand / continuous.', 'Boot / continuous.', 'Body /')):
         assert all(p.area > 1e-9 for p in data.polygons), f'Collapsed surface face: {obj.name}'
         assert closed, f'Open solid surface: {obj.name}'
     tree = BVHTree.FromPolygons(vertices, polygons)
-    if obj.name.startswith(('Hand / continuous.', 'Boot / continuous.')):
+    if obj.name.startswith(('Hand / continuous.', 'Boot / continuous.', 'Body / arm.')):
         crossing = [(a,b) for a,b in tree.overlap(tree)
                     if a<b and not set(polygons[a]).intersection(polygons[b])]
         assert not crossing, f'Intersecting extremity surfaces: {obj.name}: {crossing[:3]}'
@@ -96,6 +96,8 @@ for frame in ([1] if head_study else [1,40,70] if scene.name=='HANDS STUDY' else
     # A pair study intentionally has two separate sides; each must still be one
     # connected, closed surface after skinning, bevels and lining are evaluated.
     pending = list(meshes) if extremity_study else [root]
+    if scene.name=='LOGAN' and scene.get('floating_head'):
+        pending.append('Head / faceted shell')
     while pending:
         current = pending.pop()
         if current in reached:
@@ -107,6 +109,7 @@ for frame in ([1] if head_study else [1,40,70] if scene.name=='HANDS STUDY' else
         failures.append(f'Frame {frame}: detached parts {detached}')
     else:
         print(f'PASS frame {frame}: {len(meshes)} connected extremities' if extremity_study
+              else f'PASS frame {frame}: {len(meshes)} meshes connected within body and floating head' if scene.get('floating_head')
               else f'PASS frame {frame}: all {len(meshes)} mesh objects connect to {root}')
 assert not failures, '\n'.join(failures)
 scene.frame_set(1)

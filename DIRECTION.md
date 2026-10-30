@@ -90,7 +90,7 @@ symmetry. The original SVG mark prints directly on the coat fabric. Magenta
 surface gradients, neon bloom, rear detailing, studio lighting, and neutral and
 waving poses are included.
 Every visible mascot detail must share the supporting surface, be extruded from
-it, or overlap it. Garment hems and openings belong to the cloth mesh; colour
+it, or overlap it, except the deliberately floating head. Garment hems and openings belong to the cloth mesh; colour
 graphics belong in materials. Inspect attachment in side and bent views, and
 run `brand/logan/verify.py` against the saved master before delivering revisions.
 The approved crystal-like head is integrated into the full-body master and its rig.
@@ -113,8 +113,10 @@ Each has a shared palm and articulated, tapered digits. The approved boots from
 `brand/logan/shoes-study.blend` are integrated into the foot rig: integral instep
 straps, layered soles, transverse tread, open lined collars and recessed pink lights.
 The studies remain separate editable sources for the integrated assets.
-A skinned graphite torso, arms and legs support the head, hands and boots beneath
-the clothes. Flexible cuffs, ankle-following hems and live surface clearance
+A skinned graphite torso, arms and legs support the hands and boots beneath
+the clothes. The head floats above the collar with no neck mesh. Continuous
+elbows have flexible joint loops, FK rotation and optional wrist IK/elbow poles.
+Flexible cuffs, ankle-following hems and live surface clearance
 reduce garment clipping; extreme or combined poses still require visual checks.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
