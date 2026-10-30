@@ -10,7 +10,9 @@ retain their hollow construction, materials and deformation weights. The hands
 and arm bones follow the jacket's inward sleeve position. The master keeps its
 neutral and wave poses; the pants study's knee-bend pose remains in that study.
 `integrate-clothes.py` refreshes both garments from their saved study files;
-`build.py` imports them automatically after the head, followed by the approved hands.
+`build.py` imports them automatically after the head, followed by the approved hands
+and shoes. `integrate-shoes.py` refreshes the boots from their saved study while
+preserving the master's foot poses.
 
 ```sh
 blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-clothes.py --python brand/logan/verify.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"
@@ -72,11 +74,13 @@ approved jacket study and full-body master unchanged. The renders are
 fingers and a thumb joined through palm webbing, broad chamfers, and flexible
 knuckle creases. Frame **1** is rest, **40** curls the fingers, and **70** spreads
 them. The right hand is hidden in the initial close-up; enable it in the Outliner
-to inspect the pair. Both hands retain the master's bone names and wrist positions.
+to inspect the pair. Both hands use the master's bone names; integration fits their wrists to the cuffs.
 The palm occupies more of the hand's length; the fingers taper straight toward
 their tips. The approved hands are integrated into `logan.blend` at the fitted
-cuffs. `integrate-hands.py` imports the meshes and their finger/thumb rest joints,
-and sets the wave's outward finger spread while preserving the body animation.
+cuffs. `integrate-hands.py` aligns their wrists with the forearms, seats their
+palms beyond the cuff rims and extends the hidden wrist surfaces into the lining.
+It imports matching finger/thumb rest joints and sets the wave's outward finger
+spread while preserving the body animation.
 
 `shoes-study.blend` contains two boots with sloping insteps, two integral raised
 straps, faceted toe boxes, layered soles and open ankle collars. Four transverse
@@ -92,11 +96,12 @@ blender --background brand/logan/hands-study.blend --python-exit-code 1 --python
 blender --background brand/logan/shoes-study.blend --python-exit-code 1 --python brand/logan/verify.py --python brand/logan/render-hands-shoes.py
 ```
 
-The shoes remain a separate study for visual review. The hands retain their
-separate editable source after integration; refreshing garments preserves their
-approved rest joints. The hand study's curl and spread poses and the master's
+Both approved studies are integrated into `logan.blend` and remain separate
+editable sources. Refreshing garments preserves the fitted hand rest joints.
+The hand study's curl and spread poses and the master's
 neutral and wave poses pass geometry checks. The shoe renders include an underside
-view in `renders/shoes-sole.png`.
+view in `renders/shoes-sole.png`. `renders/logan-wrists.png` records front, side
+and rear close-ups of the fitted hands in neutral and wave poses.
 
 ```sh
 blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/integrate-hands.py --python brand/logan/verify.py --python-expr "import bpy; bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)"

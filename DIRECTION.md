@@ -108,10 +108,11 @@ connected garment with continuous knees and recessed lower-leg lights. Shoes are
 separate assets. Both garment studies are integrated into the master and its
 existing poses; the arm rig and hands follow the jacket's inward sleeve fit.
 The approved hands from `brand/logan/hands-study.blend` are integrated into the
-master with their finger rest joints and fitted wrists. Each has a shared palm
-and articulated, tapered digits. `brand/logan/shoes-study.blend` remains a separate
-study: faceted boots with integral instep straps, layered soles, transverse tread,
-open lined collars and recessed pink lights.
+master with their finger rest joints and wrists aligned to the cuff openings.
+Each has a shared palm and articulated, tapered digits. The approved boots from
+`brand/logan/shoes-study.blend` are integrated into the foot rig: integral instep
+straps, layered soles, transverse tread, open lined collars and recessed pink lights.
+The studies remain separate editable sources for the integrated assets.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private

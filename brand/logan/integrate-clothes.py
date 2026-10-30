@@ -36,9 +36,9 @@ for filename, prefixes, expected in (
         # with them, while keeping the master's action and facial controls.
         hand_offsets = {}
         for side in ('L', 'R'):
-            bone_name = 'hand.' + side
-            offset = (study_rig.data.bones[bone_name].head_local
-                      - rig.data.bones[bone_name].head_local)
+            bone_name = 'forearm.' + side
+            offset = (study_rig.data.bones[bone_name].tail_local
+                      - rig.data.bones[bone_name].tail_local)
             hand_offsets[side] = offset
             for obj in collection.objects:
                 if obj.name.startswith(('Hand /', 'Knuckle /')) and obj.name.endswith('.' + side):
@@ -50,7 +50,7 @@ for filename, prefixes, expected in (
         for side in ('L', 'R'):
             upper = rig.data.edit_bones['upper_arm.' + side]
             for bone in [upper] + list(upper.children_recursive):
-                if scene.get('approved_hands') and bone.name.startswith(('finger','thumb')):
+                if scene.get('approved_hands') and bone.name.startswith(('hand.','finger','thumb')):
                     bone.head += hand_offsets[side]
                     bone.tail += hand_offsets[side]
                     continue
