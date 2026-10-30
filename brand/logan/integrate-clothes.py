@@ -76,13 +76,5 @@ for filename, prefixes, expected in (
         bpy.data.objects.remove(obj, do_unlink=True)
     scene['approved_' + ('jacket' if filename.startswith('jacket') else 'pants')] = filename
 
-# Seat the existing neck inside the lined collar. Its narrow former base was
-# supported by the old torso's solid cap, which the hollow garment no longer has.
-neck = bpy.data.objects['Neck / swivel']
-bottom = min(v.co.z for v in neck.data.vertices)
-base = [v for v in neck.data.vertices if abs(v.co.z - bottom) < 1e-5]
-depth = max(abs(v.co.y) for v in base)
-for vertex in base:
-    vertex.co.y *= .44 / depth
 bpy.context.view_layer.update()
 print('Integrated jacket and pants studies; retained master poses, head and shoes')

@@ -13,8 +13,9 @@ rig = bpy.data.objects['LOGAN · Pose me']
 collection = bpy.data.collections['01 · Logan / meshes']
 scene.frame_set(1)
 for obj in list(collection.objects):
-    if obj.name.startswith('Body /'):
+    if obj.name.startswith(('Body /', 'Neck /')):
         bpy.data.objects.remove(obj, do_unlink=True)
+scene['floating_head'] = True
 
 material = bpy.data.materials.get('Body · graphite undersuit') or bpy.data.materials.new('Body · graphite undersuit')
 material.diffuse_color = (.022, .025, .033, 1)
@@ -23,9 +24,13 @@ shader = material.node_tree.nodes.get('Principled BSDF')
 shader.inputs['Base Color'].default_value = material.diffuse_color
 shader.inputs['Metallic'].default_value = .15
 shader.inputs['Roughness'].default_value = .58
+joint_material = bpy.data.materials.get('Body · flexible joints') or material.copy()
+joint_material.name = 'Body · flexible joints'
+joint_material.diffuse_color = (.009, .012, .017, 1)
+joint_material.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = joint_material.diffuse_color
 
 
-def tube(name, rings):
+def tube(name, rings, joint_rows=()):
     """Connect elliptical sections with shared elbow/knee loops and blended weights."""
     vertices, faces, weights = [], [], []
     count = 8
@@ -46,6 +51,10 @@ def tube(name, rings):
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(vertices, [], faces)
     mesh.materials.append(material)
+    mesh.materials.append(joint_material)
+    for polygon in mesh.polygons:
+        if polygon.index//count in joint_rows and polygon.index<(len(rings)-1)*count:
+            polygon.material_index = 1
     bm = bmesh.new()
     bm.from_mesh(mesh)
     bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
@@ -79,15 +88,17 @@ for side in ('L', 'R'):
     tube('Body / arm.'+side, [
         (a-(b-a).normalized()*.10, .23, .22, {upper.name: 1}),
         (a.lerp(b, .2), .23, .22, {upper.name: 1}),
-        (a.lerp(b, .75), .20, .19, {upper.name: 1}),
-        (a.lerp(b, .91), .18, .18, {upper.name: .8, lower.name: .2}),
-        (b, .18, .18, {upper.name: .5, lower.name: .5}),
-        (b.lerp(c, .12), .18, .17, {upper.name: .2, lower.name: .8}),
+        (a.lerp(b, .55), .22, .20, {upper.name: 1}),
+        (b-(b-a).normalized()*.24, .15, .14, {upper.name: .95, lower.name: .05}),
+        (b-(b-a).normalized()*.12, .13, .13, {upper.name: .80, lower.name: .20}),
+        (b, .145, .14, {upper.name: .5, lower.name: .5}),
+        (b+down*.12, .13, .13, {upper.name: .20, lower.name: .80}),
+        (b+down*.24, .15, .14, {upper.name: .05, lower.name: .95}),
         (b.lerp(c, .55), .17, .15, {lower.name: 1}),
         (c, .155, .115, {lower.name: 1}),
         (hand.head_local, .155, .115, {lower.name: .5, hand.name: .5}),
         (hand.head_local+down*.13, .155, .115, {hand.name: 1}),
-    ])
+    ], joint_rows=(3,4,5,6))
     thigh, shin, foot = [rig.data.bones[name+'.'+side] for name in ('thigh', 'shin', 'foot')]
     a, b, c = thigh.head_local, shin.head_local, shin.tail_local
     tube('Body / leg.'+side, [

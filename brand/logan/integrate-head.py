@@ -83,16 +83,11 @@ for side in ('L', 'R'):
 for obj in set(bpy.data.objects) - before - set(parts):
     bpy.data.objects.remove(obj, do_unlink=True)
 bpy.data.collections.remove(study)
-# The crystal underside no longer reaches the collar's outer rim. Extend the
-# existing neck down inside the closed torso instead of leaving it suspended
-# inside the hollow collar. Keep the head and the upper neck surface unchanged.
-neck = bpy.data.objects['Neck / swivel']
-if not neck.get('seated_in_torso'):
-    bottom = min(v.co.z for v in neck.data.vertices)
-    top = max(v.co.z for v in neck.data.vertices)
-    for vertex in neck.data.vertices:
-        vertex.co.z -= .25 * (top - vertex.co.z) / (top - bottom)
-    neck['seated_in_torso'] = True
+# The head intentionally floats above the collar while following its pose bone.
+for obj in list(collection.objects):
+    if obj.name.startswith('Neck /'):
+        bpy.data.objects.remove(obj, do_unlink=True)
+scene['floating_head'] = True
 bpy.context.view_layer.update()
 scene['approved_head'] = 'head-study.blend'
 print(f'Integrated {len(parts)} approved head meshes into {scene.name}')
