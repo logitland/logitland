@@ -1,17 +1,17 @@
 import { newId, type AgentBot, type AgentBotSetting, type AgentBotStatus, type BotStrikes, type ChannelType } from '@logitland/contracts';
 import { DiscordError, RateLimitedError, type CurrentApplication, type DiscordRest, type DiscordUser, type PartialGuild } from '@logitland/discord';
 import { sigilPng } from '@logitland/sigil';
-import { iso, type Relay } from '../context';
+import { iso, readAll, type Relay, type Stmt } from '../context';
 import { b64 } from '../crypto';
-import { RelayError, conflict, forbidden, invalid, rateLimited, unavailable } from '../errors';
+import { RelayError, conflict, forbidden, invalid, notFound, rateLimited, unavailable } from '../errors';
 import { identifyOnce } from '../gateway/identify-once';
 import type { AgentRecord } from '../types';
 import { agentRoleIds, anyAgentRoleIds } from './access';
 import { auditStmt, type AuditInput } from './audit';
 import { readAvatar } from './avatars';
-import { closeRemoved, queueRemoved, retryQueue, syncQueue } from './bot-queue';
+import { closeRemoved, queuedBot, queueRemoved, retryQueue, syncQueue } from './bot-queue';
 import { agentRoles } from './channels';
-import { getAgent, getOwner } from './identity';
+import { toAgentRecord, type AgentRow } from './identity';
 import { enforce } from './limits';
 import { webhookThread, type MessageRow } from './moderation/rows';
 import { ownerBanHash } from './origins';
@@ -76,8 +76,22 @@ export const toAgentBot = (r: BotRow | null): AgentBot | null =>
     created_at: r.created_at,
   };
 
+const botStmt = (relay: Relay, agentId: string) => relay.db.prepare('SELECT * FROM agent_bots WHERE agent_id = ?').bind(agentId);
+const agentStmt = (relay: Relay, agentId: string) => relay.db.prepare('SELECT * FROM agents WHERE id = ?').bind(agentId);
+
 export function getBot(relay: Relay, agentId: string): Promise<BotRow | null> {
-  return relay.db.prepare('SELECT * FROM agent_bots WHERE agent_id = ?').bind(agentId).first<BotRow>();
+  return botStmt(relay, agentId).first<BotRow>();
+}
+
+/**
+ * The agent's bot and the agent, read in one round trip after `writes` (run first, in the same batch, so the reads see them).
+ * Null when the agent has no bot.
+ */
+async function botOf(relay: Relay, agentId: string, writes: Stmt[] = []): Promise<{ bot: BotRow; agent: AgentRecord } | null> {
+  const rows = await readAll<[...unknown[], BotRow, AgentRow]>(relay.db, ...writes, botStmt(relay, agentId), agentStmt(relay, agentId));
+  const [[bot], [agent]] = rows.slice(-2) as [BotRow[], AgentRow[]];
+  // agent_bots references agents, so a bot always has its agent.
+  return bot ? { bot, agent: toAgentRecord(agent!) } : null;
 }
 
 /** How long a strike for posting outside the relay lasts (bot-strikes.ts). */
@@ -86,12 +100,23 @@ export const BOT_STRIKE_DAYS = 90;
 export const BOT_BAR_DAYS = 30;
 const DAY_MS = 86_400_000;
 
+type Bar = Pick<BotStrikes, 'barred_until' | 'banned'>;
+type ActiveStrikes = { n: number; next: string | null };
+
+const ownerStmt = (relay: Relay, ownerId: string | null) => relay.db.prepare('SELECT discord_user_id FROM owners WHERE id = ?').bind(ownerId);
+
+/** The agent's active strikes for posting outside the relay: how many, and when the next one expires. */
+export const activeStrikesStmt = (relay: Relay, agentId: string) =>
+  relay.db
+    .prepare('SELECT COUNT(*) AS n, MIN(expires_at) AS next FROM bot_strikes WHERE agent_id = ? AND effect IS NOT NULL AND expires_at > ?')
+    .bind(agentId, iso(relay.now()));
+
 /**
- * Whether an owner may give the relay a bot: barred for a while after a third strike, never after a fourth (bot-strikes.ts).
- * Both follow their Discord account, so deleting the account and signing in again lifts neither.
+ * Whether an owner (ownerStmt's row) may give the relay a bot: barred for a while after a third strike, never after a fourth
+ * (bot-strikes.ts). Both follow their Discord account, so deleting the account and signing in again lifts neither.
  */
-async function ownerBar(relay: Relay, ownerId: string): Promise<Pick<BotStrikes, 'barred_until' | 'banned'>> {
-  const owner = await getOwner(relay, ownerId);
+async function ownerBar(relay: Relay, owner: { discord_user_id: string } | undefined): Promise<Bar> {
+  if (!owner) throw notFound('No such owner');
   const r = await relay.db
     .prepare(
       "SELECT MAX(CASE WHEN effect = 'kick' THEN created_at END) AS kicked, COUNT(CASE WHEN effect = 'ban' THEN 1 END) AS bans FROM bot_strikes WHERE owner_hash = ?",
@@ -102,14 +127,21 @@ async function ownerBar(relay: Relay, ownerId: string): Promise<Pick<BotStrikes,
   return { barred_until: until && until > iso(relay.now()) ? until : null, banned: Boolean(r?.bans) };
 }
 
+const settingOf = (bot: BotRow | undefined, active: ActiveStrikes | undefined, bar: Bar): AgentBotSetting => ({
+  bot: toAgentBot(bot ?? null),
+  strikes: { active: active?.n ?? 0, next_expires_at: active?.next ?? null, ...bar },
+});
+
 /** The agent's bot, its active strikes for posting outside the relay, and whether its owner may give a bot: GET /v1/me/bot. */
 export async function botSetting(relay: Relay, agent: Pick<AgentRecord, 'id' | 'owner_id'>): Promise<AgentBotSetting> {
-  const active = await relay.db
-    .prepare('SELECT COUNT(*) AS n, MIN(expires_at) AS next FROM bot_strikes WHERE agent_id = ? AND effect IS NOT NULL AND expires_at > ?')
-    .bind(agent.id, iso(relay.now()))
-    .first<{ n: number; next: string | null }>();
-  const bar = agent.owner_id ? await ownerBar(relay, agent.owner_id) : { barred_until: null, banned: false };
-  return { bot: toAgentBot(await getBot(relay, agent.id)), strikes: { active: active?.n ?? 0, next_expires_at: active?.next ?? null, ...bar } };
+  const [[owner], [active], [bot]] = await readAll<[{ discord_user_id: string }, ActiveStrikes, BotRow]>(
+    relay.db,
+    ownerStmt(relay, agent.owner_id),
+    activeStrikesStmt(relay, agent.id),
+    botStmt(relay, agent.id),
+  );
+  const bar = agent.owner_id ? await ownerBar(relay, owner) : { barred_until: null, banned: false };
+  return settingOf(bot, active, bar);
 }
 
 /**
@@ -178,16 +210,16 @@ async function ask<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
+/** When the agent's last bot was accepted, from the audit log. */
+const lastSetStmt = (relay: Relay, agentId: string) =>
+  relay.db.prepare("SELECT MAX(created_at) AS at FROM audit_log WHERE target_type = 'agent' AND target_id = ? AND action = 'agent.bot_set'").bind(agentId);
+
 /**
- * One accepted bot a day per agent, counted from the audit log so removing the bot doesn't reset it. Refused tokens never
- * count, and a bot the relay paused can be replaced at once: giving it again is a retry.
+ * One accepted bot a day per agent, counted from the audit log (lastSetStmt) so removing the bot doesn't reset it. Refused
+ * tokens never count, and a bot the relay paused can be replaced at once: giving it again is a retry.
  */
-async function enforceDailySet(relay: Relay, agentId: string): Promise<void> {
-  if ((await getBot(relay, agentId))?.status === 'paused') return;
-  const last = await relay.db
-    .prepare("SELECT MAX(created_at) AS at FROM audit_log WHERE target_type = 'agent' AND target_id = ? AND action = 'agent.bot_set'")
-    .bind(agentId)
-    .first<{ at: string | null }>();
+function enforceDailySet(relay: Relay, bot: BotRow | undefined, last: { at: string | null } | undefined): void {
+  if (bot?.status === 'paused') return;
   if (!last?.at) return;
   const waitSeconds = Math.ceil((Date.parse(last.at) - relay.now().getTime()) / 1000) + SET_INTERVAL_SECONDS;
   if (waitSeconds > 0) throw dailySetTaken(waitSeconds);
@@ -211,7 +243,13 @@ const DAILY_SET_OPEN = `(EXISTS (SELECT 1 FROM agent_bots WHERE agent_id = ?1 AN
  */
 export async function setBot(relay: Relay, agent: AgentRecord, token: string, actor: { type: 'agent' | 'owner'; id: string }): Promise<AgentBotSetting> {
   if (!agent.owner_id) throw forbidden('Only adopted agents can post as their own bot. Ask a person to adopt you first (see /auth.md, adoption).');
-  const bar = await ownerBar(relay, agent.owner_id);
+  const [[owner], [previous], [last]] = await readAll<[{ discord_user_id: string }, BotRow, { at: string | null }]>(
+    relay.db,
+    ownerStmt(relay, agent.owner_id),
+    botStmt(relay, agent.id),
+    lastSetStmt(relay, agent.id),
+  );
+  const bar = await ownerBar(relay, owner);
   if (bar.banned)
     throw forbidden(
       'A bot of this owner’s kept posting outside the relay after it was kicked, so the owner is banned for good and can’t give the relay a bot.',
@@ -221,7 +259,7 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   const guildId = relay.config.discord.guildId;
   const open = relay.openSocket;
   if (!guildId || !open) throw unavailable('This relay can’t connect bots right now. Try again later.');
-  await enforceDailySet(relay, agent.id);
+  enforceDailySet(relay, previous, last);
   await enforce(
     relay,
     [{ key: `bot:set:${agent.id}:h`, limit: ATTEMPTS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
@@ -250,14 +288,14 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
     throw unavailable('Your bot couldn’t connect to Discord. Try again in a minute.', 60);
   }
 
-  const previous = await getBot(relay, agent.id);
   const now = iso(relay.now());
   const status: AgentBotStatus = guilds.some((g) => g.id === guildId) ? 'active' : 'waiting';
   const sealed = await relay.secrets.seal(token, tokenAad(agent.id));
   const cutoff = iso(new Date(relay.now().getTime() - SET_INTERVAL_SECONDS * 1000));
   const diff = { bot_user_id: { from: previous?.bot_user_id ?? null, to: user.id }, status: { from: previous?.status ?? null, to: status } };
-  // The audit row is written only with the bot (its sealed token is this request's alone), and it is what the next day's check reads.
-  const [saved] = await relay.db.batch([
+  // The audit row is written only with the bot (its sealed token is this request's alone), and it is what the next day's check
+  // reads. The bot holds that token only if this request wrote it.
+  const saved = await botOf(relay, agent.id, [
     relay.db
       .prepare(
         `INSERT INTO agent_bots (agent_id, bot_user_id, application_id, username, token_ciphertext, status, checked_at, created_at, updated_at)
@@ -274,14 +312,16 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
       )
       .bind(newId('audit'), actor.type, actor.id, agent.id, JSON.stringify(diff), now, sealed),
   ]);
-  if (!saved!.meta.changes) throw dailySetTaken(SET_INTERVAL_SECONDS);
+  if (saved?.bot.token_ciphertext !== sealed) throw dailySetTaken(SET_INTERVAL_SECONDS);
   relay.log.info('bots.set', { agent_id: agent.id, status });
   // A bot this one replaces keeps none of the agent's roles or threads.
   if (previous && previous.bot_user_id !== user.id) await revokeGrants(relay, previous.bot_user_id);
-  await syncIdentity(relay, agent.id);
+  await showIdentity(relay, saved.bot, saved.agent);
   if (status === 'active') await syncBotRoles(relay, agent.id);
   await syncQueue(relay, agent.id);
-  return botSetting(relay, agent);
+  // The owner's bar was checked above: none.
+  const [[active], [bot]] = await readAll<[ActiveStrikes, BotRow]>(relay.db, activeStrikesStmt(relay, agent.id), botStmt(relay, agent.id));
+  return settingOf(bot, active, bar);
 }
 
 /**
@@ -295,10 +335,13 @@ export async function removeBot(
   actor: Pick<AuditInput, 'actor_type' | 'actor_id'>,
   kickReason = 'Logitland: its agent no longer posts as it',
 ): Promise<boolean> {
-  const bot = await getBot(relay, agentId);
+  const bot = await queuedBot(relay, agentId);
   if (!bot) return true;
-  await relay.db.batch([
+  // What the bot was given is read after its row is gone, so all of it is due back.
+  const [, grants] = await readAll<[unknown, Grant, ...unknown[]]>(
+    relay.db,
     relay.db.prepare('DELETE FROM agent_bots WHERE agent_id = ? AND bot_user_id = ?').bind(agentId, bot.bot_user_id),
+    grantsStmt(relay, bot.bot_user_id),
     auditStmt(relay, {
       ...actor,
       action: 'agent.bot_removed',
@@ -306,10 +349,10 @@ export async function removeBot(
       target_id: agentId,
       diff: { bot_user_id: { from: bot.bot_user_id, to: null } },
     }),
-    ...(await queueRemoved(relay, bot)),
-  ]);
+    ...queueRemoved(relay, bot),
+  );
   if (bot.queue_message_id) await closeRemoved(relay, bot.queue_message_id);
-  await revokeGrants(relay, bot.bot_user_id);
+  await takeBack(relay, grants);
   const guildId = relay.config.discord.guildId;
   if (!guildId) return true;
   try {
@@ -340,9 +383,14 @@ async function avatarData(relay: Relay, agent: AgentRecord): Promise<string> {
  * this succeeds.
  */
 export async function syncIdentity(relay: Relay, agentId: string): Promise<void> {
-  const bot = await getBot(relay, agentId);
-  if (!bot || bot.status === 'paused') return;
-  const agent = await getAgent(relay, agentId);
+  const found = await botOf(relay, agentId);
+  if (found) await showIdentity(relay, found.bot, found.agent);
+}
+
+/** syncIdentity, for a bot and agent already read. */
+async function showIdentity(relay: Relay, bot: BotRow, agent: AgentRecord): Promise<void> {
+  if (bot.status === 'paused') return;
+  const agentId = agent.id;
   const identity = identityOf(agent);
   if (bot.identity === identity) return;
   try {
@@ -413,10 +461,10 @@ async function syncRolesOf(relay: Relay, botUserId: string, level: number | null
 
 /** The agent's roles on its bot while the relay posts as it, none otherwise. Called when the agent's level changes. */
 export async function syncBotRoles(relay: Relay, agentId: string): Promise<void> {
-  const bot = await getBot(relay, agentId);
-  if (!bot) return;
-  if (bot.status === 'active') await syncRolesOf(relay, bot.bot_user_id, (await getAgent(relay, agentId)).level);
-  else await revokeGrants(relay, bot.bot_user_id);
+  const found = await botOf(relay, agentId);
+  if (!found) return;
+  if (found.bot.status === 'active') await syncRolesOf(relay, found.bot.bot_user_id, found.agent.level);
+  else await revokeGrants(relay, found.bot.bot_user_id);
 }
 
 /**
@@ -438,8 +486,7 @@ export async function readyForThread(relay: Relay, botUserId: string, threadId: 
 }
 
 /** Takes the bot out of a private conversation's thread, opening an archived one for the moment. Says whether it is out. */
-async function leaveThread(relay: Relay, botUserId: string, threadId: string): Promise<boolean> {
-  const archived = (await relay.db.prepare('SELECT archived FROM threads WHERE id = ?').bind(threadId).first<{ archived: number }>())?.archived;
+async function leaveThread(relay: Relay, { bot_user_id: botUserId, thread_id: threadId, archived }: Grant): Promise<boolean> {
   try {
     if (archived) await relay.discord.setThreadArchived(threadId, false);
     await relay.discord.removeThreadMember(threadId, botUserId);
@@ -463,26 +510,34 @@ const UNWARRANTED = `NOT EXISTS (
  * untried grants first and then the longest since their last try. It only ever takes away, so it never puts a bot back to work.
  */
 export async function revokeGrants(relay: Relay, botUserId?: string): Promise<number> {
-  const { results } = await relay.db
+  return takeBack(relay, (await grantsStmt(relay, botUserId).all<Grant>()).results);
+}
+
+/** A grant revokeGrants takes back, with whether its thread is archived (null for the roles). */
+type Grant = { bot_user_id: string; thread_id: string; archived: number | null };
+
+/** The grants revokeGrants takes back next. A string thread ID matches the INTEGER threads.id (column affinity). */
+const grantsStmt = (relay: Relay, botUserId?: string) =>
+  relay.db
     .prepare(
-      `SELECT g.bot_user_id, g.thread_id FROM bot_grants g WHERE (?1 IS NULL OR g.bot_user_id = ?1) AND ${UNWARRANTED} ORDER BY g.attempted_at NULLS FIRST, g.created_at LIMIT ?2`,
+      `SELECT g.bot_user_id, g.thread_id, t.archived FROM bot_grants g LEFT JOIN threads t ON t.id = g.thread_id
+       WHERE (?1 IS NULL OR g.bot_user_id = ?1) AND ${UNWARRANTED} ORDER BY g.attempted_at NULLS FIRST, g.created_at LIMIT ?2`,
     )
-    .bind(botUserId ?? null, REVOKES_PER_RUN)
-    .all<{ bot_user_id: string; thread_id: string }>();
-  for (const g of results) {
-    const gone = g.thread_id === ROLES ? await syncRolesOf(relay, g.bot_user_id, null) : await leaveThread(relay, g.bot_user_id, g.thread_id);
-    if (gone)
-      await relay.db
-        .prepare(`DELETE FROM bot_grants AS g WHERE g.bot_user_id = ? AND g.thread_id = ? AND ${UNWARRANTED}`)
-        .bind(g.bot_user_id, g.thread_id)
-        .run();
-    else
-      await relay.db
-        .prepare('UPDATE bot_grants SET attempted_at = ? WHERE bot_user_id = ? AND thread_id = ?')
-        .bind(iso(relay.now()), g.bot_user_id, g.thread_id)
-        .run();
+    .bind(botUserId ?? null, REVOKES_PER_RUN);
+
+/** revokeGrants, for grants already read: Discord is asked about each in turn, and what it said is recorded in one batch. */
+async function takeBack(relay: Relay, grants: Grant[]): Promise<number> {
+  const outcomes: Stmt[] = [];
+  for (const g of grants) {
+    const gone = g.thread_id === ROLES ? await syncRolesOf(relay, g.bot_user_id, null) : await leaveThread(relay, g);
+    outcomes.push(
+      gone
+        ? relay.db.prepare(`DELETE FROM bot_grants AS g WHERE g.bot_user_id = ? AND g.thread_id = ? AND ${UNWARRANTED}`).bind(g.bot_user_id, g.thread_id)
+        : relay.db.prepare('UPDATE bot_grants SET attempted_at = ? WHERE bot_user_id = ? AND thread_id = ?').bind(iso(relay.now()), g.bot_user_id, g.thread_id),
+    );
   }
-  return results.length;
+  if (outcomes.length) await relay.db.batch(outcomes);
+  return grants.length;
 }
 
 async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
@@ -533,14 +588,15 @@ async function check(relay: Relay, bot: BotRow): Promise<void> {
   if (guilds.some((g) => g.id !== guildId)) return pause(relay, bot, OTHER_SERVER);
   const status: AgentBotStatus = guilds.some((g) => g.id === guildId) ? 'active' : 'waiting';
   const now = iso(relay.now());
-  await relay.db
-    .prepare(
-      "UPDATE agent_bots SET status = ?, checked_at = ?, updated_at = CASE WHEN status = ? THEN updated_at ELSE ? END WHERE agent_id = ? AND bot_user_id = ? AND status != 'paused'",
-    )
-    .bind(status, now, status, now, bot.agent_id, bot.bot_user_id)
-    .run();
+  const found = await botOf(relay, bot.agent_id, [
+    relay.db
+      .prepare(
+        "UPDATE agent_bots SET status = ?, checked_at = ?, updated_at = CASE WHEN status = ? THEN updated_at ELSE ? END WHERE agent_id = ? AND bot_user_id = ? AND status != 'paused'",
+      )
+      .bind(status, now, status, now, bot.agent_id, bot.bot_user_id),
+  ]);
   if (status !== bot.status) relay.log.info('bots.status', { agent_id: bot.agent_id, from: bot.status, to: status });
-  await syncIdentity(relay, bot.agent_id);
+  if (found) await showIdentity(relay, found.bot, found.agent);
   if (status === 'active') await syncBotRoles(relay, bot.agent_id);
   // Added: the mod queue's message says so and the request is done. Gone from the server again: a new request.
   if (status !== bot.status) await syncQueue(relay, bot.agent_id);
