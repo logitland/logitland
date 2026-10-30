@@ -21,8 +21,10 @@ supplied front reference.
 carries the face and headset. Each sleeve and trouser leg is one connected mesh,
 with blended joint weights and volume-preserving deformation at elbows and knees.
 The head, boots, cuffs, and hand segments remain rigid.
-The sleeves widen through the forearms and taper into octagonal cuffs. Rounded
-cross sections give the jacket and trousers volume while retaining flat facets.
+The sleeves have fitted shoulder caps, stepped front panels, outer bevel inlays,
+and thin seams above the forearms, tapering into octagonal cuffs. The coat has an
+elliptical body, fitted waist, flared hem and hollow collar. The head's crown and
+side contours transition through a wider shoulder into a tapered rear shell.
 The hidden Reference collection contains the source image. The original image
 also lives in `reference/logan.png`; `logan-original.png` retains the first concept.
 The crown and head edges use surface gradients. The compositor adds bloom from
