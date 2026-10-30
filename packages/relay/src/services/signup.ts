@@ -12,7 +12,7 @@ import {
   type RegistrationResponse,
   type Scope,
 } from '@logitland/contracts';
-import { iso, type Relay } from '../context';
+import { iso, readAll, type Relay } from '../context';
 import { randomToken, sha256, userCode } from '../crypto';
 import { OAuthError, RelayError, conflict, forbidden, unavailable } from '../errors';
 import type { AgentPrincipal, AgentRecord, ClientInfo } from '../types';
@@ -26,8 +26,8 @@ import { enforce } from './limits';
 import { classify, type ModerationRequest } from './moderation/classifier';
 import { logOne } from './moderation/log';
 import { checkAvatarUrl, checkName, nameKey, type PolicyResult } from './names';
-import { assertOriginNotBanned, clientHashes, originStmt } from './origins';
-import { checkSolution, consumeChallenge } from './pow';
+import { clientHashes, originBanStmt, originStmt, refuseBannedOrigin } from './origins';
+import { challengeStmt, checkSolution, consumeChallenge, type ChallengeRow } from './pow';
 import { getSettings } from './settings';
 import { repliesSubscriptionStmt } from './subscriptions';
 
@@ -63,11 +63,15 @@ function must(result: PolicyResult): void {
   if (!result.ok) throw new PolicyRefusal(result.code, result.reason);
 }
 
-const nameTaken = async (relay: Relay, name: string, exceptAgentId = '') =>
-  Boolean(await relay.db.prepare('SELECT id FROM agents WHERE name_key = ? AND id != ?').bind(nameKey(name), exceptAgentId).first());
+const nameTakenStmt = (relay: Relay, name: string, exceptAgentId = '') =>
+  relay.db.prepare('SELECT id FROM agents WHERE name_key = ? AND id != ?').bind(nameKey(name), exceptAgentId);
+
+const nameTaken = async (relay: Relay, name: string, exceptAgentId = '') => Boolean(await nameTakenStmt(relay, name, exceptAgentId).first());
+
+const nameIsTaken = () => conflict('That name is taken. Choose another.');
 
 async function assertNameFree(relay: Relay, name: string, exceptAgentId = ''): Promise<void> {
-  if (await nameTaken(relay, name, exceptAgentId)) throw conflict('That name is taken. Choose another.');
+  if (await nameTaken(relay, name, exceptAgentId)) throw nameIsTaken();
 }
 
 /** A unique-name violation from a concurrent writer looks like any insert failure; ask the database whether the name is gone. */
@@ -122,15 +126,19 @@ async function reviewName(relay: Relay, agentId: string, level: number, name: st
 export async function register(relay: Relay, req: RegistrationRequest, client: ClientInfo): Promise<RegistrationResponse> {
   if (req.type !== 'anonymous')
     throw new OAuthError(400, req.type === 'service' ? 'service_auth_not_enabled' : 'issuer_not_enabled', 'This relay offers anonymous registration only.');
-  if (!(await getSettings(relay)).signup_open) throw new OAuthError(403, 'anonymous_not_enabled', 'Signups are closed right now. Try again later.');
-  await assertOriginNotBanned(relay, client);
-
   const h = await clientHashes(relay, client);
-  await checkSolution(relay, req.pow.challenge, req.pow.nonce, h.net);
   const asked = req.name === undefined ? null : canonicalName(req.name);
+  // The checks read in one round trip, and refuse in this order.
+  const [settings, [banned, challenge, taken]] = await Promise.all([
+    getSettings(relay),
+    readAll<[unknown, ChallengeRow, unknown]>(relay.db, originBanStmt(relay, h), challengeStmt(relay, req.pow.challenge), nameTakenStmt(relay, asked ?? '')),
+  ]);
+  if (!settings.signup_open) throw new OAuthError(403, 'anonymous_not_enabled', 'Signups are closed right now. Try again later.');
+  refuseBannedOrigin(banned);
+  await checkSolution(relay, challenge[0], req.pow.challenge, req.pow.nonce, h.net);
   if (asked) {
     must(checkName(asked));
-    await assertNameFree(relay, asked);
+    if (taken.length) throw nameIsTaken();
   }
 
   const net = h.net ?? 'unknown';

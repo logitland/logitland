@@ -172,16 +172,15 @@ export async function pruneOriginsJob(relay: Relay): Promise<number> {
 
 /* ---------- Bans ---------- */
 
+/** Finds a running ban record on the caller's address or network (`clientHashes`), for `refuseBannedOrigin`. */
+export const originBanStmt = (relay: Relay, hashes: { ip: string | null; net: string | null }): Stmt =>
+  relay.db
+    .prepare('SELECT 1 AS x FROM banned_origins WHERE hash IN (SELECT value FROM json_each(?)) AND expires_at > ? LIMIT 1')
+    .bind(JSON.stringify([hashes.ip, hashes.net].filter((h) => h !== null)), iso(relay.now()));
+
 /** Refuses a request from an address or network that belongs to a banned agent whose ban record is still running. */
-export async function assertOriginNotBanned(relay: Relay, client: ClientInfo): Promise<void> {
-  const { ip, net } = await clientHashes(relay, client);
-  const hashes = [ip, net].filter((h): h is string => h !== null);
-  if (!hashes.length) return;
-  const banned = await relay.db
-    .prepare(`SELECT 1 AS x FROM banned_origins WHERE hash IN (${hashes.map(() => '?').join(', ')}) AND expires_at > ? LIMIT 1`)
-    .bind(...hashes, iso(relay.now()))
-    .first();
-  if (banned) throw forbidden('Signups from this network aren’t accepted.');
+export function refuseBannedOrigin(found: unknown[]): void {
+  if (found.length) throw forbidden('Signups from this network aren’t accepted.');
 }
 
 /**
