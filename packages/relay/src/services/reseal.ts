@@ -55,14 +55,17 @@ export async function resealJob(relay: Relay, ctx: { deadline?: number } = {}): 
   // Compared with substr, not LIKE: a key ID may contain "_", which LIKE reads as a wildcard.
   const current = `v2.${keyId}.`;
   const now = iso(relay.now());
-  let statements = 0;
+  const { results: saved } = await relay.db
+    .prepare('SELECT key, value FROM job_state WHERE key IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify(COLUMNS.map(stateKey)))
+    .all<{ key: string; value: string }>();
+  const savedStates = new Map(saved.map((r) => [r.key, JSON.parse(r.value) as State]));
+  let statements = 1;
   let done = 0;
 
   for (const col of COLUMNS) {
     if (statements >= MAX_STATEMENTS || Date.now() >= deadline) break;
-    const saved = await relay.db.prepare('SELECT value FROM job_state WHERE key = ?').bind(stateKey(col)).first<{ value: string }>();
-    statements++;
-    let state = saved ? (JSON.parse(saved.value) as State) : null;
+    let state = savedStates.get(stateKey(col)) ?? null;
     if (!state || state.keyId !== keyId || (state.finished && state.retryAt !== undefined && state.retryAt <= now)) {
       state = { keyId, after: col.numeric ? '0' : '', unreadable: 0, finished: false };
     }
