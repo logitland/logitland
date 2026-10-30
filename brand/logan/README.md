@@ -1,6 +1,6 @@
 # Logan
 
-Open **logan.blend** in Blender 5.2 or newer. It contains the character, a 36-bone
+Open **logan.blend** in Blender 5.2 or newer. It contains the character, a 38-bone
 rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
 and the packed full-body concept image. The side and back geometry interpret the
 supplied front reference.
@@ -79,7 +79,8 @@ to inspect the pair. Both hands use the master's bone names; integration fits th
 The palm occupies more of the hand's length; the fingers taper straight toward
 their tips. The approved hands are integrated into `logan.blend` at the fitted
 cuffs. `integrate-hands.py` aligns their wrists with the forearms and seats their
-palms beyond the cuff rims. The underlying arms extend into the hands.
+palms beyond the cuff rims. In the A-pose the thumbs face forward and palms face
+down; the wave turns its raised palm toward the viewer. The underlying arms extend into the hands.
 It imports matching finger/thumb rest joints and sets the wave's outward finger
 spread while preserving the body animation.
 
@@ -117,6 +118,8 @@ the collar; there is no neck mesh. Hide the jacket, collar, cuffs and
 trousers to inspect them; `renders/logan-body.png` shows this view.
 
 Cuffs flex with the wrists and have a driven corrective shape for sideways bends.
+Two hidden clothing bones transfer wrist bending without twisting the cuffs when
+the palms turn.
 The tucked trouser hems follow the feet, blending into the shins. `Clearance ·`
 Shrinkwrap modifiers push penetrating clothing vertices outside the hands, boots
 and head after skinning; the lining is generated afterward. Simple subdivision

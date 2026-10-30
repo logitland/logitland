@@ -33,6 +33,9 @@ for side in ('L','R'):
     wrist = study_rig.data.bones['hand.'+source_side[side]]
     direction = (forearm.tail_local-forearm.head_local).normalized()
     rotation = (wrist.tail_local-wrist.head_local).normalized().rotation_difference(direction).to_matrix().to_4x4()
+    # Pronate the A-pose at the wrist: thumbs forward, palms down/inward.
+    twist = Matrix.Rotation(radians(90 if side=='L' else -90), 4, direction)
+    rotation = twist @ rotation
     fits[side] = Matrix.Translation(forearm.tail_local+direction*.12) @ rotation @ Matrix.Translation(-wrist.head_local)
 bpy.context.view_layer.objects.active = rig
 rig.select_set(True)
@@ -45,6 +48,9 @@ for bone in rig.data.edit_bones:
 bpy.ops.object.mode_set(mode='OBJECT')
 for obj in old:
     bpy.data.objects.remove(obj,do_unlink=True)
+# Free both final names before exchanging sides in a fresh build.
+for obj in parts:
+    obj.name = 'Imported / '+obj.name
 for name,obj in zip(names,reversed(parts)):
     for group in obj.vertex_groups:
         if group.name.endswith(('.L','.R')):
@@ -74,6 +80,10 @@ for obj in set(bpy.data.objects)-before-set(parts):
 # The original wave closed the outer fingers toward each other. Use the study's
 # spread angles while retaining the master's arm, wrist, head and facial action.
 scene.frame_set(40)
+# Undo the resting pronation for the raised greeting palm. Assign an absolute
+# value so repeated imports do not accumulate another quarter turn.
+rig.pose.bones['hand.L'].rotation_euler.y = radians(-102)
+rig.pose.bones['hand.L'].keyframe_insert('rotation_euler',frame=40,group='hand.L')
 for digit,angle in ((1,8),(3,-10)):
     bone = rig.pose.bones[f'finger{digit}.01.L']
     bone.rotation_euler.z = radians(angle)
