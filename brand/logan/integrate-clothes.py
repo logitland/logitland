@@ -34,10 +34,12 @@ for filename, prefixes, expected in (
     if filename == 'jacket-study.blend':
         # The approved sleeve fit changed the arm rest locations. Move the hands
         # with them, while keeping the master's action and facial controls.
+        hand_offsets = {}
         for side in ('L', 'R'):
             bone_name = 'hand.' + side
             offset = (study_rig.data.bones[bone_name].head_local
                       - rig.data.bones[bone_name].head_local)
+            hand_offsets[side] = offset
             for obj in collection.objects:
                 if obj.name.startswith(('Hand /', 'Knuckle /')) and obj.name.endswith('.' + side):
                     local_offset = obj.matrix_world.inverted().to_3x3() @ (rig.matrix_world.to_3x3() @ offset)
@@ -48,6 +50,10 @@ for filename, prefixes, expected in (
         for side in ('L', 'R'):
             upper = rig.data.edit_bones['upper_arm.' + side]
             for bone in [upper] + list(upper.children_recursive):
+                if scene.get('approved_hands') and bone.name.startswith(('finger','thumb')):
+                    bone.head += hand_offsets[side]
+                    bone.tail += hand_offsets[side]
+                    continue
                 source_bone = study_rig.data.bones[bone.name]
                 bone.matrix = source_bone.matrix_local.copy()
                 bone.length = source_bone.length
