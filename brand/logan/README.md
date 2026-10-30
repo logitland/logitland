@@ -13,10 +13,14 @@ The front and rear cross-sections and crown/keel retain half-turn symmetry.
 Magenta-to-graphite gradients continue across the roof and underside and through
 the depth of the side facets.
 The display, facial features and headset remain attached to the casing.
-`logan.blend` retains the full-body master until the head shape is settled.
+The approved head is integrated into `logan.blend` and follows its head bone,
+with blink and screen-brightness controls restored. `head-study.blend` remains
+the editable source for the head. `integrate-head.py` replaces only the head in
+an open full-body scene; `build.py` uses it automatically when rebuilding.
+The original `head-study.py` is a historical generator for the pre-integration
+body master and refuses to reshape an already integrated character.
 
 ```sh
-blender --background --python-exit-code 1 --python brand/logan/head-study.py
 blender --background brand/logan/head-study.blend --python-exit-code 1 --python brand/logan/render-head.py
 blender --background brand/logan/head-study.blend --python-exit-code 1 --python brand/logan/verify.py
 ```
@@ -64,8 +68,8 @@ coat and neck, with its pink stripe assigned to its own faces. The chest logo us
 original `apps/web/src/lib/assets/logit.svg`, rasterized intact with resvg into
 `reference/logit-texture.png` and packed into the Blender material. UVs preserve
 the mark's proportions; its black canvas leaves the underlying cloth visible.
-The head has steep top-front and bottom-back chamfers related by a 180-degree
-rotation in side profile, with magenta gradients on both and an inset rear
+The head has broad crystal facets with a narrow crown and lower keel related by
+a 180-degree rotation in side profile, continuous magenta gradients and an inset rear
 service panel, vent rows and fasteners.
 The hidden Reference collection contains the source image. The original image
 also lives in `reference/logan.png`; `logan-original.png` retains the first concept.
