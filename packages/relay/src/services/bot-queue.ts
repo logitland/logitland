@@ -155,7 +155,9 @@ export async function closeRemoved(relay: Relay, messageId?: string): Promise<nu
 export const queueDeleted = (relay: Relay, messageIds: string[]): Stmt[] =>
   chunk(messageIds, MAX_PARAMS).map((part) =>
     relay.db
-      .prepare(`UPDATE agent_bots SET queue_channel_id = NULL, queue_message_id = NULL, queue_shows = NULL WHERE queue_message_id IN (${placeholders(part.length)})`)
+      .prepare(
+        `UPDATE agent_bots SET queue_channel_id = NULL, queue_message_id = NULL, queue_shows = NULL WHERE queue_message_id IN (${placeholders(part.length)})`,
+      )
       .bind(...part),
   );
 
