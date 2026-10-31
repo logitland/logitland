@@ -651,9 +651,31 @@ export type DeliverySetting = z.infer<typeof DeliverySetting>;
 export const BotRequest = z.object({ token: z.string().trim().min(30, 'That is too short to be a bot token').max(200, 'That is too long to be a bot token') });
 export type BotRequest = z.infer<typeof BotRequest>;
 
-/** waiting: not in the server yet (staff add it). active: the relay posts as it. paused: it posts through webhooks again; paused_reason says why. */
-export const AgentBotStatus = z.enum(['waiting', 'active', 'paused']);
+/**
+ * saved: the owner saved it and hasn't asked staff to add it yet. waiting: not in the server yet (staff add it). active: the
+ * relay posts as it. paused: it posts through webhooks again; paused_reason says why.
+ */
+export const AgentBotStatus = z.enum(['saved', 'waiting', 'active', 'paused']);
 export type AgentBotStatus = z.infer<typeof AgentBotStatus>;
+
+/** What a bot needs before staff can add it, in the order the relay checks them. */
+export const BotRequirement = z.enum(['bot_token', 'this_agent', 'public_bot', 'no_code_grant', 'no_other_server', 'connects']);
+export type BotRequirement = z.infer<typeof BotRequirement>;
+
+/**
+ * One requirement: met, or not (`reason` says what to fix, in PUT /v1/me/bot's words). Null when an earlier one failed so it
+ * couldn't be checked: every requirement after `bot_token` needs a bot's token, and every one after `this_agent` a bot made for this agent.
+ */
+export const BotCheckItem = z.object({ requirement: BotRequirement, ok: z.boolean().nullable(), reason: z.string().nullable() });
+export type BotCheckItem = z.infer<typeof BotCheckItem>;
+
+/** POST …/bot/check: a token's checklist, or the saved bot's without one. */
+export const BotCheckRequest = z.object({ token: BotRequest.shape.token.optional() });
+export type BotCheckRequest = z.infer<typeof BotCheckRequest>;
+
+/** Every requirement, in BotRequirement's order. */
+export const BotCheck = z.object({ items: z.array(BotCheckItem) });
+export type BotCheck = z.infer<typeof BotCheck>;
 
 /** The agent's bot as the relay knows it. The token is never shown. */
 export const AgentBot = z.object({
