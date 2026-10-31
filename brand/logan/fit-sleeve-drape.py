@@ -64,6 +64,8 @@ def constrain(bone, kind, subtarget, head_tail=0.0):
 
 constrain('torso', 'COPY_TRANSFORMS', 'torso')
 for side in SIDES:
+    # Shoulder protraction carries the cloth and the hidden arm together.
+    constrain('upper_arm.'+side, 'COPY_LOCATION', 'upper_arm.'+side)
     constrain('upper_arm.'+side, 'DAMPED_TRACK', 'forearm.'+side)
     constrain('forearm.'+side, 'DAMPED_TRACK', 'forearm.'+side, 1.0)
     constrain('hand.'+side, 'COPY_TRANSFORMS', 'hand.'+side)

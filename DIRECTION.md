@@ -82,9 +82,8 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-Logan's current deliverable is a posed, static avatar render. Saved frames are
-pose presets; transitions and animation are outside the current scope. A GIF may
-be considered later if Mia requests it.
+Logan's deliverable is a static avatar render. Saved frames are pose presets;
+animation is outside the current scope. A GIF may be considered if Mia requests it.
 Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigged
 3D interpretation of the supplied pink-screen robot concept, with continuous deforming
 sleeves and trousers with full faceted volumes. Recessed pink emission spans the
@@ -96,25 +95,19 @@ Every visible mascot detail must share the supporting surface, be extruded from
 it, or overlap it, except the deliberately floating head. Garment hems and openings belong to the cloth mesh; colour
 graphics belong in materials. Inspect attachment in side and bent views, and
 run `brand/logan/verify.py` against the saved master before delivering revisions.
-The approved crystal-like head is integrated into the full-body master and its rig.
-`brand/logan/head-study.blend` remains the separate editable head source; rebuilding
-the body imports that asset, including its reduced depth and continuous gradients.
-The approved jacket source is saved in `brand/logan/jacket-study.blend`, with
-its torso, collar, sleeves, cuffs and sleeve posing preserved from the master.
+The rigged master imports the crystal-like `brand/logan/head-study.blend`, including its reduced depth and gradients.
+`brand/logan/jacket-study.blend` preserves the approved torso, collar, sleeves, cuffs and sleeve posing.
 Its construction is a windproof shell: the reference's broad center panel is a
 storm flap covering the zipper, with pocket facings and folded fabric edges.
 Sleeves share the torso mesh through real armholes. The collar has a low-poly,
 worn shape; back detail comes from the yoke, seam, contrasting panels and pleat.
 The coat is hollow, with open neck, hem and wrists and inward cloth thickness.
 Raised arms slide the sleeves up slightly and draw the coat body upward, spreading cloth tension through the shoulder and torso.
-The pants source is saved in `brand/logan/pants-study.blend`: one
-connected garment with continuous knees and recessed lower-leg lights. Shoes are
-separate assets. Both garment studies are integrated into the master and its
-existing poses; the arm rig and hands follow the jacket's inward sleeve fit.
-The approved hands from `brand/logan/hands-study.blend` are integrated into the
-master with their finger rest joints and wrists aligned to the cuff openings.
-Each has a shared palm and articulated, tapered digits. The approved boots from
-`brand/logan/shoes-study.blend` are integrated into the foot rig: integral instep
+`brand/logan/pants-study.blend` is one connected garment with continuous knees and recessed lower-leg lights.
+Shoes are separate. Both garment studies are integrated into the master and its poses;
+the arm rig and hands follow the jacket's inward sleeve fit.
+`brand/logan/hands-study.blend` supplies shared palms, articulated tapered digits and wrists fitted to the cuffs.
+`brand/logan/shoes-study.blend` supplies the rigged boots: integral instep
 straps, layered soles, transverse tread, open lined collars and recessed pink lights.
 The studies remain separate editable sources for the integrated assets.
 A skinned graphite torso, arms and legs support the hands and boots beneath
@@ -122,8 +115,10 @@ the clothes. The head floats above the collar with no neck mesh. Continuous
 elbows have flexible joint loops, FK rotation and optional wrist IK/elbow poles.
 Flexible cuffs, ankle-following hems and live surface clearance
 reduce garment clipping; extreme or combined poses still require visual checks.
-Prefer close cloth contact over visible air gaps; slight hand/sleeve intersections
-are acceptable in the static avatar.
+Prefer close cloth contact over visible air gaps; slight hand/sleeve intersections are acceptable in the static avatar.
+In the crossed pose, the lower right forearm sits inside against the chest and its
+hand points up onto the left bicep. The upper left forearm crosses in front; its
+hand points down into the right arm gap. Fingers stay straight and bundled.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private

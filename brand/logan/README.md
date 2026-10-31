@@ -156,7 +156,7 @@ The arm checks also cover 90°/120° elbow bends and IK reaches in two planes on
 both sides. `render-arms.py` shows those elbows with the sleeves on and off.
 The checks also enforce a clothing face budget and zero head-contact displacement
 in the clear half-wave pose.
-Its zero-intersection checks, also used by `verify-crossed.py`, remain strict
+Its zero-intersection checks remain strict
 diagnostics; small hand/sleeve overlaps need visual assessment under the close-fit
 policy above.
 
@@ -219,33 +219,35 @@ start/duration. The screen UV canvas is 1804 × 1128.
    `pose-crossed-arms.py` keys the crossed-arms pose and refits its cloth;
    `render.py -- crossed` renders it, and `-- crossed-three-quarter` and
    `-- crossed-rear` render it from the other studio angles. Both elbows bend
-   anatomically and the forearms stack across the chest, the right one above
-   and in front, held clear of the padded coat. The right hand grips the left arm
-   at the elbow; the left hand cups the right forearm from below. Both palms rest
-   on the outside of the other sleeve with curled fingers; the wrists bend about
-   20–30°, mostly toward the little finger. The poses are held presets:
+   anatomically. The lower right forearm sits inside against the chest, with its
+   hand pointing up onto the left bicep. The upper left forearm crosses in front
+   and its hand points down into the right arm gap. Fingers are straight and
+   bundled; wrists bend about 40–43°. The poses are held presets:
    `pose-presets.py` makes every rig key constant, so frames between presets
    repeat the previous pose and garment.
    `fit-sleeve-drape.py` adds the hidden **LOGAN · Sleeve drape** armature. The
-   jacket and body arms follow it: its arm bones only aim at the elbow and wrist,
+   jacket and body arms follow it: its shoulders track the pose rig's forward
+   movement, and its arm bones aim at the elbow and wrist,
    so the fabric swings with the arm without inheriting the humerus roll that the
    elbow hinge needs. `fit-crossed-cloth.py` then bakes the driven
-   `Crossed arms cloth` shape key from that skinning. The last sleeve loops follow
-   most of the cuff's swing so each opening stays inside its cuff; contact rounds
-   then bend the cloth locally, as-rigid-as-possible, off the hands, the other
-   arm's cuff and sleeve, the coat and the body. The rig's `crossed_cloth`
+   `Crossed arms cloth` shape key from that skinning. It spreads shoulder motion
+   across the armhole and relaxes neighbouring loops. Sleeve openings follow the
+   actual cuff cross sections without taking on wrist roll. The simple body's
+   shoulder caps retract beneath the coat. The rig's `crossed_cloth`
    property blends the fit and is zero in the neutral and wave poses. In the
    crossed preset it also swings the cuffs after the hands without twist, drops
    their sideways-bend bulge and eases the raised-arm correctives to a quarter,
    which otherwise drag the coat front over the shoulders and pull the sleeves
-   out of their cuffs. Refit after changing the crossed pose or the garment
+   out of their cuffs. Hand shrinkwrap is disabled in this preset so the tucked
+   fingers can overlap hidden fabric without inflating the sleeve. Small hidden
+   overlaps remain intentional; the left fingertips can show from behind.
+   Refit after changing the crossed pose or the garment
    topology; this is a pose correction, not a live cloth simulation.
-   `verify-crossed.py` runs the fit suite and checks frame 80 for anatomical bends,
-   forearms across the chest, wrists under 35°, palms facing the arm they rest on
-   within .08 of its sleeve and at least .1 from the body beneath, hand/sleeve/cuff
-   clearance, upper sleeves that keep their pink inlay without wringing it, and at
-   most 20 self-crossing face pairs around each shoulder. It also checks that frame
-   66 still shows the wave exactly.
+   `verify-crossed.py` checks the vertical and depth order, opposite hand directions,
+   straight bundled fingers, elbow hinges, wrists under 45°, hand placement and
+   sleeve openings seated in their cuffs. It also checks that frame 66 holds the
+   wave exactly. Use solid, wireframe and material views to judge the cloth fit;
+   this check does not certify collision-free geometry.
 2. Select **LOGAN · Pose me** in the Pose rig collection. Enable viewport Overlays
    and enter **Pose Mode**. Rotate the named body, arm, leg, hand, and finger bones.
    The saved poses use FK: rotate `upper_arm` at the shoulder and `forearm` around
