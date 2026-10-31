@@ -67,7 +67,7 @@ def shell(material):
 
 
 def teddy(name):
-    """Soft looped fleece on the existing lining surfaces, with no fur meshes."""
+    """Base shading for teddy fleece; fleece-lining.py supplies exposed pile."""
     material = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     material.use_nodes = True
     nodes, links = material.node_tree.nodes, material.node_tree.links
@@ -82,8 +82,8 @@ def teddy(name):
     clusters.inputs['Detail'].default_value = 3
     links.new(coords.outputs['Object'], clusters.inputs['Vector'])
     color = nodes.new('ShaderNodeValToRGB')
-    color.color_ramp.elements[0].color = (.008,.009,.012,1)
-    color.color_ramp.elements[1].color = (.075,.067,.064,1)
+    color.color_ramp.elements[0].color = (.44,.34,.24,1)
+    color.color_ramp.elements[1].color = (.82,.72,.58,1)
     links.new(clusters.outputs['Fac'], color.inputs['Fac'])
     links.new(color.outputs[0], shader.inputs['Base Color'])
     pile = nodes.new('ShaderNodeBump')
@@ -102,7 +102,7 @@ def teddy(name):
     links.new(fine.outputs[0], shader.inputs['Normal'])
     output = nodes.new('ShaderNodeOutputMaterial')
     links.new(shader.outputs[0], output.inputs['Surface'])
-    material.diffuse_color = (.04,.036,.034,1)
+    material.diffuse_color = (.65,.55,.43,1)
     return material
 
 
@@ -141,12 +141,12 @@ def finish_avatar():
         if name.startswith(('Head ·', 'Graphite ·', 'Trim ·')):
             for shader in material.node_tree.nodes:
                 if shader.type == 'BSDF_PRINCIPLED':
-                    shader.inputs['Metallic'].default_value = .82
-                    shader.inputs['Roughness'].default_value = .6
-                    shader.inputs['Coat Weight'].default_value = 0
+                    shader.inputs['Metallic'].default_value = 0
+                    shader.inputs['Roughness'].default_value = .44
+                    shader.inputs['Coat Weight'].default_value = .12
         if 'command room plate' in name:
-            # Both accent palettes share the subdued warm arcade backdrop.
-            image = bpy.data.images.load(str(HERE/'environment/arcade-playground.png'), check_existing=True)
+            # Neutral rack silhouettes support both saturated accent palettes.
+            image = bpy.data.images.load(str(HERE/'environment/server-room-neutral.png'), check_existing=True)
             image.reload()
             image.pack()
             texture = next(n for n in material.node_tree.nodes if n.type == 'TEX_IMAGE')

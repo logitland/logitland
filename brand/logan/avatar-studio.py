@@ -148,7 +148,7 @@ mesh.materials.append(mat)
 n, l = mat.node_tree.nodes, mat.node_tree.links
 n.clear()
 tex = n.new('ShaderNodeTexImage')
-tex.image = bpy.data.images.load(str(HERE/'environment/arcade-playground.png'), check_existing=True)
+tex.image = bpy.data.images.load(str(HERE/'environment/server-room-neutral.png'), check_existing=True)
 tex.image.pack()
 emission = n.new('ShaderNodeEmission')
 emission.inputs['Strength'].default_value = .5
@@ -204,6 +204,7 @@ for name, value in {'Roughness':.1,'Specular IOR Level':.5,'IOR':1.45,
                     'Coat Weight':1,'Coat Roughness':.1}.items():
     glass.inputs[name].default_value = value
 runpy.run_path(str(HERE/'finish-avatar.py'))['finish_avatar']()
+runpy.run_path(str(HERE/'fleece-lining.py'))['fleece_lining']()
 runpy.run_path(str(HERE/'rim-portrait.py'))['rim_portrait']()
 runpy.run_path(str(HERE/'curve-screen.py'))['curve_screen']()
 runpy.run_path(str(HERE/'sync-staging.py'))['sync_staging']()

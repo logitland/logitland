@@ -45,8 +45,6 @@ def sync_staging():
         if obj.type == 'LIGHT':
             rgba = (*obj.data.color,1)
             obj.data.color = blue(rgba)[:3]
-            if obj.name.startswith('Portrait / rim · ice'):
-                obj.data.color = (1,.012,.8)
             continue
         if obj.type != 'MESH':
             continue
@@ -101,7 +99,7 @@ def sync_staging():
         if node.type == 'R_LAYERS':
             node.scene = staging
     staging.render.filepath = str(HERE/'renders/logan-staging-avatar.png')
-    staging['portrait_notes'] = 'Production pose, framing, lighting and warm arcade backdrop; blue character accents.'
+    staging['portrait_notes'] = 'Production pose, framing, lighting and neutral server-room backdrop; blue character accents.'
     bpy.context.window.scene = production
     bpy.context.view_layer.update()
     return staging

@@ -7,17 +7,20 @@ import bpy
 from mathutils import Vector
 
 
-def rim_portrait():
-    scene = bpy.data.scenes['AVATAR · Production']
+def light_edges(scene):
+    """Use pink rear strip lights for a narrow silhouette and soft fabric edges."""
     lights = {
         'Portrait / key · silk': ((-4.5,-6,9.5),340,(1,.9,.88),4.5,None),
-        'Portrait / fill · cool': ((4.5,-5,5.5),60,(.4,.65,1),3.2,None),
-        'Portrait / rim · magenta': ((-3.3,.4,7.6),600,(1,.012,.8),.25,3.5),
-        'Portrait / rim · ice': ((3.0,1.4,7.6),450,(.035,.28,1),.3,3.2),
-        'Portrait / top edge': ((0,1.2,8.1),250,(1,.012,.8),3.5,.25),
+        'Portrait / fill · pink': ((4.5,-5,5.5),60,(1,.12,.55),3.2,None),
+        'Portrait / rim · magenta': ((-3.3,1.2,7.6),850,(1,.018,.55),.18,3.0),
+        'Portrait / rim · pink right': ((3,3,7.4),650,(1,.018,.55),.18,3.0),
+        'Portrait / top edge': ((0,1.6,8.8),350,(1,.025,.6),2.5,.2),
     }
+    old_names = {'Portrait / fill · pink':'Portrait / fill · cool',
+                 'Portrait / rim · pink right':'Portrait / rim · ice'}
     for name, (position,power,color,width,height) in lights.items():
-        obj = scene.objects[name]
+        obj = scene.objects.get(name) or scene.objects[old_names[name]]
+        obj.name = name
         obj.location = position
         obj.rotation_euler = (Vector((0,0,5.9))-obj.location).to_track_quat('-Z','Y').to_euler()
         obj.data.energy, obj.data.color = power, color
@@ -25,6 +28,38 @@ def rim_portrait():
         obj.data.size = width
         if height:
             obj.data.size_y = height
+    materials = {slot.material for obj in scene.objects if obj.type=='MESH'
+                 for slot in obj.material_slots if slot.material}
+    for material in materials:
+        if not material.use_nodes or 'Face ·' in material.name or 'Portrait /' in material.name:
+            continue
+        for shader in material.node_tree.nodes:
+            if shader.type != 'BSDF_PRINCIPLED':
+                continue
+            if material.name.startswith(('Head ·','Graphite ·','Trim ·')):
+                shader.inputs['Metallic'].default_value = 0
+                shader.inputs['Roughness'].default_value = .44
+                shader.inputs['IOR'].default_value = 1.46
+                shader.inputs['Coat Weight'].default_value = .12
+                shader.inputs['Coat Roughness'].default_value = .25
+            if shader.inputs['Metallic'].default_value < .5:
+                # Short-path scattering lets backlight soften thin plastic and
+                # fabric edges. The screen keeps its independent glass shader.
+                plastic = material.name.startswith(('Head ·','Graphite ·','Trim ·'))
+                shader.inputs['Subsurface Weight'].default_value = .35 if plastic else .25
+                shader.inputs['Subsurface Scale'].default_value = .07 if plastic else .035
+                shader.inputs['Subsurface Radius'].default_value = (1,.55,.7)
+            if material.name.startswith('Jacket ·'):
+                shader.inputs['Sheen Weight'].default_value = .6 if 'teddy' not in material.name else .8
+    shell = scene.objects['Head / faceted shell']
+    bevel = next(m for m in shell.modifiers if m.type=='BEVEL')
+    bevel.width, bevel.segments = .009, 2
+
+
+def rim_portrait():
+    """Build the portrait finish; light_edges can update just the backlighting."""
+    scene = bpy.data.scenes['AVATAR · Production']
+    light_edges(scene)
     rig = next(o for o in scene.objects if o.get('logan_pose_controls'))
     rig['screen_brightness'] = 1.6
     rig.keyframe_insert(data_path='["screen_brightness"]',frame=80)
@@ -34,21 +69,8 @@ def rim_portrait():
         if not material.use_nodes or 'Face ·' in material.name or 'Portrait /' in material.name:
             continue
         for shader in material.node_tree.nodes:
-            if shader.type != 'BSDF_PRINCIPLED':
-                continue
-            if shader.inputs['Emission Strength'].default_value > 0:
+            if shader.type == 'BSDF_PRINCIPLED' and shader.inputs['Emission Strength'].default_value > 0:
                 shader.inputs['Emission Strength'].default_value = .7 if material.name.startswith(('Head ·','Trim ·')) else 1.4
-            if shader.inputs['Metallic'].default_value < .5:
-                # Shallow scattering in cloth/rubber catches backlight without
-                # turning opaque metal into wax. No scattering on screen glass.
-                shader.inputs['Subsurface Weight'].default_value = .07
-                shader.inputs['Subsurface Scale'].default_value = .009
-                shader.inputs['Subsurface Radius'].default_value = (1,.55,.7)
-            if material.name.startswith('Jacket ·'):
-                shader.inputs['Sheen Weight'].default_value = .3 if 'teddy' not in material.name else .8
-    shell = scene.objects['Head / faceted shell']
-    bevel = next(m for m in shell.modifiers if m.type=='BEVEL')
-    bevel.width, bevel.segments = .009, 2
 
     tree = scene.compositing_node_group
     nodes, links = tree.nodes, tree.links
@@ -76,7 +98,7 @@ def rim_portrait():
     glow.inputs['Size'].default_value = .6
     glow.location = (1100,250)
     scene.view_settings.exposure = -.3
-    scene['portrait_notes'] = 'Narrow saturated backlights; matte metal bevels, shallow cloth scattering; compositor grading controls.'
+    scene['portrait_notes'] = 'Pink rear strips; matte plastic edge scattering, woven shell and curly fleece; compositor grading controls.'
 
 
 if __name__ == '__main__':
