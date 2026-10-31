@@ -8,7 +8,7 @@ sleeve into a spiral. Pure hinge, raise and forward/back rotations match the
 pose rig exactly, so the neutral and wave poses are unchanged. The jacket, its
 pose-driven cloth shapes and the body arms use this armature; its hands copy
 the pose rig, so the body arms still meet the hands. The cuffs, hands, legs
-and boots keep the pose rig.
+and boots keep the pose rig; the cuffs' sleeve-ride correctives read the drape.
 """
 import bpy
 
@@ -17,6 +17,7 @@ SIDES = 'LR'
 rig = bpy.data.objects['LOGAN · Pose me']
 garments = [bpy.data.objects['Jacket / torso']]
 body_arms = [bpy.data.objects['Body / arm.'+side] for side in SIDES]
+cuffs = [bpy.data.objects['Cuff / band.'+side] for side in SIDES]
 
 old = bpy.data.objects.get(NAME)
 if old:
@@ -67,9 +68,9 @@ for side in SIDES:
     constrain('forearm.'+side, 'DAMPED_TRACK', 'forearm.'+side, 1.0)
     constrain('hand.'+side, 'COPY_TRANSFORMS', 'hand.'+side)
 
-for obj in garments+body_arms:
+for obj in garments+body_arms+cuffs:
     for modifier in obj.modifiers:
-        if modifier.type=='ARMATURE':
+        if modifier.type=='ARMATURE' and obj not in cuffs:
             modifier.object = drape
     # Shoulder-elevation correctives measure the sleeve, not the humerus roll.
     keys = obj.data.shape_keys

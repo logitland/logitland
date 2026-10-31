@@ -1,11 +1,14 @@
 """Key the crossed-arms pose at frame 80, after the wave, in the open master.
 
 blender --background brand/logan/logan.blend --python brand/logan/pose-crossed-arms.py
-Saves the file. The body turns 30° while the head looks back at the camera. The
-right forearm crosses above the left. Its palm rests on the left sleeve over
-the bicep; the left hand tucks behind the right upper arm. Elbows use their
-anatomical hinges; the sleeves follow a roll-free drape armature and a fitted
-crossed-arms coat shape. Every preset is held, not interpolated.
+Saves the file. The body turns 30° while the head looks back at the camera.
+The forearms stack across the chest, the right one above and in front, both
+held clear of the padded coat so the rigid cuffs ride free of it. The right
+hand grips the left arm at the elbow; the left hand cups the right forearm from
+below. Both palms rest on the outside of the other sleeve, fingers curled
+toward it. Elbows use their anatomical hinges; wrists bend at most about 30°.
+The sleeves follow a roll-free drape armature and a fitted crossed-arms coat
+shape. Every preset is held, not interpolated.
 """
 from math import radians
 from pathlib import Path
@@ -14,17 +17,17 @@ import bpy
 
 FRAME = 80
 DEGREES = {
-    'root': (0.0, 30.0, 0.0),
-    'head': (-6.0, -24.0, 5.0),
-    'upper_arm.L': (-36.863846, 174.255324, -36.219380),
-    'forearm.L': (0.0, 0.0, 109.099841),
-    'hand.L': (-10.850855, 80.943725, 7.054290),
-    'thumb.01.L': (30.529562, 4.026630, -14.679747),
-    'thumb.02.L': (-3.135258, 0.730205, 26.215557),
-    'upper_arm.R': (-57.305178, -162.246595, 57.875027),
-    'forearm.R': (0.0, 0.0, -96.482822),
-    'hand.R': (-10.597061, 143.473916, -25.714481),
-    **{f'{finger}.{joint}.{side}': (18.0 if side=='L' else 28.0 if joint=='01' else 22.0, 0.0, 0.0)
+    'root': (0.0000, 30.0000, 0.0000),
+    'head': (-6.0000, -24.0000, 5.0000),
+    'upper_arm.L': (-40.3733, 166.0018, -40.2781),
+    'forearm.L': (0.0000, 0.0000, 75.5344),
+    'hand.L': (21.7224, 164.6006, 29.3290),
+    'thumb.01.L': (30.5296, 4.0266, -14.6797),
+    'thumb.02.L': (-3.1353, 0.7302, 26.2156),
+    'upper_arm.R': (-72.7171, -172.7259, 48.3263),
+    'forearm.R': (0.0000, 0.0000, -89.6793),
+    'hand.R': (-90.4077, 67.7095, -86.9629),
+    **{f'{finger}.{joint}.{side}': (30.0, 0.0, 0.0)
        for finger in ('finger1', 'finger2', 'finger3') for joint in ('01', '02') for side in 'LR'},
 }
 
