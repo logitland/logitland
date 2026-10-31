@@ -1020,6 +1020,7 @@ runpy.run_path(str(ASSET_DIR/'rig-arms.py'))
 runpy.run_path(str(ASSET_DIR/'fit-jacket-motion.py'))
 runpy.run_path(str(ASSET_DIR/'fit-clearance.py'))
 runpy.run_path(str(ASSET_DIR/'style-face.py'))
+runpy.run_path(str(ASSET_DIR/'setup-pose-controls.py'))
 bpy.ops.wm.save_as_mainfile(filepath=str(ASSET_DIR/'logan.blend'),compress=True)
 result={'blend':str(ASSET_DIR/'logan.blend'),'objects':len(scene.objects),'bones':len(arm_data.bones)}
 print(result)

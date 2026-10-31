@@ -268,12 +268,34 @@ carries the face and headset. Torso and sleeves share one mesh; both trouser leg
 share one pants mesh, with blended joint weights and volume-preserving deformation
 at elbows and knees.
 The head and boots remain rigid; the cuffs flex at the wrists.
-For arm IK, start at frame 1 and set **arm_ik_L** or **arm_ik_R** to **1** on the
-rig's Custom Properties. In the **Arm controls** bone collection, move
-**CTRL wrist.L/R** to position the hand and **CTRL elbow.L/R** to choose the bend
-direction. Rotate **hand.L/R** for wrist orientation. IK does not stretch the arms.
-Set the property back to **0** for FK; switching from an arbitrary pose requires
-matching the controls first. `rig-arms.py` recreates the controls after a rebuild.
+Pose the **armature in Pose Mode**, not the character's mesh objects. Skinned mesh
+object transforms are locked and viewport selection is disabled: those transforms
+move the bind geometry before its armature deformation; their origins are not joints.
+The actual hand bones pivot at the wrists, where their forearms end.
+
+In the 3D View sidebar (**N → Logan**), each arm has two modes:
+
+- **Rotate joints (FK):** select the wrist ring and press **R** to turn the hand.
+  Rotate the upper arm and forearm bones to place the arm. Wrist translation is locked.
+- **Move wrist (IK):** select the wrist ring and press **G** to place the arm,
+  or **R** to orient the palm. The elbow diamond chooses the bend direction.
+
+The buttons snap the controls before switching; inactive controls are hidden.
+Press **Store pose**, then save the blend, to retain edits in the current preset.
+Saved presets use FK. The crossed coat corrective remains specific to frame 80;
+large arm-pose changes require refitting its garment surface.
+
+`setup-pose-controls.py` creates this setup after `rig-arms.py` and aligns the
+controls to each preset. Install and enable `logan_pose_tools.py` as a Blender
+add-on for the sidebar and IK/FK snapping buttons; it is installed on Mia's Mac.
+The bone controls and their drivers are stored in the blend and work without
+the add-on, but manually changing the IK properties does not snap arbitrary poses.
+
+`verify-pose-controls.py` checks wrist pivots, hand integrity, solver switching and
+stored edits in all three presets. `verify-crossed.py` still encodes the earlier
+straight, downward left-hand pose; its hand-direction assertions do not describe
+the manually posed crossed preset currently saved in the master.
+
 The sleeves have fitted shoulder caps, stepped surface panels, and recessed emissive
 lining across the whole outer side, wrapping onto the front and rear seams.
 The lining and its dark cavity walls share the sleeve's deforming mesh.
