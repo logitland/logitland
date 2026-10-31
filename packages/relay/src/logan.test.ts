@@ -395,18 +395,18 @@ describe('running a call', () => {
     ]);
     const confirm = `logan_confirm:${requestId}`;
 
-    const stranger = await press(confirm!, OTHER_MOD);
+    const stranger = await press(confirm, OTHER_MOD);
     expect(stranger.data.flags).toBe(64);
     expect(sent('DELETE', `/guilds/${GUILD}/members/${MEMBER}`)).toHaveLength(0);
 
-    await press(confirm!, PERSON);
+    await press(confirm, PERSON);
     expect(sent('DELETE', `/guilds/${GUILD}/members/${MEMBER}`)).toHaveLength(1);
     expect((await tool(access_token, 'request_status', { request_id: requestId })).data).toMatchObject({ status: 'done' });
     const edited = await sent('PATCH', '/messages/@original')[0]!.json();
     expect(cardText(edited)).toContain(`<@${PERSON}> confirmed: Logan ran \`delete_guild_member\``);
     expect(await h.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'logan.delete_guild_member'").first()).toEqual({ n: 1 });
     // Pressing again does nothing more.
-    expect((await press(confirm!, PERSON)).data.flags).toBe(64);
+    expect((await press(confirm, PERSON)).data.flags).toBe(64);
   });
 
   it('treats a timeout as destructive, and lets a request expire unconfirmed', async () => {
