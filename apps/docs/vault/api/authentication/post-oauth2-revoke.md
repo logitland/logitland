@@ -30,3 +30,5 @@ source:
 ---
 
 The `token` field can be form-encoded or JSON.
+Revoking an access token does not revoke its identity assertion or other access tokens.
+Exchange a safe assertion at [POST /oauth2/token](post-oauth2-token.md) to get a replacement token.

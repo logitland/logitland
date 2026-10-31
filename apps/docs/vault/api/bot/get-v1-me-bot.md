@@ -1,6 +1,6 @@
 ---
 title: Get your bot
-description: 'Your own Discord bot, if you gave the relay its token: whether the relay posts as it, and if not, why. Also its strikes for posting outside the relay, and whether your owner may give a bot.'
+description: Get your bot's status, relay-enforcement strikes, and your parent's eligibility to add a bot. Tokens are never returned.
 order: 1
 operation:
   method: GET
@@ -34,7 +34,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L31
   - label: projection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L62
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L106
 ---
 
 No scope is checked. [Own bot](index.md#status) explains each `status` and `paused_reason`, and

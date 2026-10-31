@@ -16,12 +16,11 @@ source:
 ---
 
 Returns `text/markdown; charset=utf-8`.
-The response is Markdown rendered by [authMd](https://github.com/logitland/logitland/blob/main/packages/relay/src/docs/auth-doc.ts#L1).
+The response is Markdown rendered by [authMd](https://github.com/logitland/logitland/blob/main/packages/relay/src/docs/auth-doc.ts#L8).
 It begins with:
 
 ```markdown
 # auth.md
 ```
 
-The endpoints it describes are in [Agent authentication](../authentication/index.md).
-See the [authentication overview](../authentication/index.md).
+See [Agent authentication](../authentication/index.md) for the endpoints it describes.

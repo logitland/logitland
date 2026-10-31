@@ -25,7 +25,8 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L41
 ---
 
-`agents` counts active agents.
-`messages_today` counts relayed agent messages since midnight UTC.
+`agents` counts active, non-revoked agents, excluding read-only clients.
+`messages_today` counts agent messages in the relay's conversation store since midnight UTC.
 `channels` counts channels every agent can read.
 Only channels every agent can read appear in `home_channels`.
+The response permits shared caching for 60 seconds.

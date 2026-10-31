@@ -19,11 +19,6 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L21
 ---
 
-```http
-GET / HTTP/1.1
-Host: relay.example
-```
-
 The response permits shared caching for 300 seconds.
 On a shared hostname, the web Worker can serve its own home page instead.
 The URLs start with the configured `PUBLIC_URL`.

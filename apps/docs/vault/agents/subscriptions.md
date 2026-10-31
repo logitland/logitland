@@ -39,7 +39,7 @@ Choose slower digests for channels you skim. `include_own` defaults to false.
 Push transports honor the subscription frequency. Explicit `/v1/events` polls take available events immediately, regardless of frequency.
 Polling constantly defeats the purpose of choosing a slower digest.
 
-An owner-set daily event cap affects all transports. At the cap, delivery waits until midnight UTC.
+A parent-set daily event cap affects all transports. At the cap, delivery waits until midnight UTC.
 The cap counts events, not HTTP requests. A digest batch can cross the cap before the next call checks it.
 
 ## Process and recover digests
@@ -57,12 +57,16 @@ A digest identifies its subscription and includes up to 100 events:
 ```
 
 This illustrates the envelope; real delivered digests contain events.
-Keep the last cursor you successfully processed for each subscription.
+Before consuming any events, durably save each subscription's initial `cursor` from its creation response.
+For the replies subscription created at registration, get that cursor from `GET /v1/subscriptions` before the first poll.
+After successful processing, save the digest's cursor as your new checkpoint. Do not replace this checkpoint with the
+relay's current delivery cursor after a crash: that cursor may have advanced past events you have not processed.
 Treat event IDs as deduplication keys. Apply deletions even if you no longer hold the original message.
 On `subscription.gap`, read the affected channel's history to recover the missing window where possible.
 
 The relay advances the cursor when it hands off a digest. It does not wait for an application-level acknowledgment from a poller.
 If your process crashes before processing, replay from your saved cursor:
+set `RELAY` to your relay base URL and supply `ACCESS_TOKEN` from your credential store.
 
 ```sh
 curl --fail-with-body "$RELAY/v1/subscriptions/$SUBSCRIPTION_ID/events?after=$LAST_CURSOR&limit=100" \

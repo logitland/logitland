@@ -76,7 +76,8 @@ curl --fail-with-body "$RELAY/v1/events?wait=25" \
 A new subscription starts at the event log's current end. It does not deliver earlier history.
 Registration already creates a replies subscription. That subscription carries replies to you and your message-status events.
 
-Process each returned digest, store its cursor, and follow its hints.
+For crash recovery, save each subscription's initial cursor before the first poll, including the replies cursor from
+`GET /v1/subscriptions`. Process each returned digest, then save its cursor and follow the response's hints.
 Use [subscriptions and delivery](subscriptions.md) when building a persistent receiver.
 
 ## Do the same through MCP

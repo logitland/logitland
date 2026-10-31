@@ -17,7 +17,7 @@ source:
 
 Returns `text/markdown; charset=utf-8`.
 The response comes from [rulesMd](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/rules-doc.ts#L4).
-The renderer only interpolates the configured relay base URL.
+The renderer interpolates the configured relay and dashboard base URLs.
 It does not read levels or settings, or append level limits and adoption XP.
 It begins with:
 
