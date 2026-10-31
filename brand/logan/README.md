@@ -209,17 +209,30 @@ start/duration. The screen UV canvas is 1804 × 1128.
 1. Choose frame **1** for neutral, **40** for the wave, or **80** for crossed arms.
    `pose-crossed-arms.py` keys the crossed-arms pose; `render.py -- crossed` renders it.
    Both elbows bend anatomically and the forearms fold across the chest. The right
-   hand rests over the left bicep; the left hand tucks behind the right upper arm.
-   Fingers curl toward their palms, with the tucked thumb folded out of the way.
-   `fit-crossed-cloth.py` loads a baked, pose-specific sleeve correction from
-   `crossed-cloth.json`. It decouples sleeve roll from humerus rotation, distributes
-   shoulder movement, compresses the contacting forearms, and fits fabric beneath
-   the palms. Cuff contact is fitted in world space, including object offsets.
-   `crossed_cloth` blends this correction; it is zero in neutral and wave poses.
-   Re-bake after changing the crossed pose or garment topology.
-   This is a tailored pose correction, not a live cloth simulation.
+   palm rests on the left sleeve over the bicep; the left hand tucks behind the
+   right upper arm. Fingers curl toward their palms, with the tucked thumb folded
+   out of the way. The poses are held presets: `pose-presets.py` makes every rig
+   key constant, so frames between presets repeat the previous pose and garment.
+   `fit-sleeve-drape.py` adds the hidden **LOGAN · Sleeve drape** armature. The
+   jacket and body arms follow it: its arm bones only aim at the elbow and wrist,
+   so the fabric swings with the arm without inheriting the humerus roll that the
+   elbow hinge needs. `fit-crossed-cloth.py` then bakes the driven
+   `Crossed arms cloth` shape key. Each upper sleeve stays a rigid tube on its
+   drape bone, the coat above the shoulder joints stays on the torso, and the
+   armhole band between them relaxes as-rigid-as-possible, so the shoulders bend
+   instead of folding into craters. Around the tucked hand, the cuffs and the
+   lower left forearm, the coat keeps the tailored contact fit from
+   `crossed-cloth.json`; the left cuff keeps its tailored offsets. Contact rounds
+   then clear the dressed cloth and lining off both hands, the other arm's cuff
+   and sleeve, and the body arms. Under a hand the sleeve may press down onto
+   the hidden body arm. The rig's `crossed_cloth` property blends the fit and is
+   zero in the neutral and wave poses. Refit after changing the crossed pose or
+   the garment topology; this is a tailored pose correction, not a live cloth
+   simulation.
    `verify-crossed.py` runs the fit suite and checks frame 80 for anatomical bends,
-   forearms across the chest, palm contact directions, and hand/sleeve/cuff clearance.
+   forearms across the chest, palm contact directions, hand/sleeve/cuff clearance,
+   and upper sleeves that keep their pink inlay without wringing it around the arm.
+   It also checks that frame 66 still shows the wave exactly.
 2. Select **LOGAN · Pose me** in the Pose rig collection. Enable viewport Overlays
    and enter **Pose Mode**. Rotate the named body, arm, leg, hand, and finger bones.
    The saved poses use FK: rotate `upper_arm` at the shoulder and `forearm` around
