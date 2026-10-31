@@ -128,20 +128,24 @@ armature deformation at the shoulder and elbow.
 The neutral garment keeps its approved shape. `render-jacket-motion.py` provides
 front, side, rear and halfway-wave views; `verify-fit.py` also checks intermediate,
 mirrored and forward/back arm raises.
-The tucked trouser hems follow the feet, blending into the shins. `Clearance ·`
-Shrinkwrap modifiers push penetrating clothing vertices outside the hands, boots
-and head after skinning; the lining is generated afterward. Simple subdivision
-adds contact samples while preserving the faceted silhouette. These are live,
-editable corrections with no simulation bake.
+The tucked trouser hems follow the feet, blending into the shins. Shrinkwrap
+modifiers keep the garment openings clear of hands and boots.
+`fit-clearance.py` resolves head contact locally on the existing garment vertices,
+sampling faces and edges as well as vertices. The shell allowance is .045 scene
+units, including its .018 lining. The contact proxy is the convex envelope of
+the head assembly. Deeply concave gaps still need visual inspection.
+These are live, editable corrections with no subdivision or simulation bake.
 
 `verify-fit.py` checks that the body supports its extremities without clothing
 and that the cuffs/hands, sleeves/hands, hems/boots and collar/head do not intersect
-in neutral, wave and 16 sampled joint poses: wrist flexion ±40°, sideways wrist
+across 45 sampled poses, including wrist flexion ±40°, sideways wrist
 bends ±25°, ankle flexion ±35°, and head pitch/tilt ±35°. These individual samples
 do not guarantee every intermediate, combined or more extreme pose; inspect
 those before rendering. `render-fit.py` produces close-ups of the corrections.
 The arm checks also cover 90°/120° elbow bends and IK reaches in two planes on
 both sides. `render-arms.py` shows those elbows with the sleeves on and off.
+The checks also enforce a clothing face budget and zero head-contact displacement
+in the clear half-wave pose.
 
 ```sh
 blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/verify-fit.py
@@ -188,6 +192,15 @@ wave poses, and closed sleeve, trouser and torso meshes. It catches separated
 parts even when they line up convincingly in the front view.
 
 ## Pose and render
+
+The face is 2D artwork on `Screen / glass`. Edit `face/face.svg`, then run
+`python3 brand/logan/face/render-textures.py` and `style-face.py` in Blender to
+refresh the packed PNG layers. The rig's blink controls squash the eye textures.
+The `LOGAN / CRT display` shader group applies scanlines and phosphor variation
+after the artwork is combined. Its **Image** input can instead take the Color
+output of an Image Texture node loaded with a movie or PNG sequence; connect
+the `CRT face` UV map to that texture, enable Auto Refresh, and set its frame
+start/duration. The screen UV canvas is 1804 × 1128.
 
 1. Choose frame **1** for neutral or **40** for the wave.
 2. Select **LOGAN · Pose me** in the Pose rig collection. Enable viewport Overlays

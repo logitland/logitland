@@ -1,98 +1,150 @@
-"""Pink phosphor graphics on black CRT glass, with a slightly lopsided smirk.
+"""Put an editable 2D face through a CRT shader on the existing screen mesh.
 
-Raster detail lives in materials and a common face UV map; no added geometry.
-The existing blink controls and head rig remain in place.
+The PNG layers come from face/face.svg. Eye UV transforms retain the rig's
+blink controls. The CRT group's Image input also accepts a movie or sequence.
 """
 from math import tau
+from pathlib import Path
 import bpy
 
+directory = Path(__file__).resolve().parent
 rig = bpy.data.objects['LOGAN · Pose me']
 screen = bpy.data.objects['Screen / glass']
-mouth = bpy.data.objects['Face / smirk']
-rest = mouth.data.attributes.get('Rest / smirk')
-if rest is None:
-    rest = mouth.data.attributes.new('Rest / smirk', 'FLOAT_VECTOR', 'POINT')
-    for point, vertex in zip(rest.data, mouth.data.vertices):
-        point.vector = vertex.co
-for vertex, point in zip(mouth.data.vertices, rest.data):
-    vertex.co = point.vector
-    t = max(0,min(1,(vertex.co.x+.205)/.410))
-    vertex.co.x = vertex.co.x*1.22+.035
-    vertex.co.z += .055*t*t
+material = bpy.data.materials.get('Face · 2D CRT display') or bpy.data.materials.new('Face · 2D CRT display')
+material.use_nodes = True
+nodes, links = material.node_tree.nodes, material.node_tree.links
+nodes.clear()
 
 
-def crt_material(name, color, strength, glass=False):
-    """Build stable scanlines and fine phosphor variation in face UV space."""
-    material = bpy.data.materials.get(name) or bpy.data.materials.new(name)
-    material.use_nodes = True
-    material.diffuse_color = (*color,1)
-    nodes, links = material.node_tree.nodes, material.node_tree.links
-    nodes.clear()
-    output = nodes.new('ShaderNodeOutputMaterial')
-    shader = nodes.new('ShaderNodeBsdfPrincipled')
-    shader.inputs['Base Color'].default_value = (*color,1)
-    shader.inputs['Roughness'].default_value = .26 if glass else .55
-    shader.inputs['Coat Weight'].default_value = .3 if glass else .05
-    shader.inputs['Coat Roughness'].default_value = .22
-    shader.inputs['Emission Color'].default_value = (*color,1)
-    links.new(shader.outputs['BSDF'], output.inputs['Surface'])
-    uv = nodes.new('ShaderNodeUVMap')
-    uv.uv_map = 'CRT face'
-    separate = nodes.new('ShaderNodeSeparateXYZ')
-    links.new(uv.outputs['UV'], separate.inputs[0])
+def math(nodes, links, operation, first, second=0):
+    """Connect a scalar operation, allowing either socket or constant operands."""
+    node = nodes.new('ShaderNodeMath')
+    node.operation = operation
+    for value, socket in zip((first, second), node.inputs):
+        if isinstance(value, (float, int)):
+            socket.default_value = value
+        else:
+            links.new(value, socket)
+    return node.outputs[0]
 
-    def math(operation, first, second=0, label=''):
-        node = nodes.new('ShaderNodeMath')
-        node.operation = operation
-        node.label = label
-        links.new(first, node.inputs[0])
-        node.inputs[1].default_value = second
-        return node.outputs[0]
 
-    rows = math('SINE', math('MULTIPLY', separate.outputs['Y'], 128*tau), label='128 scanlines')
-    rows = math('ADD', math('MULTIPLY', rows, .22), .78)
-    columns = math('SINE', math('MULTIPLY', separate.outputs['X'], 384*tau), label='Phosphor columns')
-    columns = math('ADD', math('MULTIPLY', columns, .04), .96)
-    raster = nodes.new('ShaderNodeMath')
-    raster.operation = 'MULTIPLY'
-    links.new(rows, raster.inputs[0])
-    links.new(columns, raster.inputs[1])
-    gain = nodes.new('ShaderNodeValue')
-    gain.name = 'Screen brightness'
-    driver = gain.outputs[0].driver_add('default_value').driver
-    driver.expression = 'brightness'
+def control(name, expression, prop):
+    """Expose an existing rig control to the display material."""
+    node = nodes.new('ShaderNodeValue')
+    node.name = name
+    driver = node.outputs[0].driver_add('default_value').driver
+    driver.expression = expression
     variable = driver.variables.new()
-    variable.name = 'brightness'
+    variable.name = 'value'
     variable.targets[0].id = rig
-    variable.targets[0].data_path = '["screen_brightness"]'
-    intensity = nodes.new('ShaderNodeMath')
-    intensity.operation = 'MULTIPLY'
-    links.new(math('MULTIPLY', raster.outputs[0], strength), intensity.inputs[0])
-    links.new(gain.outputs[0], intensity.inputs[1])
-    links.new(intensity.outputs[0], shader.inputs['Emission Strength'])
-    # Minute roughness variation suggests coated glass without surface bumps.
-    if glass:
-        noise = nodes.new('ShaderNodeTexNoise')
-        noise.inputs['Scale'].default_value = 180
-        noise.inputs['Detail'].default_value = 1
-        links.new(uv.outputs[0], noise.inputs['Vector'])
-        links.new(math('ADD', math('MULTIPLY', noise.outputs['Fac'], .035), .24), shader.inputs['Roughness'])
-    return material
+    variable.targets[0].data_path = f'["{prop}"]'
+    return node.outputs[0]
 
 
-phosphor = crt_material('Face · pink CRT phosphor', (1,.018,.62), 2.0)
-glass = crt_material('Face · black CRT glass', (.003,.001,.006), .6, glass=True)
-cutout = crt_material('Face · dark pixel cutouts', (.001,.0004,.002), .05)
-parts = [obj for obj in bpy.data.objects if obj.name.startswith(('Face /','Screen /'))]
-for obj in parts:
-    material = glass if obj==screen else cutout if obj.name.startswith('Face / eye pixel') else phosphor
-    obj.data.materials.clear()
-    obj.data.materials.append(material)
-    uv = obj.data.uv_layers.get('CRT face') or obj.data.uv_layers.new(name='CRT face')
-    for loop in obj.data.loops:
-        point = obj.matrix_world @ obj.data.vertices[loop.vertex_index].co
-        uv.data[loop.index].uv = ((point.x+.902)/1.804, (point.z-5.7843)/1.1274)
-    obj.data.update()
-bpy.context.scene['face_style'] = 'Pink phosphor on black CRT glass'
+uv = nodes.new('ShaderNodeUVMap')
+uv.uv_map = 'CRT face'
+uv.location = (-1000, 100)
+separate = nodes.new('ShaderNodeSeparateXYZ')
+links.new(uv.outputs[0], separate.inputs[0])
+layers = []
+for index, name in enumerate(('static', 'eye-L', 'eye-R')):
+    texture = nodes.new('ShaderNodeTexImage')
+    texture.name = '2D artwork / '+name
+    texture.label = name+' · editable PNG layer'
+    texture.location = (-500, 300-index*260)
+    image = bpy.data.images.load(str(directory/'face'/f'{name}.png'), check_existing=True)
+    image.reload()
+    image.pack()
+    texture.image = image
+    texture.extension = 'CLIP'
+    vector = uv.outputs[0]
+    if name.startswith('eye-'):
+        side = name[-1]
+        opening = control('Blink '+side, 'max(0.035,1-value)', 'blink_'+side)
+        # Sampling inversely scales the raster around the original eye centre.
+        y = math(nodes, links, 'SUBTRACT', separate.outputs['Y'], .4734)
+        y = math(nodes, links, 'ADD', math(nodes, links, 'DIVIDE', y, opening), .4734)
+        combine = nodes.new('ShaderNodeCombineXYZ')
+        links.new(separate.outputs['X'], combine.inputs['X'])
+        links.new(y, combine.inputs['Y'])
+        vector = combine.outputs[0]
+    links.new(vector, texture.inputs['Vector'])
+    layers.append(texture.outputs['Color'])
+composite = layers[0]
+for layer in layers[1:]:
+    add = nodes.new('ShaderNodeMixRGB')
+    add.blend_type = 'ADD'
+    add.inputs[0].default_value = 1
+    links.new(composite, add.inputs[1])
+    links.new(layer, add.inputs[2])
+    composite = add.outputs[0]
+
+# CRT stays downstream of the artwork, so an animated image uses the same display.
+group = bpy.data.node_groups.get('LOGAN / CRT display')
+if group:
+    bpy.data.node_groups.remove(group, do_unlink=True)
+group = bpy.data.node_groups.new('LOGAN / CRT display', 'ShaderNodeTree')
+for name, kind, direction in [('Image','NodeSocketColor','INPUT'), ('UV','NodeSocketVector','INPUT'),
+                              ('Brightness','NodeSocketFloat','INPUT'), ('Shader','NodeSocketShader','OUTPUT')]:
+    group.interface.new_socket(name=name, in_out=direction, socket_type=kind)
+n, l = group.nodes, group.links
+inp, out = n.new('NodeGroupInput'), n.new('NodeGroupOutput')
+xy = n.new('ShaderNodeSeparateXYZ')
+l.new(inp.outputs['UV'], xy.inputs[0])
+# Dark intervals affect the emitted image, rather than a subtle brightness ripple.
+phase = math(n,l,'FRACT',math(n,l,'MULTIPLY',xy.outputs['Y'],72))
+line = math(n,l,'GREATER_THAN',phase,.28)
+line = math(n,l,'ADD',math(n,l,'MULTIPLY',line,.94),.06)
+columns = math(n,l,'SINE',math(n,l,'MULTIPLY',xy.outputs['X'],240*tau))
+columns = math(n,l,'ADD',math(n,l,'MULTIPLY',columns,.09),.91)
+pattern = math(n,l,'MULTIPLY',line,columns)
+pattern = math(n,l,'MULTIPLY',pattern,inp.outputs['Brightness'])
+emission = n.new('ShaderNodeEmission')
+l.new(inp.outputs['Image'], emission.inputs['Color'])
+l.new(pattern, emission.inputs['Strength'])
+glass = n.new('ShaderNodeBsdfPrincipled')
+glass.inputs['Base Color'].default_value = (.001,.0005,.002,1)
+glass.inputs['Roughness'].default_value = .38
+glass.inputs['Specular IOR Level'].default_value = .12
+mix = n.new('ShaderNodeAddShader')
+l.new(emission.outputs[0],mix.inputs[0])
+l.new(glass.outputs[0],mix.inputs[1])
+l.new(mix.outputs[0],out.inputs['Shader'])
+crt = nodes.new('ShaderNodeGroup')
+crt.node_tree = group
+crt.name = 'CRT display / plug image or movie into Image'
+crt.location = (300,100)
+links.new(composite,crt.inputs['Image'])
+links.new(uv.outputs[0],crt.inputs['UV'])
+links.new(control('Screen brightness','value','screen_brightness'),crt.inputs['Brightness'])
+output = nodes.new('ShaderNodeOutputMaterial')
+output.location = (600,100)
+links.new(crt.outputs[0],output.inputs[0])
+
+# Keep the editable artwork and CRT stages readable in the Shader Editor.
+for tree in (material.node_tree, group):
+    depths, rows = {}, {}
+    def depth(node):
+        if node.name not in depths:
+            parents = [link.from_node for socket in node.inputs for link in socket.links]
+            depths[node.name] = 1+max((depth(parent) for parent in parents), default=-1)
+        return depths[node.name]
+    for node in tree.nodes:
+        column = depth(node)
+        row = rows.get(column, 0)
+        node.location = (column*240, -row*300)
+        rows[column] = row+1
+screen.data.materials.clear()
+screen.data.materials.append(material)
+uv_layer = screen.data.uv_layers.get('CRT face') or screen.data.uv_layers.new(name='CRT face')
+for loop in screen.data.loops:
+    point = screen.matrix_world @ screen.data.vertices[loop.vertex_index].co
+    uv_layer.data[loop.index].uv = ((point.x+.902)/1.804,(point.z-5.784)/1.128)
+screen.data.update()
+# The screen now carries all graphics; no protruding eyes, eyebrows or mouth.
+for obj in list(bpy.data.objects):
+    if obj.name.startswith('Face /'):
+        bpy.data.objects.remove(obj,do_unlink=True)
+bpy.context.scene['face_style'] = '2D texture layers through CRT display'
 bpy.context.view_layer.update()
-print('Applied pink-on-black CRT face and asymmetric smirk; topology unchanged')
+print('2D textured face; CRT scanlines; existing blink and brightness controls')
