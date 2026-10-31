@@ -11,6 +11,9 @@ scene = bpy.data.scenes['LOGAN']
 rig = bpy.data.objects['LOGAN · Pose me']
 jacket = bpy.data.objects['Jacket / torso']
 scene.frame_set(1)
+for modifier in jacket.modifiers:
+    if modifier.type=='ARMATURE':
+        modifier.use_deform_preserve_volume = True
 
 
 def smoothstep(low, high, value):
@@ -154,10 +157,17 @@ try:
         mobility = []
         lower = rig.data.bones['forearm.'+side]
         lower_axis = (lower.tail_local-lower.head_local).normalized()
+        sleeve_weights = [a.value+b.value for a,b in zip(
+            jacket.data.attributes['Rest weights / upper_arm.'+side].data,
+            jacket.data.attributes['Rest weights / forearm.'+side].data)]
         for vertex in jacket.data.vertices:
             p = vertex.co
             move = smoothstep(.25,.80,sign*p.x)*(1-smoothstep(1.65,1.90,sign*p.x))
             move *= 1-smoothstep(4.75,5.12,p.z)*(1-smoothstep(.65,1.1,abs(p.x)))
+            # Preserve the slid sleeve's complete cross-section. A length-only
+            # cloth solve can otherwise satisfy tension by collapsing its width.
+            # Draw the required ease from the torso and soft armhole transition.
+            move *= 1-smoothstep(.20,.80,sleeve_weights[vertex.index])
             if weights[names.index(lower.name)][vertex.index]>.5:
                 move *= 1-smoothstep(.35,.80,(p-lower.head_local).dot(lower_axis)/lower.length)
             mobility.append(move)
