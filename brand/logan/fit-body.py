@@ -222,9 +222,9 @@ for side, sign in (('L', 1), ('R', -1)):
     samples.subdivision_type = 'SIMPLE'
     samples.levels = samples.render_levels = 2
     cuff.modifiers.move(list(cuff.modifiers).index(samples), next(i+1 for i,m in enumerate(cuff.modifiers) if m.type=='ARMATURE'))
-    clearance(cuff, hand, 'Clearance · hand', offset=.075)
+    clearance(cuff, hand, 'Clearance · hand', offset=.025)
     sleeve = [v.index for v in jacket.data.vertices if sign*v.co.x>1.45 and v.co.z<3.95]
-    clearance(jacket, hand, 'Clearance · hand.'+side, sleeve)
+    clearance(jacket, hand, 'Clearance · hand.'+side, sleeve, offset=.015)
     hem = [v.index for v in pants.data.vertices if sign*v.co.x>0 and v.co.z<1.55]
     clearance(pants, bpy.data.objects['Boot / continuous.'+side], 'Clearance · boot.'+side, hem)
 collar = bpy.data.objects['Collar / raised band']

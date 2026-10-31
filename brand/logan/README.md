@@ -140,6 +140,12 @@ units, including its .018 lining. The contact proxy is the convex envelope of
 the head assembly. Deeply concave gaps still need visual inspection.
 These are live, editable corrections with no subdivision or simulation bake.
 
+Hand contact uses .025 scene units at the cuffs and .015 at the coat and collar.
+Close cloth contact takes priority over perfect separation: slight hand/sleeve
+intersections are acceptable in the static avatar. To update an existing master,
+run `fit-contact-margins.py`, then `fit-crossed-cloth.py` and `pose-presets.py`,
+inspect frame 80 and save. These scripts do not save automatically.
+
 `verify-fit.py` checks that the body supports its extremities without clothing
 and that the cuffs/hands, sleeves/hands, hems/boots and collar/head do not intersect
 across 45 sampled poses, including wrist flexion ±40°, sideways wrist
@@ -150,6 +156,9 @@ The arm checks also cover 90°/120° elbow bends and IK reaches in two planes on
 both sides. `render-arms.py` shows those elbows with the sleeves on and off.
 The checks also enforce a clothing face budget and zero head-contact displacement
 in the clear half-wave pose.
+Its zero-intersection checks, also used by `verify-crossed.py`, remain strict
+diagnostics; small hand/sleeve overlaps need visual assessment under the close-fit
+policy above.
 
 ```sh
 blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/verify-fit.py
@@ -235,8 +244,7 @@ start/duration. The screen UV canvas is 1804 × 1128.
    forearms across the chest, wrists under 35°, palms facing the arm they rest on
    within .08 of its sleeve and at least .1 from the body beneath, hand/sleeve/cuff
    clearance, upper sleeves that keep their pink inlay without wringing it, and at
-   most 20 self-crossing face pairs around each shoulder (13 and 15 now, hidden at
-   the underarms; the earlier tucked-hand fit had 112). It also checks that frame
+   most 20 self-crossing face pairs around each shoulder. It also checks that frame
    66 still shows the wave exactly.
 2. Select **LOGAN · Pose me** in the Pose rig collection. Enable viewport Overlays
    and enter **Pose Mode**. Rotate the named body, arm, leg, hand, and finger bones.
