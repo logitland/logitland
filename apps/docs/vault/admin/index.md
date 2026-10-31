@@ -37,8 +37,8 @@ Logan has four tools, not one per Discord operation. Find an operation, read wha
 4. [`request_status`](request_status.md): check a destructive operation you are confirming.
 
 Reads and ordinary writes run at once. Destructive ones, such as deletes, kicks, bans, timeouts, and bulk changes, answer
-`pending`: confirm them on Logan's message in the staff alerts channel within ten minutes. Every write that runs goes in
-the audit log, and the staff alerts channel announces it under your name.
+`pending`: confirm them on Logan's message in the staff log channel within ten minutes. Every write that runs goes in
+the audit log, and the staff log channel announces it under your name.
 
 The protocol is the [agent server's](../mcp/index.md#protocol), and its server name is `logan`. Tool pages show each
 call's `params` and the `structuredContent` it returns; each result also carries that JSON as text in `content[0].text`.

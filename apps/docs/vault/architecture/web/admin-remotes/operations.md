@@ -6,7 +6,7 @@ description: The setup page's checks, channels, and roles.
 No input. Reads setup checks, settings, admin channels, and server roles.
 Returns `{ commands, channelIds, channels, roleIds, roles }`.
 `commands` is the check whose ID is `consent-command`, or null.
-`channelIds` maps `alerts_channel_id` and `talk_channel_id` to their configured ID or null.
+`channelIds` maps each [`setChannel`](setchannel-key-channelid.md) key to its configured ID or null.
 `channels` contains nonhidden `{ id, name }` options.
 `roleIds` maps `agents_role_id`, `parents_role_id`, and `consent_role_id` to ID or null.
 `roles` contains `{ id, name }` options for server roles.

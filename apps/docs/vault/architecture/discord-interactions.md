@@ -95,17 +95,21 @@ source:
   - label: HTTP handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/discord-interactions.ts#L18
   - label: signature verification
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L80
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L85
   - label: payload schema
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L47
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L52
   - label: command definition
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L34
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L39
   - label: action selection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L136
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L149
   - label: consent handling
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L152
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L165
   - label: Logan button handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/calls.ts#L200
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/calls.ts#L196
+  - label: staff card buttons
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L177
+  - label: staff cards
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/staff-cards.ts
 ---
 
 The signature covers the timestamp text immediately followed by the exact raw request body.
@@ -175,15 +179,21 @@ Example button data within the signed interaction payload:
 { "custom_id": "logan_cancel:lgr_01J00000000000000000000000" }
 ```
 
-Example successful cancellation response, with illustrative user and operation IDs:
+The prompt is a Components V2 card in the staff log channel, so every answer that changes it lays it out afresh, without its
+buttons. Example successful cancellation response, with illustrative user and operation IDs:
 
 ```json
 {
   "type": 7,
   "data": {
-    "content": "<@123456789012345672> cancelled running \u0060delete_channel\u0060 through Logan.",
-    "allowed_mentions": { "parse": [] },
-    "components": []
+    "flags": 32768,
+    "components": [
+      {
+        "type": 17,
+        "components": [{ "type": 10, "content": "<@123456789012345672> cancelled running \u0060delete_channel\u0060 through Logan." }]
+      }
+    ],
+    "allowed_mentions": { "parse": [] }
   }
 }
 ```
@@ -191,4 +201,41 @@ Example successful cancellation response, with illustrative user and operation I
 Another person's click receives an ephemeral refusal.
 Expired requests update the message to say they expired.
 Missing or already-handled requests receive an explanatory reply.
+A confirmed request's result replaces the card through `PATCH /webhooks/:application/:token/messages/@original`.
 [request_status](../admin/request_status.md) reports the eventual execution result.
+
+## Staff card buttons
+
+Bot strike cards in `#mod-queue` and add-bot request cards in `#bot-requests` carry **Dismiss**, with a custom ID naming
+the card's kind and the rows it is built from: `staff_dismiss:strike:<bot strike source key>` or
+`staff_dismiss:bot:<agent ID>`. Dismiss answers `type: 7` with the card collapsed to one line and **Reopen**
+(`staff_reopen:…`, same kind and reference). Reopen answers `type: 7` with the whole card, rebuilt as it reads now: a bot
+request that ended meanwhile shows how it ended, without Dismiss.
+
+The press must come from someone with the `moderate` admin power, in the configured guild; the member's roles in the
+signed payload are what the relay checks. Anyone else receives an ephemeral refusal and the card stays as it was. A card
+whose rows are gone (the bot was removed, retention deleted the strike) receives an explanatory ephemeral reply.
+
+Example Dismiss response, with illustrative IDs:
+
+```json
+{
+  "type": 7,
+  "data": {
+    "flags": 32768,
+    "components": [
+      {
+        "type": 17,
+        "components": [
+          {
+            "type": 9,
+            "components": [{ "type": 10, "content": "Wren’s bot posted outside the relay · Dismissed by <@123456789012345672>" }],
+            "accessory": { "type": 2, "style": 2, "label": "Reopen", "custom_id": "staff_reopen:strike:create:123456789012345673" }
+          }
+        ]
+      }
+    ],
+    "allowed_mentions": { "parse": [] }
+  }
+}
+```
