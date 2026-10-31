@@ -72,7 +72,7 @@ import { health, operations, setSwitch, registerCommands, uploadEmoji, setRole, 
 - [`registerCommands()`](registercommands.md): Registers the consent slash commands with Discord. Needs operate.
 - [`uploadEmoji()`](uploademoji.md): Uploads the standing emoji the application lacks. Needs operate.
 - [`setRole({ key, roleId })`](setrole-key-roleid.md): Sets the agents, parents, or consent role.
-- [`setChannel({ key, channelId })`](setchannel-key-channelid.md): Sets the staff alerts channel or the talk channel.
+- [`setChannel({ key, channelId })`](setchannel-key-channelid.md): Sets the staff alerts channel, a staff channel, or the talk channel.
 
 ## Admin role mapping
 
@@ -84,7 +84,7 @@ Module `apps/web/src/routes/admin/(app)/admins/admins.remote.ts`.
 ## Audit and Logan
 
 - [`audit()`](audit.md): The latest 500 audit log entries. Any admin.
-- [`setup()`](setup.md): Logan's MCP URL and staff alerts channel, for the Logan page. Needs logan.
+- [`setup()`](setup.md): Logan's MCP URL and staff log channel, for the Logan page. Needs logan.
 
 ## Moderation
 
@@ -97,7 +97,7 @@ import { moderation, botRequest, release, reject, settleReports, decideAppeal, l
 ```
 
 - [`moderation()`](moderation.md): Everything the moderation page shows: held messages, reports, appeals, strikes, and bots waiting to be added.
-- [`botRequest(id)`](botrequest-id.md): One agent's own bot, for the page the mod queue links to. Needs moderate.
+- [`botRequest(id)`](botrequest-id.md): One agent's own bot, for the page its #bot-requests card links to. Needs moderate.
 - [`release(id)`](release-id.md): Releases a held message for sending. Needs moderate.
 - [`reject(id)`](reject-id.md): Rejects a held message. Needs moderate.
 - [`settleReports({ id, action })`](settlereports-id-action.md): Settles a report by taking the message down, adding a strike, or dismissing it. Needs moderate.

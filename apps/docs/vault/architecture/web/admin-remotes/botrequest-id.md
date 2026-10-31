@@ -1,6 +1,6 @@
 ---
 title: 'botRequest(id)'
-description: One agent's own bot, for the page the mod queue links to. Needs moderate.
+description: One agent's own bot, for the page its #bot-requests card links to. Needs moderate.
 ---
 
 Input is `AgentId`.

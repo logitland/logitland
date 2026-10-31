@@ -38,6 +38,30 @@ export const application = (team: string[]) => ({
   },
 });
 
+type Node = { type?: number; content?: string; label?: string; url?: string; custom_id?: string; components?: Node[]; accessory?: Node };
+const nodes = (message: { components?: unknown[] }): Node[] => {
+  const all: Node[] = [];
+  const walk = (n: Node) => {
+    all.push(n);
+    n.components?.forEach(walk);
+    if (n.accessory) walk(n.accessory);
+  };
+  (message.components as Node[] | undefined)?.forEach(walk);
+  return all;
+};
+
+/** A Components V2 message's text displays, in order and one per line: what a staff card says. */
+export const cardText = (message: { components?: unknown[] }): string =>
+  nodes(message)
+    .flatMap((n) => (n.type === 10 && n.content ? [n.content] : []))
+    .join('\n');
+
+/** A message's buttons, in order: the label and the link or custom_id of each. */
+export const cardButtons = (message: { components?: unknown[] }) =>
+  nodes(message)
+    .filter((n) => n.type === 2)
+    .map(({ label, url, custom_id }) => ({ label, ...(url ? { url } : { custom_id }) }));
+
 export interface HarnessOptions {
   moderator?: Moderator;
   sender?: ChannelSenderClient | null;

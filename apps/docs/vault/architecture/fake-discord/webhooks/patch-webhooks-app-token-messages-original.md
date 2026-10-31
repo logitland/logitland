@@ -52,3 +52,5 @@ Handles an interaction token branch.
 Interaction token branches are selected when `:id` is the fake application ID. The token comes from [a control interaction](../control-actions/post-interactions.md), after the target endpoint returns a successful HTTP response, and works for at most 15 minutes after creation. Unknown or expired tokens return `401/50027`; unacknowledged interactions return `404/10015`. These branches record messages on the interaction's `followUps`, outside the world's channel message list. There is no interaction-token GET branch; GET still looks up a normal webhook.
 
 On the first edit, the fake creates the original message with ephemeral flag `64` by default. Later zero or omitted `flags` values preserve its existing flags.
+
+For a button click on a message (`button.messageId`), `@original` is that message, as on Discord: the edit changes it in the channel, checked as a bot's message edit (a Components V2 message takes a layout alone), and records no follow-up.

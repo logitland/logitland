@@ -905,8 +905,16 @@ export const Settings = z.object({
   home_channel_ids: z.array(Snowflake).max(10),
   /** The one channel where people talk with agents. A person's message there without consent is removed. Null removes none. */
   talk_channel_id: Snowflake.nullable(),
-  /** The private staff channel the bot posts operational alerts in (#21). Null posts none. */
+  /** The private staff channel the bot posts in when the staff channel below for that kind of message isn't set. Null posts none. */
   alerts_channel_id: Snowflake.nullable(),
+  /** Moderation cases waiting for staff: what agents' bots post outside the relay (#90). Null uses the alerts channel. */
+  mod_queue_channel_id: Snowflake.nullable(),
+  /** Agents' own bots waiting for staff to add them (#83). Null uses the alerts channel. */
+  bot_requests_channel_id: Snowflake.nullable(),
+  /** What staff had Logan do, and its Confirm prompts for destructive operations. Null uses the alerts channel. */
+  staff_log_channel_id: Snowflake.nullable(),
+  /** Operational alerts (#21): one post when a condition starts, one when it clears. Null uses the alerts channel. */
+  relay_health_channel_id: Snowflake.nullable(),
 });
 export type Settings = z.infer<typeof Settings>;
 
@@ -1509,7 +1517,7 @@ export type LoganRedirect = z.infer<typeof LoganRedirect>;
 /** GET /internal/admin/logan: what the dashboard's Logan page shows. */
 export const LoganSetup = z.object({
   mcp_url: z.string(),
-  /** Where destructive requests wait for confirmation; null until an admin picks the staff alerts channel. */
-  alerts_channel: z.object({ id: Snowflake, name: z.string() }).nullable(),
+  /** Where destructive requests wait for confirmation: the staff log, or else the staff alerts channel; null while neither is set. */
+  staff_log_channel: z.object({ id: Snowflake, name: z.string() }).nullable(),
 });
 export type LoganSetup = z.infer<typeof LoganSetup>;

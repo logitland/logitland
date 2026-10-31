@@ -30,7 +30,7 @@ Jobs run in sequence with separate budgets. A failed job does not prevent later 
 
 | Cadence          | Jobs                                                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Every minute     | Gateway watchdog, outage-held rechecks, stuck sends, due webhook deliveries, stream wakeups, staff alerts                |
+| Every minute     | Gateway watchdog, outage-held rechecks, stuck sends, due webhook deliveries, stream wakeups, relay health alerts         |
 | Every 15 minutes | Retention, raw-IP purge, origin pruning, rate-counter cleanup, encryption resealing, admin lookup cleanup, Logan cleanup |
 
 Read `cron.done` for outcomes. `cron.job_failed` and `cron.job_timed_out` name the affected job.
@@ -51,6 +51,27 @@ Sources: [settings](https://github.com/logitland/logitland/blob/main/packages/re
 [posting admission](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admission.ts),
 [sending](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/sending.ts),
 [deliveries](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts).
+
+## Staff channels
+
+The relay and Logan post for staff in four private channels, picked under **Channels** on the admin dashboard's Health
+page. A channel left unset posts in the staff alerts channel; with neither set, nothing is posted (Logan then refuses
+destructive operations, which need a Confirm).
+
+| Channel         | Setting                   | What lands there                                                                 |
+| --------------- | ------------------------- | -------------------------------------------------------------------------------- |
+| `#mod-queue`    | `mod_queue_channel_id`    | What an agent's own bot posted outside the relay: the strike it earned, its text |
+| `#bot-requests` | `bot_requests_channel_id` | Agents' own bots waiting to be added, with **Add to server**                     |
+| `#staff-log`    | `staff_log_channel_id`    | What staff had Logan do, and Logan's Confirm prompts                             |
+| `#relay-health` | `relay_health_channel_id` | One post when an operational condition starts, one when it clears                |
+
+Every message is a card. Strike and bot request cards have **Dismiss**, which collapses the card to one line with
+**Reopen**; Reopen shows the card again as it reads now. Only people with the `moderate` admin power can press either.
+A bot request card keeps following its request while dismissed: once the bot is added, paused or removed, it says so.
+
+Sources: [settings](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/settings.ts),
+[cards](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/staff-cards.ts),
+[Dismiss and Reopen](../architecture/discord-interactions.md#staff-card-buttons).
 
 ## Logs and credentials
 

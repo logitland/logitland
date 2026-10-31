@@ -5,9 +5,10 @@ import { ANNOUNCE, down, mod, pass, post, say, world } from './posting-fixtures'
 import { alertsJob } from './services/alerts';
 import { reviewHeldJob } from './services/review';
 import { updateSettings } from './services/settings';
-import { GUILD, type Harness } from './testing';
+import { GUILD, cardButtons, cardText, type Harness } from './testing';
 
 const STAFF = '110000000000000099';
+const HEALTH = '110000000000000097';
 const SECRET = '110000000000000098';
 
 async function getHealth(h: Harness): Promise<AdminHealth> {
@@ -85,30 +86,36 @@ describe('GET /internal/admin/health', () => {
 });
 
 describe('alerts in the staff channel', () => {
-  it('posts each alert once when it starts and once when it clears, and nothing without an alerts channel', async () => {
+  it('posts each alert once when it starts and once when it clears, in #relay-health or else the alerts channel, and nothing without either', async () => {
     let answer = down;
     const { h, a } = await world({ moderator: mod(() => answer) });
     await connectGateway(h);
-    const posts = async () => {
+    /** The cards posted in a channel so far: their text, accent and buttons. */
+    const posts = async (channel = STAFF) => {
       await alertsJob(h.relay);
-      const sent = h.discordCalls.filter((r) => r.method === 'POST' && new URL(r.url).pathname.endsWith(`/channels/${STAFF}/messages`));
-      return Promise.all(sent.map(async (r) => ((await r.clone().json()) as { content: string }).content));
+      const sent = h.discordCalls.filter((r) => r.method === 'POST' && new URL(r.url).pathname.endsWith(`/channels/${channel}/messages`));
+      const bodies = await Promise.all(sent.map(async (r) => (await r.clone().json()) as { flags: number; components: { accent_color: number }[] }));
+      return bodies.map((b) => ({ flags: b.flags, text: cardText(b), accent: b.components[0]!.accent_color, buttons: cardButtons(b) }));
     };
+    const health = [{ label: 'Open Health', url: 'https://logitland.test/admin/health' }];
 
     expect((await post(h, a, say('hello there'))).status).toBe(202);
     expect(await posts()).toEqual([]);
 
     await updateSettings(h.relay, 'adm_test', { alerts_channel_id: STAFF });
-    expect(await posts()).toEqual([expect.stringMatching(/^Jev on TypeSafe is failing\. 1 message is held/)]);
+    expect(await posts()).toEqual([
+      { flags: 1 << 15, text: expect.stringMatching(/^Jev on TypeSafe is failing\. 1 message is held/), accent: 0xf66d67, buttons: health },
+    ]);
     expect(await posts()).toHaveLength(1);
 
-    // The Gateway drops: only after 5 minutes is it alerted.
+    // The Gateway drops: only after 5 minutes is it alerted, now in #relay-health.
+    await updateSettings(h.relay, 'adm_test', { relay_health_channel_id: HEALTH });
     await connectGateway(h, 'reconnecting');
     h.advance(60_000);
-    expect(await posts()).toHaveLength(1);
+    expect(await posts(HEALTH)).toHaveLength(0);
     h.advance(5 * 60_000);
-    expect((await posts()).slice(1)).toEqual([expect.stringMatching(/^The Gateway has been disconnected for over 5 minutes \(reconnecting\)/)]);
-    expect(await posts()).toHaveLength(2);
+    expect((await posts(HEALTH)).map((p) => p.text)).toEqual([expect.stringMatching(/^The Gateway has been disconnected for over 5 minutes \(reconnecting\)/)]);
+    expect(await posts(HEALTH)).toHaveLength(1);
 
     // TypeSafe answers again, the held message goes out, and the Gateway reconnects.
     answer = pass;
@@ -117,7 +124,9 @@ describe('alerts in the staff channel', () => {
       .prepare("UPDATE intake_state SET status = 'connected', last_heartbeat_at = ?, updated_at = ? WHERE source = 'gateway'")
       .bind(h.now().toISOString(), h.now().toISOString())
       .run();
-    expect((await posts()).slice(2).sort()).toEqual(['Jev on TypeSafe is answering again.', 'The Gateway is connected again.']);
-    expect(await posts()).toHaveLength(4);
+    const cleared = (await posts(HEALTH)).slice(1);
+    expect(cleared.map((p) => p.text).sort()).toEqual(['Jev on TypeSafe is answering again.', 'The Gateway is connected again.']);
+    expect(cleared.map((p) => p.accent)).toEqual([0x6fd087, 0x6fd087]);
+    expect(await posts()).toHaveLength(1);
   });
 });

@@ -512,6 +512,14 @@ describe('bot messages and threads', () => {
     expect(await refusal(bot.createMessage(f.text.id, { content: '' }))).toMatchObject({ code: 50006 });
   });
 
+  it('lays out a Components V2 message afresh on edit, which keeps the flag and refuses text beside it', async () => {
+    const card = (content: string) => [{ type: 17, components: [{ type: 10, content }] }];
+    const message = await bot.createMessage(f.text.id, { flags: IS_COMPONENTS_V2, components: card('Waiting') });
+    await bot.editMessage(f.text.id, message.id, { components: card('Added') });
+    expect(fake.messages(f.text.id).find((m) => m.id === message.id)).toMatchObject({ flags: IS_COMPONENTS_V2, components: card('Added') });
+    expect(await refusal(bot.editMessage(f.text.id, message.id, { content: 'plain' }))).toMatchObject({ code: 50035 });
+  });
+
   it('cannot post straight into a forum (40058)', async () => {
     expect(await refusal(bot.createMessage(f.forum.id, { content: 'x' }))).toMatchObject({ status: 400, code: 40058 });
   });
@@ -643,9 +651,9 @@ describe('another bot', () => {
     expect((await as.getCurrentUserGuilds()).map((g) => g.id)).toEqual([f.guild.id]);
     const { message } = await as.sendMessage(f.text.id, { content: 'from the bot' });
     expect(message).toMatchObject({ author: { id: other.user.id }, application_id: other.application.id });
-    expect((await as.editMessage(f.text.id, message.id, 'edited')).content).toBe('edited');
+    expect((await as.editMessage(f.text.id, message.id, { content: 'edited' })).content).toBe('edited');
     // Only the bot that posted it may edit it; the relay's bot deletes it with Manage Messages.
-    expect((await refusal(bot.editMessage(f.text.id, message.id, 'not mine'))).code).toBe(50005);
+    expect((await refusal(bot.editMessage(f.text.id, message.id, { content: 'not mine' }))).code).toBe(50005);
     await bot.deleteMessage(f.text.id, message.id);
     expect(fake.messages(f.text.id)).toEqual([]);
 

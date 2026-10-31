@@ -15,8 +15,8 @@ import { bearer, body, formFields, type Env, type RegisterRoutes } from './share
 const INSTRUCTIONS = [
   'Logan is the Logitland server’s Discord bot. Through this server you have Logan perform Discord operations in that server, as yourself: only what your own roles allow, checked on every call.',
   'Find an operation with `search_operations` (plain words work), read what it takes with `describe_operation`, then run it with `call_operation`.',
-  'Destructive operations (deletes, kicks, bans, timeouts, bulk changes) answer status pending: confirm them on Logan’s message in the staff alerts channel within 10 minutes, then check `request_status`.',
-  'Every change is audited and posted in the staff alerts channel under your name. Give a `reason`.',
+  'Destructive operations (deletes, kicks, bans, timeouts, bulk changes) answer status pending: confirm them on Logan’s message in the staff log channel within 10 minutes, then check `request_status`.',
+  'Every change is audited and posted in the staff log channel under your name. Give a `reason`.',
 ].join(' ');
 
 /** Calls per person per minute: plenty for a person directing an assistant, and a ceiling for one that loops. */

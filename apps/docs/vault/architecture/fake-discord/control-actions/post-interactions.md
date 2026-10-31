@@ -71,7 +71,7 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/interactions.ts#L39
 ---
 
-POST requires a string `user`, even for a ping. Supply one of `command`, `button`, or `ping: true`. `command` contains `name` and optional `subcommand`. `button` contains `customId` and optional `messageId`; for example, the button click uses `customId` `agree` and message ID `100000000000000060`.
+POST requires a string `user`, even for a ping. Supply one of `command`, `button`, or `ping: true`. `command` contains `name` and optional `subcommand`. `button` contains `customId` and optional `messageId`; for example, the button click uses `customId` `agree` and message ID `100000000000000060`. `messageId` names a message in `channel` (`400` Unknown Message otherwise), and the payload carries it as `message`. When the target answers the click with `type: 7` (UPDATE_MESSAGE), the fake applies its `data` to that message, checked as a bot's message edit; an update Discord would refuse returns `400` with the reason, and the message stays as it was.
 
 Optional `guild` defaults to the first guild. Optional `channel` defaults to the guild's first text channel, or `null` if none exists. Optional `endpoint` defaults to `application.interactions_endpoint_url`. `signature` accepts `valid` (default), `invalid`, or `missing`. `timestamp` defaults to the current epoch time in seconds.
 

@@ -7,7 +7,20 @@ import { processSend } from './services/sending';
 import { updateSettings } from './services/settings';
 import { STANDING_EMOJI } from './services/standing-emoji';
 import { asOwner } from './signup.helpers';
-import { ADMIN_DISCORD, GUILD, LOUNGE, application, harness, seedAgent, seedChannel, seedOwner, type Harness, type HarnessOptions } from './testing';
+import {
+  ADMIN_DISCORD,
+  GUILD,
+  LOUNGE,
+  application,
+  cardButtons,
+  cardText,
+  harness,
+  seedAgent,
+  seedChannel,
+  seedOwner,
+  type Harness,
+  type HarnessOptions,
+} from './testing';
 
 // An adopted agent's own Discord bot (#84): the relay checks the token, posts as the bot once staff add it, and goes back to
 // the channel's webhook when the bot can't be used.
@@ -115,7 +128,7 @@ function discordWithBot(h: Harness) {
   return bot;
 }
 
-async function adopted(opts: Pick<HarnessOptions, 'sender'> = {}) {
+async function adopted(opts: Pick<HarnessOptions, 'sender' | 'env'> = {}) {
   const h = harness({ moderator: mod(), ...opts });
   await seedChannel(h.relay);
   await updateSettings(h.relay, 'own_admin', { agents_role_id: AGENTS_ROLE });
@@ -409,7 +422,8 @@ const botPost = (h: Harness, id: string, content: string) => ({
 const byItself = (h: Harness, id: string, content: string) => ingest(h.relay, { source: 'test', events: [botPost(h, id, content)] });
 const botSetting = async (h: Harness, a: { token: string }) => json(await h.call('GET', '/v1/me/bot', undefined, h.as(a.token)));
 const deletedMessages = async (h: Harness) => (await calls(h, 'DELETE', /\/channels\/\d+\/messages\/\d+$/)).map((c) => c.url.pathname);
-const staffAlerts = async (h: Harness) => (await calls(h, 'POST', new RegExp(`/channels/${STAFF}/messages$`))).map((c) => c.body.content as string);
+/** What the cards posted in a staff channel say. */
+const staffAlerts = async (h: Harness, channel = STAFF) => (await calls(h, 'POST', new RegExp(`/channels/${channel}/messages$`))).map((c) => cardText(c.body));
 const DAY = 86_400_000;
 const STAFF = '110000000000000009';
 
@@ -453,8 +467,8 @@ describe('posting outside the relay', () => {
       `/api/v10/channels/${LOUNGE}/messages/320000000000000003`,
     ]);
     expect(await staffAlerts(h)).toEqual([
-      `Wren’s bot <@${BOT_ID}> posted in <#${LOUNGE}> outside the relay, and the relay deleted it. Strike 1: the agent was told to post through the relay.\n> Not through the relay`,
-      `Wren’s bot <@${BOT_ID}> posted in <#${LOUNGE}> outside the relay, and the relay deleted it. No new strike: it did this before its last strike was given.\n> Nor this`,
+      `### Wren’s bot posted outside the relay\n<@${BOT_ID}> posted in <#${LOUNGE}>, and the relay deleted it. Strike 1: the agent was told to post through the relay.\n> Not through the relay`,
+      `### Wren’s bot posted outside the relay\n<@${BOT_ID}> posted in <#${LOUNGE}>, and the relay deleted it. No new strike: it did this before its last strike was given.\n> Nor this`,
     ]);
 
     expect((await botSetting(h, a)).strikes).toEqual({
@@ -503,7 +517,7 @@ describe('posting outside the relay', () => {
     expect(await row(h, msg.id)).toMatchObject({ status: 'removed', removed_by: 'moderator' });
     expect((await botSetting(h, a)).strikes.active).toBe(1);
     expect(await staffAlerts(h)).toEqual([
-      `Wren’s bot <@${BOT_ID}> edited a relayed message in <#${LOUNGE}> outside the relay, and the relay deleted it. Strike 1: the agent was told to post through the relay.\nBefore:\n> The second version of this\nAfter:\n> Changed behind the relay’s back`,
+      `### Wren’s bot edited a relayed message outside the relay\n<@${BOT_ID}> edited a relayed message in <#${LOUNGE}>, and the relay deleted it. Strike 1: the agent was told to post through the relay.\nBefore:\n> The second version of this\nAfter:\n> Changed behind the relay’s back`,
     ]);
   });
 
@@ -766,13 +780,12 @@ describe('the owner’s DM', () => {
 describe('staff adding the bot from the mod queue', () => {
   const OTHER_BOT = '500000000000000003';
   const queueEdits = async (h: Harness) =>
-    (await calls(h, 'PATCH', new RegExp(`/channels/${STAFF}/messages/\\d+$`))).map((c) => [c.url.pathname.split('/').pop(), c.body.content as string]);
+    (await calls(h, 'PATCH', new RegExp(`/channels/${STAFF}/messages/\\d+$`))).map((c) => [c.url.pathname.split('/').pop(), cardText(c.body)]);
   const asStaff = async (h: Harness) => {
     const staff = await seedOwner(h.relay, ADMIN_DISCORD, 'admin');
     return (path: string) => h.internal('GET', path, undefined, { 'x-logitland-owner': staff.id });
   };
-  const waiting = (a: { id: string }, bot = 'Wren') =>
-    `Wren’s own bot \`${bot}\` is waiting to be added to the server. Owner: <@200000000000000001>.\n[Add it from the dashboard](https://logitland.test/admin/moderation/bots/${a.id})`;
+  const WAITING = '### Wren’s own bot is waiting to be added\nBot `Wren` · Owner <@200000000000000001>';
 
   async function queued() {
     const setup = await adopted();
@@ -780,12 +793,21 @@ describe('staff adding the bot from the mod queue', () => {
     return setup;
   }
 
-  it('posts one message for a waiting bot, linking to its page, whose Add to server link is Discord’s for this bot and server', async () => {
+  it('posts one card for a waiting bot, whose Add to server link is Discord’s for this bot and server, linking to its page', async () => {
     const { h, a, owner } = await queued();
     await give(h, a);
     h.advance(60_000);
     await botsJob(h.relay, { deadline: Date.now() + 10_000 });
-    expect(await staffAlerts(h)).toEqual([waiting(a)]);
+    expect(await staffAlerts(h)).toEqual([WAITING]);
+    const [card] = await calls(h, 'POST', new RegExp(`/channels/${STAFF}/messages$`));
+    expect(cardButtons(card!.body)).toEqual([
+      {
+        label: 'Add to server',
+        url: `https://discord.com/oauth2/authorize?client_id=${APP_ID}&scope=bot&permissions=0&guild_id=${GUILD}&disable_guild_select=true`,
+      },
+      { label: 'Open in dashboard', url: `https://logitland.test/admin/moderation/bots/${a.id}` },
+      { label: 'Dismiss', custom_id: `staff_dismiss:bot:${a.id}` },
+    ]);
 
     const staff = await asStaff(h);
     const { bots } = await json(await staff('/internal/admin/bots'));
@@ -816,7 +838,7 @@ describe('staff adding the bot from the mod queue', () => {
     expect((await give(h, a)).status).toBe(200);
 
     expect(await staffAlerts(h)).toHaveLength(1);
-    expect((await queueEdits(h)).map(([, c]) => c)).toEqual([waiting(a)]);
+    expect((await queueEdits(h)).map(([, c]) => c)).toEqual([WAITING]);
     expect(await h.db.prepare('SELECT queue_shows FROM agent_bots WHERE agent_id = ?').bind(a.id).first()).toEqual({ queue_shows: `waiting:${OTHER_BOT}` });
   });
 
@@ -845,7 +867,7 @@ describe('staff adding the bot from the mod queue', () => {
     bot.guilds = [];
     await give(h, a);
     await h.call('DELETE', '/v1/me/bot', undefined, h.as(a.token));
-    expect(await staffAlerts(h)).toEqual([waiting(a), waiting(a)]);
+    expect(await staffAlerts(h)).toEqual([WAITING, WAITING]);
     expect((await queueEdits(h)).map(([, c]) => c).at(-1)).toBe('Wren’s own bot `Wren` was removed before it was added, so there’s nothing to add.');
   });
 
@@ -856,7 +878,7 @@ describe('staff adding the bot from the mod queue', () => {
     h.advance(60_000);
     await botsJob(h.relay, { deadline: Date.now() + 10_000 });
     await botsJob(h.relay, { deadline: Date.now() + 10_000 });
-    expect(await staffAlerts(h)).toEqual([waiting(a)]);
+    expect(await staffAlerts(h)).toEqual([WAITING]);
   });
 
   it('posts once more when staff delete the message while the bot still waits', async () => {
@@ -869,7 +891,7 @@ describe('staff adding the bot from the mod queue', () => {
     await botsJob(h.relay, { deadline: Date.now() + 10_000 });
     h.advance(60_000);
     await botsJob(h.relay, { deadline: Date.now() + 10_000 });
-    expect(await staffAlerts(h)).toEqual([waiting(a), waiting(a)]);
+    expect(await staffAlerts(h)).toEqual([WAITING, WAITING]);
   });
 
   it('removes the bot at once when Discord refuses to say so, and says so at a later run', async () => {
@@ -915,5 +937,85 @@ describe('staff adding the bot from the mod queue', () => {
       await botsJob(h.relay, { deadline: Date.now() + 10_000 });
     }
     expect((await queueEdits(h)).filter(([id]) => id === ids[10])).toHaveLength(1);
+  });
+});
+
+describe('staff cards in their own channels', () => {
+  const BOT_REQUESTS = '110000000000000010';
+  const MOD_QUEUE = '110000000000000011';
+  const OWNER_DISCORD = '200000000000000001';
+
+  /** An adopted agent with its bot, #bot-requests and #mod-queue set, and Discord's key to sign button presses with. */
+  async function staffed() {
+    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as CryptoKeyPair;
+    const publicKey = Buffer.from(await crypto.subtle.exportKey('raw', pair.publicKey)).toString('hex');
+    const setup = await adopted({ env: { DISCORD_PUBLIC_KEY: publicKey } });
+    await updateSettings(setup.h.relay, 'own_admin', { alerts_channel_id: STAFF, bot_requests_channel_id: BOT_REQUESTS, mod_queue_channel_id: MOD_QUEUE });
+    /** Presses a button on a card as `who`, signed as Discord signs it. */
+    const press = async (customId: string, who: string) => {
+      const payload = {
+        id: '800000000000000001',
+        application_id: '400000000000000001',
+        token: 'tok',
+        type: 3,
+        guild_id: GUILD,
+        member: { user: { id: who }, roles: [] },
+        data: { custom_id: customId },
+      };
+      const timestamp = String(Math.floor(setup.h.now().getTime() / 1000));
+      const signed = await crypto.subtle.sign({ name: 'Ed25519' }, pair.privateKey, new TextEncoder().encode(timestamp + JSON.stringify(payload)));
+      const headers = { 'x-signature-ed25519': Buffer.from(signed).toString('hex'), 'x-signature-timestamp': timestamp };
+      return json(await setup.h.call('POST', '/v1/discord/interactions', payload, headers));
+    };
+    return { ...setup, press };
+  }
+  const posted = async (h: Harness, channel: string) => (await calls(h, 'POST', new RegExp(`/channels/${channel}/messages$`))).map((c) => c.body);
+
+  it('collapses a bot request for staff and reopens it as it reads now, while its edits still land on its message', async () => {
+    const { h, a, bot, press } = await staffed();
+    await give(h, a);
+    const [card] = await posted(h, BOT_REQUESTS);
+    expect(cardText(card!)).toBe('### Wren’s own bot is waiting to be added\nBot `Wren` · Owner <@200000000000000001>');
+    expect(await staffAlerts(h)).toEqual([]);
+    const dismiss = `staff_dismiss:bot:${a.id}`;
+    const reopen = `staff_reopen:bot:${a.id}`;
+
+    expect(await press(dismiss, OWNER_DISCORD)).toEqual({
+      type: 4,
+      data: { content: 'Only staff with the moderate power can dismiss or reopen this.', flags: 64, allowed_mentions: { parse: [] } },
+    });
+    const dismissed = await press(dismiss, ADMIN_DISCORD);
+    expect(dismissed.type).toBe(7);
+    expect(cardText(dismissed.data)).toBe(`Wren’s own bot is waiting to be added · Dismissed by <@${ADMIN_DISCORD}>`);
+    expect(cardButtons(dismissed.data)).toEqual([{ label: 'Reopen', custom_id: reopen }]);
+    expect((await press(reopen, ADMIN_DISCORD)).data.components).toEqual(card!.components);
+
+    // Dismissed again, the card still follows the request: the bot joins, and its message says so in one line.
+    await press(dismiss, ADMIN_DISCORD);
+    const queued = await h.db.prepare('SELECT queue_message_id AS id FROM agent_bots WHERE agent_id = ?').bind(a.id).first<{ id: string }>();
+    await staffAdd(h, bot);
+    const edits = await calls(h, 'PATCH', /\/channels\/\d+\/messages\/\d+$/);
+    const added = 'Wren’s own bot `Wren` was added to the server.';
+    expect(edits.map((c) => [c.url.pathname, cardText(c.body)])).toEqual([[`/api/v10/channels/${BOT_REQUESTS}/messages/${queued!.id}`, added]]);
+    expect(cardText((await press(reopen, ADMIN_DISCORD)).data)).toBe(added);
+  });
+
+  it('posts a strike in #mod-queue, collapses it for staff and reopens it whole', async () => {
+    const { h, a, bot, press } = await staffed();
+    await give(h, a);
+    await staffAdd(h, bot);
+    await byItself(h, '320000000000000001', 'Not through the relay');
+    const [card] = await posted(h, MOD_QUEUE);
+    const key = 'create:320000000000000001';
+    expect(card!.components[0].accent_color).toBe(0xeeb154);
+    expect(cardButtons(card!)).toEqual([
+      { label: 'Open agent', url: `https://logitland.test/admin/agents/${a.id}` },
+      { label: 'Dismiss', custom_id: `staff_dismiss:strike:${key}` },
+    ]);
+    expect(await staffAlerts(h)).toEqual([]);
+
+    const dismissed = await press(`staff_dismiss:strike:${key}`, ADMIN_DISCORD);
+    expect(cardText(dismissed.data)).toBe(`Wren’s bot posted outside the relay · Dismissed by <@${ADMIN_DISCORD}>`);
+    expect((await press(`staff_reopen:strike:${key}`, ADMIN_DISCORD)).data.components).toEqual(card!.components);
   });
 });

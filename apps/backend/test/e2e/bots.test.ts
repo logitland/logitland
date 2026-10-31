@@ -8,6 +8,9 @@ describe.skipIf(!E2E)('an agent’s own bot, against a fake Discord', () => {
   let agent: Agent;
   let friend: Agent;
   let bot: ReturnType<Stack['fake']['addBot']>;
+  /** The staff channels add-bot requests and strikes go to. */
+  let botRequests: string;
+  let modQueue: string;
 
   beforeAll(async () => {
     s = await startStack();
@@ -15,6 +18,13 @@ describe.skipIf(!E2E)('an agent’s own bot, against a fake Discord', () => {
       .prepare("INSERT INTO settings (key, value, updated_by, updated_at) VALUES ('pow_difficulty', '8', 'e2e', ?)")
       .bind(new Date().toISOString())
       .run();
+    botRequests = s.fake.addChannel(s.community.guildId, { name: 'bot-requests' }).id;
+    modQueue = s.fake.addChannel(s.community.guildId, { name: 'mod-queue' }).id;
+    const staffed = await s.dashboard('PATCH', '/internal/admin/settings', {
+      owner: await s.adminOwner(),
+      body: { bot_requests_channel_id: botRequests, mod_queue_channel_id: modQueue },
+    });
+    expect(staffed.status).toBe(200);
     agent = await s.register('Wren', '198.51.100.20');
     friend = await s.register('Orrery', '198.51.100.24');
     await s.connect();
@@ -38,12 +48,18 @@ describe.skipIf(!E2E)('an agent’s own bot, against a fake Discord', () => {
     expect(given.body.bot).toMatchObject({ bot_user_id: bot.user.id, status: 'waiting', username: 'Wren' });
     expect(s.fake.gateway.received('IDENTIFY').filter((f) => (f.d as { token: string }).token === bot.token)).toHaveLength(1);
     expect(bot.user.username).toBe('Wren');
+    const [request] = s.fake.messages(botRequests);
+    expect(request?.flags).toBe(1 << 15);
+    expect(JSON.stringify(request?.components)).toContain('Add to server');
 
-    // Staff add it from the mod queue (#83); the next check sees it.
+    // Staff add it from #bot-requests (#83); the next check sees it, and the card says so.
     s.fake.addMember(s.community.guildId, { id: bot.user.id });
     await s.db.prepare("UPDATE agent_bots SET checked_at = '2000-01-01T00:00:00.000Z'").run();
     await s.cron();
     expect((await s.call('GET', '/v1/me/bot', { token: agent.token })).body.bot.status).toBe('active');
+    expect(s.fake.messages(botRequests).map((m) => [m.id, JSON.stringify(m.components)])).toEqual([
+      [request!.id, expect.stringContaining('Wren’s own bot `Wren` was added to the server.')],
+    ]);
 
     const content = 'Posted as my own bot';
     const sent = await s.call('POST', '/v1/messages', {
@@ -105,5 +121,20 @@ describe.skipIf(!E2E)('an agent’s own bot, against a fake Discord', () => {
     const layout = JSON.stringify(message!.components);
     expect(layout).toContain('Wren’s bot is **warned**');
     expect(layout).toMatch(/<:standing_past:\d+><:standing_line_on:\d+><:standing_now:\d+>/);
+  });
+
+  it('lets staff dismiss the strike’s card in #mod-queue to one line, and reopen it whole', async () => {
+    const card = await eventually(() => s.fake.messages(modQueue)[0], { what: 'the strike’s card' });
+    const whole = JSON.stringify(card.components);
+    const dismiss = /"custom_id":"(staff_dismiss:strike:[^"]+)"/.exec(whole)![1]!;
+    const press = (customId: string) => s.fake.interact({ user: s.community.adminId, button: { customId, messageId: card.id }, channelId: modQueue });
+
+    expect((await press(dismiss)).status).toBe(200);
+    const line = s.fake.messages(modQueue)[0]!;
+    expect(JSON.stringify(line.components)).toContain('Wren’s bot posted outside the relay · Dismissed by');
+    expect(JSON.stringify(line.components)).not.toContain('Posted behind the relay’s back');
+
+    expect((await press(dismiss.replace('staff_dismiss:', 'staff_reopen:'))).status).toBe(200);
+    expect(JSON.stringify(s.fake.messages(modQueue)[0]!.components)).toBe(whole);
   });
 });

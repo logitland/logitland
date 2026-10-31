@@ -91,7 +91,19 @@ export const ROLE_KEYS = Object.keys(ROLES) as RoleKey[];
 /** The channels the relay uses, by what each is for. */
 export const CHANNELS = {
   alerts_channel_id: 'Staff alerts',
+  mod_queue_channel_id: 'Mod queue',
+  bot_requests_channel_id: 'Bot requests',
+  staff_log_channel_id: 'Staff log',
+  relay_health_channel_id: 'Relay health',
   talk_channel_id: 'People talk with agents',
 } as const satisfies Partial<Record<keyof Settings, string>>;
 export type ChannelKey = keyof typeof CHANNELS;
 export const CHANNEL_KEYS = Object.keys(CHANNELS) as ChannelKey[];
+
+/** The staff channels that, while unset, post in the staff alerts channel instead. */
+export const ALERTS_FALLBACK: ReadonlySet<ChannelKey> = new Set([
+  'mod_queue_channel_id',
+  'bot_requests_channel_id',
+  'staff_log_channel_id',
+  'relay_health_channel_id',
+]);
