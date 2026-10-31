@@ -67,6 +67,23 @@ try:
         scene.frame_set(frame)
         check_pose(f'frame {frame}')
     if scene.get('garment_contact'):
+        # A clear sleeve must not anticipate contact by bulging away from the head.
+        scene.frame_set(20)
+        jacket = bpy.data.objects['Jacket / torso']
+        modifier = jacket.modifiers['Local head contact']
+        graph = bpy.context.evaluated_depsgraph_get()
+        active = [v.co.copy() for v in jacket.evaluated_get(graph).data.vertices]
+        try:
+            modifier.show_viewport = False
+            bpy.context.view_layer.update()
+            graph = bpy.context.evaluated_depsgraph_get()
+            inactive = [v.co.copy() for v in jacket.evaluated_get(graph).data.vertices]
+            assert len(active)==len(inactive), 'Contact must preserve garment topology'
+            assert max((a-b).length for a,b in zip(active,inactive))<1e-6, 'Clear sleeve deforms before head contact'
+        finally:
+            modifier.show_viewport = True
+            bpy.context.view_layer.update()
+        print('PASS clear sleeve: zero head-contact displacement before contact')
         # Proves that a moving head pushes the raised sleeve clear, rather than
         # relying on a correction sculpted only for the saved waving pose.
         for axis in (0,1,2):

@@ -1,13 +1,10 @@
-"""Use a head-following lattice to spread contact across the low-poly garments.
+"""Resolve local head contact on the existing low-poly garment vertices.
 
-The 245-point cage provides broad clearance; outside-only shrinkwrap finishes
-local contact. Neither changes the garment topology or requires a simulation.
+Sample vertices, edge midpoints and face centres so broad cloth faces yield too.
+Only penetrating samples move: no permanent cage bulge, subdivision or simulation.
 """
-from math import exp
 import bmesh
 import bpy
-from mathutils import Matrix, Vector
-from mathutils.bvhtree import BVHTree
 
 objects = bpy.data.objects
 scene = bpy.context.scene
@@ -18,13 +15,12 @@ if collection is None:
     scene.collection.children.link(collection)
 
 proxy_name = 'Contact surface / head assembly'
-cage_name = 'Deform cage / head contact'
 garments = ['Jacket / torso', 'Cuff / band.L', 'Cuff / band.R', 'Collar / raised band',
             'Trouser / continuous pants']
 for name in garments:
     obj = objects[name]
     for modifier in list(obj.modifiers):
-        if modifier.type=='SUBSURF' or modifier.name.startswith(('Contact /', 'Lattice head contact')):
+        if modifier.type=='SUBSURF' or modifier.name.startswith(('Contact /', 'Lattice head contact', 'Local head contact')):
             obj.modifiers.remove(modifier)
     for modifier in obj.modifiers:
         if modifier.type=='SOLIDIFY':
@@ -34,11 +30,12 @@ for name in garments:
             modifier.use_quality_normals = True
         if name.startswith('Cuff /') and modifier.type=='SHRINKWRAP':
             modifier.offset = .15
-for name in (proxy_name, cage_name):
+for name in (proxy_name, 'Deform cage / head contact'):
     if objects.get(name):
         bpy.data.objects.remove(objects[name], do_unlink=True)
 
-# Construct in the true rest pose so binding never applies a pose twice.
+# A single convex contact surface avoids contradictory normals where the rigid
+# head parts overlap. Construct it in REST so the pose is applied exactly once.
 pose_position = rig.data.pose_position
 rig.data.pose_position = 'REST'
 bpy.context.view_layer.update()
@@ -64,45 +61,83 @@ try:
     proxy.modifiers.new('Follow head pose', 'ARMATURE').object = rig
     proxy.hide_render = True
     proxy.hide_set(True)
-
-    points = [v.co.copy() for v in mesh.vertices]
-    low = Vector(tuple(min(p[a] for p in points)-.6 for a in range(3)))
-    high = Vector(tuple(max(p[a] for p in points)+.6 for a in range(3)))
-    center = (low+high)*.5
-    data = bpy.data.lattices.new(cage_name)
-    data.points_u, data.points_v, data.points_w = 7, 5, 7
-    data.interpolation_type_u = data.interpolation_type_v = data.interpolation_type_w = 'KEY_BSPLINE'
-    cage = bpy.data.objects.new(cage_name, data)
-    collection.objects.link(cage)
-    cage.parent, cage.parent_type, cage.parent_bone = rig, 'BONE', 'head'
-    # New lattice coordinates have unit spacing, not a unit-sized bounding box.
-    spacing = Vector(((high.x-low.x)/6, (high.y-low.y)/4, (high.z-low.z)/6))
-    cage.matrix_world = Matrix.Translation(center) @ Matrix.Diagonal((*spacing,1))
-    inverse = cage.matrix_world.inverted()
-    surface = BVHTree.FromPolygons(points, [p.vertices[:] for p in mesh.polygons])
-    # A smooth outward field avoids sending adjacent control points to opposite
-    # sides of the head. Its falloff distributes contact over nearby cloth loops.
-    for point in data.points:
-        world = cage.matrix_world @ point.co
-        delta = world-center
-        radius = delta.length
-        if radius<1e-6:
-            continue
-        direction = delta.normalized()
-        hit, _, _, distance = surface.ray_cast(center, direction)
-        if hit is None:
-            continue
-        push = .22*exp(-((radius-distance)/.55)**2)*min(1,radius/.4)
-        point.co_deform = inverse @ (world+direction*push)
-    cage.hide_render = True
-    cage.hide_set(True)
 finally:
     rig.data.pose_position = pose_position
     bpy.context.view_layer.update()
 
+name = 'LOGAN / local surface contact'
+old = bpy.data.node_groups.get(name)
+if old:
+    bpy.data.node_groups.remove(old, do_unlink=True)
+group = bpy.data.node_groups.new(name, 'GeometryNodeTree')
+group.interface.new_socket(name='Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+group.interface.new_socket(name='Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+nodes, links = group.nodes, group.links
+inp, out = nodes.new('NodeGroupInput'), nodes.new('NodeGroupOutput')
+target = nodes.new('GeometryNodeObjectInfo')
+target.transform_space = 'RELATIVE'
+target.inputs['Object'].default_value = proxy
+position = nodes.new('GeometryNodeInputPosition')
+normal = nodes.new('GeometryNodeInputNormal')
+near = nodes.new('GeometryNodeProximity')
+near.target_element = 'FACES'
+links.new(target.outputs['Geometry'], near.inputs['Geometry'])
+links.new(position.outputs[0], near.inputs['Sample Position'])
+sample = nodes.new('GeometryNodeSampleNearestSurface')
+sample.data_type = 'FLOAT_VECTOR'
+links.new(target.outputs['Geometry'], sample.inputs['Mesh'])
+links.new(normal.outputs[0], sample.inputs['Value'])
+links.new(position.outputs[0], sample.inputs['Sample Position'])
+
+
+def vector(operation, a, b):
+    """Connect vector arithmetic in the local contact field."""
+    node = nodes.new('ShaderNodeVectorMath')
+    node.operation = operation
+    links.new(a, node.inputs[0])
+    links.new(b, node.inputs[1])
+    return node.outputs['Value' if operation=='DOT_PRODUCT' else 'Vector']
+
+
+delta = vector('SUBTRACT', position.outputs[0], near.outputs['Position'])
+signed_distance = vector('DOT_PRODUCT', delta, sample.outputs['Value'])
+penetration = nodes.new('ShaderNodeMath')
+penetration.operation = 'SUBTRACT'
+# Includes the .018-thick lining and a small allowance for faceted polygons.
+penetration.inputs[0].default_value = .045
+links.new(signed_distance, penetration.inputs[1])
+clamp = nodes.new('ShaderNodeMath')
+clamp.operation = 'MAXIMUM'
+links.new(penetration.outputs[0], clamp.inputs[0])
+clamp.inputs[1].default_value = 0
+scale = nodes.new('ShaderNodeVectorMath')
+scale.operation = 'SCALE'
+links.new(sample.outputs['Value'], scale.inputs[0])
+links.new(clamp.outputs[0], scale.inputs['Scale'])
+delta = scale.outputs['Vector']
+face, edge = [nodes.new('GeometryNodeFieldOnDomain') for _ in range(2)]
+for node, domain in ((face,'FACE'), (edge,'EDGE')):
+    node.data_type, node.domain = 'FLOAT_VECTOR', domain
+    links.new(delta, node.inputs['Value'])
+total = vector('ADD', vector('ADD', delta, face.outputs[0]), edge.outputs[0])
+damp = nodes.new('ShaderNodeVectorMath')
+damp.operation = 'SCALE'
+links.new(total, damp.inputs[0])
+damp.inputs['Scale'].default_value = .8
+geometry = inp.outputs['Geometry']
+# Re-evaluate contact as vertices move. This converges locally without creating
+# any new vertices or applying an offset to cloth that is already clear.
+for iteration in range(24):
+    move = nodes.new('GeometryNodeSetPosition')
+    move.label = f'Contact relaxation {iteration+1}'
+    links.new(geometry, move.inputs['Geometry'])
+    links.new(damp.outputs[0], move.inputs['Offset'])
+    geometry = move.outputs[0]
+links.new(geometry, out.inputs[0])
+
 
 def contact(obj, target, offset):
-    """Finish local clearance after broad lattice deformation."""
+    """Keep garment openings clear of hands and boots."""
     mod = obj.modifiers.new('Contact / '+target.name, 'SHRINKWRAP')
     mod.target = target
     mod.wrap_method, mod.wrap_mode, mod.offset = 'NEAREST_SURFACEPOINT', 'OUTSIDE', offset
@@ -111,14 +146,10 @@ def contact(obj, target, offset):
 for name in garments:
     obj = objects[name]
     if name!='Trouser / continuous pants':
-        mod = obj.modifiers.new('Lattice head contact', 'LATTICE')
-        mod.object = cage
-        mod.strength = 1 if name=='Jacket / torso' else .25
-        obj.modifiers.move(len(obj.modifiers)-1, next(i+1 for i,m in enumerate(obj.modifiers) if m.type=='ARMATURE'))
-        # The jacket's lining needs room below the ear cup during a head tilt.
-        contact(obj, proxy, .18 if name=='Jacket / torso' else .15)
         for side in ('R','L'):
             contact(obj, objects['Hand / continuous.'+side], .15 if name.startswith('Cuff /') else .075)
+        mod = obj.modifiers.new('Local head contact', 'NODES')
+        mod.node_group = group
     else:
         for side in ('L','R'):
             contact(obj, objects['Boot / continuous.'+side], .07)
@@ -128,4 +159,4 @@ for name in garments:
 
 scene['garment_contact'] = True
 bpy.context.view_layer.update()
-print('245 lattice control points; no garment subdivision; live head and extremity clearance')
+print('Local head contact; no static cage bulge or garment subdivision')
