@@ -10,4 +10,7 @@ magenta practical lights on the left and blue practical lights on the right.
 It is an ordinary image, not an HDR lighting map. The camera-only plane keeps
 its painted lights separate from the actual HDRI and portrait lights.
 
-Both images are packed into `avatar-studio.blend`.
+`command-room-blue.png` and `command-room-pink.png` retain the room's broad
+shapes with softened detail and a single color palette. Production uses blue
+behind pink Logan; staging uses pink behind blue Logan. Regenerate both with
+`python3 soften-background.py`. The plates and HDRI are packed into the studio.

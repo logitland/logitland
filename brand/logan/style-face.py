@@ -6,6 +6,7 @@ blink controls. The CRT group's Image input also accepts a movie or sequence.
 from math import tau
 from pathlib import Path
 import xml.etree.ElementTree as ET
+import runpy
 import bpy
 
 directory = Path(__file__).resolve().parent
@@ -111,8 +112,11 @@ l.new(inp.outputs['Image'], emission.inputs['Color'])
 l.new(pattern, emission.inputs['Strength'])
 glass = n.new('ShaderNodeBsdfPrincipled')
 glass.inputs['Base Color'].default_value = (.001,.0005,.002,1)
-glass.inputs['Roughness'].default_value = .38
-glass.inputs['Specular IOR Level'].default_value = .12
+glass.inputs['Roughness'].default_value = .035
+glass.inputs['Specular IOR Level'].default_value = .5
+glass.inputs['IOR'].default_value = 1.45
+glass.inputs['Coat Weight'].default_value = 1
+glass.inputs['Coat Roughness'].default_value = .025
 mix = n.new('ShaderNodeAddShader')
 l.new(emission.outputs[0],mix.inputs[0])
 l.new(glass.outputs[0],mix.inputs[1])
@@ -154,4 +158,5 @@ for obj in list(bpy.data.objects):
         bpy.data.objects.remove(obj,do_unlink=True)
 bpy.context.scene['face_style'] = '2D texture layers through CRT display'
 bpy.context.view_layer.update()
+runpy.run_path(str(directory/'screen-controls.py'))['setup_screen_controls']()
 print('2D textured face; CRT scanlines; existing blink and brightness controls')

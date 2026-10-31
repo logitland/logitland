@@ -8,12 +8,24 @@ GIF work is deferred until requested.
 
 **avatar-studio.blend** contains two editable scenes: **AVATAR · Production**
 (pink) and **AVATAR · Staging** (blue). Both preserve the manually posed crossed
-arms from the master. The studio uses an 85mm perspective camera at f/2.8,
-eye focus, a slight camera roll, five area lights, a real Poly Haven HDRI,
-and a generated server-room background plate. All colored accents emit light,
+arms from the master. Production uses Mia's close 14mm framing; staging keeps
+the 85mm portrait. Both use f/2.8, eye focus, a slight camera roll, five area
+lights, a real Poly Haven HDRI and a softened room backdrop in the opposite
+accent color: blue for production, pink for staging. All colored accents emit light,
 including the head gradients, SVG chest print, seams, pants, shoes and CRT face.
-Nylon sheen, ceramic clearcoat, optical glow and subtle lens distortion complete
-the portrait. Staging has independent materials and face controls.
+The head is matte metal, the CRT screen glossy glass with black features on
+pink phosphor (blue in staging), and the jacket a
+fine woven weatherproof shell with teddy fleece on its inner shell and collar.
+Both eyes share the same height, with left-facing brows. Optical glow and subtle
+lens distortion complete the portrait. Staging has independent materials and face controls.
+
+Select **Screen / glass**, then **Material Properties → Surface** to adjust
+**Glass Roughness** (both reflection layers) and **Screen Diffusion** (the soft
+spread of the emitted artwork beneath the glass). These affect Eevee and Cycles;
+the Roughness/Metallic fields under **Viewport Display** do not drive the
+rendered shader. Diffusion maps follow each eye's blink independently and preserve the
+black features. The SVG and PNGs are bright masks; the shader reverses them
+before staging recolors the phosphor.
 
 Upload `renders/logan-avatar-512.png` or `renders/logan-staging-avatar-512.png`
 to Discord. The matching files without `-512` are the 2048px masters.
@@ -28,9 +40,17 @@ python3 brand/logan/export-avatar-icons.py
 ```
 
 Rebuilding the studio replaces its art-direction edits with the script's settings.
-Rendering leaves the saved studio untouched. Add `-- preview` to the production
+Rendering selects crossed arms (frame 80) and Cycles in the render process,
+leaving the live studio's Eevee setting and current frame untouched. Add `-- preview` to the production
 render command, or `preview` after `staging`, for a smaller draft in `/tmp`.
 Environment provenance is in [environment/README.md](environment/README.md).
+
+`finish-avatar.py` refreshes both scenes' materials and packed face artwork
+without changing their poses or cameras. After editing `face/face.svg`, run
+`python3 brand/logan/face/render-textures.py`, then run the finish script in
+the studio and save. `fit-avatar-background.py` fits the active scene's plate
+to its camera; parenting and focal-length drivers keep it covering the shot.
+Re-run the fit after changing sensor fit, lens shift or render aspect ratio.
 
 ## Character master
 

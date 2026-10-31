@@ -1,4 +1,4 @@
-"""Render one avatar scene; -- staging selects blue, -- preview makes a draft.
+"""Render the crossed-arms avatar in Cycles; -- staging selects blue, -- preview makes a draft.
 
 Open avatar-studio.blend with Blender --background and run this script.
 The saved studio is never modified by rendering.
@@ -11,6 +11,10 @@ args = sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else []
 variant = 'Staging' if 'staging' in args else 'Production'
 scene = bpy.data.scenes['AVATAR · '+variant]
 bpy.context.window.scene = scene
+# The live studio may use Eevee and another preset for responsive editing.
+# These overrides only affect this render process, never the saved studio.
+scene.frame_set(80)
+scene.render.engine = 'CYCLES'
 scene.cycles.device = 'CPU'
 scene.render.threads_mode = 'FIXED'
 scene.render.threads = 8

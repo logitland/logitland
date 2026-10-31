@@ -1,4 +1,4 @@
-"""Rasterize the editable SVG layers for Blender; requires ImageMagick.
+"""Rasterize editable SVG layers and their diffusion maps; needs ImageMagick/Pillow.
 
 Run with system Python after editing face.svg. The face material keeps the
 brightest of the black-backed layers, so overlaps stay one solid colour and eye
@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
+from PIL import Image, ImageFilter
 
 directory = Path(__file__).resolve().parent
 source = ET.parse(directory/'face.svg').getroot()
@@ -24,3 +25,7 @@ for name in ('static', 'eye-L', 'eye-R'):
         ET.ElementTree(layer).write(temporary.name, encoding='unicode')
         subprocess.run([magick, '-background', 'black', temporary.name,
                         '-alpha', 'off', str(directory/f'{name}.png')], check=True)
+    # Optical diffusion sits beneath the sharp glass reflection. Separate eye
+    # maps use the same UV transforms as their artwork, so the glow also blinks.
+    image = Image.open(directory/f'{name}.png').convert('RGB')
+    image.filter(ImageFilter.GaussianBlur(28)).save(directory/f'{name}-diffusion.png')

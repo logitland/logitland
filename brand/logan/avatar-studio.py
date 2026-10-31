@@ -7,6 +7,7 @@ the production scene at 768px for lighting review.
 from pathlib import Path
 from math import radians
 import colorsys
+import runpy
 import sys
 
 import bpy
@@ -155,6 +156,7 @@ emission.inputs['Strength'].default_value = .7
 output = n.new('ShaderNodeOutputMaterial')
 l.new(tex.outputs['Color'], emission.inputs['Color'])
 l.new(emission.outputs[0], output.inputs['Surface'])
+runpy.run_path(str(HERE/'fit-avatar-background.py'))['fit_background'](scene)
 
 # Bloom belongs to the bright details. Lens aberration is deliberately subpixel
 # at icon size so the face stays legible instead of becoming a rainbow fringe.
@@ -177,7 +179,7 @@ l.new(glow.outputs['Image'], lens.inputs['Image'])
 out = n.new('NodeGroupOutput')
 l.new(lens.outputs['Image'], out.inputs['Image'])
 scene.compositing_node_group = tree
-scene.render.engine = 'CYCLES'
+scene.render.engine = 'BLENDER_EEVEE'
 scene.cycles.device = 'CPU'
 scene.cycles.samples = 64
 scene.cycles.use_denoising = True
@@ -264,6 +266,7 @@ for node in staging.compositing_node_group.nodes:
 staging.render.filepath = str(HERE/'renders/logan-staging-avatar.png')
 staging['portrait_notes'] = 'Matching 85mm portrait; blue staging identity.'
 
+runpy.run_path(str(HERE/'finish-avatar.py'))['finish_avatar']()
 bpy.context.window.scene = scene
 for screen in bpy.data.screens:
     for space in (a.spaces.active for a in screen.areas if a.type == 'VIEW_3D'):
@@ -275,6 +278,7 @@ for screen in bpy.data.screens:
         space.shading.use_compositor = 'CAMERA'
 bpy.ops.wm.save_as_mainfile(filepath=str(HERE/'avatar-studio.blend'), compress=True)
 if '--' in sys.argv and 'preview' in sys.argv[sys.argv.index('--')+1:]:
+    scene.render.engine = 'CYCLES'
     scene.render.resolution_x = scene.render.resolution_y = 768
     scene.render.resolution_percentage = 100
     scene.cycles.samples = 32

@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1804" height="1128" viewBox="0 0 1804 1128">
   <title>Logan — 2D face layers</title>
-  <!-- Each eye is the cubic Laguz from brand/logo/04-laguz, mirrored: the arm is the brow.
-       The pupils glance right and the right eye sits higher, after reference/logan.png. -->
+  <!-- Each eye is cubic Laguz: the arm is the left-facing brow.
+       Both eyes share a baseline; the pupils glance right. -->
   <rect id="background" width="1804" height="1128" fill="black"/>
   <!-- Outlined because render-textures.py's renderer ignores strokes:
        M 822 800 C 920 836 1046 806 1128 716, 34 wide with round caps. -->
@@ -10,14 +10,14 @@
              C 1058.6 817.5 914.1 852 816.1 816 A 17 17 0 0 1 827.9 784 Z" fill="#ff55dd"/>
   </g>
   <!-- The rig's blinks squash each eye toward the centre of its pupil rect. -->
-  <!-- Each eye is a 320 × 360 stem whose 90-thick brow runs straight right, 120 past it.
+  <!-- Each eye is a 320 × 360 stem whose 90-thick brow runs straight left, 120 past it.
        The rect is the pupil. -->
   <g id="eye-R" fill="#ff55dd">
-    <path d="M 340 360 H 780 V 450 H 660 V 720 H 340 Z"/>
-    <rect x="470" y="480" width="150" height="150" fill="black"/>
+    <path d="M 220 330 H 660 V 690 H 340 V 420 H 220 Z"/>
+    <rect x="470" y="450" width="150" height="150" fill="black"/>
   </g>
   <g id="eye-L" fill="#ff55dd">
-    <path d="M 1230 300 H 1670 V 390 H 1550 V 660 H 1230 Z"/>
-    <rect x="1360" y="420" width="150" height="150" fill="black"/>
+    <path d="M 1110 330 H 1550 V 690 H 1230 V 420 H 1110 Z"/>
+    <rect x="1360" y="450" width="150" height="150" fill="black"/>
   </g>
 </svg>
