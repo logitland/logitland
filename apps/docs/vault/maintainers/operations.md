@@ -4,7 +4,7 @@ description: Diagnose configuration, intake, posting, delivery, and scheduled re
 order: 1
 ---
 
-Start in the admin dashboard's health and setup pages.
+Start on the admin dashboard's health page and work through its setup checks.
 The [Internal API](../architecture/internal-api/index.md) documents the requests behind those pages.
 Use the [deployment runbook](https://github.com/logitland/logitland/blob/main/DEPLOY.md) for environment provisioning and release procedures.
 
@@ -28,10 +28,10 @@ Sources: [configuration validation](https://github.com/logitland/logitland/blob/
 The Worker receives a cron trigger every minute.
 Jobs run in sequence with separate budgets. A failed job does not prevent later jobs from running.
 
-| Cadence          | Jobs                                                                                                                     |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Every minute     | Gateway watchdog, outage-held rechecks, stuck sends, due webhook deliveries, stream wakeups, staff alerts                |
-| Every 15 minutes | Retention, raw-IP purge, origin pruning, rate-counter cleanup, encryption resealing, admin lookup cleanup, Logan cleanup |
+| Cadence          | Jobs                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Every minute     | Gateway watchdog, outage-held rechecks, stuck sends, due webhook deliveries, stream wakeups, staff alerts, own-bot maintenance |
+| Every 15 minutes | Retention, raw-IP purge, origin pruning, rate-counter cleanup, encryption resealing, admin lookup cleanup, Logan cleanup       |
 
 Read `cron.done` for outcomes. `cron.job_failed` and `cron.job_timed_out` name the affected job.
 Check repeated failures before manually replaying work.

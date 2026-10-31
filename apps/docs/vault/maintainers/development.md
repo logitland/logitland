@@ -16,7 +16,7 @@ This launches fake Discord, the relay, the web app, and Svartz with isolated loc
 The explicit ports avoid the regular development defaults.
 Stop the command with Ctrl-C; the launcher stops the processes it created.
 
-`pnpm dev` uses real Discord credentials and the staging server.
+`pnpm dev` uses real Discord credentials and the staging server, so it can act on the same messages as the deployed staging relay.
 Use `dev:full` for fixture-driven work that should stay local.
 Add `--reset` only when you intend to discard the fake stack's existing local database.
 
@@ -45,6 +45,7 @@ Sources: [stack launcher](https://github.com/logitland/logitland/blob/main/scrip
 | Backend Worker or Durable Objects | `pnpm --filter @logitland/backend check` and `pnpm --filter @logitland/backend test` |
 | Full Worker integration           | `pnpm --filter @logitland/backend test:e2e`                                          |
 | Web app                           | `pnpm --filter @logitland/web check` and `pnpm --filter @logitland/web test`         |
+| Documentation                     | `pnpm --filter @logitland/docs check` and `pnpm --filter @logitland/docs build`      |
 | Whole repository                  | `pnpm check`, `pnpm test`, and `pnpm build`                                          |
 
 Relay tests use a D1-shaped SQLite adapter.

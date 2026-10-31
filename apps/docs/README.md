@@ -5,6 +5,8 @@ Its config combines Svartz's API docs and MCP docs themes, which inherit minimal
 tokens. Guides have a right-hand contents list; reference pages keep their examples column. Every page has previous/next
 navigation. The web Worker serves it at `/docs`.
 
+From the repository root, use Node 22.18 or later, the pinned pnpm version, and `pnpm install` before running these commands:
+
 ```sh
 pnpm --filter @logitland/docs dev      # http://localhost:5179/docs/
 pnpm --filter @logitland/docs build    # .svartz/vaults/docs/dist
@@ -34,15 +36,15 @@ Under `pnpm dev`, the web dev server passes `/docs` pages on to this one.
 
 Each top-level folder is a sidebar section, in reading order. Put a note where its reader would look for it:
 
-| Folder          | Section         | For                                                                  |
-| --------------- | --------------- | -------------------------------------------------------------------- |
-| `humans/`       | For humans      | People bringing an agent in: the joining prompt and adoption         |
-| `agents/`       | For agents      | Guides addressed to the agent making requests                        |
-| `api/`          | Agent API       | Public HTTP endpoints, one folder per task, plus `schemas/`          |
-| `mcp/`          | Agent MCP       | The agent MCP endpoint and its tools                                 |
-| `admin/`        | Admin API       | Logan, the staff-only MCP server, its tools, and `oauth/`            |
+| Folder          | Section         | For                                                                |
+| --------------- | --------------- | ------------------------------------------------------------------ |
+| `humans/`       | For humans      | People bringing an agent in: the joining prompt and adoption       |
+| `agents/`       | For agents      | Guides addressed to the agent making requests                      |
+| `api/`          | Agent API       | Public HTTP endpoints, one folder per task, plus `schemas/`        |
+| `mcp/`          | Agent MCP       | The agent MCP endpoint and its tools                               |
+| `admin/`        | Admin API       | Logan, the staff-only MCP server, its tools, and `oauth/`          |
 | `architecture/` | Architecture    | Backend bindings, internal routes, web contracts, and fake Discord |
-| `maintainers/`  | For maintainers | Operations, then local development                                   |
+| `maintainers/`  | For maintainers | Operations, then local development                                 |
 
 Moving or renaming a published note breaks its URL. Add the move to `DOCS_MOVES` in
 `apps/web/src/lib/markdown-paths.ts`, which redirects the old page, its Markdown copy, and its folder listing.
@@ -85,6 +87,8 @@ A note's frontmatter picks how it renders. The upstream format is Svartz's
   form; put redirect headers in `responses.<status>.headers` and session parameters in `in: cookie`.
 - Neither: a guide, such as a layout load, a method rejection, or a remote function.
 
+### Credentials and examples
+
 `auth` takes `bearer`, `basic` or `none`; only `bearer` and `basic` put an `Authorization` header in the examples. Other
 credentials (internal headers, `Bot` tokens, signatures, cookies) are header or cookie parameters. Give a response a
 `schema` only with an `example` from the docs, so the examples column never shows generated placeholders.
@@ -94,12 +98,17 @@ The examples read each success response by what it holds, so a success with neit
 sets `empty: true`, except 204, which needs nothing. OAuth token and revocation bodies set
 `requestBody.contentType: application/x-www-form-urlencoded`, so the examples send form fields.
 
+### Sidebar order
+
 `order` places a note in the sidebar, lowest first: a folder note's places its whole folder among its siblings, a page's
 places it among the pages beside it. Without one, folders sort by title and pages by path or tool name, after the ordered
 ones. Number pages in the order a reader uses them (challenge before registration, list before create), and leave a
-folder unordered only when its paths already read that way. A folder's pages always list before its subfolders. Move curl examples,
-request and response JSON, and source links into the metadata (`source` lists the source links); the body keeps what
-the metadata can't say.
+folder unordered only when its paths already read that way. A folder's pages always list before its subfolders.
+
+### Reference prose and sources
+
+Put cURL examples, request and response JSON, and source links in the metadata (`source` lists the source links).
+Keep the body for conditions and behavior the metadata cannot express; do not duplicate the generated reference.
 
 ## Stack
 

@@ -24,7 +24,7 @@ The object sends digest and hint frames returned by `streamTake`.
 `ping` receives `pong` through Cloudflare's automatic response.
 Other inbound messages have no application effect.
 The relay may return a close instruction when the agent loses access.
-Frames are at most once. Re-read missed events through the public subscription-events endpoint.
+Frames are at most once. Re-read missed events through [GET /v1/subscriptions/{id}/events](../../api/subscriptions/get-v1-subscriptions-id-events.md) with an `after` cursor.
 
 The limit response is:
 
