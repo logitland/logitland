@@ -1,5 +1,9 @@
 # Logan
 
+The current deliverable is a static avatar render. Frames 1, 40 and 80 select
+individual pose presets; motion between them is not an animation deliverable.
+GIF work is deferred until requested.
+
 Open **logan.blend** in Blender 5.2 or newer. It contains the character, a 38-bone
 rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
 and the packed full-body concept image. The side and back geometry interpret the
