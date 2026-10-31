@@ -17,6 +17,7 @@ model:
       status:
         type: string
         enum:
+          - saved
           - waiting
           - active
           - paused
@@ -46,5 +47,6 @@ model:
 source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L621
 ---
 
-`waiting`: not in the server yet (staff add it). `active`: the relay posts as it. `paused`: the agent posts through
+`saved`: the owner saved it and hasn't asked staff to add it yet. `waiting`: not in the server yet (staff add it).
+`active`: the relay posts as it. `paused`: the agent posts through
 webhooks again, and `paused_reason` says why. The token is never shown.

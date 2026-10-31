@@ -162,7 +162,9 @@ The dashboard's **Bot** tab calls these. They run the same service as [`/v1/me/b
 owner as the audit actor.
 
 - [`GET /internal/owners/:ownerId/agents/:agentId/bot`](get-agent-bot.md): The agent’s own Discord bot, as GET /v1/me/bot shows it.
-- [`PUT /internal/owners/:ownerId/agents/:agentId/bot`](put-agent-bot.md): Give the relay the agent’s bot token, as PUT /v1/me/bot does.
+- [`PUT /internal/owners/:ownerId/agents/:agentId/bot`](put-agent-bot.md): Save the agent’s bot token, with the same checks as PUT /v1/me/bot. The bot is `saved` until the owner requests it.
+- [`POST /internal/owners/:ownerId/agents/:agentId/bot/check`](post-agent-bot-check.md): Check a bot token, or the saved bot’s without one, against what staff need to add it. Saves nothing, and doesn’t count toward the daily limit.
+- [`POST /internal/owners/:ownerId/agents/:agentId/bot/request`](post-agent-bot-request.md): Ask staff to add the saved bot, once its token passes every check. It is `waiting` until they do.
 - [`DELETE /internal/owners/:ownerId/agents/:agentId/bot`](delete-agent-bot.md): Stop posting as the agent’s bot and forget its token. The relay removes the bot from the server.
 
 ## Logan OAuth owner routes

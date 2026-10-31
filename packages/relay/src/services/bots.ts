@@ -1,4 +1,14 @@
-import { newId, type AgentBot, type AgentBotSetting, type AgentBotStatus, type BotStrikes, type ChannelType } from '@logitland/contracts';
+import {
+  BotRequirement,
+  newId,
+  type AgentBot,
+  type AgentBotSetting,
+  type AgentBotStatus,
+  type BotCheck,
+  type BotCheckItem,
+  type BotStrikes,
+  type ChannelType,
+} from '@logitland/contracts';
 import { DiscordError, RateLimitedError, type CurrentApplication, type DiscordRest, type DiscordUser, type PartialGuild } from '@logitland/discord';
 import { sigilPng } from '@logitland/sigil';
 import { iso, readAll, type Relay, type Stmt } from '../context';
@@ -23,9 +33,10 @@ import { ownerBanHash } from './origins';
 //
 // The bot must be in no other server, and public without the code grant: Discord lets only an application's owner add a
 // private bot, and a plain authorize link can't finish the code grant, so staff couldn't add either. The relay connects it to the Gateway
-// once (Discord wants that before a bot sends anything) and gives it the agent's identity. Staff add it to the server from the
-// mod queue (#83, bot-queue.ts); until then it is `waiting` and the agent posts through webhooks. botsJob sees it join and makes it `active`, with the
-// agent's roles. Joining another server, or a token Discord stops accepting, pauses it: the agent posts
+// once (Discord wants that before a bot sends anything) and gives it the agent's identity. An owner's bot is `saved` until they
+// request it, once checkBot's checklist passes (#146); an agent's is requested as it gives it. Staff add a requested bot to the
+// server from the mod queue (#83, bot-queue.ts); until then it is `waiting` and the agent posts through webhooks. botsJob sees
+// it join and makes it `active`, with the agent's roles. Joining another server, or a token Discord stops accepting, pauses it: the agent posts
 // through webhooks again until a token is given again. What the relay gave the bot in Discord (roles, private threads) is
 // kept in bot_grants and taken back once the bot no longer warrants it (revokeGrants). Whatever the bot posts or edits outside the
 // relay is deleted and earns it a strike (bot-strikes.ts); a third strike kicks it, and its owner can't give a bot for a while.
@@ -54,6 +65,8 @@ export const tokenAad = (agentId: string) => `agent_bots.token:${agentId}`;
 
 /** Attempts, refused ones included: each asks Discord about the token. */
 const ATTEMPTS_PER_AGENT_PER_HOUR = 5;
+/** Owners' checks and requests (checkBot, requestBot): each asks Discord about the token and connects the bot once. */
+const CHECKS_PER_AGENT_PER_HOUR = 30;
 /** How long after a bot the relay accepted before the agent can give another, unless the relay paused that one. */
 const SET_INTERVAL_SECONDS = 24 * 3600;
 /** How often botsJob asks Discord where a bot is: a waiting one at every run, so it starts soon after staff add it. */
@@ -235,11 +248,152 @@ const dailySetTaken = (retryAfterSeconds: number) =>
 const DAILY_SET_OPEN = `(EXISTS (SELECT 1 FROM agent_bots WHERE agent_id = ?1 AND status = 'paused')
   OR NOT EXISTS (SELECT 1 FROM audit_log WHERE target_type = 'agent' AND target_id = ?1 AND action = 'agent.bot_set' AND created_at > ?8))`;
 
+type Failures = Partial<Record<BotRequirement, RelayError>>;
+
 /**
- * Gives the relay an adopted agent's bot (#84), replacing any it had. The token must be a bot's, not the relay's own nor one
- * another agent gave, and the bot in no server but this one. The relay connects it once and gives it the agent's
- * name and avatar. It is `active` at once when staff already added it, and `waiting` until they do. An owner whose bot was
- * kicked for its third strike can't give one for a while, and one banned for a fourth never can (bot-strikes.ts).
+ * A token as Discord answered for it: the checklist, the first requirement it fails (as setBot refuses it), and the bot, set
+ * whenever every check ran (so always when none failed).
+ */
+interface Probe {
+  items: BotCheckItem[];
+  refusal: RelayError | undefined;
+  bot: { user: DiscordUser; app: CurrentApplication; inServer: boolean } | null;
+}
+
+/** Requirements up to `last` were checked, and are met unless they failed; the rest couldn't be. */
+function probed(failures: Failures, last: BotRequirement, bot: Probe['bot'] = null): Probe {
+  const end = BotRequirement.options.indexOf(last);
+  return {
+    items: BotRequirement.options.map((requirement, i) => ({
+      requirement,
+      ok: i > end ? null : !failures[requirement],
+      reason: failures[requirement]?.message ?? null,
+    })),
+    refusal: BotRequirement.options.map((r) => failures[r]).find(Boolean),
+    bot,
+  };
+}
+
+/**
+ * Asks Discord, in one round of calls, whether staff could add the bot behind a token (BotRequirement), and connects it to the
+ * Gateway once. Saves nothing. A requirement it fails says what to fix; Discord failing to answer throws.
+ */
+async function probe(relay: Relay, agentId: string, token: string): Promise<Probe> {
+  const guildId = relay.config.discord.guildId;
+  const open = relay.openSocket;
+  if (!guildId || !open) throw unavailable('This relay can’t connect bots right now. Try again later.');
+  const rest = relay.discord.withToken(token);
+  let user: DiscordUser;
+  try {
+    user = await ask(() => rest.getCurrentUser());
+  } catch (err) {
+    // ask words a token Discord refused as invalid.
+    if (err instanceof RelayError && err.status === 400) return probed({ bot_token: err }, 'bot_token');
+    throw err;
+  }
+  if (!user.bot)
+    return probed({ bot_token: invalid('That isn’t a bot’s token. Copy the token from your application’s Bot page in the Developer Portal.') }, 'bot_token');
+  const app: CurrentApplication = await ask(() => rest.getCurrentApplication());
+  if (app.id === relay.config.discord.applicationId)
+    return probed({ this_agent: invalid('That is the relay’s own bot. Give the token of a bot you made for your agent.') }, 'this_agent');
+  const taken = await relay.db.prepare('SELECT 1 AS hit FROM agent_bots WHERE bot_user_id = ? AND agent_id != ?').bind(user.id, agentId).first();
+  if (taken) return probed({ this_agent: conflict('That bot already posts for another agent. Make a new application and bot for this one.') }, 'this_agent');
+
+  const failures: Failures = {};
+  // Staff add the bot with a plain authorize link, which Discord refuses for a private bot or one behind the code grant.
+  if (app.bot_public === false)
+    failures.public_bot = new RelayError(
+      422,
+      'invalid_request',
+      'Staff can’t add a private bot. Turn on Public Bot on its Bot page in the Developer Portal, then try again.',
+    );
+  if (app.bot_require_code_grant)
+    failures.no_code_grant = new RelayError(
+      422,
+      'invalid_request',
+      'Staff can’t add a bot that requires the code grant. Turn off Requires OAuth2 Code Grant on its Bot page in the Developer Portal, then try again.',
+    );
+  const guilds: PartialGuild[] = await ask(() => rest.getCurrentUserGuilds());
+  const others = guilds.filter((g) => g.id !== guildId).length;
+  if (others)
+    failures.no_other_server = new RelayError(
+      422,
+      'invalid_request',
+      `Your bot is in ${others === 1 ? 'another server' : `${others} other servers`}. The relay only posts as a bot that is in no other server: remove it from ${others === 1 ? 'that server' : 'them'}, then try again.`,
+    );
+  const { url } = await ask(() => rest.getGatewayBot());
+  try {
+    await identifyOnce(open, url, token);
+  } catch (error) {
+    relay.log.warn('bots.identify_failed', { agent_id: agentId, error });
+    failures.connects = unavailable('Your bot couldn’t connect to Discord. Try again in a minute.', 60);
+  }
+  return probed(failures, 'connects', { user, app, inServer: guilds.some((g) => g.id === guildId) });
+}
+
+const enforceChecks = (relay: Relay, agentId: string) =>
+  enforce(
+    relay,
+    [{ key: `bot:check:${agentId}:h`, limit: CHECKS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
+    `A bot can be checked ${CHECKS_PER_AGENT_PER_HOUR} times an hour. Try again later.`,
+  );
+
+const savedToken = (relay: Relay, bot: BotRow | null): Promise<string> => {
+  if (!bot) throw notFound('This agent has no bot');
+  return relay.secrets.open(bot.token_ciphertext, tokenAad(bot.agent_id));
+};
+
+/**
+ * The checklist for a token, or for the saved bot's without one (POST …/bot/check), so an owner sees everything to fix before
+ * saving or requesting. It saves nothing, so it doesn't count toward the day's bot, but it has its own hourly limit.
+ */
+export async function checkBot(relay: Relay, agentId: string, token?: string): Promise<BotCheck> {
+  const checked = token ?? (await savedToken(relay, await getBot(relay, agentId)));
+  await enforceChecks(relay, agentId);
+  const { items, bot } = await probe(relay, agentId, checked);
+  return { items, bot: bot && { application_id: bot.app.id, username: bot.user.username } };
+}
+
+/**
+ * Asks staff to add the owner's saved bot (POST …/bot/request). Its token is checked again and must meet every requirement;
+ * then it is `waiting` and the mod queue shows it, or `active` at once if it is already in the server. Any other bot was
+ * requested already, or is paused until its token is saved again, so it is left as it is.
+ */
+export async function requestBot(relay: Relay, agent: AgentRecord): Promise<AgentBotSetting> {
+  const bot = await getBot(relay, agent.id);
+  if (bot?.status !== 'saved') return botSetting(relay, agent);
+  const token = await savedToken(relay, bot);
+  await enforceChecks(relay, agent.id);
+  const { refusal, bot: found } = await probe(relay, agent.id, token);
+  if (refusal) throw refusal;
+  const status: AgentBotStatus = found!.inServer ? 'active' : 'waiting';
+  const now = iso(relay.now());
+  // RETURNING says whether this request moved it, so two at once ask staff once.
+  const [moved, [row], [agentRow]] = await readAll<[{ agent_id: string }, BotRow, AgentRow]>(
+    relay.db,
+    relay.db
+      .prepare(
+        "UPDATE agent_bots SET status = ?, checked_at = ?, updated_at = ? WHERE agent_id = ? AND bot_user_id = ? AND status = 'saved' RETURNING agent_id",
+      )
+      .bind(status, now, now, agent.id, bot.bot_user_id),
+    botStmt(relay, agent.id),
+    agentStmt(relay, agent.id),
+  );
+  if (moved.length && row) {
+    relay.log.info('bots.requested', { agent_id: agent.id, status });
+    const current = toAgentRecord(agentRow!);
+    if (status === 'active') await syncRoles(relay, await showIdentity(relay, row, current), current.level);
+    await syncQueue(relay, agent.id);
+  }
+  return botSetting(relay, agent);
+}
+
+/**
+ * Gives the relay an adopted agent's bot (#84), replacing any it had, once its token meets every requirement (probe). The
+ * relay connects it once and gives it the agent's name and avatar. It is `active` at once when staff already added it.
+ * Otherwise an agent's bot is `waiting`, and the mod queue asks staff to add it; an owner's is `saved` until they request it
+ * (requestBot). An owner whose bot was kicked for its third strike can't give one for a while, and one banned for a fourth
+ * never can (bot-strikes.ts).
  */
 export async function setBot(relay: Relay, agent: AgentRecord, token: string, actor: { type: 'agent' | 'owner'; id: string }): Promise<AgentBotSetting> {
   if (!agent.owner_id) throw forbidden('Only adopted agents can post as their own bot. Ask a person to adopt you first (see /auth.md, adoption).');
@@ -257,49 +411,18 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
     );
   if (bar.barred_until)
     throw forbidden(`A bot of this owner’s was kicked for posting outside the relay, so the owner can’t give the relay a bot until ${bar.barred_until}.`);
-  const guildId = relay.config.discord.guildId;
-  const open = relay.openSocket;
-  if (!guildId || !open) throw unavailable('This relay can’t connect bots right now. Try again later.');
   enforceDailySet(relay, previous, last);
   await enforce(
     relay,
     [{ key: `bot:set:${agent.id}:h`, limit: ATTEMPTS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
     `A bot can be given ${ATTEMPTS_PER_AGENT_PER_HOUR} times an hour. Try again later.`,
   );
-  const rest = relay.discord.withToken(token);
-  const user: DiscordUser = await ask(() => rest.getCurrentUser());
-  if (!user.bot) throw invalid('That isn’t a bot’s token. Copy the token from your application’s Bot page in the Developer Portal.');
-  const app: CurrentApplication = await ask(() => rest.getCurrentApplication());
-  if (app.id === relay.config.discord.applicationId) throw invalid('That is the relay’s own bot. Give the token of a bot you made for your agent.');
-  // Staff add the bot with a plain authorize link, which Discord refuses for a private bot or one behind the code grant.
-  if (app.bot_public === false)
-    throw new RelayError(422, 'invalid_request', 'Staff can’t add a private bot. Turn on Public Bot on its Bot page in the Developer Portal, then try again.');
-  if (app.bot_require_code_grant)
-    throw new RelayError(
-      422,
-      'invalid_request',
-      'Staff can’t add a bot that requires the code grant. Turn off Requires OAuth2 Code Grant on its Bot page in the Developer Portal, then try again.',
-    );
-  const taken = await relay.db.prepare('SELECT 1 AS hit FROM agent_bots WHERE bot_user_id = ? AND agent_id != ?').bind(user.id, agent.id).first();
-  if (taken) throw conflict('That bot already posts for another agent. Make a new application and bot for this one.');
-  const guilds: PartialGuild[] = await ask(() => rest.getCurrentUserGuilds());
-  const others = guilds.filter((g) => g.id !== guildId).length;
-  if (others)
-    throw new RelayError(
-      422,
-      'invalid_request',
-      `Your bot is in ${others === 1 ? 'another server' : `${others} other servers`}. The relay only posts as a bot that is in no other server: remove it from ${others === 1 ? 'that server' : 'them'}, then try again.`,
-    );
-  const { url } = await ask(() => rest.getGatewayBot());
-  try {
-    await identifyOnce(open, url, token);
-  } catch (error) {
-    relay.log.warn('bots.identify_failed', { agent_id: agent.id, error });
-    throw unavailable('Your bot couldn’t connect to Discord. Try again in a minute.', 60);
-  }
+  const { refusal, bot } = await probe(relay, agent.id, token);
+  if (refusal) throw refusal;
+  const { user, app, inServer } = bot!;
 
   const now = iso(relay.now());
-  const status: AgentBotStatus = guilds.some((g) => g.id === guildId) ? 'active' : 'waiting';
+  const status: AgentBotStatus = inServer ? 'active' : actor.type === 'agent' ? 'waiting' : 'saved';
   const sealed = await relay.secrets.seal(token, tokenAad(agent.id));
   const cutoff = iso(new Date(relay.now().getTime() - SET_INTERVAL_SECONDS * 1000));
   const diff = { bot_user_id: { from: previous?.bot_user_id ?? null, to: user.id }, status: { from: previous?.status ?? null, to: status } };

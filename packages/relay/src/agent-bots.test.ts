@@ -72,8 +72,7 @@ function discordWithBot(h: Harness) {
         return Response.json({ id: bot.id, username: bot.username, bot: true });
       }
       // Public: Discord lets only an application's owner add a private bot, so staff can add only a public one.
-      if (path === '/applications/@me')
-        return Response.json({ id: APP_ID, name: 'helper', bot_public: !bot.private, bot_require_code_grant: bot.codeGrant });
+      if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: !bot.private, bot_require_code_grant: bot.codeGrant });
       if (path === '/users/@me/guilds') return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
       if (path === '/gateway/bot') {
         await gateway();
@@ -796,6 +795,43 @@ describe('staff adding the bot from the mod queue', () => {
     return setup;
   }
 
+  it('asks staff at once when the agent gives its bot', async () => {
+    const { h, a } = await queued();
+    expect((await json(await give(h, a))).bot.status).toBe('waiting');
+    expect(await staffAlerts(h)).toEqual([waiting(a)]);
+  });
+
+  it('asks staff nothing for a bot its owner saved, and once when they request it and it passes every check', async () => {
+    const { h, a, owner, bot } = await queued();
+    const ownerCall = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    expect((await json(await ownerCall('PUT', '', { token: BOT_TOKEN }))).bot.status).toBe('saved');
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect(await staffAlerts(h)).toEqual([]);
+
+    bot.private = true;
+    expect((await json(await ownerCall('POST', '/check', {}))).items.map((i: { ok: boolean }) => i.ok)).toEqual([true, true, false, true, true, true]);
+    expect((await ownerCall('POST', '/request')).status).toBe(422);
+    expect(await staffAlerts(h)).toEqual([]);
+
+    bot.private = false;
+    expect((await json(await ownerCall('POST', '/request'))).bot.status).toBe('waiting');
+    expect((await ownerCall('POST', '/request')).status).toBe(200);
+    h.advance(60_000);
+    await botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    expect(await staffAlerts(h)).toEqual([waiting(a)]);
+  });
+
+  it('withdraws a waiting request when the owner saves a new token over it', async () => {
+    const { h, a, owner } = await queued();
+    await give(h, a);
+    h.advance(DAY);
+    await h.internal('PUT', `/internal/owners/${owner.id}/agents/${a.id}/bot`, { token: BOT_TOKEN }, asOwner(owner.id));
+    expect((await queueEdits(h)).map(([, c]) => c)).toEqual(['Wren’s own bot `Wren` was withdrawn before it was added, so there’s nothing to add.']);
+    expect((await json(await (await asStaff(h))('/internal/admin/bots'))).bots).toEqual([]);
+  });
+
   it('posts one message for a waiting bot, linking to its page, whose Add to server link is Discord’s for this bot and server', async () => {
     const { h, a, owner } = await queued();
     await give(h, a);
@@ -931,5 +967,52 @@ describe('staff adding the bot from the mod queue', () => {
       await botsJob(h.relay, { deadline: Date.now() + 10_000 });
     }
     expect((await queueEdits(h)).filter(([id]) => id === ids[10])).toHaveLength(1);
+  });
+});
+
+describe('checking a bot before staff add it', () => {
+  const check = (h: Harness, owner: { id: string }, a: { id: string }, body: unknown = { token: BOT_TOKEN }) =>
+    h.internal('POST', `/internal/owners/${owner.id}/agents/${a.id}/bot/check`, body, asOwner(owner.id));
+
+  it.each([
+    ['nothing', () => {}, [true, true, true, true, true, true], null],
+    ['a token Discord refuses', (s) => (s.bot.revoked = true), [false, null, null, null, null, null], /didn’t accept that token/],
+    [
+      'another agent’s bot',
+      async (s) => give(s.h, await seedAgent(s.h.relay, { ownerId: s.owner.id })),
+      [true, false, null, null, null, null],
+      /another agent/,
+    ],
+    ['a private bot', (s) => (s.bot.private = true), [true, true, false, true, true, true], /Public Bot/],
+    ['the code grant', (s) => (s.bot.codeGrant = true), [true, true, true, false, true, true], /Requires OAuth2 Code Grant/],
+    ['another server', (s) => s.bot.guilds.push(OTHER_SERVER), [true, true, true, true, false, true], /in another server/],
+    [
+      'no Gateway connection',
+      (s) => Object.assign(s.h.relay, { openSocket: () => Promise.reject(new Error('refused')) }),
+      [true, true, true, true, true, false],
+      /couldn’t connect/,
+    ],
+  ] satisfies [string, (s: Awaited<ReturnType<typeof adopted>>) => unknown, (boolean | null)[], RegExp | null][])(
+    'ticks every requirement, and says what to fix for the one that fails: %s',
+    async (_case, arrange, ok, reason) => {
+      const setup = await adopted();
+      await arrange(setup);
+      const { items, bot } = await json(await check(setup.h, setup.owner, setup.a));
+      expect(items.map((i: { ok: boolean | null }) => i.ok)).toEqual(ok);
+      // The bot is named, for its Developer Portal link, once every requirement was checked.
+      expect(bot).toEqual(ok.some((v) => v === null) ? null : { application_id: APP_ID, username: 'helper-bot' });
+      const failed = items.filter((i: { ok: boolean | null }) => i.ok === false).map((i: { reason: string }) => i.reason);
+      expect(failed).toEqual(reason ? [expect.stringMatching(reason)] : []);
+      expect(await setup.h.db.prepare('SELECT COUNT(*) AS n FROM agent_bots WHERE agent_id = ?').bind(setup.a.id).first()).toEqual({ n: 0 });
+    },
+  );
+
+  it('counts toward neither the day’s bot nor its hourly attempts', async () => {
+    const { h, a, owner } = await adopted();
+    for (let i = 0; i < 6; i++) expect((await check(h, owner, a)).status).toBe(200);
+    const save = () => h.internal('PUT', `/internal/owners/${owner.id}/agents/${a.id}/bot`, { token: BOT_TOKEN }, asOwner(owner.id));
+    expect((await save()).status).toBe(200);
+    expect((await save()).status).toBe(429);
+    expect((await check(h, owner, a, {})).status).toBe(200);
   });
 });
