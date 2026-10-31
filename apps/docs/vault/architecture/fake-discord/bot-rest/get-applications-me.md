@@ -1,6 +1,6 @@
 ---
 title: Get the application
-description: Return the fake application's expanded object.
+description: Return the application associated with a fake bot token.
 operation:
   method: GET
   path: /api/v10/applications/@me
@@ -10,7 +10,7 @@ operation:
       in: header
       required: true
       type: string
-      description: The fake bot token.
+      description: The relay bot's token or another bot token seeded in the fake.
       example: Bot fake-local
   responses:
     '200':
@@ -20,14 +20,18 @@ operation:
       description: Missing or wrong bot token (`0`).
 source:
   - label: applications.me
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L224
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L341
   - label: application object
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L254
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L267
+  - label: another bot's application object
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L284
 ---
 
 Route name `applications.me`. The `/api/v9` and `/api` prefixes also work.
 
-The object has `id`, `name`, `icon: null`, `description: ""`, `bot_public: false`, and `bot_require_code_grant: false`.
+## Relay bot's application
+
+With the relay bot's token, the object has `id`, `name`, `icon: null`, `description: ""`, `bot_public: false`, and `bot_require_code_grant: false`.
 It includes the bot User as `bot`, the signing public key as `verify_key`, `owner`, `team`, `flags`, `flags_new`, `interactions_endpoint_url`, and `install_params`.
 
 - `flags_new` is the string form of `flags`.
@@ -38,4 +42,10 @@ It includes the bot User as `bot`, the signing public key as `verify_key`, `owne
 [`PATCH /_fake/application`](../control-seeding/patch-application.md) changes the endpoint URL, team, and Message Content flags.
 That control route returns the fake's smaller stored object instead.
 
-- [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
+## Another bot's application
+
+A token seeded with `DiscordFake.addBot` returns that bot's smaller application object:
+`id`, `name`, `icon: null`, `description: ""`, its configured `bot_public` (default `true`),
+`bot_require_code_grant: false`, `bot`, and `flags: 0`. It omits the relay-specific fields listed above.
+
+[Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.

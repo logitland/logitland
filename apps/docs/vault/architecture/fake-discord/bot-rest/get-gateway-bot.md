@@ -10,7 +10,7 @@ operation:
       in: header
       required: true
       type: string
-      description: The fake bot token.
+      description: The relay bot's token or another bot token seeded in the fake.
       example: Bot fake-local
   responses:
     '200':
@@ -27,16 +27,17 @@ operation:
       description: Missing or wrong bot token (`0`).
 source:
   - label: gateway.bot
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L208
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L305
   - label: session limit defaults
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L171
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L173
 ---
 
 Route name `gateway.bot`. The limit contains `total`, `remaining`, `reset_after` in milliseconds, and `max_concurrency`.
-The fake starts with 1,000 total and remaining sessions and concurrency one.
+The `/api/v9` and `/api` prefixes also work.
+All seeded bot tokens read the same limit. The fake starts with 1,000 total and remaining sessions and concurrency one.
 
-`reset_after` counts down from one day after startup and never drops below `0`.
+By default, `reset_after` counts down from one day after startup and never drops below `0`.
 Each successful IDENTIFY decrements `remaining`. The fake does not refill it automatically.
 [`POST /_fake/gateway/session-limit`](../control-gateway/post-gateway-session-limit.md) changes it.
 
-- [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
+[Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.

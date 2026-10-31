@@ -9,29 +9,35 @@ operation:
   parameters:
     - name: limit
       in: query
-      type: integer
+      type: number
       default: 200
-      description: Number of most recent frames to return.
+      description: Number of most recent frames to return; not validated or range-checked.
       example: 20
   responses:
     '200':
       contentType: application/json
       description: Returns `{sessions,frames}`.
     '400':
-      description: Invalid input or world error.
+      description: Malformed JSON request body.
 source:
   - label: inspection
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L327
-  - label: options
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L66
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L336-L343
   - label: session and frame fields
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L130
   - label: session summaries
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L186
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L187
   - label: frame recording
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L314
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L315
 ---
 
-Gateway defaults are `heartbeatIntervalMs: 41250`, `resumeWindowMs: 120000`, `eventLagMs: 0`, and `bufferLimit: 10000`. Option and session-limit endpoints check numeric types, without range checks. Changing the heartbeat interval affects later HELLO frames. The initial session limit has `total: 1000`, `remaining: 1000`, and `maxConcurrency: 1`. Its initial `resetAt` is one day after startup. The fake does not automatically refill remaining sessions.
+`limit` affects frames only, not sessions. The handler applies `Number(limit)` and JavaScript's `slice(-limit)` without validation: `0` or nonnumeric input returns all retained frames, and a negative value skips that many oldest frames.
 
-Session summaries contain `id`, `user_id`, `intents`, `connected`, `seq`, `buffered`, `heartbeats`, `last_heartbeat_at`, `resumes`, and `expired`. Recorded frames contain `at`, `connection`, `session`, `direction`, `op`, `t`, `s`, and `d`. `direction` is `in` or `out`. The frame log retains at most 5,000 records. Raw-text control sends bypass that structured log.
+## Session summaries
+
+Each summary contains `id`, `user_id`, `intents`, `connected`, `seq`, `buffered`, `heartbeats`, `last_heartbeat_at`, `resumes`, and `expired`. `last_heartbeat_at` is an ISO timestamp or `null` before the first heartbeat. Expired sessions remain listed; `expired` does not automatically reflect an elapsed resume window.
+
+## Recorded frames
+
+Each frame contains `at`, `connection`, `session`, `direction`, `op`, `t`, `s`, and `d`. `at` is an ISO timestamp; `direction` is `in` or `out`. `session` is `null` before authentication, and absent event names or sequences become `null`.
+
+The log retains at most 5,000 records, in recording order. [Raw-text control sends](post-gateway-raw.md) bypass this log. Frame data includes bot tokens sent in IDENTIFY and RESUME, so treat inspection output as sensitive.

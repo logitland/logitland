@@ -21,6 +21,7 @@ operation:
           type: string
         kind:
           type: string
+          default: text
           enum:
             - text
             - voice
@@ -30,6 +31,7 @@ operation:
             - media
         type:
           type: number
+          description: Numeric channel type; takes precedence over kind when supplied.
         parent:
           type: string
         topic:
@@ -47,6 +49,7 @@ operation:
                 type: string
               moderated:
                 type: boolean
+                default: false
         overwrites:
           type: array
           items:
@@ -58,13 +61,16 @@ operation:
                 type: string
               type:
                 type: string
+                default: role
                 enum:
                   - role
                   - member
               allow:
                 type: string
+                default: '0'
               deny:
                 type: string
+                default: '0'
     example:
       guild: '100000000000000010'
       id: '100000000000000020'
@@ -73,7 +79,7 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: The created channel summary.
+      description: A channel summary with id, name, type, parent_id, webhooks, and message count; forum and media summaries also include available_tags.
     '400':
       description: Invalid input or a world error.
       example:
@@ -83,34 +89,25 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L130
   - label: channel types
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L4
-  - label: world defaults
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L134
   - label: channel and tag creation
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L231
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L239-L274
+  - label: channel summary
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L36-L54
 ---
 
-Channel kinds are `text`, `voice`, `category`, `announcement`, `forum`, and `media`. Their numeric types are `0`, `2`, `4`, `5`, `15`, and `16`. Tags accept `id`, required `name`, and optional `moderated` (default `false`). Overwrites accept `id`, `type: "role" | "member"`, and decimal-string `allow` and `deny`, each defaulting to `"0"`.
+The supported `kind` values map to these numeric types:
 
-Another request body, create a forum with a permission overwrite:
+| Kind           | Type |
+| -------------- | ---: |
+| `text`         |  `0` |
+| `voice`        |  `2` |
+| `category`     |  `4` |
+| `announcement` |  `5` |
+| `forum`        | `15` |
+| `media`        | `16` |
 
-```json
-{
-  "guild": "100000000000000010",
-  "id": "100000000000000021",
-  "name": "ideas",
-  "kind": "forum",
-  "tags": [
-    {
-      "id": "100000000000000070",
-      "name": "idea"
-    }
-  ],
-  "overwrites": [
-    {
-      "id": "100000000000000010",
-      "type": "role",
-      "deny": "2048"
-    }
-  ]
-}
-```
+Channel and tag IDs generate when omitted. Tags apply only to forum and media channels.
+Use decimal strings for overwrite `allow` and `deny`; for example, `"2048"` is the fake's Send Messages bit.
+
+This seeding endpoint checks that the guild exists, but does not validate the numeric channel type, parent ID, or overwrite targets.
+It does not enforce the bot's channel-creation permissions. The response is a summary, not the full channel object with its topic and overwrites.

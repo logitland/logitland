@@ -13,7 +13,7 @@ operation:
         url: ws://127.0.0.1:8790/gateway
 source:
   - label: gateway.get
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L206
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L303
 ---
 
 Returns the WebSocket URL of the fake's Gateway. Route name `gateway.get`.

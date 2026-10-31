@@ -16,7 +16,7 @@ operation:
       in: header
       required: true
       type: string
-      description: Discord bot authorization header.
+      description: Relay bot authorization header.
       example: Bot fake-local
   requestBody:
     schema:
@@ -24,6 +24,8 @@ operation:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 100
         archived:
           type: boolean
         locked:
@@ -39,18 +41,22 @@ operation:
     '401':
       description: Missing or wrong bot token.
     '403':
-      description: The bot lacks Manage Threads.
+      description: The bot lacks Manage Threads (`50013`), or the token belongs to another bot (`50001`).
     '404':
       description: Unknown channel.
 source:
   - label: channel.modify
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L431
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L647-L660
   - label: thread modification
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L644
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L694-L707
 ---
 
 `/api/v9` and `/api` also work. Omitted fields stay unchanged.
 
 ## Permission rules
 
-The bot needs Manage Threads unless the thread creator changes only `archived`. [Shared REST rules](../index.md#rest-authentication-and-responses) cover JSON bodies, rate-limit headers, and injected failures.
+The relay bot can archive or unarchive a thread it owns without Manage Threads. A non-null `name` or a `locked` field requires Manage Threads, even for the owner. Updating someone else's thread always requires that permission.
+
+Omitted fields and `name: null` leave values unchanged. When supplied, `archived` and `locked` must be booleans; `null` is invalid. An empty body object is allowed, subject to the same owner/permission check.
+
+[Shared REST rules](../index.md#rest-authentication-and-responses) cover JSON bodies, rate-limit headers, and injected failures.

@@ -26,4 +26,8 @@ Returns the User associated with an OAuth access token.
 
 The `/api/v9` and `/api` prefixes also work. The User includes `id`, `username`, `discriminator`, `global_name`, `avatar`, and optional bot/flag fields.
 
-Without a nonempty Bearer header, this path falls through to the [bot REST handler](../bot-rest/get-users-me.md). There is no fake refresh-token or revocation endpoint.
+The handler requires exactly `Authorization: Bearer <access-token>`, with a non-empty token and case-sensitive `Bearer`.
+Without that header, this path falls through to the [bot REST handler](../bot-rest/get-users-me.md).
+An unknown Bearer token returns `401` here; it does not fall back to bot authentication.
+
+Tokens come from the [code exchange](post-oauth2-token.md). The fake does not enforce token expiry and has no refresh-token or revocation endpoint.
