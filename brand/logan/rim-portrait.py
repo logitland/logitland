@@ -14,7 +14,7 @@ def light_edges(scene):
         'Portrait / fill · pink': ((4.5,-5,5.5),60,(1,.12,.55),3.2,None),
         'Portrait / rim · magenta': ((-3.3,1.2,7.6),850,(1,.018,.55),.18,3.0),
         'Portrait / rim · pink right': ((3,3,7.4),650,(1,.018,.55),.18,3.0),
-        'Portrait / top edge': ((0,1.6,8.8),350,(1,.025,.6),2.5,.2),
+        'Portrait / top edge': ((0,1.6,8.8),750,(1,.025,.6),2.5,.2),
     }
     old_names = {'Portrait / fill · pink':'Portrait / fill · cool',
                  'Portrait / rim · pink right':'Portrait / rim · ice'}
@@ -22,7 +22,9 @@ def light_edges(scene):
         obj = scene.objects.get(name) or scene.objects[old_names[name]]
         obj.name = name
         obj.location = position
-        obj.rotation_euler = (Vector((0,0,5.9))-obj.location).to_track_quat('-Z','Y').to_euler()
+        target = (0,0,7.1) if name == 'Portrait / top edge' else (0,0,5.9)
+        obj.rotation_euler = (Vector(target)-obj.location).to_track_quat('-Z','Y').to_euler()
+        if name == 'Portrait / top edge':obj.data.spread = 1.309
         obj.data.energy, obj.data.color = power, color
         obj.data.shape = 'RECTANGLE' if height else 'DISK'
         obj.data.size = width
@@ -46,14 +48,24 @@ def light_edges(scene):
                 # Short-path scattering lets backlight soften thin plastic and
                 # fabric edges. The screen keeps its independent glass shader.
                 plastic = material.name.startswith(('Head ·','Graphite ·','Trim ·'))
-                shader.inputs['Subsurface Weight'].default_value = .35 if plastic else .25
-                shader.inputs['Subsurface Scale'].default_value = .07 if plastic else .035
+                shader.inputs['Subsurface Weight'].default_value = .5 if plastic else .25
+                shader.inputs['Subsurface Scale'].default_value = .025 if plastic else .035
                 shader.inputs['Subsurface Radius'].default_value = (1,.55,.7)
             if material.name.startswith('Jacket ·'):
                 shader.inputs['Sheen Weight'].default_value = .6 if 'teddy' not in material.name else .8
     shell = scene.objects['Head / faceted shell']
     bevel = next(m for m in shell.modifiers if m.type=='BEVEL')
-    bevel.width, bevel.segments = .009, 2
+    bevel.width, bevel.segments, bevel.angle_limit = .018,3,.5235988
+    edge = bpy.data.materials.get('Head · polished plastic edges') or bpy.data.materials.new('Head · polished plastic edges')
+    edge.use_nodes = True
+    shader = next(n for n in edge.node_tree.nodes if n.type=='BSDF_PRINCIPLED')
+    for name,value in {'Base Color':(.12,.1,.11,1),'Metallic':0,'Roughness':.2,
+                       'Coat Weight':.35,'Coat Roughness':.15,'IOR':1.46,
+                       'Subsurface Weight':.5,'Subsurface Scale':.025,
+                       'Subsurface Radius':(1,.55,.7)}.items():
+        shader.inputs[name].default_value = value
+    if edge.name not in shell.data.materials:shell.data.materials.append(edge)
+    bevel.material = shell.data.materials.find(edge.name)
 
 
 def rim_portrait():

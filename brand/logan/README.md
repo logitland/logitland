@@ -13,12 +13,15 @@ face-focused depth of field, a slight camera roll, five area
 lights, a real Poly Haven HDRI and a shared generated server-room backdrop:
 soft charcoal racks and neutral white lighting. All colored accents emit light,
 including the head gradients, SVG chest print, seams, pants, shoes and CRT face.
-The head is matte plastic with shallow subsurface scattering, the CRT screen glossy glass with black features on
-pink phosphor (blue in staging), and the jacket a
+The head is matte plastic with shallow subsurface scattering. The CRT screen is
+glossy glass: black features on pink in production, pink features on black in
+staging. The jacket is a
 fine woven weatherproof shell with teddy fleece on its inner shell and collar.
 Both enlarged eyes share the same height, with left-facing brows. A shared
 shader raster samples the eyes once per CRT row and places their boundaries
-inside the dark gaps, including during blinks. The smirk is a tapered crescent. Narrow pink
+inside the dark gaps, including during blinks. Shared curved coordinates bow
+the scanlines and artwork together; adjust **Curvature** on the material's
+**CRT curvature / curved raster** node. The smirk is a tapered crescent. Narrow pink
 rear strip lights catch the head bevels, collar and shoulders; staging swaps them
 to blue. Subsurface scattering and sheen soften cloth
 and rubber. Optical glow and subtle lens distortion complete the portrait.
@@ -38,8 +41,8 @@ intensity) and **Screen Diffusion** (the soft spread of the emitted artwork
 beneath the glass). These affect Eevee and Cycles;
 the Roughness/Metallic fields under **Viewport Display** do not drive the
 rendered shader. Diffusion maps follow each eye's blink independently and preserve the
-black features. The SVG and PNGs are bright masks; the shader reverses them
-before staging recolors the phosphor.
+dark regions. The SVG and PNGs contain pink features on black; production
+reverses their polarity and staging uses them directly.
 
 The screen has shallow convex CRT glass, with its perimeter seated in the bezel.
 Under **Object Data Properties → Shape Keys**, adjust **CRT glass / shallow

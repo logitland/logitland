@@ -84,6 +84,8 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 Logan has pink production and blue staging portraits in `brand/logan/avatar-studio.blend`. Both use the exact same pose and framing; only their colors change. Pink backlights and emissive accents (blue in staging) sit against a subdued server-room backdrop with neutral graphite racks and soft white lighting. His head is matte plastic with subsurface edge glow, screen convex glossy CRT glass, and coat a weatherproof woven shell with visible curly teddy fleece inside the collar.
 Saved frames are static pose presets; animation and GIF work wait for Mia's request.
+The CRT face is black on pink in production and pink on black in staging;
+scanlines and artwork share a curved raster. Ivory-beige teddy fleece lines the collar.
 Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigged
 3D interpretation of the supplied pink-screen robot concept, with continuous deforming
 sleeves and trousers with full faceted volumes. Recessed pink emission spans the

@@ -79,10 +79,50 @@ def lock_eye_raster():
         node.location = (nodes['Separate XYZ'].location.x-220,400)
         links.new(nodes['UV Map'].outputs[0],node.inputs['UV'])
         links.new(node.outputs['Row UV'],nodes['Separate XYZ'].inputs[0])
+    curve_face_uv()
+
+
+def curve_face_uv():
+    """Bow the whole raster before artwork sampling, keeping eyes on its rows."""
+    group = bpy.data.node_groups.get('LOGAN / CRT curved coordinates')
+    if group is None:
+        group = bpy.data.node_groups.new('LOGAN / CRT curved coordinates','ShaderNodeTree')
+        group.interface.new_socket(name='UV',in_out='INPUT',socket_type='NodeSocketVector')
+        strength = group.interface.new_socket(name='Curvature',in_out='INPUT',socket_type='NodeSocketFloat')
+        strength.default_value, strength.min_value, strength.max_value = .1,0,.3
+        group.interface.new_socket(name='UV',in_out='OUTPUT',socket_type='NodeSocketVector')
+        nodes, links = group.nodes, group.links
+        inp, out = nodes.new('NodeGroupInput'), nodes.new('NodeGroupOutput')
+        xy = nodes.new('ShaderNodeSeparateXYZ'); links.new(inp.outputs['UV'],xy.inputs[0])
+        def math(op,a,b):
+            node = nodes.new('ShaderNodeMath'); node.operation = op
+            for value,socket in zip((a,b),node.inputs):
+                if isinstance(value,(float,int)):socket.default_value = value
+                else:links.new(value,socket)
+            return node.outputs[0]
+        x = math('MULTIPLY',math('SUBTRACT',xy.outputs['X'],.5),2)
+        y = math('MULTIPLY',math('SUBTRACT',xy.outputs['Y'],.5),2)
+        combine = nodes.new('ShaderNodeCombineXYZ')
+        for axis,coordinate,across,ratio in (('X',x,y,.55),('Y',y,x,1)):
+            amount = math('MULTIPLY',inp.outputs['Curvature'],ratio)
+            factor = math('ADD',1,math('MULTIPLY',amount,math('MULTIPLY',across,across)))
+            curved = math('ADD',.5,math('MULTIPLY',.5,math('MULTIPLY',coordinate,factor)))
+            links.new(curved,combine.inputs[axis])
+        links.new(combine.outputs[0],out.inputs['UV'])
+        for index,node in enumerate(nodes):node.location = ((index%5)*210,-(index//5)*200)
+    for material in bpy.data.materials:
+        if not material.use_nodes or 'Face · 2D CRT display' not in material.name:continue
+        nodes,links = material.node_tree.nodes,material.node_tree.links
+        warp = nodes.get('CRT curvature / curved raster') or nodes.new('ShaderNodeGroup')
+        warp.name = 'CRT curvature / curved raster'; warp.node_tree = group
+        original = nodes['UV Map'].outputs[0]
+        destinations = [link.to_socket for link in original.links if link.to_node != warp]
+        links.new(original,warp.inputs['UV'])
+        for destination in destinations:links.new(warp.outputs['UV'],destination)
 
 
 def dark_features(material, crt):
-    """Use the artwork as a negative mask, before staging recolors its phosphor."""
+    """Production is black on pink; staging uses the original pink-on-black art."""
     nodes, links = material.node_tree.nodes, material.node_tree.links
     # Image textures decode sRGB before entering the shader. Subtract the same
     # linear-light pink to retain genuinely black features, including the smirk.
@@ -95,9 +135,16 @@ def dark_features(material, crt):
         ('Diffusion Image','Screen diffusion / blue phosphor'),
     ):
         destination = crt.inputs[socket_name]
-        if material.name.startswith('Staging / '):
-            destination = nodes[hue_name].inputs['Color']
         name = 'Face polarity / '+socket_name
+        if material.name.startswith('Staging / '):
+            signal = destination.links[0].from_socket
+            while signal.node.name in (name,hue_name):
+                socket = signal.node.inputs[2] if signal.node.name == name else signal.node.inputs['Color']
+                signal = socket.links[0].from_socket
+            links.new(signal,destination)
+            for old_name in (name,hue_name):
+                if nodes.get(old_name):nodes.remove(nodes[old_name])
+            continue
         signal = destination.links[0].from_socket
         if signal.node.name == name:
             continue
@@ -230,13 +277,6 @@ def setup_screen_controls():
             material_links.new(texture.outputs['Color'], lighten.inputs[2])
             lighten.location = (texture.location.x+300, texture.location.y)
             composite = lighten.outputs[0]
-        if material.name.startswith('Staging / '):
-            hue = nodes.new('ShaderNodeHueSaturation')
-            hue.name = 'Screen diffusion / blue phosphor'
-            hue.inputs['Hue'].default_value = .25
-            material_links.new(composite, hue.inputs['Color'])
-            composite = hue.outputs['Color']
-            hue.location = (crt.location.x-250,-2200)
         material_links.new(composite, crt.inputs['Diffusion Image'])
         dark_features(material, crt)
     lock_eye_raster()

@@ -5,6 +5,7 @@ lights, grading and render settings together, preserving production's appearance
 """
 from pathlib import Path
 import colorsys
+import runpy
 import bpy
 
 HERE = Path(__file__).resolve().parent
@@ -41,6 +42,7 @@ def sync_staging():
     source_rig = next(o for o in production.objects if o.get('logan_pose_controls'))
     target_rig = next(o for o in staging.objects if o.get('logan_pose_controls'))
     copies = {}
+    face_polarity = runpy.run_path(str(HERE/'screen-controls.py'))['dark_features']
     for obj in staging.objects:
         if obj.type == 'LIGHT':
             rgba = (*obj.data.color,1)
@@ -68,15 +70,7 @@ def sync_staging():
             nodes, links = material.node_tree.nodes, material.node_tree.links
             if 'Face · 2D CRT display' in source.name:
                 crt = next(n for n in nodes if n.type == 'GROUP' and n.node_tree.name == 'LOGAN / CRT display')
-                for name, label in (('Image','Staging / blue phosphor'),
-                                    ('Diffusion Image','Screen diffusion / blue phosphor')):
-                    destination = crt.inputs[name]
-                    signal = destination.links[0].from_socket
-                    hue = nodes.new('ShaderNodeHueSaturation')
-                    hue.name = label
-                    hue.inputs['Hue'].default_value = .25
-                    links.new(signal, hue.inputs['Color'])
-                    links.new(hue.outputs[0], destination)
+                face_polarity(material,crt)
                 continue
             material.diffuse_color = blue(material.diffuse_color)
             for node in list(nodes):
@@ -99,7 +93,7 @@ def sync_staging():
         if node.type == 'R_LAYERS':
             node.scene = staging
     staging.render.filepath = str(HERE/'renders/logan-staging-avatar.png')
-    staging['portrait_notes'] = 'Production pose, framing, lighting and neutral server-room backdrop; blue character accents.'
+    staging['portrait_notes'] = 'Production pose and framing; blue body accents, pink-on-black face, ivory fleece and neutral server room.'
     bpy.context.window.scene = production
     bpy.context.view_layer.update()
     return staging
