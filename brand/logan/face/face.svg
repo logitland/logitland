@@ -10,14 +10,16 @@
              C 1058.6 817.5 914.1 852 816.1 816 A 17 17 0 0 1 827.9 784 Z" fill="#ff55dd"/>
   </g>
   <!-- The rig's blinks squash each eye toward the centre of its first rect. -->
+  <!-- Stem width W = 150: the flat top runs 0.4W past the stem, the arm drops at 45°
+       to 1.4W out and is cut square, 1.4W tall. The arm overlaps the stem to avoid a seam. -->
   <g id="eye-R" fill="#ff55dd">
-    <rect x="427" y="318" width="260" height="410"/>
-    <path d="M 467 318 H 385 L 280 423 V 570 L 427 423 H 467 Z"/>
-    <rect x="551" y="354" width="100" height="100" fill="black"/>
+    <rect x="537" y="300" width="150" height="440"/>
+    <path d="M 577 300 H 477 L 327 450 V 660 L 537 450 H 577 Z"/>
+    <rect x="573" y="324" width="90" height="90" fill="black"/>
   </g>
   <g id="eye-L" fill="#ff55dd">
-    <rect x="1262" y="250" width="260" height="410"/>
-    <path d="M 1302 250 H 1220 L 1115 355 V 502 L 1262 355 H 1302 Z"/>
-    <rect x="1386" y="286" width="100" height="100" fill="black"/>
+    <rect x="1372" y="232" width="150" height="440"/>
+    <path d="M 1412 232 H 1312 L 1162 382 V 592 L 1372 382 H 1412 Z"/>
+    <rect x="1408" y="256" width="90" height="90" fill="black"/>
   </g>
 </svg>
