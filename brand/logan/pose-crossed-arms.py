@@ -2,9 +2,10 @@
 
 blender --background brand/logan/logan.blend --python brand/logan/pose-crossed-arms.py
 Saves the file. The body turns 30° while the head looks back at the camera. The
-right forearm crosses above the left. Its hand rests over the opposite bicep;
-the left hand tucks behind the right upper arm. Elbows use their anatomical
-hinges, while the baked garment correction lets fabric slide around arm roll.
+right forearm crosses above the left. Its palm rests on the left sleeve over
+the bicep; the left hand tucks behind the right upper arm. Elbows use their
+anatomical hinges; the sleeves follow a roll-free drape armature and a fitted
+crossed-arms coat shape. Every preset is held, not interpolated.
 """
 from math import radians
 from pathlib import Path
@@ -20,9 +21,9 @@ DEGREES = {
     'hand.L': (-10.850855, 80.943725, 7.054290),
     'thumb.01.L': (30.529562, 4.026630, -14.679747),
     'thumb.02.L': (-3.135258, 0.730205, 26.215557),
-    'upper_arm.R': (-53.755990, -164.885725, 50.867281),
-    'forearm.R': (0.0, 0.0, -99.287127),
-    'hand.R': (-6.229030, 143.840861, -31.074547),
+    'upper_arm.R': (-57.305178, -162.246595, 57.875027),
+    'forearm.R': (0.0, 0.0, -96.482822),
+    'hand.R': (-10.597061, 143.473916, -25.714481),
     **{f'{finger}.{joint}.{side}': (18.0 if side=='L' else 28.0 if joint=='01' else 22.0, 0.0, 0.0)
        for finger in ('finger1', 'finger2', 'finger3') for joint in ('01', '02') for side in 'LR'},
 }
@@ -39,7 +40,8 @@ for bone in rig.pose.bones:
 marker = scene.timeline_markers.get('CROSSED ARMS') or scene.timeline_markers.new('CROSSED ARMS')
 marker.frame = FRAME
 scene.frame_end = max(scene.frame_end, FRAME)
-runpy.run_path(str(Path(__file__).with_name('fit-crossed-cloth.py')))
-scene.frame_set(FRAME)
+here = Path(__file__).parent
+for script in ('fit-sleeve-drape.py', 'fit-crossed-cloth.py', 'pose-presets.py'):
+    runpy.run_path(str(here/script))
 bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)
 print('Keyed CROSSED ARMS at frame', FRAME)
