@@ -65,7 +65,7 @@ for index, name in enumerate(('static', 'eye-L', 'eye-R')):
     if name.startswith('eye-'):
         side = name[-1]
         opening = control('Blink '+side, 'max(0.035,1-value)', 'blink_'+side)
-        # Sampling inversely scales the raster around the centre of the eye's first rect.
+        # Sampling inversely scales the raster around the centre of the eye's pupil rect.
         eye = svg.find(f"{SVG}g[@id='{name}']/{SVG}rect")
         centre = 1-(float(eye.get('y'))+float(eye.get('height'))/2)/canvas_height
         y = math(nodes, links, 'SUBTRACT', separate.outputs['Y'], centre)
