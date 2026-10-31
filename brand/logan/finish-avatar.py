@@ -127,12 +127,6 @@ def refresh_face():
             divide = add.inputs[0].links[0].from_node
             subtract = divide.inputs[0].links[0].from_node
             add.inputs[1].default_value = subtract.inputs[1].default_value = center
-    group = bpy.data.node_groups['LOGAN / CRT display']
-    glass = next(n for n in group.nodes if n.type == 'BSDF_PRINCIPLED')
-    # Black backing plus dielectric reflection: the emitted pixels stay opaque.
-    for name, value in {'Roughness':.035, 'Specular IOR Level':.5, 'IOR':1.45,
-                        'Coat Weight':1, 'Coat Roughness':.025}.items():
-        glass.inputs[name].default_value = value
 
 
 def finish_avatar():

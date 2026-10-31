@@ -5,10 +5,13 @@ The saved studio is never modified by rendering.
 """
 from pathlib import Path
 import sys
+import runpy
 import bpy
 
 args = sys.argv[sys.argv.index('--')+1:] if '--' in sys.argv else []
 variant = 'Staging' if 'staging' in args else 'Production'
+if variant == 'Staging':
+    runpy.run_path(str(Path(__file__).resolve().parent/'sync-staging.py'))['sync_staging']()
 scene = bpy.data.scenes['AVATAR · '+variant]
 bpy.context.window.scene = scene
 # The live studio may use Eevee and another preset for responsive editing.

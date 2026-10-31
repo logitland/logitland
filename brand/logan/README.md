@@ -8,16 +8,22 @@ GIF work is deferred until requested.
 
 **avatar-studio.blend** contains two editable scenes: **AVATAR · Production**
 (pink) and **AVATAR · Staging** (blue). Both preserve the manually posed crossed
-arms from the master. Production uses Mia's close 14mm framing; staging keeps
-the 85mm portrait. Both use f/2.8, eye focus, a slight camera roll, five area
+arms from the master. Both use Mia's close 14mm framing, the same pose, f/2.8,
+eye focus, a slight camera roll, five area
 lights, a real Poly Haven HDRI and a softened room backdrop in the opposite
 accent color: blue for production, pink for staging. All colored accents emit light,
 including the head gradients, SVG chest print, seams, pants, shoes and CRT face.
 The head is matte metal, the CRT screen glossy glass with black features on
 pink phosphor (blue in staging), and the jacket a
 fine woven weatherproof shell with teddy fleece on its inner shell and collar.
-Both eyes share the same height, with left-facing brows. Optical glow and subtle
-lens distortion complete the portrait. Staging has independent materials and face controls.
+Both enlarged eyes share the same height, with left-facing brows and horizontal
+edges aligned to the 72 CRT rows. The smirk is a tapered crescent. Narrow colored
+backlights catch the head bevels; shallow subsurface scattering softens cloth
+and rubber. Optical glow and subtle lens distortion complete the portrait.
+Staging differs only in its colors. `sync-staging.py` derives its geometry,
+pose, camera, materials and lighting from production; staging exports run this
+automatically without changing the saved studio. Run it in Blender and save
+after editing production to update the staging scene in the open file as well.
 
 Select **Screen / glass**, then **Material Properties → Surface** to adjust
 **Glass Roughness** (both reflection layers) and **Screen Diffusion** (the soft
@@ -26,6 +32,12 @@ the Roughness/Metallic fields under **Viewport Display** do not drive the
 rendered shader. Diffusion maps follow each eye's blink independently and preserve the
 black features. The SVG and PNGs are bright masks; the shader reverses them
 before staging recolors the phosphor.
+
+For grading, use **Color Management → Exposure** for scene exposure in stops.
+In **Compositing**, the nodes labeled **Grade / Exposure**, **Lift Gamma Gain**,
+**RGB Curves** and **Saturation** sit before bloom and lens effects. Blender's
+shutter setting controls motion blur; ISO is not an exposure control in the
+standard camera. `rim-portrait.py` establishes the rim lights and grading setup.
 
 Upload `renders/logan-avatar-512.png` or `renders/logan-staging-avatar-512.png`
 to Discord. The matching files without `-512` are the 2048px masters.

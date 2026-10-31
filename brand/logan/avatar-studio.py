@@ -6,7 +6,6 @@ the production scene at 768px for lighting review.
 """
 from pathlib import Path
 from math import radians
-import colorsys
 import runpy
 import sys
 
@@ -196,77 +195,11 @@ scene.view_settings.exposure = -.25
 scene.render.filepath = str(HERE/'renders/logan-avatar.png')
 scene['portrait_notes'] = '85mm, f/2.8, focus on eyes, 2-degree roll; pink production identity.'
 
-# Full-copy remaps the armature, constraints and drivers together. Materials are
-# then copied explicitly so changing staging cannot recolor production.
-bpy.ops.scene.new(type='FULL_COPY')
-staging = bpy.context.scene
-staging.name = 'AVATAR · Staging'
-copies = {}
-production_rig = next(o for o in scene.objects if o.get('logan_pose_controls'))
-staging_rig = next(o for o in staging.objects if o.get('logan_pose_controls'))
-
-
-def blue(color):
-    h, saturation, value = colorsys.rgb_to_hsv(*color[:3])
-    if saturation > .25 and (h > .73 or h < .02):
-        return (*colorsys.hsv_to_rgb(.59, saturation, value), color[3])
-    return tuple(color)
-
-
-for obj in staging.objects:
-    if obj.type == 'LIGHT' and 'rim · magenta' in obj.name:
-        obj.data.color = (.08, .38, 1)
-    if obj.type != 'MESH':
-        continue
-    for slot in obj.material_slots:
-        source = slot.material
-        if source is None:
-            continue
-        if source not in copies:
-            copy = source.copy()
-            copy.name = 'Staging / '+source.name
-            copies[source] = copy
-            if copy.node_tree.animation_data:
-                for driver in copy.node_tree.animation_data.drivers:
-                    for variable in driver.driver.variables:
-                        for target in variable.targets:
-                            if target.id == production_rig:
-                                target.id = staging_rig
-            copy.diffuse_color = blue(copy.diffuse_color)
-            for node in copy.node_tree.nodes:
-                for socket in list(node.inputs)+list(node.outputs):
-                    if socket.type == 'RGBA' and hasattr(socket, 'default_value'):
-                        socket.default_value = blue(socket.default_value)
-                if node.type == 'VALTORGB':
-                    for element in node.color_ramp.elements:
-                        element.color = blue(element.color)
-            # Artwork remains 2D: recolor its image signal before the CRT stage.
-            for node in list(copy.node_tree.nodes):
-                if node.type == 'TEX_IMAGE' and 'original SVG print' in source.name:
-                    destinations = [link.to_socket for link in node.outputs['Color'].links]
-                    hue = copy.node_tree.nodes.new('ShaderNodeHueSaturation')
-                    hue.name = 'Staging / blue SVG ink'
-                    hue.inputs['Hue'].default_value = .25
-                    copy.node_tree.links.new(node.outputs['Color'], hue.inputs['Color'])
-                    for destination in destinations:
-                        copy.node_tree.links.new(hue.outputs['Color'], destination)
-                if node.type == 'GROUP' and 'CRT display' in node.node_tree.name:
-                    socket = node.inputs['Image']
-                    signal = socket.links[0].from_socket
-                    hue = copy.node_tree.nodes.new('ShaderNodeHueSaturation')
-                    hue.name = 'Staging / blue phosphor'
-                    hue.inputs['Hue'].default_value = .25
-                    copy.node_tree.links.new(signal, hue.inputs['Color'])
-                    copy.node_tree.links.new(hue.outputs['Color'], socket)
-        slot.material = copies[source]
-staging.compositing_node_group = scene.compositing_node_group.copy()
-for node in staging.compositing_node_group.nodes:
-    if node.type == 'R_LAYERS':
-        node.scene = staging
-staging.render.filepath = str(HERE/'renders/logan-staging-avatar.png')
-staging['portrait_notes'] = 'Matching 85mm portrait; blue staging identity.'
-
+# Derive staging after production is finished so both scenes share every
+# photographic and geometric choice, with only their palettes differing.
 runpy.run_path(str(HERE/'finish-avatar.py'))['finish_avatar']()
+runpy.run_path(str(HERE/'rim-portrait.py'))['rim_portrait']()
+runpy.run_path(str(HERE/'sync-staging.py'))['sync_staging']()
 bpy.context.window.scene = scene
 for screen in bpy.data.screens:
     for space in (a.spaces.active for a in screen.areas if a.type == 'VIEW_3D'):
