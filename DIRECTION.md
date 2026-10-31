@@ -87,8 +87,8 @@ Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigged
 sleeves and trousers with full faceted volumes. Recessed pink emission spans the
 outer sleeves; the monitor's top-front and bottom-back chamfers have half-turn
 symmetry. The original SVG mark prints directly on the coat fabric. Magenta
-surface gradients, neon bloom, rear detailing, studio lighting, and neutral and
-waving poses are included. Facial animation uses 2D textures on the screen, passed through a CRT shader; the editable face source is `brand/logan/face/face.svg`.
+surface gradients, neon bloom, rear detailing, studio lighting, and neutral,
+waving and crossed-arms poses are included. Facial animation uses 2D textures on the screen, passed through a CRT shader; the editable face source is `brand/logan/face/face.svg`.
 Every visible mascot detail must share the supporting surface, be extruded from
 it, or overlap it, except the deliberately floating head. Garment hems and openings belong to the cloth mesh; colour
 graphics belong in materials. Inspect attachment in side and bent views, and

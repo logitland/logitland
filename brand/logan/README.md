@@ -8,7 +8,7 @@ supplied front reference.
 The saved jacket and pants studies are integrated into the master. Both garments
 retain their hollow construction, materials and deformation weights. The hands
 and arm bones follow the jacket's inward sleeve position. The master keeps its
-neutral and wave poses; the pants study's knee-bend pose remains in that study.
+neutral, wave and crossed-arms poses; the pants study's knee-bend pose remains in that study.
 `integrate-clothes.py` refreshes both garments from their saved study files;
 `build.py` imports them automatically after the head, followed by the approved hands
 and shoes. `integrate-shoes.py` refreshes the boots from their saved study while
@@ -202,7 +202,8 @@ output of an Image Texture node loaded with a movie or PNG sequence; connect
 the `CRT face` UV map to that texture, enable Auto Refresh, and set its frame
 start/duration. The screen UV canvas is 1804 × 1128.
 
-1. Choose frame **1** for neutral or **40** for the wave.
+1. Choose frame **1** for neutral, **40** for the wave, or **80** for crossed arms.
+   `pose-crossed-arms.py` keys the crossed-arms pose; `render.py -- crossed` renders it.
 2. Select **LOGAN · Pose me** in the Pose rig collection. Enable viewport Overlays
    and enter **Pose Mode**. Rotate the named body, arm, leg, hand, and finger bones.
    The saved poses use FK: rotate `upper_arm` at the shoulder and `forearm` around
