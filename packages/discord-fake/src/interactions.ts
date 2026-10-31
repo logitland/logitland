@@ -1,11 +1,14 @@
 // Discord calling the relay's interactions endpoint: signed requests for slash commands and button clicks, and the
-// follow-up webhook calls (`PATCH /webhooks/:application/:token/messages/@original`) the relay makes in answer.
+// follow-up webhook calls (`PATCH /webhooks/:application/:token/messages/@original`) the relay makes in answer. A click
+// answered with UPDATE_MESSAGE (type 7) changes the message the button is on, and so does a later edit of `@original`.
 // https://docs.discord.com/developers/interactions/receiving-and-responding
 
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
-import { errors, formBody, type Member } from './model.ts';
+import { DiscordHttpError, errors, formBody, type Member, type Message } from './model.ts';
 import type { DiscordFake } from './fake.ts';
-import type { Reply } from './rest.ts';
+import { messageEdit, type Reply } from './rest.ts';
+
+const UPDATE_MESSAGE = 7;
 
 const TOKEN_LIFETIME_MS = 15 * 60_000;
 const EPHEMERAL = 64;
@@ -17,7 +20,7 @@ export interface InteractionSpec {
   channelId?: string;
   /** A slash command such as /mirror agree. */
   command?: { name: string; subcommand?: string };
-  /** A click on a message button. */
+  /** A click on a message button; `messageId` is a message in `channelId`, which an UPDATE_MESSAGE answer changes. */
   button?: { customId: string; messageId?: string };
   ping?: boolean;
   /** Where to send it. Defaults to the application's interactions endpoint URL. */
@@ -128,8 +131,8 @@ export class Interactions {
           },
         };
       } else if (spec.button) {
-        const message = spec.button.messageId && channelId ? world.messagesIn(channelId).find((x) => x.id === spec.button!.messageId) : undefined;
-        payload = { ...common, type: 3, data: { custom_id: spec.button.customId, component_type: 2 }, ...(message ? { message } : {}) };
+        const message = spec.button.messageId && channelId ? world.findMessage(channelId, spec.button.messageId) : undefined;
+        payload = { ...common, type: 3, data: { custom_id: spec.button.customId, component_type: 2 }, ...(message ? { message: { ...message } } : {}) };
       } else throw new Error('Pass command, button or ping');
     }
 
@@ -165,7 +168,24 @@ export class Interactions {
     }
     record.response = { status: res.status, body: parsed };
     record.acknowledged = res.ok;
+    const answer = parsed as { type?: number; data?: Record<string, unknown> };
+    if (res.ok && answer.type === UPDATE_MESSAGE && payload.message) {
+      try {
+        this.editButtonMessage(record, answer.data ?? {});
+      } catch (err) {
+        // Discord shows "This interaction failed" and leaves the message as it was.
+        if (err instanceof DiscordHttpError) throw new Error(`Discord would refuse this UPDATE_MESSAGE: ${err.message} ${JSON.stringify(err.errors ?? {})}`);
+        throw err;
+      }
+    }
     return { status: res.status, body: parsed, interaction: record };
+  }
+
+  /** Changes the message a clicked button is on, as UPDATE_MESSAGE and edits of `@original` do. */
+  private editButtonMessage(record: InteractionRecord, body: Record<string, unknown>): Message {
+    const channelId = record.payload.channel_id as string;
+    const message = this.fake.world.findMessage(channelId, (record.payload.message as Message).id);
+    return this.fake.world.editMessage(channelId, message.id, messageEdit(message, body));
   }
 
   private memberPayload(guildId: string, m: Member): Record<string, unknown> {
@@ -215,6 +235,8 @@ export class Interactions {
 
   editOriginal(token: string, messageId: string, body: Record<string, unknown>): Reply {
     const record = this.lookup(token);
+    // A click's original is the message its button is on.
+    if (messageId === '@original' && record.payload.message) return { status: 200, json: this.editButtonMessage(record, body) };
     const { content, flags } = this.content(body);
     const at = new Date(this.fake.now()).toISOString();
     if (messageId !== '@original') {

@@ -220,6 +220,12 @@ export const MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19);
 /** Message flag: the message is laid out by components alone (containers, text displays), with no `content` or embeds. */
 export const IS_COMPONENTS_V2 = 1 << 15;
 
+/** Component types, of those the relay lays messages out with. https://docs.discord.com/developers/components/reference */
+export const Component = { actionRow: 1, button: 2, section: 9, textDisplay: 10, thumbnail: 11, separator: 14, container: 17 } as const;
+
+/** Button styles: `link` opens its `url`; the others send an interaction with their `custom_id`. */
+export const ButtonStyle = { primary: 1, secondary: 2, danger: 4, link: 5 } as const;
+
 /** Discord's code when it won't let a bot message someone, for example one who turned off DMs. */
 export const CANNOT_MESSAGE_USER = 50007;
 
@@ -286,9 +292,9 @@ export class DiscordRest {
     return { message: thread.message, rateLimit };
   }
 
-  /** New text for a message the bot posted. Discord does not keep allowed_mentions from the original, so it is sent again. */
-  editMessage(channelId: string, messageId: string, content: string): Promise<DiscordMessage> {
-    return this.send<DiscordMessage>('PATCH', `/channels/${channelId}/messages/${messageId}`, { content, allowed_mentions: { parse: [] } }, true);
+  /** New text or layout for a message the bot posted. Discord does not keep allowed_mentions from the original, so it is sent again. */
+  editMessage(channelId: string, messageId: string, body: CreateMessageBody): Promise<DiscordMessage> {
+    return this.send<DiscordMessage>('PATCH', `/channels/${channelId}/messages/${messageId}`, { ...body, allowed_mentions: { parse: [] } }, true);
   }
 
   /** The servers the bot is in (up to 200, more than any agent's bot may be in). */

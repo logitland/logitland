@@ -109,7 +109,7 @@ export function loganTools(relay: Relay, caller: Caller): McpTool[] {
       name: 'call_operation',
       title: 'Have Logan perform an operation',
       description:
-        'Logan performs one Discord operation in this server, if you may. Destructive ones (deletes, kicks, bans, timeouts, bulk changes) answer status pending: you confirm them on Logan’s message in the staff alerts channel.',
+        'Logan performs one Discord operation in this server, if you may. Destructive ones (deletes, kicks, bans, timeouts, bulk changes) answer status pending: you confirm them on Logan’s message in the staff log channel.',
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       input: Call,
       run: async ({ operation_id, params = {}, query = {}, body, reason }) => callOperation(relay, caller, operation_id, { params, query, body, reason }),

@@ -19,7 +19,7 @@ import {
   type Webhook,
 } from './model.ts';
 import type { Acting, DiscordFake, OtherBot } from './fake.ts';
-import type { AllowedMentions } from './world.ts';
+import type { AllowedMentions, World } from './world.ts';
 
 export interface RouteRequest {
   fake: DiscordFake;
@@ -201,6 +201,26 @@ function legacyFieldsWithLayout(o: Record<string, unknown>): void {
         'MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2',
         `The '${key}' field cannot be used when using MessageFlags.IS_COMPONENTS_V2`,
       );
+}
+
+/**
+ * What an edit to a bot's message changes, checked as Discord checks it: text, embeds and components, or with
+ * IS_COMPONENTS_V2 a layout alone. The flag is asked for or already on the message, which never loses it; a message that
+ * takes it drops its text and embeds. Also how a button's message is updated (interactions.ts).
+ */
+export function messageEdit(message: Message, o: Record<string, unknown>): Parameters<World['editMessage']>[2] {
+  if (((typeof o.flags === 'number' ? o.flags : 0) | message.flags) & IS_COMPONENTS_V2) {
+    const v2 = { ...o, flags: IS_COMPONENTS_V2 };
+    legacyFieldsWithLayout(v2);
+    const comps = components(v2);
+    if (!(comps ?? message.components).length) throw errors.emptyMessage();
+    return { content: '', embeds: [], components: comps, flags: IS_COMPONENTS_V2 };
+  }
+  const content = text(o, 'content', { max: 2000 });
+  const emb = embeds(o);
+  const comps = components(o);
+  if (!(content ?? message.content) && !message.poll && !(emb ?? message.embeds).length && !(comps ?? message.components).length) throw errors.emptyMessage();
+  return { content, embeds: emb, components: comps };
 }
 
 function embeds(o: Record<string, unknown>): unknown[] | undefined {
@@ -557,10 +577,7 @@ export function routes(): Route[] {
     const channel = fake.world.channel(params.channel!);
     const message = fake.world.findMessage(channel.id, params.message!);
     if (message.author.id !== bot.user.id) throw new DiscordHttpError(403, 50005, 'Cannot edit a message authored by another user');
-    const o = objectBody(body);
-    const content = text(o, 'content', { max: 2000 });
-    if (!(content ?? message.content) && !message.poll && !message.embeds.length) throw errors.emptyMessage();
-    return ok(fake.world.editMessage(channel.id, message.id, { content, embeds: embeds(o) }));
+    return ok(fake.world.editMessage(channel.id, message.id, messageEdit(message, objectBody(body))));
   });
 
   // Its own message, or anyone's with Manage Messages.

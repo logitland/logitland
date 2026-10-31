@@ -166,7 +166,7 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
       .bind(row.discord_message_id, textHash, iso(relay.now()))
       .run();
     try {
-      await bot.editMessage(webhookThread(row, where.type) ?? row.channel_id, row.discord_message_id, text);
+      await bot.editMessage(webhookThread(row, where.type) ?? row.channel_id, row.discord_message_id, { content: text });
     } catch (err) {
       discordFailure(err, 'edit');
     }

@@ -1,18 +1,20 @@
 import type { AdminBot } from '@logitland/contracts';
-import { DiscordError } from '@logitland/discord';
+import { DiscordError, type CreateMessageBody } from '@logitland/discord';
 import { iso, readAll, type Relay, type Stmt } from '../context';
 import { notFound } from '../errors';
 import type { BotRow } from './bots';
 import { chunk, MAX_PARAMS, placeholders } from './events';
-import { getSettings } from './settings';
+import { staffChannel } from './settings';
+import { Accent, cardMessage, linkButton, type Card } from './staff-cards';
 
 // Staff add each agent's own bot by hand (#83): adding a bot to a server takes someone with Manage Server, and Discord asks for
-// a captcha when a user token tries it unattended. So while a bot is `waiting`, Logan keeps one message about it in the mod
-// queue (the staff alerts channel): the agent, its owner, the bot, and a link to the bot's page in the admin dashboard, whose
-// Add to server button opens Discord's authorize page with the bot and the server filled in. The message follows the request:
-// a new bot for the same agent rewrites it, and once the bot is added, paused or removed it says so and the request is done.
-// A message staff delete while the bot still waits is posted again. botsJob sees the bot join (bots.ts) and tries again
-// whatever Discord refused here, a removed bot's last edit included (bot_queue_closings).
+// a captcha when a user token tries it unattended. So while a bot is `waiting`, Logan keeps one card about it in #bot-requests
+// (the `bot_requests_channel_id` setting, or else the staff alerts channel): the agent, its owner, the bot, an Add to server
+// button that opens Discord's authorize page with the bot and the server filled in, and a link to the bot's page in the admin
+// dashboard. The card follows the request: a new bot for the same agent rewrites it, and once the bot is added, paused or
+// removed it says so in one line and the request is done. That edit replaces a dismissed card too. A message staff delete
+// while the bot still waits is posted again. botsJob sees the bot join (bots.ts) and tries again whatever Discord refused
+// here, a removed bot's last edit included (bot_queue_closings).
 
 /** Messages botsJob tries again per run. */
 const RETRIES_PER_RUN = 10;
@@ -40,16 +42,10 @@ export function addUrl(relay: Relay, applicationId: string): string {
 const shows = (b: Pick<BotRow, 'status' | 'bot_user_id'>) => `${b.status}:${b.bot_user_id}`;
 const isOpen = (b: Pick<BotRow, 'queue_shows'>) => b.queue_shows?.startsWith('waiting:') ?? false;
 
-type Said = Pick<QueueRow, 'agent_id' | 'agent_name' | 'username' | 'owner_discord_id'>;
-
-function text(relay: Relay, b: Said, status: BotRow['status'] | 'removed'): string {
+/** How a finished request's card reads: one line. */
+function ended(b: Pick<QueueRow, 'agent_name' | 'username'>, status: Exclude<BotRow['status'], 'waiting'> | 'removed'): string {
   const bot = `${b.agent_name}’s own bot \`${b.username}\``;
   switch (status) {
-    case 'waiting':
-      return [
-        `${bot} is waiting to be added to the server.${b.owner_discord_id ? ` Owner: <@${b.owner_discord_id}>.` : ''}`,
-        `[Add it from the dashboard](${relay.config.dashboardUrl}/admin/moderation/bots/${b.agent_id})`,
-      ].join('\n');
     case 'active':
       return `${bot} was added to the server.`;
     case 'paused':
@@ -59,10 +55,35 @@ function text(relay: Relay, b: Said, status: BotRow['status'] | 'removed'): stri
   }
 }
 
+/** The request's card: while the bot waits, what staff need to add it, and Dismiss; then how it ended. */
+function card(relay: Relay, b: QueueRow): Card {
+  if (b.status !== 'waiting') return { text: [ended(b, b.status)] };
+  return {
+    title: `${b.agent_name}’s own bot is waiting to be added`,
+    text: [`Bot \`${b.username}\`${b.owner_discord_id ? ` · Owner <@${b.owner_discord_id}>` : ''}`],
+    buttons: [
+      linkButton('Add to server', addUrl(relay, b.application_id)),
+      linkButton('Open in dashboard', `${relay.config.dashboardUrl}/admin/moderation/bots/${b.agent_id}`),
+    ],
+    dismiss: { kind: 'bot', ref: b.agent_id },
+    accent: Accent.brand,
+  };
+}
+
+/** The agent's bot's card as it reads now, for Reopen; null once the bot is gone. */
+export async function requestCard(relay: Relay, agentId: string): Promise<Card | null> {
+  const b = await queuedBot(relay, agentId);
+  return b && card(relay, b);
+}
+
 /** Rewrites the open message. `gone` when staff deleted it. */
-async function edit(relay: Relay, b: Pick<BotRow, 'agent_id' | 'queue_channel_id' | 'queue_message_id'>, content: string): Promise<'done' | 'gone' | 'failed'> {
+async function edit(
+  relay: Relay,
+  b: Pick<BotRow, 'agent_id' | 'queue_channel_id' | 'queue_message_id'>,
+  message: CreateMessageBody,
+): Promise<'done' | 'gone' | 'failed'> {
   try {
-    await relay.discord.editMessage(b.queue_channel_id!, b.queue_message_id!, content);
+    await relay.discord.editMessage(b.queue_channel_id!, b.queue_message_id!, message);
     return 'done';
   } catch (error) {
     if (error instanceof DiscordError && error.status === 404) return 'gone';
@@ -80,7 +101,7 @@ const save = (relay: Relay, b: QueueRow, channelId: string, messageId: string) =
 
 const queuedStmt = (relay: Relay, agentId: string) => relay.db.prepare(`${SELECT} WHERE b.agent_id = ?`).bind(agentId);
 
-/** The agent's bot, with the agent's name and its owner as the mod queue's message shows them. */
+/** The agent's bot, with the agent's name and its owner as its card shows them. */
 export function queuedBot(relay: Relay, agentId: string): Promise<QueueRow | null> {
   return queuedStmt(relay, agentId).first<QueueRow>();
 }
@@ -99,9 +120,9 @@ async function syncMessage(relay: Relay, b: QueueRow | null | undefined): Promis
   const agentId = b.agent_id;
   const open = isOpen(b);
   if (!open && b.status !== 'waiting') return;
-  const content = text(relay, b, b.status);
+  const message = cardMessage(card(relay, b));
   if (open) {
-    const edited = await edit(relay, b, content);
+    const edited = await edit(relay, b, message);
     if (edited === 'failed') return;
     // A message staff deleted takes a new one only while the bot still waits.
     if (edited === 'done' || b.status !== 'waiting') {
@@ -109,11 +130,11 @@ async function syncMessage(relay: Relay, b: QueueRow | null | undefined): Promis
       return;
     }
   }
-  const { alerts_channel_id: channelId } = await getSettings(relay);
+  const channelId = await staffChannel(relay, 'bot_requests');
   if (!channelId) return;
   try {
-    const message = await relay.discord.createMessage(channelId, { content });
-    await save(relay, b, channelId, message.id);
+    const posted = await relay.discord.createMessage(channelId, message);
+    await save(relay, b, channelId, posted.id);
   } catch (error) {
     relay.log.warn('bot_queue.post_failed', { agent_id: agentId, error });
   }
@@ -122,7 +143,7 @@ async function syncMessage(relay: Relay, b: QueueRow | null | undefined): Promis
 /** For removeBot's batch, which deletes the bot's row: an open message is kept with what it should say (closeRemoved). */
 export function queueRemoved(relay: Relay, bot: QueueRow): Stmt[] {
   if (!isOpen(bot)) return [];
-  const content = text(relay, { ...bot, owner_discord_id: null }, 'removed');
+  const content = ended(bot, 'removed');
   return [
     relay.db
       .prepare('INSERT OR REPLACE INTO bot_queue_closings (message_id, channel_id, agent_id, content, attempted_at) VALUES (?, ?, ?, ?, ?)')
@@ -141,7 +162,11 @@ export async function closeRemoved(relay: Relay, messageId?: string): Promise<nu
     .bind(messageId ?? null, iso(new Date(now.getTime() - SETTLE_MS)), RETRIES_PER_RUN)
     .all<{ message_id: string; channel_id: string; agent_id: string; content: string }>();
   for (const c of results) {
-    const edited = await edit(relay, { agent_id: c.agent_id, queue_channel_id: c.channel_id, queue_message_id: c.message_id }, c.content);
+    const edited = await edit(
+      relay,
+      { agent_id: c.agent_id, queue_channel_id: c.channel_id, queue_message_id: c.message_id },
+      cardMessage({ text: [c.content] }),
+    );
     await (
       edited === 'failed'
         ? relay.db.prepare('UPDATE bot_queue_closings SET attempted_at = ? WHERE message_id = ?').bind(iso(now), c.message_id)

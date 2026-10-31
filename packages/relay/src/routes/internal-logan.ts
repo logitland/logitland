@@ -1,11 +1,11 @@
 import { LoganAuthorization, LoganDecision, type LoganSetup } from '@logitland/contracts';
 import { parse } from '../errors';
 import { authorize, consent, loganUrls } from '../services/logan/oauth';
-import { getSettings } from '../services/settings';
+import { staffChannel } from '../services/settings';
 import { adminCan, body, type RegisterRoutes } from './shared';
 
 // The dashboard's side of the Logan admin MCP: its /oauth/authorize page checks a request and hands over the signed-in person's
-// decision (the relay issues the code), and its Logan page shows how to connect.
+// decision (the relay issues the code), and its Logan page shows how to connect and where Confirm prompts wait.
 
 export const register: RegisterRoutes = (app, relay) => {
   app.post('/internal/owners/:ownerId/logan/consent', async (c) =>
@@ -17,8 +17,8 @@ export const register: RegisterRoutes = (app, relay) => {
   );
 
   app.get('/internal/admin/logan', adminCan('logan'), async (c) => {
-    const { alerts_channel_id: id } = await getSettings(relay);
+    const id = await staffChannel(relay, 'staff_log');
     const known = id ? await relay.db.prepare('SELECT name FROM channels WHERE id = ?').bind(id).first<{ name: string }>() : null;
-    return c.json({ mcp_url: loganUrls(relay).resource, alerts_channel: id ? { id, name: known?.name ?? id } : null } satisfies LoganSetup);
+    return c.json({ mcp_url: loganUrls(relay).resource, staff_log_channel: id ? { id, name: known?.name ?? id } : null } satisfies LoganSetup);
   });
 };

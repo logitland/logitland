@@ -523,7 +523,7 @@ export class World {
     return message;
   }
 
-  editMessage(channelId: string, id: string, patch: { content?: string; components?: unknown[]; embeds?: unknown[] }): Message {
+  editMessage(channelId: string, id: string, patch: { content?: string; components?: unknown[]; embeds?: unknown[]; flags?: number }): Message {
     const channel = this.channel(channelId);
     const message = this.findMessage(channelId, id);
     if (patch.content !== undefined) {
@@ -536,6 +536,7 @@ export class World {
     }
     if (patch.components !== undefined) message.components = patch.components;
     if (patch.embeds !== undefined) message.embeds = patch.embeds;
+    if (patch.flags !== undefined) message.flags = patch.flags;
     message.edited_timestamp = this.iso();
     this.emit(channel.guild_id, 'MESSAGE_UPDATE', this.gatewayMessage(message));
     return message;

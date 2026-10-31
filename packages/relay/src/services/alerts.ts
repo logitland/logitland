@@ -1,10 +1,12 @@
 import { iso, type Relay } from '../context';
 import { vitals } from './health';
-import { getSettings } from './settings';
+import { staffChannel } from './settings';
+import { Accent, cardMessage, linkButton } from './staff-cards';
 
-// Operational alerts (#21). The bot posts in the staff channel (the `alerts_channel_id` setting) when a condition starts and
-// once when it clears, never again while it lasts. Cron runs this every minute; job_state remembers what is active and
-// whether it was posted, so a post that fails is tried again on the next run. No alerts channel, no alerts.
+// Operational alerts (#21). The bot posts a card in #relay-health (the `relay_health_channel_id` setting, or else the staff
+// alerts channel) when a condition starts and once when it clears, never again while it lasts. They only inform, so they
+// have no Dismiss. Cron runs this every minute; job_state remembers what is active and whether it was posted, so a post that
+// fails is tried again on the next run. No channel, no alerts.
 
 /** Deliveries waiting (pending or retrying) beyond which the backlog is alerted. */
 export const BACKLOG_THRESHOLD = 1000;
@@ -61,9 +63,15 @@ async function conditions(relay: Relay): Promise<Record<string, Condition>> {
   };
 }
 
-async function post(relay: Relay, channelId: string, content: string): Promise<boolean> {
+/** Posts an alert, red while the condition lasts and green once it clears, linking to the Health page. */
+async function post(relay: Relay, channelId: string, content: string, cleared = false): Promise<boolean> {
   try {
-    await relay.discord.createMessage(channelId, { content });
+    const card = cardMessage({
+      text: [content],
+      accent: cleared ? Accent.success : Accent.destructive,
+      buttons: [linkButton('Open Health', `${relay.config.dashboardUrl}/admin/health`)],
+    });
+    await relay.discord.createMessage(channelId, card);
     return true;
   } catch (error) {
     relay.log.warn('alerts.post_failed', { channel_id: channelId, error });
@@ -73,7 +81,7 @@ async function post(relay: Relay, channelId: string, content: string): Promise<b
 
 /** The cron job. Returns how many alerts it posted. */
 export async function alertsJob(relay: Relay): Promise<number> {
-  const { alerts_channel_id: channelId } = await getSettings(relay);
+  const channelId = await staffChannel(relay, 'relay_health');
   if (!channelId) return 0;
   const saved = await relay.db.prepare('SELECT value FROM job_state WHERE key = ?').bind(STATE_KEY).first<{ value: string }>();
   const state: State = saved ? JSON.parse(saved.value) : {};
@@ -83,7 +91,7 @@ export async function alertsJob(relay: Relay): Promise<number> {
     const was = state[key];
     if (c.alert === null) {
       // A clear that fails to post is tried again next run.
-      if (was?.posted && !(await post(relay, channelId, c.cleared))) continue;
+      if (was?.posted && !(await post(relay, channelId, c.cleared, true))) continue;
       if (was?.posted) posted++;
       delete state[key];
       continue;

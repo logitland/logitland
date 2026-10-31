@@ -1,14 +1,19 @@
 import { LIMITS } from '@logitland/contracts';
+import type { CreateMessageBody } from '@logitland/discord';
 import { z } from 'zod';
 import { RelayError, parse, unauthorized } from '../errors';
 import type { Relay } from '../context';
+import { adminStanding } from './admins';
+import { requestCard } from './bot-queue';
+import { strikeCard } from './bot-strikes';
 import { hit } from './limits';
 import { setPersonRole } from './people-roles';
 import { answerButton, isLoganButton } from './logan/calls';
+import { cardButton, cardMessage, dismissedMessage, type Card, type CardKind } from './staff-cards';
 import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, revokeConsent, type ConsentActor } from './consent';
 
 // Discord interactions: the /consent command and its agree button (only the button agrees: /consent agree shows the notice
-// with it), and the Confirm and Cancel buttons on the Logan admin MCP's requests.
+// with it), the Confirm and Cancel buttons on the Logan admin MCP's requests, and Dismiss and Reopen on staff cards.
 // https://docs.discord.com/developers/interactions/receiving-and-responding
 // https://docs.discord.com/developers/interactions/overview (verifying requests)
 
@@ -58,7 +63,7 @@ type Interaction = z.infer<typeof Interaction>;
 
 export interface InteractionResponse {
   type: number;
-  data?: { content?: string; flags?: number; allowed_mentions?: { parse: never[] }; components?: ReturnType<typeof agreeButton> | [] };
+  data?: { content?: string; flags?: number; allowed_mentions?: { parse: never[] }; components?: unknown[] };
 }
 
 /* ---------- Signature ---------- */
@@ -112,12 +117,17 @@ const edit = (content: string): InteractionResponse => ({
   data: { content, allowed_mentions: { parse: [] }, components: [] },
 });
 
+/** Lays out the card the pressed button is on afresh. */
+const update = (message: CreateMessageBody): InteractionResponse => ({ type: Callback.UPDATE_MESSAGE, data: { ...message, allowed_mentions: { parse: [] } } });
+
 /** Agreeing and withdrawing write history that is kept for good, so one person can only do so much of it. */
 const TOGGLES_PER_10_MIN = 6;
 const tooOften = (seconds: number) =>
   `You’ve agreed and withdrawn a few times in a row. Wait about ${Math.ceil(seconds / 60)} ${seconds > 60 ? 'minutes' : 'minute'} and try again.`;
 
 const WRONG_PLACE = 'This only works in the Logitland server. Run it there.';
+const NOT_STAFF = 'Only staff with the moderate power can dismiss or reopen this.';
+const CARD_GONE = 'What this card was about is gone.';
 const UNKNOWN = 'I don’t know that command. Try /consent agree, /consent withdraw or /consent status.';
 const WITHDRAW_NOTE = 'To stop, run `/consent withdraw`: nothing you write after that is relayed.';
 const WITHDRAWN = 'Your agreement has ended: nothing you write from now on is relayed. Messages already relayed stay.';
@@ -130,6 +140,9 @@ const agreed = (changed: boolean) =>
   ].join('\n\n');
 
 /* ---------- Handling ---------- */
+
+/** Each kind of staff card, rebuilt as it reads now for Dismiss and Reopen (staff-cards.ts); null once its rows are gone. */
+const CARDS: Record<CardKind, (relay: Relay, ref: string) => Promise<Card | null>> = { bot: requestCard, strike: strikeCard };
 
 type Action = 'notice' | 'agree' | 'withdraw' | 'status';
 
@@ -155,11 +168,20 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
   const guildId = relay.config.discord.guildId;
   const userId = i.member?.user.id ?? i.user?.id;
   const customId = i.data?.custom_id;
-  // Confirm and Cancel on a request the Logan admin MCP left in the staff alerts channel (logan/calls.ts).
+  // Confirm and Cancel on a request the Logan admin MCP left in the staff log (logan/calls.ts).
   if (i.type === InteractionType.MESSAGE_COMPONENT && isLoganButton(customId)) {
     if (!guildId || i.guild_id !== guildId || !userId) return say(WRONG_PLACE);
-    const answer = await answerButton(relay, customId, userId, defer, (content) => editOriginal(relay, i, content));
-    return 'ephemeral' in answer ? say(answer.ephemeral) : edit(answer.update);
+    const answer = await answerButton(relay, customId, userId, defer, (content) => editOriginal(relay, i, cardMessage({ text: [content] })));
+    return 'ephemeral' in answer ? say(answer.ephemeral) : update(cardMessage({ text: [answer.update] }));
+  }
+  const press = i.type === InteractionType.MESSAGE_COMPONENT ? cardButton(customId) : null;
+  if (press) {
+    if (!guildId || i.guild_id !== guildId || !userId) return say(WRONG_PLACE);
+    if (!(await adminStanding(relay, userId, i.member?.roles)).permissions.includes('moderate')) return say(NOT_STAFF);
+    const card = await CARDS[press.kind](relay, press.ref);
+    if (!card) return say(CARD_GONE);
+    // A card that stopped asking anything of staff (a bot request that ended) can't be dismissed: it shows as it reads now.
+    return update(press.dismiss && card.title && card.dismiss ? dismissedMessage(card.title, card.dismiss, userId) : cardMessage(card));
   }
   const action = actionOf(i);
   if (!action) return say(UNKNOWN);
@@ -225,14 +247,14 @@ export async function answerFromGateway(relay: Relay, raw: unknown): Promise<voi
  * Edits the deferred reply through the interaction webhook; the interaction token is the credential, so no bot token.
  * The token and URL never reach a log. A 404 can mean our acknowledgement hasn't landed at Discord yet, so it is retried briefly.
  */
-async function editOriginal(relay: Relay, i: Interaction, content: string): Promise<void> {
+async function editOriginal(relay: Relay, i: Interaction, message: CreateMessageBody): Promise<void> {
   const url = `${relay.discord.apiBase}/webhooks/${i.application_id}/${i.token}/messages/@original`;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await relay.fetch(url, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+        body: JSON.stringify({ ...message, allowed_mentions: { parse: [] } }),
         signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) return;

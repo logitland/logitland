@@ -1,7 +1,8 @@
 import { namesToBits, type PermissionName } from './services/logan/catalog';
 import { describe, expect, it } from 'vitest';
 import { pruneLoganJob } from './services/logan/oauth';
-import { ADMIN_DISCORD, GUILD, application, harness, seedOwner } from './testing';
+import { updateSettings } from './services/settings';
+import { ADMIN_DISCORD, GUILD, application, cardButtons, cardText, harness, seedOwner } from './testing';
 
 // The Logan admin MCP: a person's MCP client signs in through the dashboard's Discord sign-in (OAuth 2.1 with PKCE) and has
 // Logan act in the server within that person's own permissions, checked again on every call.
@@ -17,6 +18,7 @@ const LOUNGE = '110000000000000001';
 const SECRET = '110000000000000002';
 const ALERTS = '110000000000000003';
 const ELSEWHERE = '110000000000000004';
+const STAFF_LOG = '110000000000000005';
 const REDIRECT = 'http://localhost:33418/callback';
 const VERIFIER = 'a-pkce-code-verifier-that-is-long-enough-to-be-valid-0123456789';
 
@@ -151,7 +153,7 @@ async function setup() {
     const signature = hex(await crypto.subtle.sign({ name: 'Ed25519' }, pair.privateKey, new TextEncoder().encode(timestamp + raw)));
     const res = await h.call('POST', '/v1/discord/interactions', payload, { 'x-signature-ed25519': signature, 'x-signature-timestamp': timestamp });
     await h.settle();
-    return (await res.json()) as { type: number; data: { content: string; flags?: number } };
+    return (await res.json()) as { type: number; data: { content?: string; flags?: number; components?: unknown[] } };
   }
 
   const sent = (method: string, path: string) => h.discordCalls.filter((r) => r.method === method && new URL(r.url).pathname.endsWith(path));
@@ -353,8 +355,9 @@ describe('what Logan offers', () => {
 });
 
 describe('running a call', () => {
-  it('runs a write at once, as Logan, naming the person in both audit logs and the alerts channel', async () => {
+  it('runs a write at once, as Logan, naming the person in both audit logs and the staff log', async () => {
     const { h, owner, signIn, tool, sent } = await setup();
+    await updateSettings(h.relay, 'test', { staff_log_channel_id: STAFF_LOG });
     const { access_token } = await signIn();
     const res = await tool(access_token, 'call_operation', {
       operation_id: 'create_pin',
@@ -366,8 +369,11 @@ describe('running a call', () => {
     expect(decodeURIComponent(pin!.headers.get('x-audit-log-reason')!)).toBe('pat via Logan admin MCP: the rules');
     const audited = await h.db.prepare("SELECT actor_id, target_id, reason FROM audit_log WHERE action = 'logan.create_pin'").first();
     expect(audited).toEqual({ actor_id: owner.id, target_id: `PUT /channels/${LOUNGE}/messages/pins/910000000000000001`, reason: 'the rules' });
-    const alert = (await sent('POST', `/channels/${ALERTS}/messages`)[0]!.json()) as { content: string };
-    expect(alert.content).toContain(`<@${PERSON}> had Logan run \`create_pin\``);
+    expect(sent('POST', `/channels/${ALERTS}/messages`)).toHaveLength(0);
+    const alert = await sent('POST', `/channels/${STAFF_LOG}/messages`)[0]!.json();
+    expect(cardText(alert)).toBe(
+      `<@${PERSON}> had Logan run \`create_pin\` (\`PUT /channels/${LOUNGE}/messages/pins/910000000000000001\`) through the admin MCP.\nReason: the rules`,
+    );
   });
 
   it('holds a destructive call until the person who asked confirms it', async () => {
@@ -381,8 +387,13 @@ describe('running a call', () => {
     expect(kick.data).toMatchObject({ status: 'pending', operation_id: 'delete_guild_member' });
     const requestId = kick.data.request_id as string;
     expect(sent('DELETE', `/guilds/${GUILD}/members/${MEMBER}`)).toHaveLength(0);
-    const posted = (await sent('POST', `/channels/${ALERTS}/messages`)[0]!.json()) as { components: { components: { custom_id: string }[] }[] };
-    const [confirm] = posted.components[0]!.components.map((c) => c.custom_id);
+    // No staff log is set, so the Confirm waits in the alerts channel.
+    const posted = await sent('POST', `/channels/${ALERTS}/messages`)[0]!.json();
+    expect(cardButtons(posted)).toEqual([
+      { label: 'Confirm', custom_id: `logan_confirm:${requestId}` },
+      { label: 'Cancel', custom_id: `logan_cancel:${requestId}` },
+    ]);
+    const confirm = `logan_confirm:${requestId}`;
 
     const stranger = await press(confirm!, OTHER_MOD);
     expect(stranger.data.flags).toBe(64);
@@ -391,8 +402,8 @@ describe('running a call', () => {
     await press(confirm!, PERSON);
     expect(sent('DELETE', `/guilds/${GUILD}/members/${MEMBER}`)).toHaveLength(1);
     expect((await tool(access_token, 'request_status', { request_id: requestId })).data).toMatchObject({ status: 'done' });
-    const edited = (await sent('PATCH', '/messages/@original')[0]!.json()) as { content: string };
-    expect(edited.content).toContain(`<@${PERSON}> confirmed: Logan ran \`delete_guild_member\``);
+    const edited = await sent('PATCH', '/messages/@original')[0]!.json();
+    expect(cardText(edited)).toContain(`<@${PERSON}> confirmed: Logan ran \`delete_guild_member\``);
     expect(await h.db.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'logan.delete_guild_member'").first()).toEqual({ n: 1 });
     // Pressing again does nothing more.
     expect((await press(confirm!, PERSON)).data.flags).toBe(64);
@@ -410,7 +421,7 @@ describe('running a call', () => {
     h.advance(10 * 60_000);
     expect((await tool(access_token, 'request_status', { request_id: timeout.data.request_id })).data).toMatchObject({ status: 'expired' });
     const answer = await press(`logan_confirm:${String(timeout.data.request_id)}`, PERSON);
-    expect(answer.data.content).toContain('expired');
+    expect(cardText(answer.data)).toContain('expired');
     expect(sent('PATCH', `/guilds/${GUILD}/members/${MEMBER}`)).toHaveLength(0);
   });
 
@@ -432,8 +443,8 @@ describe('running a call', () => {
     await press(`logan_confirm:${String(ban.data.request_id)}`, PERSON);
     expect(sent('PUT', `/guilds/${GUILD}/bans/${MEMBER}`)).toHaveLength(0);
     expect(await h.db.prepare('SELECT status FROM logan_requests WHERE id = ?').bind(ban.data.request_id).first()).toEqual({ status: 'failed' });
-    const edited = (await sent('PATCH', '/messages/@original')[0]!.json()) as { content: string };
-    expect(edited.content).toBe('Logan didn’t run `ban_user_from_guild`: Acting through Logan needs the logan admin power.');
+    const edited = await sent('PATCH', '/messages/@original')[0]!.json();
+    expect(cardText(edited)).toBe('Logan didn’t run `ban_user_from_guild`: Acting through Logan needs the logan admin power.');
   });
 });
 
