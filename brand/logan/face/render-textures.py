@@ -1,7 +1,8 @@
 """Rasterize the editable SVG layers for Blender; requires ImageMagick.
 
-Run with system Python after editing face.svg. Black-backed layers add together
-in the face material, keeping eye motion separate from the fixed artwork.
+Run with system Python after editing face.svg. The face material keeps the
+brightest of the black-backed layers, so overlaps stay one solid colour and eye
+motion stays separate from the fixed artwork.
 """
 from copy import deepcopy
 from pathlib import Path
