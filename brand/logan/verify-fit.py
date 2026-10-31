@@ -14,6 +14,12 @@ checks = runpy.run_path(str(Path(__file__).with_name('verify.py')))
 geometry, touches = checks['geometry'], checks['touches']
 scene = bpy.data.scenes['LOGAN']
 rig = bpy.data.objects['LOGAN · Pose me']
+# Contact deformation must keep the clothes inexpensive to pose and edit.
+garments = ['Jacket / torso', 'Trouser / continuous pants', 'Cuff / band.L',
+            'Cuff / band.R', 'Collar / raised band']
+graph = bpy.context.evaluated_depsgraph_get()
+face_count = sum(len(bpy.data.objects[name].evaluated_get(graph).data.polygons) for name in garments)
+assert face_count<=5000, f'Clothing exceeds the low-poly budget: {face_count} faces'
 parts = [obj for obj in bpy.data.collections['01 · Logan / meshes'].objects
          if obj.name.startswith(('Body /', 'Pelvis /', 'Hand /', 'Boot /'))]
 assert not any(obj.name.startswith('Neck /') for obj in scene.objects), 'The head must float above the collar'
