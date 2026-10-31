@@ -145,13 +145,13 @@ def finish_avatar():
                     shader.inputs['Roughness'].default_value = .6
                     shader.inputs['Coat Weight'].default_value = 0
         if 'command room plate' in name:
-            # Opposite hues separate each silhouette from the room behind it.
-            palette = 'pink' if material.name.startswith('Staging / ') else 'blue'
-            image = bpy.data.images.load(str(HERE/'environment'/f'command-room-{palette}.png'), check_existing=True)
+            # Both accent palettes share the subdued warm arcade backdrop.
+            image = bpy.data.images.load(str(HERE/'environment/arcade-playground.png'), check_existing=True)
             image.reload()
             image.pack()
             texture = next(n for n in material.node_tree.nodes if n.type == 'TEX_IMAGE')
             texture.image = image
+            next(n for n in material.node_tree.nodes if n.type == 'EMISSION').inputs['Strength'].default_value = .5
     for scene in bpy.data.scenes:
         if not scene.name.startswith('AVATAR ·'):
             continue

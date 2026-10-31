@@ -82,7 +82,7 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-Logan has pink production and blue staging portraits in `brand/logan/avatar-studio.blend`. Both use the exact same pose and framing; only their colors change. Saturated rim lights and emissive accents sit against soft room detail in the opposite accent color. His head is matte metal, screen glossy glass, and coat a weatherproof woven shell with teddy lining.
+Logan has pink production and blue staging portraits in `brand/logan/avatar-studio.blend`. Both use the exact same pose and framing; only their colors change. Saturated rim lights and emissive accents sit against a playful, subdued arcade backdrop with oversized warm shapes. His head is matte metal, screen convex glossy CRT glass, and coat a weatherproof woven shell with teddy lining.
 Saved frames are static pose presets; animation and GIF work wait for Mia's request.
 Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigged
 3D interpretation of the supplied pink-screen robot concept, with continuous deforming

@@ -18,7 +18,7 @@ def blue(color):
 
 
 def sync_staging():
-    """Keep staging identical to production apart from accent and backdrop hues."""
+    """Keep staging identical to production apart from character accent hues."""
     production = bpy.data.scenes['AVATAR · Production']
     old = bpy.data.scenes.get('AVATAR · Staging')
     if old:
@@ -88,9 +88,6 @@ def sync_staging():
                 if node.type == 'VALTORGB':
                     for element in node.color_ramp.elements:
                         element.color = blue(element.color)
-                if node.type == 'TEX_IMAGE' and 'command room plate' in source.name:
-                    node.image = bpy.data.images.load(str(HERE/'environment/command-room-pink.png'),check_existing=True)
-                    node.image.pack()
                 if node.type == 'TEX_IMAGE' and 'original SVG print' in source.name:
                     destinations = [link.to_socket for link in node.outputs['Color'].links]
                     hue = nodes.new('ShaderNodeHueSaturation')
@@ -104,7 +101,7 @@ def sync_staging():
         if node.type == 'R_LAYERS':
             node.scene = staging
     staging.render.filepath = str(HERE/'renders/logan-staging-avatar.png')
-    staging['portrait_notes'] = 'Production pose, framing, lighting and finish; blue accents on a pink room.'
+    staging['portrait_notes'] = 'Production pose, framing, lighting and warm arcade backdrop; blue character accents.'
     bpy.context.window.scene = production
     bpy.context.view_layer.update()
     return staging

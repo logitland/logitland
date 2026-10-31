@@ -8,16 +8,23 @@ import bmesh
 import bpy
 
 KEY = 'CRT glass / shallow bulge'
-DEPTH = .045
+DEPTH = .10
 
 
 def curve_screen():
-    """Bow the glass center outward 4.5 cm across its 1.77 m visible width."""
+    """Bow the glass center outward by about 6% of its visible width."""
     obj = bpy.data.scenes['AVATAR · Production'].objects['Screen / glass']
-    if obj.data.shape_keys and KEY in obj.data.shape_keys.key_blocks:
-        return obj
     if obj.data.users > 1:
         obj.data = obj.data.copy()
+    if obj.data.shape_keys and KEY in obj.data.shape_keys.key_blocks:
+        ratio = DEPTH / obj['crt_bulge_depth']
+        if ratio != 1:
+            basis = obj.data.shape_keys.key_blocks['Basis']
+            for base, point in zip(basis.data, obj.data.shape_keys.key_blocks[KEY].data):
+                point.co = base.co + (point.co-base.co)*ratio
+            obj['crt_bulge_depth'] = DEPTH
+            obj.data.update()
+        return obj
     bm = bmesh.new()
     bm.from_mesh(obj.data)
     bm.normal_update()

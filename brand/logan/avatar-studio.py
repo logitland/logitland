@@ -148,10 +148,10 @@ mesh.materials.append(mat)
 n, l = mat.node_tree.nodes, mat.node_tree.links
 n.clear()
 tex = n.new('ShaderNodeTexImage')
-tex.image = bpy.data.images.load(str(HERE/'environment/command-room.png'), check_existing=True)
+tex.image = bpy.data.images.load(str(HERE/'environment/arcade-playground.png'), check_existing=True)
 tex.image.pack()
 emission = n.new('ShaderNodeEmission')
-emission.inputs['Strength'].default_value = .7
+emission.inputs['Strength'].default_value = .5
 output = n.new('ShaderNodeOutputMaterial')
 l.new(tex.outputs['Color'], emission.inputs['Color'])
 l.new(emission.outputs[0], output.inputs['Surface'])

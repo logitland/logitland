@@ -10,8 +10,8 @@ GIF work is deferred until requested.
 (pink) and **AVATAR · Staging** (blue). Both preserve the manually posed crossed
 arms from the master. Both use Mia's close 14mm framing, the same pose, f/2.8,
 eye focus, a slight camera roll, five area
-lights, a real Poly Haven HDRI and a softened room backdrop in the opposite
-accent color: blue for production, pink for staging. All colored accents emit light,
+lights, a real Poly Haven HDRI and a shared generated arcade backdrop: oversized
+tangerine and mint forms against subdued plum. All colored accents emit light,
 including the head gradients, SVG chest print, seams, pants, shoes and CRT face.
 The head is matte metal, the CRT screen glossy glass with black features on
 pink phosphor (blue in staging), and the jacket a
@@ -37,7 +37,7 @@ before staging recolors the phosphor.
 
 The screen has shallow convex CRT glass, with its perimeter seated in the bezel.
 Under **Object Data Properties → Shape Keys**, adjust **CRT glass / shallow
-bulge**: 0 is flat, 1 is the portrait's gentle curve. The artwork and scanlines
+bulge**: 0 is flat, 1 bows the center outward by about 6% of the screen width. The artwork and scanlines
 follow the same surface. `curve-screen.py` builds this adjustable front grid.
 
 For grading, use **Color Management → Exposure** for scene exposure in stops.
