@@ -162,16 +162,28 @@ try:
             jacket.data.attributes['Rest weights / forearm.'+side].data)]
         for vertex in jacket.data.vertices:
             p = vertex.co
-            move = smoothstep(.25,.80,sign*p.x)*(1-smoothstep(1.65,1.90,sign*p.x))
+            move = smoothstep(-.15,.70,sign*p.x)*(1-smoothstep(1.65,1.90,sign*p.x))
             move *= 1-smoothstep(4.75,5.12,p.z)*(1-smoothstep(.65,1.1,abs(p.x)))
-            # Preserve the slid sleeve's complete cross-section. A length-only
-            # cloth solve can otherwise satisfy tension by collapsing its width.
-            # Draw the required ease from the torso and soft armhole transition.
-            move *= 1-smoothstep(.20,.80,sleeve_weights[vertex.index])
+            # Let whole sleeve sections travel; pinning their inner vertices
+            # traps all remaining tension in the last mobile armhole row.
+            move *= 1-.65*smoothstep(.20,.80,sleeve_weights[vertex.index])
             if weights[names.index(lower.name)][vertex.index]>.5:
                 move *= 1-smoothstep(.35,.80,(p-lower.head_local).dot(lower_axis)/lower.length)
             mobility.append(move)
-        for iteration in range(600):
+        # Cross-section braces keep the sleeve broad while its centre can slide.
+        # Use opposite points in the same rest-space section, including pairs
+        # that are not mesh edges, so the solver cannot flatten a fabric tube.
+        upper = rig.data.bones['upper_arm.'+side]
+        axis = (lower.tail_local-upper.head_local).normalized()
+        sleeve = [i for i,w in enumerate(sleeve_weights) if w>.8]
+        braces = []
+        for offset,a in enumerate(sleeve):
+            for b in sleeve[offset+1:]:
+                delta = basis.data[b].co-basis.data[a].co
+                if abs(delta.dot(axis))<.055 and delta.length>.20:
+                    braces.append((a,b,(initial[b]-initial[a]).length))
+        iterations = 1200
+        for iteration in range(iterations):
             for a,b,rest_length in edges:
                 delta = points[b]-points[a]
                 length = delta.length
@@ -180,6 +192,17 @@ try:
                 if length<=limit or total<1e-8:
                     continue
                 correction = delta*((length-limit)/(length*total))
+                points[a] += correction*mobility[a]
+                points[b] -= correction*mobility[b]
+            for a,b,width in braces:
+                delta = points[b]-points[a]
+                length = delta.length
+                total = mobility[a]+mobility[b]
+                if total<1e-8 or length<1e-8:
+                    continue
+                if length>=width*.95:
+                    continue
+                correction = delta*((length-width*.95)/(length*total))
                 points[a] += correction*mobility[a]
                 points[b] -= correction*mobility[b]
             if iteration<350:
@@ -193,7 +216,16 @@ try:
                     continue
                 adjacent = neighbors[index]
                 average = sum((offsets[j]*w for j,w in adjacent), Vector())/sum(w for j,w in adjacent)
-                points[index] = initial[index]+offsets[index].lerp(average,.12*(1-iteration/600))
+                points[index] = initial[index]+offsets[index].lerp(average,.12*max(0,1-iteration/600))
+        # Boolean seam fragments are much smaller than neighbouring cloth
+        # panels. Fair the displacement field so they do not become sharp
+        # puckers when the length constraints pull the side of the coat up.
+        for iteration in range(24):
+            offsets = [p-q for p,q in zip(points,initial)]
+            for index, move in enumerate(mobility):
+                adjacent = neighbors[index]
+                average = sum((offsets[j]*w for j,w in adjacent), Vector())/sum(w for j,w in adjacent)
+                points[index] = initial[index]+offsets[index].lerp(average,.35*move)
         # Armature skinning is affine per vertex. Probe its three basis vectors
         # to map the posed displacement back into a rest-space shape key, also
         # supporting the existing dual-quaternion volume-preserving modifier.
@@ -211,6 +243,9 @@ try:
             transform = Matrix([axis[index] for axis in axes]).transposed()
             assert abs(transform.determinant())>.2, f'Degenerate deformation probe at {index}: {transform}, weights {[w[index] for w in weights]}'
             point.co += transform.inverted() @ (points[index]-initial[index])
+        actual = evaluated_points()
+        residual = max((a-b).length for a,b in zip(actual,points))
+        assert residual<.001, f'Arm {side}: cloth correction mapping error {residual:.6f}'
         print(f'Arm {side}: spread cloth tension through {sum(m>0 for m in mobility)} vertices')
 finally:
     jacket.shape_key_remove(probe)
