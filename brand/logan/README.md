@@ -35,6 +35,11 @@ rendered shader. Diffusion maps follow each eye's blink independently and preser
 black features. The SVG and PNGs are bright masks; the shader reverses them
 before staging recolors the phosphor.
 
+The screen has shallow convex CRT glass, with its perimeter seated in the bezel.
+Under **Object Data Properties → Shape Keys**, adjust **CRT glass / shallow
+bulge**: 0 is flat, 1 is the portrait's gentle curve. The artwork and scanlines
+follow the same surface. `curve-screen.py` builds this adjustable front grid.
+
 For grading, use **Color Management → Exposure** for scene exposure in stops.
 In **Compositing**, the nodes labeled **Grade / Exposure**, **Lift Gamma Gain**,
 **RGB Curves** and **Saturation** sit before bloom and lens effects. Blender's

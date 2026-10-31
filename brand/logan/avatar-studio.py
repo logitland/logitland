@@ -205,6 +205,7 @@ for name, value in {'Roughness':.1,'Specular IOR Level':.5,'IOR':1.45,
     glass.inputs[name].default_value = value
 runpy.run_path(str(HERE/'finish-avatar.py'))['finish_avatar']()
 runpy.run_path(str(HERE/'rim-portrait.py'))['rim_portrait']()
+runpy.run_path(str(HERE/'curve-screen.py'))['curve_screen']()
 runpy.run_path(str(HERE/'sync-staging.py'))['sync_staging']()
 bpy.context.window.scene = scene
 for screen in bpy.data.screens:
