@@ -1,6 +1,7 @@
 import type { Author } from '@logitland/contracts';
 import { z } from 'zod';
-import { iso, type Relay, type Stmt } from '../context';
+import { iso, readAll, type Relay, type Stmt } from '../context';
+import { unit } from '../memo';
 import { hmac, sha256 } from '../crypto';
 import { auditStmt } from './audit';
 import { queueDeleted } from './bot-queue';
@@ -215,7 +216,12 @@ export interface IngestResult {
   invalid: number;
 }
 
-export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestResult> {
+/** Records a batch of Gateway or backfill events, as one unit of work. */
+export function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestResult> {
+  return unit(() => ingestBatch(relay, batch));
+}
+
+async function ingestBatch(relay: Relay, batch: IntakeBatch): Promise<IngestResult> {
   const { source, events: raw, history } = IntakeBatch.parse(batch);
   const total: IngestResult = { recorded: 0, ignored: 0, invalid: 0 };
   const events: IntakeEvent[] = [];
@@ -228,15 +234,19 @@ export async function ingest(relay: Relay, batch: IntakeBatch): Promise<IngestRe
   await applyGuildEvents(relay, events.filter(isGuildEvent));
   const messages = events.filter((e): e is MessageEvent => !isGuildEvent(e));
   if (!messages.length) return total;
-  const { results } = await relay.db
-    .prepare('SELECT id, guild_id, webhook_id, name, type, overwrites, hidden FROM channels WHERE deleted_at IS NULL')
-    .all<Relayed & { id: string; overwrites: string; hidden: number }>();
   // Only channels some agent can see are relayed (#9): a staff channel's messages are never stored.
-  const visible = await anyAgentAccess(relay);
-  const { results: bots } = await relay.db.prepare('SELECT bot_user_id, agent_id FROM agent_bots').all<{ bot_user_id: string; agent_id: string }>();
+  const [[results, bots], visible, settings] = await Promise.all([
+    readAll<[Relayed & { id: string; overwrites: string; hidden: number }, { bot_user_id: string; agent_id: string }]>(
+      relay.db,
+      relay.db.prepare('SELECT id, guild_id, webhook_id, name, type, overwrites, hidden FROM channels WHERE deleted_at IS NULL'),
+      relay.db.prepare('SELECT bot_user_id, agent_id FROM agent_bots'),
+    ),
+    anyAgentAccess(relay),
+    getSettings(relay),
+  ]);
   const ctx: Context = {
     relayed: new Map(results.filter((c) => visible(c).view).map((c) => [c.id, c])),
-    talkChannelId: (await getSettings(relay)).talk_channel_id,
+    talkChannelId: settings.talk_channel_id,
     turnedAway: [],
     known: new Map(results.map((c) => [c.id, c])),
     agentBots: new Map(bots.map((b) => [b.bot_user_id, b.agent_id])),
@@ -263,6 +273,14 @@ function withoutReplyLine(e: MessageEvent): MessageEvent {
   return e.kind === 'message_create' ? { ...e, content: parsed.content, reply_to: e.reply_to ?? parsed.replyTo } : { ...e, content: parsed.content };
 }
 
+/** `readAll` of the statements there are; a null one (nothing to look up) answers no rows and costs no query. */
+async function readSome<T extends unknown[]>(db: Relay['db'], ...stmts: { [K in keyof T]: Stmt | null }): Promise<{ [K in keyof T]: T[K][] }> {
+  const live = stmts.filter((s) => s !== null);
+  const rows = live.length ? await readAll<unknown[]>(db, ...live) : [];
+  let next = 0;
+  return stmts.map((s) => (s ? rows[next++]! : [])) as { [K in keyof T]: T[K][] };
+}
+
 async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): Promise<Omit<IngestResult, 'invalid'>> {
   const { relayed } = ctx;
   const out = { ignored: 0 };
@@ -282,7 +300,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
     keyed.push({ e: withoutReplyLine(e), key });
   }
 
-  // Everything the round needs to know about the current state, in a handful of queries.
+  // Everything the round needs to know about the current state, in one round trip.
   const keys = new Set<string>();
   const messageIds = new Set<string>();
   for (const { e, key } of keyed) {
@@ -291,96 +309,74 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
     else if (e.kind === 'message_update' || e.kind === 'message_delete') messageIds.add(e.message_id);
     else if (e.kind === 'message_delete_bulk') for (const id of e.message_ids) messageIds.add(id);
   }
-  const seen = new Set<string>();
-  const tombs = new Map<string, Tomb>();
-  for (const part of chunk([...keys], MAX_PARAMS)) {
-    const { results } = await relay.db
-      .prepare(
-        `SELECT source_key, observed_at, json_extract(payload, '$.data.removed_by') AS removed_by FROM events WHERE source_key IN (${placeholders(part.length)})`,
-      )
-      .bind(...part)
-      .all<{ source_key: string; observed_at: string; removed_by: RemovedBy | null }>();
-    for (const r of results) {
-      seen.add(r.source_key);
-      if (r.source_key.startsWith('delete:')) tombs.set(r.source_key.slice('delete:'.length), { observed_at: r.observed_at, removed_by: r.removed_by });
-    }
-  }
-  const known = new Map<string, Known>();
-  for (const part of chunk([...messageIds], MAX_PARAMS)) {
-    const { results } = await relay.db
-      .prepare(`SELECT CAST(c.message_id AS TEXT) AS id, c.edited_at, c.deleted_at FROM conversation c WHERE c.message_id IN (${placeholders(part.length)})`)
-      .bind(...part)
-      .all<{ id: string; edited_at: string | null; deleted_at: string | null }>();
-    for (const r of results) known.set(r.id, { edited_at: r.edited_at, deleted: r.deleted_at !== null });
-  }
-  const ours = keyed.flatMap(({ e, key }) =>
-    e.kind === 'message_create' &&
-    !seen.has(key!) &&
-    (e.author.webhook_id ? e.author.webhook_id === relayed.get(e.channel_id)?.webhook_id : ctx.agentBots.has(e.author.id))
-      ? [e.message_id]
-      : [],
-  );
-  const sent = new Map<string, Sent>();
-  for (const part of chunk(ours, MAX_PARAMS)) {
-    const { results } = await relay.db
-      .prepare(
-        `SELECT m.discord_message_id AS did, m.id, m.agent_id, a.name, m.reply_to FROM relay_messages m JOIN agents a ON a.id = m.agent_id WHERE m.discord_message_id IN (${placeholders(part.length)})`,
-      )
-      .bind(...part)
-      .all<Sent & { did: string }>();
-    for (const r of results) sent.set(r.did, r);
-  }
-  // Edits of what agents' bots posted through the relay, with text the relay didn't give: read before the reply line comes off.
-  // An edit of a send this round settles (`settled`) is read again when it comes, once the send is the relay's.
-  const botEdits = await offRelayEdits(
-    relay,
-    events.flatMap((e) => (e.kind === 'message_update' ? [e] : [])),
-  );
-  const settled = new Set<string>();
+  const creates = keyed.flatMap(({ e }) => (e.kind === 'message_create' ? [e] : []));
+  // What the relay may have sent, through its webhook or an agent's bot. Creates already logged are read too, and never asked about.
+  const ours = creates.filter((e) => (e.author.webhook_id ? e.author.webhook_id === relayed.get(e.channel_id)?.webhook_id : ctx.agentBots.has(e.author.id)));
   // A person's message is kept only if they had agreed by the time they wrote it: when each person in the round agreed (for
   // those who still have).
-  const fromPeople = keyed.flatMap(({ e }) => (e.kind === 'message_create' && !e.author.bot && !e.author.webhook_id ? [e] : []));
-  const agreedAt = new Map<string, Agreement>();
-  for (const part of chunk([...new Set(fromPeople.map((e) => e.author.id))], MAX_PARAMS)) {
-    const { results } = await relay.db
-      .prepare(
-        `SELECT discord_user_id, granted_at, notice_version, username, avatar FROM consents WHERE revoked_at IS NULL AND discord_user_id IN (${placeholders(part.length)})`,
-      )
-      .bind(...part)
-      .all<Agreement & { discord_user_id: string }>();
-    for (const { discord_user_id, ...r } of results) agreedAt.set(discord_user_id, r);
-  }
+  const fromPeople = creates.filter((e) => !e.author.bot && !e.author.webhook_id);
   // Which messages replied to are agents' (and whose): every reply to an agent goes to that agent's replies subscription.
-  const agentMessages = new Map<string, string>();
   // Threads' starters too: a thread's ID is its starter message's, so this says which agent started a new thread.
-  const targets = [
-    ...new Set(keyed.flatMap(({ e }) => (e.kind === 'message_create' && e.reply_to ? [e.reply_to] : e.kind === 'thread_upsert' ? [e.thread_id] : []))),
-  ];
-  for (const part of chunk(targets, MAX_PARAMS)) {
-    const { results } = await relay.db
-      .prepare(`SELECT CAST(message_id AS TEXT) AS id, agent_id FROM conversation WHERE author_kind = 'agent' AND message_id IN (${placeholders(part.length)})`)
-      .bind(...part)
-      .all<{ id: string; agent_id: string }>();
-    for (const r of results) agentMessages.set(r.id, r.agent_id);
-  }
+  const targets = keyed.flatMap(({ e }) => (e.kind === 'message_create' && e.reply_to ? [e.reply_to] : e.kind === 'thread_upsert' ? [e.thread_id] : []));
   // In a private conversation (#33) the people kept are the owners of its joined agents: who they are, per conversation.
-  const privateOwners = new Map<string, Set<string>>();
-  const threadIds = [...new Set(fromPeople.flatMap((e) => (e.thread_id ? [e.thread_id] : [])))];
-  for (const part of chunk(threadIds, MAX_PARAMS)) {
-    const { results: privates } = await relay.db
-      .prepare(`SELECT CAST(id AS TEXT) AS id FROM threads WHERE private = 1 AND id IN (${placeholders(part.length)})`)
-      .bind(...part)
-      .all<{ id: string }>();
-    for (const t of privates) privateOwners.set(t.id, new Set());
-    const { results } = await relay.db
-      .prepare(
+  const threadIds = fromPeople.flatMap((e) => (e.thread_id ? [e.thread_id] : []));
+  /** `sql`, with the IDs as its one parameter, when there are any to look up. */
+  const lookup = (sql: string, ids: Iterable<string>) => {
+    const list = [...new Set(ids)];
+    return list.length ? relay.db.prepare(sql).bind(JSON.stringify(list)) : null;
+  };
+  const IDS = 'IN (SELECT value FROM json_each(?))';
+  const [[logged, stored, sentRows, agreements, replied, privates, members], botEdits] = await Promise.all([
+    readSome<
+      [
+        { source_key: string; observed_at: string; removed_by: RemovedBy | null },
+        { id: string; edited_at: string | null; deleted_at: string | null },
+        Sent & { did: string },
+        Agreement & { discord_user_id: string },
+        { id: string; agent_id: string },
+        { id: string },
+        { thread_id: string; discord_user_id: string },
+      ]
+    >(
+      relay.db,
+      lookup(`SELECT source_key, observed_at, json_extract(payload, '$.data.removed_by') AS removed_by FROM events WHERE source_key ${IDS}`, keys),
+      lookup(`SELECT CAST(c.message_id AS TEXT) AS id, c.edited_at, c.deleted_at FROM conversation c WHERE c.message_id ${IDS}`, messageIds),
+      lookup(
+        `SELECT m.discord_message_id AS did, m.id, m.agent_id, a.name, m.reply_to FROM relay_messages m JOIN agents a ON a.id = m.agent_id WHERE m.discord_message_id ${IDS}`,
+        ours.map((e) => e.message_id),
+      ),
+      lookup(
+        `SELECT discord_user_id, granted_at, notice_version, username, avatar FROM consents WHERE revoked_at IS NULL AND discord_user_id ${IDS}`,
+        fromPeople.map((e) => e.author.id),
+      ),
+      lookup(`SELECT CAST(message_id AS TEXT) AS id, agent_id FROM conversation WHERE author_kind = 'agent' AND message_id ${IDS}`, targets),
+      lookup(`SELECT CAST(id AS TEXT) AS id FROM threads WHERE private = 1 AND id ${IDS}`, threadIds),
+      lookup(
         `SELECT CAST(m.thread_id AS TEXT) AS thread_id, o.discord_user_id FROM conversation_members m JOIN agents a ON a.id = m.agent_id JOIN owners o ON o.id = a.owner_id
-         WHERE m.joined_at IS NOT NULL AND m.left_at IS NULL AND m.thread_id IN (${placeholders(part.length)})`,
-      )
-      .bind(...part)
-      .all<{ thread_id: string; discord_user_id: string }>();
-    for (const r of results) privateOwners.get(r.thread_id)?.add(r.discord_user_id);
+         WHERE m.joined_at IS NOT NULL AND m.left_at IS NULL AND m.thread_id ${IDS}`,
+        threadIds,
+      ),
+    ),
+    // Edits of what agents' bots posted through the relay, with text the relay didn't give: read before the reply line comes off.
+    // An edit of a send this round settles (`settled`) is read again when it comes, once the send is the relay's.
+    offRelayEdits(
+      relay,
+      events.flatMap((e) => (e.kind === 'message_update' ? [e] : [])),
+    ),
+  ]);
+  const seen = new Set<string>();
+  const tombs = new Map<string, Tomb>();
+  for (const r of logged) {
+    seen.add(r.source_key);
+    if (r.source_key.startsWith('delete:')) tombs.set(r.source_key.slice('delete:'.length), { observed_at: r.observed_at, removed_by: r.removed_by });
   }
+  const known = new Map<string, Known>(stored.map((r) => [r.id, { edited_at: r.edited_at, deleted: r.deleted_at !== null }]));
+  const sent = new Map<string, Sent>(sentRows.map((r) => [r.did, r]));
+  const settled = new Set<string>();
+  const agreedAt = new Map<string, Agreement>(agreements.map(({ discord_user_id, ...r }) => [discord_user_id, r]));
+  const agentMessages = new Map<string, string>(replied.map((r) => [r.id, r.agent_id]));
+  const privateOwners = new Map<string, Set<string>>(privates.map((t) => [t.id, new Set()]));
+  for (const r of members) privateOwners.get(r.thread_id)?.add(r.discord_user_id);
 
   const stmts: Stmt[] = [];
   const planned: { at: number; event: PlannedEvent }[] = [];

@@ -2,13 +2,14 @@ import { LIMITS, newId, type ClaimAttempt, type Scope, type TokenResponse } from
 import { iso, type Relay, type Stmt } from '../context';
 import { randomToken, sha256 } from '../crypto';
 import { OAuthError, forbidden, unauthorized } from '../errors';
+import { once } from '../memo';
 import type { AgentPrincipal, AgentRecord, ClientInfo } from '../types';
 import { issueAssertion, verifyAssertion } from './assertions';
 import { auditStmt } from './audit';
 import { newClaim } from './claims';
-import { getAgent, toAgentRecord, type AgentRow } from './identity';
-import { enforce, hit, peek } from './limits';
-import { clientHashes, recordOrigin } from './origins';
+import { toAgentRecord, type AgentRow } from './identity';
+import { enforce, hit } from './limits';
+import { clientHashes, originStmt } from './origins';
 
 // auth.md's token layer (#7): access tokens traded for an identity assertion at /oauth2/token (the jwt-bearer grant), the
 // claim grant an agent polls while a person adopts it, revocation, and the bearer check on every /v1 and /mcp request.
@@ -60,8 +61,8 @@ export async function exchangeAssertion(relay: Relay, assertion: string, client:
   const agent = toAgentRecord(row);
   const why = refusal(agent);
   if (why) throw invalidGrant(why);
-  await noteOrigin(relay, agent.id, client);
-  return tokenResponse(relay, agent);
+  const origin = await originToNote(relay, agent.id, client);
+  return tokenResponse(relay, agent, origin ? [origin] : []);
 }
 
 /**
@@ -151,25 +152,29 @@ export async function revokeAccessToken(relay: Relay, token: string): Promise<vo
     .run();
 }
 
-interface TokenRow {
-  id: string;
-  agent_id: string;
-  scopes: string;
-  expires_at: string;
-  revoked_at: string | null;
+/** The token's row, and its agent's under the same query. */
+interface TokenRow extends AgentRow {
+  token_id: string;
+  token_scopes: string;
+  token_expires_at: string;
+  token_revoked_at: string | null;
 }
 
-/** Where the agent connects from, noted at most once a day per network, so bans can follow the operator. */
-async function noteOrigin(relay: Relay, agentId: string, client: ClientInfo): Promise<void> {
-  if (!client.ip) return;
+/**
+ * Where the agent connects from, noted at most once a day per network, so bans can follow the operator: the insert that notes
+ * it, when this is the day's first request from there. A capped count, so the rest of the day's requests write nothing.
+ */
+async function originToNote(relay: Relay, agentId: string, client: ClientInfo): Promise<Stmt | null> {
+  if (!client.ip) return null;
   const { net } = await clientHashes(relay, client);
   const daily = { key: `origin:${agentId}:${net}:d`, limit: 1, windowSeconds: 86_400 };
-  if ((await peek(relay, daily)) === 0 && (await hit(relay, daily)).ok) await recordOrigin(relay, agentId, client, 'use');
+  return (await hit(relay, daily, 1, true)).ok ? originStmt(relay, agentId, client, 'use') : null;
 }
 
 /**
  * Every agent request: hash the bearer token, then check the token and the agent are in good standing. Only active agents pass
- * unless `allowStatuses` says otherwise (a suspended agent reading its status or appealing).
+ * unless `allowStatuses` says otherwise (a suspended agent reading its status or appealing). The token is read, and its origin
+ * noted, once per unit of work: an MCP tool call authenticates again inside the /mcp request that carried it.
  */
 export async function authenticateToken(
   relay: Relay,
@@ -178,15 +183,21 @@ export async function authenticateToken(
   opts: { allowStatuses?: AgentRecord['status'][] } = {},
 ): Promise<AgentPrincipal> {
   if (!token.startsWith('lat_')) throw unauthorized('Send an access token from /oauth2/token as a Bearer token (see /auth.md).');
-  const row = await relay.db
-    .prepare('SELECT id, agent_id, scopes, expires_at, revoked_at FROM access_tokens WHERE hash = ?')
-    .bind(await sha256(token))
-    .first<TokenRow>();
-  if (!row || row.revoked_at || row.expires_at <= iso(relay.now()))
+  const hash = await sha256(token);
+  const row = await once(`token:${hash}`, () =>
+    relay.db
+      .prepare(
+        'SELECT a.*, t.id AS token_id, t.scopes AS token_scopes, t.expires_at AS token_expires_at, t.revoked_at AS token_revoked_at FROM access_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.hash = ?',
+      )
+      .bind(hash)
+      .first<TokenRow>(),
+  );
+  if (!row || row.token_revoked_at || row.token_expires_at <= iso(relay.now()))
     throw unauthorized('That access token isn’t valid or has expired. Exchange your identity assertion for a new one at /oauth2/token.');
-  const agent = await getAgent(relay, row.agent_id);
+  const { token_id, token_scopes, token_expires_at: _expires, token_revoked_at: _revoked, ...agentRow } = row;
+  const agent = toAgentRecord(agentRow);
   if (agent.status !== 'active' && !opts.allowStatuses?.includes(agent.status)) throw forbidden(`This agent is ${agent.status}`);
-  await noteOrigin(relay, agent.id, client);
-  const scopes = JSON.parse(row.scopes) as Scope[];
-  return { agent, tokenId: row.id, scopes: scopes.filter((s) => agent.scopes.includes(s)) };
+  await once(`origin:${hash}`, async () => (await originToNote(relay, agent.id, client))?.run());
+  const scopes = JSON.parse(token_scopes) as Scope[];
+  return { agent, tokenId: token_id, scopes: scopes.filter((s) => agent.scopes.includes(s)) };
 }

@@ -1,18 +1,19 @@
 import type { RelayMessage } from '@logitland/contracts';
 import { DiscordError, RateLimitedError } from '@logitland/discord';
-import { iso, type Relay } from '../../context';
+import { iso, readAll, type Relay } from '../../context';
 import { RelayError, conflict, forbidden, invalid, notFound, rateLimited, unavailable } from '../../errors';
 import type { AgentPrincipal } from '../../types';
-import { audit } from '../audit';
+import { auditStmtIf } from '../audit';
 import { deleteBotPost, postingBot } from '../bots';
 import { getChannel, openWebhook, usableChannel } from '../channels';
 import { hit } from '../limits';
 import { scrubMessage } from '../scrub';
 import { getSettings } from '../settings';
-import { addStrike, escalateRuleBlocks } from '../strikes';
+import { activeStrikeCount, addStrike, escalateRuleBlocks } from '../strikes';
 import { standingOf } from '../levels';
 import { assertMayPost, countAttempt, findDuplicate } from './admission';
-import { Trail, writeLog } from './log';
+import { Trail, logStmtWhere, writeLog } from './log';
+import { recentConversation } from './loops';
 import { decide } from './pipeline';
 import { EDITS_PER_MINUTE, EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
 import { contentHash, discordContent, getRow, normalise, toRelayMessage, webhookThread, type MessageRow } from './rows';
@@ -57,8 +58,7 @@ function discordFailure(err: unknown, verb: 'edit' | 'delete'): never {
  */
 export async function editMessage(relay: Relay, principal: AgentPrincipal, id: string, content: string): Promise<RelayMessage> {
   const { agent } = principal;
-  const row = await ownMessage(relay, agent.id, id);
-  const settings = await getSettings(relay);
+  const [row, settings] = await Promise.all([ownMessage(relay, agent.id, id), getSettings(relay)]);
   assertMayPost(relay, agent, settings);
   if (row.status === 'removed') throw conflict('This message was deleted, so it can’t be edited.');
   if (row.status !== 'sent' || !row.discord_message_id) throw conflict(`Only a message that was posted can be edited, and this one is ${row.status}.`);
@@ -121,13 +121,18 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
   if (ruling.verdict !== 'pass') await refuse(ruling.policy!, ruling.reason!, true);
 
   const textHash = await contentHash(content);
-  const dup = await findDuplicate(relay, { agentId: agent.id, channelId: row.channel_id, textHash, excludeId: row.id, length: normalise(content).length });
+  // The duplicate check and what the classifier reads, at once.
+  const [dup, conversation, strikes] = await Promise.all([
+    findDuplicate(relay, { agentId: agent.id, channelId: row.channel_id, textHash, excludeId: row.id, length: normalise(content).length }),
+    recentConversation(relay, row.channel_id, row.thread_id),
+    activeStrikeCount(relay, agent.id),
+  ]);
   if (dup) {
     trail.add('limits', dup.verdict, dup.policy, `Edit: ${dup.reason}`, 'limits');
     await refuse(dup.policy, 'This text is the same as another recent message in this channel, so the edit is refused.');
   }
 
-  const decision = await decide(relay, { ...row, content, thread_name: null }, agent, { probation });
+  const decision = await decide(relay, { ...row, content, thread_name: null }, agent, { probation, conversation, channel: where, strikes });
   if (decision.kind === 'unavailable') {
     trail.add('classifier', 'block', 'outage', `Edit: ${decision.reason}`, decision.source, decision.latencyMs);
     await writeLog(relay, agent.id, row.id, trail.entries);
@@ -173,14 +178,24 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
       discordFailure(err, 'edit');
     }
   }
-  const changed = await relay.db
-    .prepare("UPDATE relay_messages SET content = ?, content_hash = ?, text_hash = ?, updated_at = ? WHERE id = ? AND status = 'sent'")
-    .bind(content, await contentHash(text), textHash, iso(relay.now()), row.id)
-    .run();
-  if (changed.meta.changes === 0) throw conflict('This message was removed while you were editing it.');
-  await writeLog(relay, agent.id, row.id, trail.entries);
-  await audit(relay, { actor_type: 'agent', actor_id: agent.id, action: 'message.edited', target_type: 'message', target_id: row.id });
-  return toRelayMessage((await getRow(relay, row.id))!);
+  // The trail and audit go first, guarded as the update is, so they are written exactly when the update applies.
+  const sent = "id = ? AND status = 'sent'";
+  const written = await readAll<MessageRow[]>(
+    relay.db,
+    ...trail.entries.map((e) => logStmtWhere(relay, agent.id, row.id, e, sent, row.id)),
+    auditStmtIf(
+      relay,
+      { actor_type: 'agent', actor_id: agent.id, action: 'message.edited', target_type: 'message', target_id: row.id },
+      `EXISTS (SELECT 1 FROM relay_messages WHERE ${sent})`,
+      row.id,
+    ),
+    relay.db
+      .prepare(`UPDATE relay_messages SET content = ?, content_hash = ?, text_hash = ?, updated_at = ? WHERE ${sent} RETURNING *`)
+      .bind(content, await contentHash(text), textHash, iso(relay.now()), row.id),
+  );
+  const changed = written.at(-1)![0];
+  if (!changed) throw conflict('This message was removed while you were editing it.');
+  return toRelayMessage(changed);
 }
 
 /**
@@ -193,22 +208,32 @@ export async function editMessage(relay: Relay, principal: AgentPrincipal, id: s
 export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id: string): Promise<RelayMessage> {
   const { agent } = principal;
   const row = await ownMessage(relay, agent.id, id);
-  const gone = async (status: string, reason: string) => {
-    const r = await relay.db
-      .prepare(
-        "UPDATE relay_messages SET status = 'removed', removed_by = 'author', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ?",
-      )
-      .bind(reason, iso(relay.now()), row.id, status)
-      .run();
-    if (r.meta.changes === 0) throw conflict('This message changed while you were deleting it. Look at it again and retry.');
-    await audit(relay, {
-      actor_type: 'agent',
-      actor_id: agent.id,
-      action: 'message.deleted',
-      target_type: 'message',
-      target_id: row.id,
-      diff: { status: { from: status, to: 'removed' } },
-    });
+  const gone = async (status: string, reason: string): Promise<MessageRow> => {
+    // The audit goes first, guarded as the update is, so it is written exactly when the update applies.
+    const [, [removed]] = await readAll<[unknown, MessageRow]>(
+      relay.db,
+      auditStmtIf(
+        relay,
+        {
+          actor_type: 'agent',
+          actor_id: agent.id,
+          action: 'message.deleted',
+          target_type: 'message',
+          target_id: row.id,
+          diff: { status: { from: status, to: 'removed' } },
+        },
+        'EXISTS (SELECT 1 FROM relay_messages WHERE id = ? AND status = ?)',
+        row.id,
+        status,
+      ),
+      relay.db
+        .prepare(
+          "UPDATE relay_messages SET status = 'removed', removed_by = 'author', status_reason = ?, held_kind = NULL, next_review_at = NULL, content = NULL, thread_name = NULL, reply_prefix = NULL, updated_at = ? WHERE id = ? AND status = ? RETURNING *",
+        )
+        .bind(reason, iso(relay.now()), row.id, status),
+    );
+    if (!removed) throw conflict('This message changed while you were deleting it. Look at it again and retry.');
+    return removed;
   };
 
   switch (row.status) {
@@ -230,15 +255,15 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
         if (err instanceof RelayError) throw err;
         discordFailure(err, 'delete');
       }
-      await gone('sent', 'Deleted by its author.');
+      const removed = await gone('sent', 'Deleted by its author.');
+      // The scrub blanks nothing in the relay's record that gone() left.
       await scrubMessage(relay, row.discord_message_id, 'author', { channelId: row.channel_id });
-      break;
+      return toRelayMessage(removed);
     }
     case 'queued':
     case 'held':
     case 'failed':
-      await gone(row.status, 'Cancelled by its author. It was never posted.');
-      break;
+      return toRelayMessage(await gone(row.status, 'Cancelled by its author. It was never posted.'));
     case 'moderating':
       throw conflict('This message is still being checked. Try again in a moment.');
     case 'sending':
@@ -248,5 +273,4 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
     case 'blocked':
       throw conflict('This message was blocked, so it was never posted. There is nothing to delete.');
   }
-  return toRelayMessage((await getRow(relay, row.id))!);
 }

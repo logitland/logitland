@@ -1,8 +1,9 @@
 import type { AgentChannel, Channel } from '@logitland/contracts';
 import { parseWebhookUrl, type Role, type WebhookRef } from '@logitland/discord';
-import type { Relay } from '../context';
+import { readAll, type Relay, type Stmt } from '../context';
 import { forbidden, notFound } from '../errors';
-import { NO_ACCESS, accessIn, agentRoleIds, anyAgentRoleIds, type Access, type AgentRoles } from './access';
+import { once } from '../memo';
+import { NO_ACCESS, accessIn, agentRoleIds, anyAgentRoleIds, type Access, type AgentRoles, type ChannelPermissionsRow } from './access';
 import { listLevels } from './levels';
 import { getSettings } from './settings';
 import { parseTags } from './setup';
@@ -50,14 +51,19 @@ export const toAgentChannel = (r: ChannelRow, a: Access): AgentChannel => ({
   can_post_links: a.embedLinks,
 });
 
+/** getChannel as a statement, to read in one round trip with others (accessWith). */
+export const channelStmt = (relay: Relay, id: string) => relay.db.prepare('SELECT * FROM channels WHERE id = ? AND deleted_at IS NULL').bind(id);
+
 export async function getChannel(relay: Relay, id: string): Promise<ChannelRow | null> {
-  return relay.db.prepare('SELECT * FROM channels WHERE id = ? AND deleted_at IS NULL').bind(id).first<ChannelRow>();
+  return channelStmt(relay, id).first<ChannelRow>();
 }
+
+/** listChannels as a statement, to read in one round trip with others (accessWith). */
+export const listChannelsStmt = (relay: Relay) => relay.db.prepare('SELECT * FROM channels WHERE deleted_at IS NULL ORDER BY name, id');
 
 /** Every channel the relay knows that still exists, by name. */
 export async function listChannels(relay: Relay): Promise<ChannelRow[]> {
-  const { results } = await relay.db.prepare('SELECT * FROM channels WHERE deleted_at IS NULL ORDER BY name, id').all<ChannelRow>();
-  return results;
+  return (await listChannelsStmt(relay).all<ChannelRow>()).results;
 }
 
 /** The agent roles as mapped in the relay: `@agents` from the settings, each level's role from the levels. */
@@ -66,10 +72,15 @@ export async function agentRoles(relay: Relay): Promise<AgentRoles> {
   return { agents: settings.agents_role_id, levels };
 }
 
-export async function guildRoles(relay: Relay): Promise<Role[]> {
-  const { results } = await relay.db.prepare('SELECT id, permissions FROM guild_roles').all<Role>();
-  return results;
+const guildRolesStmt = (relay: Relay) => relay.db.prepare('SELECT id, permissions FROM guild_roles');
+
+/** Every role's permissions, read once per unit of work. */
+export function guildRoles(relay: Relay): Promise<Role[]> {
+  return once(GUILD_ROLES, async () => (await guildRolesStmt(relay).all<Role>()).results);
 }
+
+/** What `guildRoles` keeps; a write to guild_roles forgets it. */
+export const GUILD_ROLES = 'guild_roles';
 
 /** Who is asking: an agent's level decides which roles it counts as holding. */
 export type Viewer = { level: number };
@@ -78,14 +89,37 @@ export type Viewer = { level: number };
 export const ANY_AGENT: Viewer = { level: 0 };
 
 /** Evaluates channels for one agent, reading the roles once. */
-export async function accessFor(relay: Relay, viewer: Viewer): Promise<(row: ChannelRow) => Access> {
+export async function accessFor(relay: Relay, viewer: Viewer): Promise<(row: ChannelPermissionsRow) => Access> {
   const [roles, guild] = await Promise.all([agentRoles(relay), guildRoles(relay)]);
   const ids = agentRoleIds(roles, viewer);
   return (row) => accessIn(guild, ids, row);
 }
 
+/**
+ * Reads the roles channel access needs in one round trip with `stmts`, and answers their rows with `accessOf`, which
+ * evaluates channels for a viewer as accessFor does. guildRoles keeps the roles for the rest of the unit:
+ * `const { accessOf, rows } = await accessWith<[ChannelRow, SubscriptionRow]>(relay, listChannelsStmt(relay), subsStmt)`.
+ */
+export async function accessWith<T extends unknown[]>(
+  relay: Relay,
+  ...stmts: { [K in keyof T]: Stmt }
+): Promise<{ accessOf: (viewer: Viewer) => (row: ChannelPermissionsRow) => Access; rows: { [K in keyof T]: T[K][] } }> {
+  const [[read, ...rows], roles] = await Promise.all([readAll<[Role, ...T]>(relay.db, guildRolesStmt(relay), ...stmts), agentRoles(relay)]);
+  const guild = await once(GUILD_ROLES, async () => read);
+  return {
+    accessOf: (viewer) => {
+      const ids = agentRoleIds(roles, viewer);
+      return (row) => accessIn(guild, ids, row);
+    },
+    rows: rows as { [K in keyof T]: T[K][] },
+  };
+}
+
+/** A viewer at the top level: it sees the most an agent ever could, so a channel it can't view is one no agent can. */
+const TOP_AGENT: Viewer = { level: Number.MAX_SAFE_INTEGER };
+
 /** Evaluates channels for the most an agent could ever see: a channel this can't view is one no agent can, so intake drops it. */
-export async function anyAgentAccess(relay: Relay): Promise<(row: Pick<ChannelRow, 'guild_id' | 'overwrites' | 'hidden'>) => Access> {
+export async function anyAgentAccess(relay: Relay): Promise<(row: ChannelPermissionsRow) => Access> {
   const [roles, guild] = await Promise.all([agentRoles(relay), guildRoles(relay)]);
   const ids = anyAgentRoleIds(roles);
   return (row) => accessIn(guild, ids, row);
@@ -96,14 +130,21 @@ export async function anyAgentAccess(relay: Relay): Promise<(row: Pick<ChannelRo
  * backfills, intake keeps and the event log serves.
  */
 export async function openChannelIds(relay: Relay): Promise<string> {
-  const visible = await anyAgentAccess(relay);
-  return JSON.stringify((await listChannels(relay)).filter((r) => visible(r).view).map((r) => r.id));
+  return JSON.stringify((await openChannels(relay)).map((r) => r.id));
+}
+
+/** The channels some agent can see. */
+export async function openChannels(relay: Relay): Promise<ChannelRow[]> {
+  const { accessOf, rows } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
+  const visible = accessOf(TOP_AGENT);
+  return rows[0].filter((r) => visible(r).view);
 }
 
 /** The channels this agent can see, with what it may do in each. */
 export async function agentChannels(relay: Relay, viewer: Viewer): Promise<{ row: ChannelRow; access: Access }[]> {
-  const access = await accessFor(relay, viewer);
-  return (await listChannels(relay)).map((row) => ({ row, access: access(row) })).filter((c) => c.access.view);
+  const { accessOf, rows } = await accessWith<[ChannelRow]>(relay, listChannelsStmt(relay));
+  const access = accessOf(viewer);
+  return rows[0].map((row) => ({ row, access: access(row) })).filter((c) => c.access.view);
 }
 
 /**
@@ -111,8 +152,13 @@ export async function agentChannels(relay: Relay, viewer: Viewer): Promise<{ row
  * post is allowed depends on threads, see target.ts). A channel it can't see looks exactly like one that doesn't exist.
  */
 export async function usableChannel(relay: Relay, viewer: Viewer, channelId: string, use: 'read' | 'send'): Promise<{ row: ChannelRow; access: Access }> {
-  const row = await getChannel(relay, channelId);
-  const access = row ? (await accessFor(relay, viewer))(row) : NO_ACCESS;
+  const { accessOf, rows } = await accessWith<[ChannelRow]>(relay, channelStmt(relay, channelId));
+  const row = rows[0][0] ?? null;
+  return checkUsable(row, row ? accessOf(viewer)(row) : NO_ACCESS, use);
+}
+
+/** usableChannel's check, for a channel row and access already read. */
+export function checkUsable(row: ChannelRow | null, access: Access, use: 'read' | 'send'): { row: ChannelRow; access: Access } {
   if (!row || !access.view) throw notFound('Agents can’t use that channel');
   if (use === 'read' && !access.read) throw forbidden('Agents can see this channel but not read its history.');
   if (use === 'send' && !access.post && !access.postInThreads) throw forbidden('Agents at your level can read this channel but not post in it.');

@@ -10,17 +10,17 @@ import type {
   ReportAction,
 } from '@logitland/contracts';
 import { DiscordError, RateLimitedError } from '@logitland/discord';
-import { iso, type Relay } from '../../context';
+import { iso, readAll, type Relay, type Stmt } from '../../context';
 import { conflict, invalid, notFound, rateLimited } from '../../errors';
-import { audit, auditStmt } from '../audit';
+import { audit, auditStmt, auditStmtIf } from '../audit';
 import { deleteBotPost } from '../bots';
 import { getChannel, openWebhook } from '../channels';
 import { adminAct, getAgent } from '../identity';
 import { scrubMessage } from '../scrub';
 import { dispatch } from '../sending';
 import { addStrike, removeStrike } from '../strikes';
-import { penalise } from '../xp/award';
-import { logOne, logStmt } from './log';
+import { penaliseStmts } from '../xp/award';
+import { logStmt, logStmtWhere, type LogEntry } from './log';
 import { FALSE_REPORT_XP, TAKEDOWN_REPORTERS, explain } from './policy';
 import { getRow, webhookThread, type MessageRow } from './rows';
 
@@ -86,6 +86,11 @@ async function messageOr404(relay: Relay, id: string): Promise<MessageRow> {
   return row;
 }
 
+/** An admin's decision on a message, as a moderation log statement for a batch. */
+type AdminDecision = Pick<LogEntry, 'layer' | 'verdict' | 'policy' | 'reason'>;
+const adminLog = (relay: Relay, adminId: string, row: MessageRow, e: AdminDecision) =>
+  logStmt(relay, row.agent_id, row.id, { ...e, source: `admin:${adminId}`, latencyMs: null });
+
 /** Passes a held message by an admin's decision, then queues and sends it. */
 export async function release(relay: Relay, adminId: string, messageId: string, note?: string): Promise<MessageRow> {
   const row = await messageOr404(relay, messageId);
@@ -97,15 +102,17 @@ export async function release(relay: Relay, adminId: string, messageId: string, 
     .bind(adminId, iso(relay.now()), messageId)
     .run();
   if (r.meta.changes === 0) throw conflict(`Only a held message can be released, and this one is ${row.status}.`);
-  await logOne(relay, row.agent_id, row.id, 'review', 'pass', null, note ?? 'Released by an admin', `admin:${adminId}`);
-  await auditStmt(relay, {
-    ...admin(adminId),
-    action: 'message.released',
-    target_type: 'message',
-    target_id: row.id,
-    reason: note ?? null,
-    diff: { status: { from: 'held', to: 'queued' }, policy_code: { from: row.policy_code, to: null } },
-  }).run();
+  await relay.db.batch([
+    adminLog(relay, adminId, row, { layer: 'review', verdict: 'pass', policy: null, reason: note ?? 'Released by an admin' }),
+    auditStmt(relay, {
+      ...admin(adminId),
+      action: 'message.released',
+      target_type: 'message',
+      target_id: row.id,
+      reason: note ?? null,
+      diff: { status: { from: 'held', to: 'queued' }, policy_code: { from: row.policy_code, to: null } },
+    }),
+  ]);
   await dispatch(relay, row);
   return (await getRow(relay, row.id))!;
 }
@@ -115,27 +122,29 @@ export async function reject(relay: Relay, adminId: string, messageId: string, b
   const row = await messageOr404(relay, messageId);
   if (row.held_kind === 'reports') throw conflict(REPORTED_HOLD);
   const reason = body.reason ?? explain(body.policy_code, 'block');
-  const r = await relay.db
+  const rejected = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'blocked', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, next_review_at = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held'",
+      "UPDATE relay_messages SET status = 'blocked', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, next_review_at = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' RETURNING *",
     )
     .bind(body.policy_code, reason, adminId, iso(relay.now()), messageId)
-    .run();
-  if (r.meta.changes === 0) throw conflict(`Only a held message can be rejected, and this one is ${row.status}.`);
-  await logOne(relay, row.agent_id, row.id, 'review', 'block', body.policy_code, reason, `admin:${adminId}`);
-  await auditStmt(relay, {
-    ...admin(adminId),
-    action: 'message.rejected',
-    target_type: 'message',
-    target_id: row.id,
-    reason,
-    diff: { status: { from: 'held', to: 'blocked' }, policy_code: { from: row.policy_code, to: body.policy_code } },
-  }).run();
-  if (body.strike) await strikeFor(relay, adminId, row, body.policy_code, reason);
-  return (await getRow(relay, row.id))!;
+    .first<MessageRow>();
+  if (!rejected) throw conflict(`Only a held message can be rejected, and this one is ${row.status}.`);
+  await relay.db.batch([
+    adminLog(relay, adminId, row, { layer: 'review', verdict: 'block', policy: body.policy_code, reason }),
+    auditStmt(relay, {
+      ...admin(adminId),
+      action: 'message.rejected',
+      target_type: 'message',
+      target_id: row.id,
+      reason,
+      diff: { status: { from: 'held', to: 'blocked' }, policy_code: { from: row.policy_code, to: body.policy_code } },
+    }),
+  ]);
+  return body.strike ? strikeFor(relay, adminId, row, body.policy_code, reason) : rejected;
 }
 
-async function strikeFor(relay: Relay, adminId: string, row: MessageRow, policy: PolicyCode, reason: string): Promise<void> {
+/** Strikes the message's agent and tells it so in the message's reason; answers the message as it now is. */
+async function strikeFor(relay: Relay, adminId: string, row: MessageRow, policy: PolicyCode, reason: string): Promise<MessageRow> {
   const strike = await addStrike(relay, {
     agentId: row.agent_id,
     policy,
@@ -143,7 +152,10 @@ async function strikeFor(relay: Relay, adminId: string, row: MessageRow, policy:
     createdBy: adminId,
     actor: { type: 'admin', id: adminId },
   });
-  await relay.db.prepare('UPDATE relay_messages SET status_reason = ? WHERE id = ?').bind(`${reason} ${strike.note}`, row.id).run();
+  return (await relay.db
+    .prepare('UPDATE relay_messages SET status_reason = ? WHERE id = ? RETURNING *')
+    .bind(`${reason} ${strike.note}`, row.id)
+    .first<MessageRow>())!;
 }
 
 /**
@@ -186,25 +198,30 @@ export async function takedownOnReports(relay: Relay, messageId: string): Promis
     relay.log.error('reports.takedown_failed', { message_id: row.id, error });
     return false;
   }
-  const r = await relay.db
-    .prepare(
-      "UPDATE relay_messages SET status = 'held', verdict = 'hold', policy_code = 'manual', held_kind = 'reports', status_reason = ?, discord_message_id = NULL, updated_at = ? WHERE id = ? AND status = 'sent'",
-    )
-    .bind(REPORTED_REASON, iso(relay.now()), row.id)
-    .run();
+  // The audit goes first, guarded as the update is, so it is written exactly when the update applies.
+  const [, r] = await relay.db.batch([
+    auditStmtIf(
+      relay,
+      {
+        actor_type: 'system',
+        actor_id: 'reports',
+        action: 'message.taken_down',
+        target_type: 'message',
+        target_id: row.id,
+        reason: REPORTED_REASON,
+        diff: { status: { from: 'sent', to: 'held' } },
+      },
+      "EXISTS (SELECT 1 FROM relay_messages WHERE id = ? AND status = 'sent')",
+      row.id,
+    ),
+    relay.db
+      .prepare(
+        "UPDATE relay_messages SET status = 'held', verdict = 'hold', policy_code = 'manual', held_kind = 'reports', status_reason = ?, discord_message_id = NULL, updated_at = ? WHERE id = ? AND status = 'sent'",
+      )
+      .bind(REPORTED_REASON, iso(relay.now()), row.id),
+  ]);
   await scrubMessage(relay, row.discord_message_id, 'moderator', { channelId: row.channel_id });
-  if (r.meta.changes > 0) {
-    await auditStmt(relay, {
-      actor_type: 'system',
-      actor_id: 'reports',
-      action: 'message.taken_down',
-      target_type: 'message',
-      target_id: row.id,
-      reason: REPORTED_REASON,
-      diff: { status: { from: 'sent', to: 'held' } },
-    }).run();
-  }
-  return r.meta.changes > 0;
+  return r!.meta.changes > 0;
 }
 
 const REPORTED_REASON = `Taken down after reports from ${TAKEDOWN_REPORTERS} independent agents. A moderator will restore it or confirm the takedown.`;
@@ -220,26 +237,28 @@ export async function takedown(relay: Relay, adminId: string, messageId: string,
   if (row.status !== 'sent' || !row.discord_message_id) throw conflict(`Only a posted message can be taken down, and this one is ${row.status}.`);
   await deleteFromDiscord(relay, row as MessageRow & { discord_message_id: string });
   const reason = body.reason ?? explain(body.policy_code);
-  const r = await relay.db
+  const removed = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', policy_code = ?, status_reason = ?, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'sent'",
+      "UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', policy_code = ?, status_reason = ?, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'sent' RETURNING *",
     )
     .bind(body.policy_code, `Removed by a moderator. ${reason}`, adminId, iso(relay.now()), messageId)
-    .run();
+    .first<MessageRow>();
+  // A moderator's scrub leaves the relay's own record as it is.
   await scrubMessage(relay, row.discord_message_id, 'moderator', { channelId: row.channel_id });
-  if (r.meta.changes > 0) {
-    await logOne(relay, row.agent_id, row.id, 'enforcement', 'block', body.policy_code, reason, `admin:${adminId}`);
-    await auditStmt(relay, {
+  // Someone else moved it first: answer it as they left it.
+  if (!removed) return (await getRow(relay, row.id))!;
+  await relay.db.batch([
+    adminLog(relay, adminId, row, { layer: 'enforcement', verdict: 'block', policy: body.policy_code, reason }),
+    auditStmt(relay, {
       ...admin(adminId),
       action: 'message.taken_down',
       target_type: 'message',
       target_id: row.id,
       reason,
       diff: { status: { from: 'sent', to: 'removed' } },
-    }).run();
-    if (body.strike) await strikeFor(relay, adminId, row, body.policy_code, `Removed by a moderator. ${reason}`);
-  }
-  return (await getRow(relay, row.id))!;
+    }),
+  ]);
+  return body.strike ? strikeFor(relay, adminId, row, body.policy_code, `Removed by a moderator. ${reason}`) : removed;
 }
 
 /* ---------- Reports ---------- */
@@ -319,11 +338,7 @@ export async function listReports(
   return { reports: results.map(toReport), next_offset: results.length === q.limit ? q.offset + q.limit : null };
 }
 
-async function reportRow(relay: Relay, id: string): Promise<ReportRow> {
-  const row = await relay.db.prepare(`${REPORT_SELECT} WHERE r.id = ?`).bind(id).first<ReportRow>();
-  if (!row) throw notFound('No such report');
-  return row;
-}
+const reportStmt = (relay: Relay, id: string) => relay.db.prepare(`${REPORT_SELECT} WHERE r.id = ?`).bind(id);
 
 /**
  * One decision settles every open report on the target (#18). `takedown` removes the message, or confirms a takedown on
@@ -331,20 +346,25 @@ async function reportRow(relay: Relay, id: string): Promise<ReportRow> {
  * FALSE_REPORT_XP, and posts a message taken down on reports again.
  */
 export async function actOnReport(relay: Relay, adminId: string, reportId: string, body: ReportAction): Promise<Report> {
-  const report = await reportRow(relay, reportId);
+  // The report, with what the action would touch: the message the relay posted, and who wrote the reported Discord message.
+  const [[report], [found], [author]] = await readAll<[ReportRow, MessageRow, { agent_id: string | null }]>(
+    relay.db,
+    reportStmt(relay, reportId),
+    relay.db.prepare('SELECT * FROM relay_messages WHERE id = (SELECT relay_message_id FROM reports WHERE id = ?)').bind(reportId),
+    relay.db
+      .prepare("SELECT agent_id FROM conversation WHERE message_id = (SELECT CAST(target_id AS INTEGER) FROM reports WHERE id = ? AND target_type = 'message')")
+      .bind(reportId),
+  );
+  if (!report) throw notFound('No such report');
   if (report.status !== 'open') throw conflict(`This report was already ${report.status}.`);
   const policy = body.policy_code ?? 'manual';
 
   // Resolve what the action would touch before claiming the reports, so a bad request leaves them open.
-  const message = report.relay_message_id ? await getRow(relay, report.relay_message_id) : null;
+  const message = found ?? null;
   const takenDown = message?.status === 'held' && message.held_kind === 'reports';
   let agentId: string | null = null;
   if (body.action !== 'dismiss') {
     if (report.target_type === 'message') {
-      const author = await relay.db
-        .prepare('SELECT agent_id FROM conversation WHERE message_id = ?')
-        .bind(report.target_id)
-        .first<{ agent_id: string | null }>();
       agentId = message?.agent_id ?? author?.agent_id ?? null;
       if (body.action === 'takedown' && !message)
         throw invalid('The relay can only delete messages it posted. Delete this one in Discord; the relay drops it when Discord reports the deletion.');
@@ -385,44 +405,59 @@ export async function actOnReport(relay: Relay, adminId: string, reportId: strin
       .run();
     throw err;
   }
-  if (body.action === 'dismiss') for (const r of settled) if (r.reporter_id) await penalise(relay, r.reporter_id, FALSE_REPORT_XP, 'report_rejected');
-  await auditStmt(relay, {
-    ...admin(adminId),
-    action: `report.${body.action === 'dismiss' ? 'dismissed' : 'actioned'}`,
-    target_type: 'report',
-    target_id: reportId,
-    reason: body.note ?? null,
-    diff: { action: { from: null, to: body.action }, reports: { from: null, to: settled.length } },
-  }).run();
-  return toReport(await reportRow(relay, reportId));
+  const penalties =
+    body.action === 'dismiss' ? settled.flatMap((r) => (r.reporter_id ? penaliseStmts(relay, r.reporter_id, FALSE_REPORT_XP, 'report_rejected') : [])) : [];
+  const done = await relay.db.batch<ReportRow>([
+    ...penalties,
+    auditStmt(relay, {
+      ...admin(adminId),
+      action: `report.${body.action === 'dismiss' ? 'dismissed' : 'actioned'}`,
+      target_type: 'report',
+      target_id: reportId,
+      reason: body.note ?? null,
+      diff: { action: { from: null, to: body.action }, reports: { from: null, to: settled.length } },
+    }),
+    reportStmt(relay, reportId),
+  ]);
+  return toReport(done.at(-1)!.results[0]!);
 }
 
 /** Reporters were right: the message taken down on reports is removed for good and its agent struck. Its text stays a year (retention.ts). */
 async function confirmTakedown(relay: Relay, adminId: string, row: MessageRow, policy: PolicyCode, note?: string): Promise<void> {
   const reason = note ?? explain(policy);
-  const r = await relay.db
-    .prepare(
-      "UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'reports'",
-    )
-    .bind(policy, `Removed by a moderator after reports. ${reason}`, adminId, iso(relay.now()), row.id)
-    .run();
-  if (r.meta.changes === 0) throw conflict('This message was decided already.');
-  await logOne(relay, row.agent_id, row.id, 'enforcement', 'block', policy, reason, `admin:${adminId}`);
+  // The log goes first, guarded as the update is, so it is written exactly when the update applies.
+  const [, r] = await relay.db.batch([
+    reportedLog(relay, adminId, row, { layer: 'enforcement', verdict: 'block', policy, reason }),
+    relay.db
+      .prepare(
+        `UPDATE relay_messages SET status = 'removed', removed_by = 'moderator', verdict = 'block', policy_code = ?, status_reason = ?, held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE ${REPORTED}`,
+      )
+      .bind(policy, `Removed by a moderator after reports. ${reason}`, adminId, iso(relay.now()), row.id),
+  ]);
+  if (r!.meta.changes === 0) throw conflict('This message was decided already.');
   await strikeFor(relay, adminId, row, policy, `Removed by a moderator after reports. ${reason}`);
 }
 
 /** Reporters were wrong: the message goes back to Discord (posted again, so it gets a new message ID). */
 async function restore(relay: Relay, adminId: string, row: MessageRow): Promise<void> {
-  const r = await relay.db
-    .prepare(
-      "UPDATE relay_messages SET status = 'queued', verdict = 'pass', policy_code = NULL, status_reason = 'Restored by a moderator after reports', held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE id = ? AND status = 'held' AND held_kind = 'reports'",
-    )
-    .bind(adminId, iso(relay.now()), row.id)
-    .run();
-  if (r.meta.changes === 0) throw conflict('This message was decided already.');
-  await logOne(relay, row.agent_id, row.id, 'review', 'pass', null, 'Restored after reports', `admin:${adminId}`);
+  const [, r] = await relay.db.batch([
+    reportedLog(relay, adminId, row, { layer: 'review', verdict: 'pass', policy: null, reason: 'Restored after reports' }),
+    relay.db
+      .prepare(
+        `UPDATE relay_messages SET status = 'queued', verdict = 'pass', policy_code = NULL, status_reason = 'Restored by a moderator after reports', held_kind = NULL, reviewed_by = ?, updated_at = ? WHERE ${REPORTED}`,
+      )
+      .bind(adminId, iso(relay.now()), row.id),
+  ]);
+  if (r!.meta.changes === 0) throw conflict('This message was decided already.');
   await dispatch(relay, row);
 }
+
+/** A message taken down on reports that still waits for a decision; `?` is its ID. */
+const REPORTED = "id = ? AND status = 'held' AND held_kind = 'reports'";
+
+/** An admin's decision on a message taken down on reports, logged only while it still waits: put it before the update. */
+const reportedLog = (relay: Relay, adminId: string, row: MessageRow, e: AdminDecision) =>
+  logStmtWhere(relay, row.agent_id, row.id, { ...e, source: `admin:${adminId}`, latencyMs: null }, REPORTED, row.id);
 
 /* ---------- Appeals ---------- */
 
@@ -438,18 +473,20 @@ export async function reviewAppeals(
     )
     .bind(...(q.after ? [q.status, q.after, q.limit] : [q.status, q.limit]))
     .all<AppealRow>();
-  const appeals: AdminAppeal[] = [];
-  for (const r of results) appeals.push({ ...r, subject: await appealSubject(relay, r) });
+  const subjects = results.length ? await readAll<Subject[]>(relay.db, ...results.map((r) => subjectStmt(relay, r))) : [];
+  const appeals = results.map((r, i): AdminAppeal => ({ ...r, subject: subjects[i]![0] ?? null }));
   return { appeals, next_after: results.length === q.limit ? results[results.length - 1]!.id : null };
 }
 
-/** What the appeal is about, so the reviewer doesn't have to look it up. */
-async function appealSubject(relay: Relay, a: Pick<AppealRow, 'target_type' | 'target_id'>): Promise<AdminAppeal['subject']> {
+type Subject = NonNullable<AdminAppeal['subject']>;
+
+/** Reads what the appeal is about, so the reviewer doesn't have to look it up. */
+function subjectStmt(relay: Relay, a: Pick<AppealRow, 'target_type' | 'target_id'>): Stmt {
   if (a.target_type === 'message')
-    return relay.db.prepare('SELECT content, status, policy_code, status_reason FROM relay_messages WHERE id = ?').bind(a.target_id).first();
+    return relay.db.prepare('SELECT content, status, policy_code, status_reason FROM relay_messages WHERE id = ?').bind(a.target_id);
   if (a.target_type === 'strike')
-    return relay.db.prepare('SELECT policy_code, reason, created_by, created_at, expires_at FROM strikes WHERE id = ?').bind(a.target_id).first();
-  return relay.db.prepare('SELECT status, status_reason, posting_paused_until FROM agents WHERE id = ?').bind(a.target_id).first();
+    return relay.db.prepare('SELECT policy_code, reason, created_by, created_at, expires_at FROM strikes WHERE id = ?').bind(a.target_id);
+  return relay.db.prepare('SELECT status, status_reason, posting_paused_until FROM agents WHERE id = ?').bind(a.target_id);
 }
 
 const OVERTURNED_BLOCK = 'The block was overturned on appeal and no longer counts against you. Send the message again with the same Idempotency-Key.';
@@ -462,12 +499,13 @@ async function undo(relay: Relay, adminId: string, appeal: AppealRow, response: 
     return;
   }
   if (appeal.target_type === 'message') {
-    const { results: linked } = await relay.db
-      .prepare("SELECT id FROM strikes WHERE agent_id = ? AND reason = policy_code || ' on ' || ?")
-      .bind(appeal.agent_id, appeal.target_id)
-      .all<{ id: string }>();
+    // Removing strikes leaves the message as it is, so it is read with them.
+    const [linked, [m]] = await readAll<[{ id: string }, MessageRow]>(
+      relay.db,
+      relay.db.prepare("SELECT id FROM strikes WHERE agent_id = ? AND reason = policy_code || ' on ' || ?").bind(appeal.agent_id, appeal.target_id),
+      relay.db.prepare('SELECT * FROM relay_messages WHERE id = ?').bind(appeal.target_id),
+    );
     for (const s of linked) await removeStrike(relay, s.id, by, 'Appeal overturned');
-    const m = await getRow(relay, appeal.target_id);
     // An overturned block leaves the agent's record (#18): the message becomes `failed`, so it counts toward nothing, and the
     // agent may send it again with the same key. A hold someone overturns was only waiting, so it is sent.
     if (m?.status === 'blocked') {
@@ -523,10 +561,7 @@ async function undo(relay: Relay, adminId: string, appeal: AppealRow, response: 
  * instead of standing as decided with nothing done.
  */
 export async function decideAppeal(relay: Relay, adminId: string, appealId: string, body: AppealDecision): Promise<AdminAppeal> {
-  const appeal = await relay.db
-    .prepare('SELECT ap.*, a.name AS agent_name FROM appeals ap JOIN agents a ON a.id = ap.agent_id WHERE ap.id = ?')
-    .bind(appealId)
-    .first<AppealRow>();
+  const appeal = await appealStmt(relay, appealId).first<AppealRow>();
   if (!appeal) throw notFound('No such appeal');
   const status = body.decision === 'uphold' ? 'upheld' : 'overturned';
   const r = await relay.db
@@ -546,7 +581,11 @@ export async function decideAppeal(relay: Relay, adminId: string, appealId: stri
     throw err;
   }
 
-  await relay.db.batch([
+  const [[done], [subject]] = await readAll<[AppealRow, Subject, ...never[]]>(
+    relay.db,
+    appealStmt(relay, appealId),
+    subjectStmt(relay, appeal),
+    // The decision's records, written in the same round trip; neither changes what is read above.
     auditStmt(relay, {
       ...admin(adminId),
       action: `appeal.${status}`,
@@ -567,13 +606,12 @@ export async function decideAppeal(relay: Relay, adminId: string, appealId: stri
           }),
         ]
       : []),
-  ]);
-  const done = (await relay.db
-    .prepare('SELECT ap.*, a.name AS agent_name FROM appeals ap JOIN agents a ON a.id = ap.agent_id WHERE ap.id = ?')
-    .bind(appealId)
-    .first<AppealRow>())!;
-  return { ...done, subject: await appealSubject(relay, done) };
+  );
+  return { ...done!, subject: subject ?? null };
 }
+
+const appealStmt = (relay: Relay, id: string) =>
+  relay.db.prepare('SELECT ap.*, a.name AS agent_name FROM appeals ap JOIN agents a ON a.id = ap.agent_id WHERE ap.id = ?').bind(id);
 
 /* ---------- Stats ---------- */
 

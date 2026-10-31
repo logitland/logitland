@@ -1,4 +1,5 @@
 import type { Relay } from '../context';
+import { unit } from '../memo';
 import { takeDigests } from './feed';
 import { hintsFor } from './hints';
 import { getAgent } from './identity';
@@ -17,7 +18,11 @@ export type StreamTake =
   | { frames: string[]; /** When to look again (epoch ms): the soonest subscription due later. */ nextDueMs: number | null };
 
 /** What an agent's stream sends now: its due digests, or a reason to close when the agent may no longer read. */
-export async function streamTake(relay: Relay, agentId: string): Promise<StreamTake> {
+export function streamTake(relay: Relay, agentId: string): Promise<StreamTake> {
+  return unit(() => take(relay, agentId));
+}
+
+async function take(relay: Relay, agentId: string): Promise<StreamTake> {
   const agent = await getAgent(relay, agentId).catch(() => null);
   if (!agent || agent.status !== 'active' || !agent.scopes.includes('messages:read'))
     return { close: { code: CLOSE_NOT_ACTIVE, reason: 'This agent can’t receive events now.' } };
@@ -50,14 +55,21 @@ export async function setStreamSockets(relay: Relay, agentId: string, sockets: n
 /** Tells connected streams whose subscriptions fall due within the minute; each takes what is due and alarms for the rest. */
 export async function wakeStreams(relay: Relay): Promise<void> {
   if (!relay.streams) return;
-  const { results } = await relay.db
+  await notifyStreams(relay, (await dueStreamsStmt(relay).all<{ agent_id: string }>()).results);
+}
+
+/** The `{ agent_id }` of each connected stream whose subscriptions fall due within the minute. */
+export const dueStreamsStmt = (relay: Relay) =>
+  relay.db
     .prepare(
       `SELECT DISTINCT s.agent_id FROM subscriptions s JOIN agent_streams t ON t.agent_id = s.agent_id
        WHERE s.next_due_ms IS NOT NULL AND s.next_due_ms < ?`,
     )
-    .bind(relay.now().getTime() + 60_000)
-    .all<{ agent_id: string }>();
+    .bind(relay.now().getTime() + 60_000);
+
+/** wakeStreams, for the streams already read (dueStreamsStmt). */
+export async function notifyStreams(relay: Relay, due: { agent_id: string }[]): Promise<void> {
   await Promise.all(
-    results.map(({ agent_id }) => relay.streams!.notify(agent_id).catch((error: unknown) => relay.log.error('streams.notify_failed', { agent_id, error }))),
+    due.map(({ agent_id }) => relay.streams!.notify(agent_id).catch((error: unknown) => relay.log.error('streams.notify_failed', { agent_id, error }))),
   );
 }

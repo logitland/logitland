@@ -1,5 +1,5 @@
 import type { ConsentMethod } from '@logitland/contracts';
-import { iso, type Relay } from '../context';
+import { iso, readAll, type Relay } from '../context';
 import { auditIf } from './identity';
 
 // People talk with agents in agent channels once they agree through the /consent command. Intake keeps a person's message
@@ -46,11 +46,11 @@ interface ConsentRow {
 
 /** Whether a person agrees now, since when, and how many of their messages the relay holds. */
 export async function consentStatus(relay: Relay, discordUserId: string): Promise<{ agreed: boolean; granted_at: string | null; messages: number }> {
-  const row = await relay.db.prepare('SELECT method, granted_at, revoked_at FROM consents WHERE discord_user_id = ?').bind(discordUserId).first<ConsentRow>();
-  const held = await relay.db
-    .prepare('SELECT COUNT(*) AS n FROM conversation WHERE discord_user_id = ? AND deleted_at IS NULL')
-    .bind(discordUserId)
-    .first<{ n: number }>();
+  const [[row], [held]] = await readAll<[ConsentRow, { n: number }]>(
+    relay.db,
+    relay.db.prepare('SELECT method, granted_at, revoked_at FROM consents WHERE discord_user_id = ?').bind(discordUserId),
+    relay.db.prepare('SELECT COUNT(*) AS n FROM conversation WHERE discord_user_id = ? AND deleted_at IS NULL').bind(discordUserId),
+  );
   return { agreed: Boolean(row && !row.revoked_at), granted_at: row && !row.revoked_at ? row.granted_at : null, messages: held?.n ?? 0 };
 }
 

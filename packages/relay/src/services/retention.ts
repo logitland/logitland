@@ -137,26 +137,27 @@ export async function retentionJob(relay: Relay, ctx: { deadline?: number } = {}
   let statements = 1;
   let changed = 0;
   let active = RULES.filter((r) => r.name !== 'events' || anchor);
+  // A turn runs every rule still active, as many as the statement budget has room for, in one batch.
   while (active.length) {
-    const next: Rule[] = [];
-    for (const [i, rule] of active.entries()) {
-      if (statements >= MAX_STATEMENTS || Date.now() >= deadline) {
-        relay.log.warn('retention.out_of_budget', { rules_left: active.length - i + next.length });
-        active = [];
-        break;
-      }
-      const args = rule.name === 'events' ? [ago(EVENT_TEXT_DAYS), anchor!.seq] : (rule.args?.(ago) ?? []);
-      statements++;
-      const rows = (
-        await relay.db
-          .prepare(rule.sql)
-          .bind(...args, BATCH)
-          .run()
-      ).meta.changes;
+    const turn = Date.now() >= deadline ? [] : active.slice(0, MAX_STATEMENTS - statements);
+    statements += turn.length;
+    const results = turn.length
+      ? await relay.db.batch(
+          turn.map((rule) =>
+            relay.db.prepare(rule.sql).bind(...(rule.name === 'events' ? [ago(EVENT_TEXT_DAYS), anchor!.seq] : (rule.args?.(ago) ?? [])), BATCH),
+          ),
+        )
+      : [];
+    const next = turn.filter((_, i) => {
+      const rows = results[i]!.meta.changes;
       changed += rows;
-      if (rows >= BATCH) next.push(rule);
+      return rows >= BATCH;
+    });
+    if (turn.length < active.length) {
+      relay.log.warn('retention.out_of_budget', { rules_left: active.length - turn.length + next.length });
+      break;
     }
-    if (active.length) active = next;
+    active = next;
   }
   if (changed) relay.log.info('retention.done', { rows: changed });
   return changed;

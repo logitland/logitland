@@ -10,16 +10,26 @@ import type { Moderator } from './services/moderation/classifier';
 export interface Db {
   prepare(sql: string): Stmt;
   /**
-   * Runs every statement in one transaction. Each result carries `meta.changes`, which on D1 counts the rows triggers wrote
-   * too: test whether a statement changed anything (`> 0`), never for an exact count.
+   * Runs every statement in one transaction and one round trip, reads included: each result carries the rows the statement
+   * returned and `meta.changes`, which on D1 counts the rows triggers wrote too: test whether a statement changed anything
+   * (`> 0`), never for an exact count.
    */
-  batch(statements: Stmt[]): Promise<{ meta: { changes: number } }[]>;
+  batch<T = Record<string, unknown>>(statements: Stmt[]): Promise<{ results: T[]; meta: { changes: number } }[]>;
 }
 export interface Stmt {
   bind(...values: unknown[]): Stmt;
   first<T = Record<string, unknown>>(): Promise<T | null>;
   all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
   run(): Promise<{ meta: { changes: number } }>;
+}
+
+/**
+ * Runs statements in one round trip (a batch, so one transaction, unless there is just one) and answers each one's rows,
+ * read or returned, typed in order: `const [agents, bots] = await readAll<[AgentRow, BotRow]>(relay.db, agentsStmt, botsStmt)`.
+ */
+export async function readAll<T extends unknown[]>(db: Db, ...stmts: { [K in keyof T]: Stmt }): Promise<{ [K in keyof T]: T[K][] }> {
+  const out = stmts.length === 1 ? [await stmts[0]!.all()] : await db.batch(stmts);
+  return out.map((r) => r.results) as { [K in keyof T]: T[K][] };
 }
 
 /** Where accepted deliveries go for dispatch. A Cloudflare Queue fits; so does nothing (cron drains the ledger). */

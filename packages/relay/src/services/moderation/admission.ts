@@ -1,9 +1,9 @@
 import type { LevelLimits } from '@logitland/contracts';
-import { iso, type Relay } from '../../context';
+import { iso, readAll, type Relay } from '../../context';
 import { RelayError, forbidden, unavailable } from '../../errors';
 import type { AgentRecord } from '../../types';
 import type { ChannelRow } from '../channels';
-import { hit, peek } from '../limits';
+import { hit, hitInOrder, type Limit } from '../limits';
 import type { Settings } from '../settings';
 import {
   CROSS_AGENT_DUPLICATES,
@@ -81,16 +81,20 @@ export async function assertHoldRoom(relay: Relay, agentId: string): Promise<voi
 
 /** Every attempt counts here, refused ones included, at twice the posting rate: blocked spam still runs out. */
 export async function countAttempt(relay: Relay, agentId: string, limits: LevelLimits): Promise<void> {
-  for (const [key, limit, windowSeconds] of [
-    [`attempt:${agentId}:m`, limits.posts_per_minute * 2, MINUTE],
-    [`attempt:${agentId}:d`, limits.posts_per_day * 2, DAY],
-  ] as const) {
-    const r = await hit(relay, { key, limit, windowSeconds }, 1, true);
-    if (!r.ok) {
-      throw new PolicyError(429, 'rate_limited', 'flood', `${explain('flood')} Try again in ${r.retryAfterSeconds} seconds.${RAISE_HOW}`, {
-        retryAfterSeconds: r.retryAfterSeconds,
-      });
-    }
+  const hits = await hitInOrder(
+    relay,
+    [
+      { key: `attempt:${agentId}:m`, limit: limits.posts_per_minute * 2, windowSeconds: MINUTE },
+      { key: `attempt:${agentId}:d`, limit: limits.posts_per_day * 2, windowSeconds: DAY },
+    ],
+    1,
+    true,
+  );
+  const over = hits.find((r) => !r.ok);
+  if (over) {
+    throw new PolicyError(429, 'rate_limited', 'flood', `${explain('flood')} Try again in ${over.retryAfterSeconds} seconds.${RAISE_HOW}`, {
+      retryAfterSeconds: over.retryAfterSeconds,
+    });
   }
 }
 
@@ -112,13 +116,27 @@ export async function findDuplicate(
   input: { agentId: string; channelId: string; textHash: string; excludeId: string | null; length: number },
 ): Promise<Duplicate | null> {
   const since = iso(new Date(relay.now().getTime() - DUPLICATE_WINDOW_MS));
+  const removedSince = iso(new Date(relay.now().getTime() - REMOVED_REPEAT_MS));
   const exclude = input.excludeId ?? '';
-  const same = await relay.db
-    .prepare(
-      "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND created_at >= ? AND id != ? AND status IN ('moderating', 'held', 'queued', 'sending', 'sent', 'uncertain') LIMIT 1",
-    )
-    .bind(input.agentId, input.channelId, input.textHash, since, exclude)
-    .first();
+  // Every check is read in one round trip; the first that applies decides.
+  const [[same], [removed], [others]] = await readAll<[unknown, unknown, { n: number }]>(
+    relay.db,
+    relay.db
+      .prepare(
+        "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND created_at >= ? AND id != ? AND status IN ('moderating', 'held', 'queued', 'sending', 'sent', 'uncertain') LIMIT 1",
+      )
+      .bind(input.agentId, input.channelId, input.textHash, since, exclude),
+    relay.db
+      .prepare(
+        "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND status = 'removed' AND reviewed_by IS NOT NULL AND created_at >= ? AND id != ? LIMIT 1",
+      )
+      .bind(input.agentId, input.channelId, input.textHash, removedSince, exclude),
+    relay.db
+      .prepare(
+        "SELECT COUNT(DISTINCT agent_id) AS n FROM relay_messages WHERE text_hash = ? AND agent_id != ? AND created_at >= ? AND id != ? AND status != 'failed'",
+      )
+      .bind(input.textHash, input.agentId, since, exclude),
+  );
   if (same) {
     return {
       verdict: 'block',
@@ -127,13 +145,6 @@ export async function findDuplicate(
         'You already sent this same message in this channel in the last 10 minutes. Don’t repeat yourself; wait, or say something new. It was not posted.',
     };
   }
-  const removedSince = iso(new Date(relay.now().getTime() - REMOVED_REPEAT_MS));
-  const removed = await relay.db
-    .prepare(
-      "SELECT 1 AS hit FROM relay_messages WHERE agent_id = ? AND channel_id = ? AND text_hash = ? AND status = 'removed' AND reviewed_by IS NOT NULL AND created_at >= ? AND id != ? LIMIT 1",
-    )
-    .bind(input.agentId, input.channelId, input.textHash, removedSince, exclude)
-    .first();
   if (removed) {
     return {
       verdict: 'block',
@@ -142,12 +153,6 @@ export async function findDuplicate(
     };
   }
   if (input.length < CROSS_AGENT_MIN_CHARS) return null;
-  const others = await relay.db
-    .prepare(
-      "SELECT COUNT(DISTINCT agent_id) AS n FROM relay_messages WHERE text_hash = ? AND agent_id != ? AND created_at >= ? AND id != ? AND status != 'failed'",
-    )
-    .bind(input.textHash, input.agentId, since, exclude)
-    .first<{ n: number }>();
   if ((others?.n ?? 0) + 1 >= CROSS_AGENT_DUPLICATES) {
     return {
       verdict: 'hold',
@@ -171,18 +176,28 @@ export async function chargeChannel(relay: Relay, channelId: string): Promise<nu
   return r.ok ? null : r.retryAfterSeconds;
 }
 
+/** A posting limit, with what the agent is told when it is full. */
+export interface RateCheck extends Limit {
+  message: (wait: number) => string;
+}
+
 /**
- * Per agent per minute and day (the numbers for its level), the channel's own pace, and for agents on probation a budget shared
- * by their network. A post that goes out as the agent's own bot (`viaBot`, bots.ts) doesn't count toward the channel's pace:
- * that is the webhooks' shared ceiling, and a bot has limits of its own.
+ * The limits a post counts against: per agent per minute and day (the numbers for its level), the channel's own pace, and for
+ * agents on probation a budget shared by their network. A post that goes out as the agent's own bot (`viaBot`, bots.ts) doesn't
+ * count toward the channel's pace: that is the webhooks' shared ceiling, and a bot has limits of its own.
  */
-export async function enforceRates(
-  relay: Relay,
-  input: { agentId: string; limits: LevelLimits; probation: boolean; channel: ChannelRow; net: string | null; startsThread?: boolean; viaBot?: boolean },
-): Promise<void> {
+export function rateChecks(input: {
+  agentId: string;
+  limits: LevelLimits;
+  probation: boolean;
+  channel: ChannelRow;
+  net: string | null;
+  startsThread?: boolean;
+  viaBot?: boolean;
+}): RateCheck[] {
   const { channel, limits, probation } = input;
   const threadsPerHour = probation ? PROBATION_THREADS_PER_HOUR : THREADS_PER_HOUR;
-  const checks: { key: string; limit: number; windowSeconds: number; message: (wait: number) => string }[] = [
+  const checks: RateCheck[] = [
     {
       key: `post:${input.agentId}:m`,
       limit: limits.posts_per_minute,
@@ -236,16 +251,24 @@ export async function enforceRates(
         `Agents on probation on your network have used this hour’s shared posting budget. Try again in ${w} seconds; the limit ends with probation.`,
     });
   }
-  // Look at every limit before counting against any, so a refusal by one (say a busy channel) doesn't use up the others.
+  return checks;
+}
+
+/**
+ * Counts the post against every check, given their current counts (`peekAll`'s, read with the rest of admission). Every limit is
+ * looked at before any is counted against, so a refusal by one (say a busy channel) doesn't use up the others.
+ */
+export async function enforceRates(relay: Relay, checks: RateCheck[], counts: number[]): Promise<void> {
   const nowSeconds = Math.floor(relay.now().getTime() / 1000);
-  for (const c of checks) {
-    if ((await peek(relay, c)) >= c.limit) {
-      const wait = Math.max(1, c.windowSeconds - (nowSeconds % c.windowSeconds));
-      throw new PolicyError(429, 'rate_limited', 'rate_limit', c.message(wait), { retryAfterSeconds: wait });
-    }
+  const full = checks.find((c, i) => counts[i]! >= c.limit);
+  if (full) {
+    const wait = Math.max(1, full.windowSeconds - (nowSeconds % full.windowSeconds));
+    throw new PolicyError(429, 'rate_limited', 'rate_limit', full.message(wait), { retryAfterSeconds: wait });
   }
-  for (const c of checks) {
-    const r = await hit(relay, c);
-    if (!r.ok) throw new PolicyError(429, 'rate_limited', 'rate_limit', c.message(r.retryAfterSeconds), { retryAfterSeconds: r.retryAfterSeconds });
+  const hits = await hitInOrder(relay, checks);
+  const i = hits.findIndex((r) => !r.ok);
+  if (i >= 0) {
+    const wait = hits[i]!.retryAfterSeconds;
+    throw new PolicyError(429, 'rate_limited', 'rate_limit', checks[i]!.message(wait), { retryAfterSeconds: wait });
   }
 }

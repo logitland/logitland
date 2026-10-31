@@ -1,8 +1,8 @@
 import type { AdminCategory, AdminChannel } from '@logitland/contracts';
-import { accessIn, agentRoleIds } from '../services/access';
-import { agentRoles, guildRoles, listChannels, toChannel } from '../services/channels';
 import { audit } from '../services/audit';
+import { accessWith, listChannelsStmt, toChannel, type ChannelRow } from '../services/channels';
 import { adminReadConversation, listAdminConversations } from '../services/conversations';
+import { listLevels } from '../services/levels';
 import { register as registerSetup } from './internal-admin-setup';
 import { intQuery, snowflakeQuery, type RegisterRoutes } from './shared';
 
@@ -13,14 +13,22 @@ export const register: RegisterRoutes = (app, relay) => {
   registerSetup(app, relay);
 
   app.get('/internal/admin/channels', async (c) => {
-    const [roles, guild, channels, { results: categories }] = await Promise.all([
-      agentRoles(relay),
-      guildRoles(relay),
-      listChannels(relay),
-      relay.db.prepare('SELECT id, name, position FROM categories WHERE deleted_at IS NULL ORDER BY position, id').all<AdminCategory>(),
+    const [
+      {
+        accessOf,
+        rows: [channels, categories],
+      },
+      levels,
+    ] = await Promise.all([
+      accessWith<[ChannelRow, AdminCategory]>(
+        relay,
+        listChannelsStmt(relay),
+        relay.db.prepare('SELECT id, name, position FROM categories WHERE deleted_at IS NULL ORDER BY position, id'),
+      ),
+      listLevels(relay),
     ]);
-    const at = (level: number, row: (typeof channels)[number]) => {
-      const a = accessIn(guild, agentRoleIds(roles, { level }), row);
+    const at = (level: number, row: ChannelRow) => {
+      const a = accessOf({ level })(row);
       return { level, view: a.view, post: a.post };
     };
     return c.json({
@@ -29,7 +37,7 @@ export const register: RegisterRoutes = (app, relay) => {
         hidden: Boolean(row.hidden),
         has_webhook: Boolean(row.webhook_ciphertext),
         position: row.position,
-        levels: roles.levels.map((l) => at(l.level, row)),
+        levels: levels.map((l) => at(l.level, row)),
       })),
       categories,
     });

@@ -1,6 +1,6 @@
 import { AdminPermission, type AdminRole, type AdminRoleUpdate, type AdminStanding, type TeamMember } from '@logitland/contracts';
 import { DiscordError, TEAM_MEMBER_ACCEPTED } from '@logitland/discord';
-import { iso, type Relay } from '../context';
+import { iso, readAll, type Relay } from '../context';
 import { RelayError, invalid, notFound, unavailable } from '../errors';
 import { auditStmt } from './audit';
 
@@ -17,9 +17,17 @@ const MEMBER_KEEP_MS = 86_400_000;
 
 const NO_STANDING: AdminStanding = { full: false, permissions: [] };
 
+type Cached = { value: string; fetched_at: string };
+
+const cachedStmt = (relay: Relay, key: string) => relay.db.prepare('SELECT value, fetched_at FROM discord_lookups WHERE key = ?').bind(key);
+
 /** Discord's answer under `key`, asked again once it is older than `ttlMs`. */
 export async function lookup<T>(relay: Relay, key: string, ttlMs: number, ask: () => Promise<T>): Promise<T> {
-  const row = await relay.db.prepare('SELECT value, fetched_at FROM discord_lookups WHERE key = ?').bind(key).first<{ value: string; fetched_at: string }>();
+  return answer(relay, key, ttlMs, ask, await cachedStmt(relay, key).first<Cached>());
+}
+
+/** `lookup`, given what is cached under `key` already read (null when nothing is). */
+async function answer<T>(relay: Relay, key: string, ttlMs: number, ask: () => Promise<T>, row: Cached | null): Promise<T> {
   const now = relay.now();
   if (row && now.getTime() - Date.parse(row.fetched_at) < ttlMs) return JSON.parse(row.value) as T;
   let value: T;
@@ -43,16 +51,17 @@ export async function lookup<T>(relay: Relay, key: string, ttlMs: number, ask: (
 }
 
 /** The Discord user IDs of the full admins: the team that owns the bot (its owner and accepted members), or its one owner. */
-export const fullAdmins = (relay: Relay): Promise<string[]> =>
-  lookup(relay, 'team', TEAM_TTL_MS, async () => {
-    const app = await relay.discord.getCurrentApplication();
-    if (app.team) {
-      const accepted = app.team.members.filter((m) => m.membership_state === TEAM_MEMBER_ACCEPTED).map((m) => m.user.id);
-      return [...new Set([app.team.owner_user_id, ...accepted])];
-    }
-    if (app.owner) return [app.owner.id];
-    throw new Error('Discord named no owner for the application');
-  });
+export const fullAdmins = (relay: Relay): Promise<string[]> => lookup(relay, 'team', TEAM_TTL_MS, () => askTeam(relay));
+
+async function askTeam(relay: Relay): Promise<string[]> {
+  const app = await relay.discord.getCurrentApplication();
+  if (app.team) {
+    const accepted = app.team.members.filter((m) => m.membership_state === TEAM_MEMBER_ACCEPTED).map((m) => m.user.id);
+    return [...new Set([app.team.owner_user_id, ...accepted])];
+  }
+  if (app.owner) return [app.owner.id];
+  throw new Error('Discord named no owner for the application');
+}
 
 type TeamUser = { id: string; username: string; global_name?: string | null };
 
@@ -80,15 +89,14 @@ export async function developerTeam(relay: Relay): Promise<TeamMember[]> {
 }
 
 /** A person's roles in the server. Someone who isn't in it holds none. */
-const memberRoles = (relay: Relay, guildId: string, discordUserId: string): Promise<string[]> =>
-  lookup(relay, `member:${discordUserId}`, MEMBER_TTL_MS, async () => {
-    try {
-      return (await relay.discord.getGuildMember(guildId, discordUserId)).roles;
-    } catch (err) {
-      if (err instanceof DiscordError && err.status === 404) return [];
-      throw err;
-    }
-  });
+async function askMemberRoles(relay: Relay, guildId: string, discordUserId: string): Promise<string[]> {
+  try {
+    return (await relay.discord.getGuildMember(guildId, discordUserId)).roles;
+  } catch (err) {
+    if (err instanceof DiscordError && err.status === 404) return [];
+    throw err;
+  }
+}
 
 /** Permissions in AdminPermission's order, each once. */
 const ordered = (held: Iterable<AdminPermission>): AdminPermission[] => {
@@ -98,14 +106,22 @@ const ordered = (held: Iterable<AdminPermission>): AdminPermission[] => {
 
 /**
  * Whether this person is an admin and what they may do. Discord is only asked about their roles once a role is mapped, and
- * not at all when the caller passes the roles it just fetched (`fresh`), as the Logan admin MCP does on every call.
+ * not at all when the caller passes the roles it just fetched (`fresh`), as the Logan admin MCP does on every call. What is
+ * cached is read in one round trip.
  */
 export async function adminStanding(relay: Relay, discordUserId: string, fresh?: string[]): Promise<AdminStanding> {
-  if ((await fullAdmins(relay)).includes(discordUserId)) return { full: true, permissions: [...AdminPermission.options] };
+  const memberKey = `member:${discordUserId}`;
+  const [team, mapped, member] = await readAll<[Cached, { role_id: string; permissions: string }, Cached]>(
+    relay.db,
+    cachedStmt(relay, 'team'),
+    relay.db.prepare('SELECT role_id, permissions FROM admin_roles'),
+    cachedStmt(relay, memberKey),
+  );
+  if ((await answer(relay, 'team', TEAM_TTL_MS, () => askTeam(relay), team[0] ?? null)).includes(discordUserId))
+    return { full: true, permissions: [...AdminPermission.options] };
   const guildId = relay.config.discord.guildId;
-  const { results: mapped } = await relay.db.prepare('SELECT role_id, permissions FROM admin_roles').all<{ role_id: string; permissions: string }>();
   if (!guildId || !mapped.length) return NO_STANDING;
-  const roles = new Set(fresh ?? (await memberRoles(relay, guildId, discordUserId)));
+  const roles = new Set(fresh ?? (await answer(relay, memberKey, MEMBER_TTL_MS, () => askMemberRoles(relay, guildId, discordUserId), member[0] ?? null)));
   return { full: false, permissions: ordered(mapped.filter((m) => roles.has(m.role_id)).flatMap((m) => JSON.parse(m.permissions) as AdminPermission[])) };
 }
 

@@ -2,7 +2,7 @@ import { LIMITS, UserCode, type ClaimDecision, type ClaimLookup, type ClaimOutco
 import { iso, type Relay, type Stmt } from '../context';
 import { userCode } from '../crypto';
 import { conflict, forbidden, notFound, rateLimited } from '../errors';
-import { assertOwnerEstablished, assertOwnerHasRoom, auditIf, getAgent, getOwner, ownerLimitKey, toAgent, toPublicAgent } from './identity';
+import { assertOwnerCanAdopt, auditIf, getAgent, getOwner, ownerLimitKey, toAgent, toPublicAgent } from './identity';
 import { hit, peek } from './limits';
 import { syncParentRole } from './people-roles';
 import { grantAdoptionXp } from './xp/award';
@@ -56,15 +56,19 @@ interface ClaimRow {
 
 /** The claim behind a code, if it is undecided and unexpired. Anything else counts as a wrong guess. */
 async function openClaim(relay: Relay, ownerId: string, raw: string): Promise<ClaimRow> {
-  await assertNotLockedOut(relay, ownerId);
   const code = raw.trim().toUpperCase();
-  if (!UserCode.safeParse(code).success) return miss(relay, ownerId);
-  const row = await relay.db
-    .prepare(
-      'SELECT c.user_code, c.agent_id, c.expires_at, a.owner_id, a.status FROM claims c JOIN agents a ON a.id = c.agent_id WHERE c.user_code = ? AND c.decision IS NULL AND c.expires_at > ?',
-    )
-    .bind(code, iso(relay.now()))
-    .first<ClaimRow>();
+  const valid = UserCode.safeParse(code).success;
+  const [, row] = await Promise.all([
+    assertNotLockedOut(relay, ownerId),
+    valid
+      ? relay.db
+          .prepare(
+            'SELECT c.user_code, c.agent_id, c.expires_at, a.owner_id, a.status FROM claims c JOIN agents a ON a.id = c.agent_id WHERE c.user_code = ? AND c.decision IS NULL AND c.expires_at > ?',
+          )
+          .bind(code, iso(relay.now()))
+          .first<ClaimRow>()
+      : null,
+  ]);
   if (!row) return miss(relay, ownerId);
   if (row.owner_id) throw conflict('That agent already has an owner.');
   if (row.status !== 'active') throw conflict('That agent isn’t active, so it can’t be adopted.');
@@ -86,8 +90,7 @@ export async function decideClaim(relay: Relay, ownerId: string, input: ClaimDec
   const claim = await openClaim(relay, ownerId, input.user_code);
   if (input.decision === 'approve') {
     if (!(await getSettings(relay)).signup_open) throw forbidden('Adoption is paused while signups are closed. Try again later.');
-    await assertOwnerEstablished(relay, ownerId);
-    await assertOwnerHasRoom(relay, ownerId);
+    await assertOwnerCanAdopt(relay, ownerId);
   }
   const now = iso(relay.now());
   const lost = () => conflict('That code was just used or replaced. Reload and check the agent.');

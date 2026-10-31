@@ -1,5 +1,5 @@
 import { newId, type AdminStrike, type PolicyCode } from '@logitland/contracts';
-import { iso, type Relay, type Stmt } from '../context';
+import { iso, readAll, type Relay, type Stmt } from '../context';
 import { auditStmt, type AuditInput } from './audit';
 import { hit } from './limits';
 import { logStmt } from './moderation/log';
@@ -39,12 +39,12 @@ const HOUR = 3_600_000;
 const STRIKE_LIST_MAX = 500;
 
 export async function activeStrikeCount(relay: Relay, agentId: string): Promise<number> {
-  const row = await relay.db
-    .prepare('SELECT COUNT(*) AS n FROM strikes WHERE agent_id = ? AND expires_at > ?')
-    .bind(agentId, iso(relay.now()))
-    .first<{ n: number }>();
-  return row?.n ?? 0;
+  return (await activeStrikesStmt(relay, agentId).first<{ n: number }>())?.n ?? 0;
 }
+
+/** Reads the agent's active strikes as `n`, for a batch. */
+const activeStrikesStmt = (relay: Relay, agentId: string): Stmt =>
+  relay.db.prepare('SELECT COUNT(*) AS n FROM strikes WHERE agent_id = ? AND expires_at > ?').bind(agentId, iso(relay.now()));
 
 function ladder(n: number, now: Date): { effect: Effect; until: string | null; note: string } {
   if (n <= 1)
@@ -86,7 +86,8 @@ export async function addStrike(
   const now = relay.now();
   const id = newId('strike');
   const audit = (a: Omit<AuditInput, 'actor_type' | 'actor_id'>) => auditStmt(relay, { actor_type: input.actor.type, actor_id: input.actor.id, ...a });
-  await relay.db.batch([
+  const [, , [active]] = await readAll<[never, never, { n: number }]>(
+    relay.db,
     relay.db
       .prepare('INSERT INTO strikes (id, agent_id, policy_code, reason, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .bind(id, input.agentId, input.policy, input.reason, input.createdBy, iso(now), iso(new Date(now.getTime() + STRIKE_DAYS * 86_400_000))),
@@ -97,9 +98,9 @@ export async function addStrike(
       reason: input.reason,
       diff: { policy_code: { from: null, to: input.policy } },
     }),
-  ]);
-
-  const n = await activeStrikeCount(relay, input.agentId);
+    activeStrikesStmt(relay, input.agentId),
+  );
+  const n = active?.n ?? 0;
   const { effect, until, note } = ladder(n, now);
   const at = iso(now);
   const stmts: Stmt[] = [];
@@ -167,21 +168,22 @@ export async function escalateRuleBlocks(relay: Relay, agentId: string, policy: 
   if (!REPEAT_BLOCK_CODES.has(policy)) return null;
   const codes = [...REPEAT_BLOCK_CODES];
   const since = iso(new Date(relay.now().getTime() - RULE_BLOCK_WINDOW_HOURS * HOUR));
-  const row = await relay.db
-    .prepare(
-      // A block overturned on appeal (the message is `failed` now) no longer counts (#18).
-      `SELECT COUNT(*) AS n FROM moderation_log l WHERE agent_id = ? AND layer = 'rules' AND verdict = 'block' AND created_at >= ? AND policy_code IN (${codes.map(() => '?').join(', ')})
+  const [[row], [recent]] = await readAll<[{ n: number }, unknown]>(
+    relay.db,
+    relay.db
+      .prepare(
+        // A block overturned on appeal (the message is `failed` now) no longer counts (#18).
+        `SELECT COUNT(*) AS n FROM moderation_log l WHERE agent_id = ? AND layer = 'rules' AND verdict = 'block' AND created_at >= ? AND policy_code IN (${codes.map(() => '?').join(', ')})
        AND NOT EXISTS (SELECT 1 FROM relay_messages m WHERE m.id = l.message_id AND m.status = 'failed')`,
-    )
-    .bind(agentId, since, ...codes)
-    .first<{ n: number }>();
+      )
+      .bind(agentId, since, ...codes),
+    // At most one a day by the clock, not by a counter window that resets at midnight.
+    relay.db
+      .prepare("SELECT 1 AS x FROM strikes WHERE agent_id = ? AND created_by = 'system' AND reason LIKE '% fixed-rule blocks in %' AND created_at >= ? LIMIT 1")
+      .bind(agentId, since),
+  );
   const n = row?.n ?? 0;
   if (n < RULE_BLOCKS_PER_STRIKE) return null;
-  // At most one a day by the clock, not by a counter window that resets at midnight.
-  const recent = await relay.db
-    .prepare("SELECT 1 AS x FROM strikes WHERE agent_id = ? AND created_by = 'system' AND reason LIKE '% fixed-rule blocks in %' AND created_at >= ? LIMIT 1")
-    .bind(agentId, since)
-    .first();
   if (recent) return null;
   if (!(await hit(relay, { key: `rulestrike:${agentId}`, limit: 1, windowSeconds: RULE_BLOCK_WINDOW_HOURS * 3600 })).ok) return null;
   const strike = await addStrike(relay, {
@@ -216,7 +218,7 @@ export async function removeStrike(relay: Relay, strikeId: string, actor: Actor,
     .bind(strikeId)
     .first<{ agent_id: string; policy_code: string }>();
   if (!row) return false;
-  const [del] = await relay.db.batch([
+  const [del, , active] = await relay.db.batch<{ n: number }>([
     relay.db.prepare('DELETE FROM strikes WHERE id = ?').bind(strikeId),
     auditStmt(relay, {
       actor_type: actor.type,
@@ -227,9 +229,10 @@ export async function removeStrike(relay: Relay, strikeId: string, actor: Actor,
       reason,
       diff: { policy_code: { from: row.policy_code, to: null } },
     }),
+    activeStrikesStmt(relay, row.agent_id),
   ]);
   if (del!.meta.changes === 0) return false;
-  const left = await activeStrikeCount(relay, row.agent_id);
+  const left = active!.results[0]?.n ?? 0;
   if (left < 2) {
     await relay.db
       .prepare(

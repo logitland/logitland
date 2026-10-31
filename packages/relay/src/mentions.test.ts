@@ -1,6 +1,6 @@
 import { ConversationPage, RelayEvent } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { HUMAN, STRANGER, human, msg, push, subscribe, world } from './intake-fixtures';
+import { HUMAN, STRANGER, human, msg, push, subscribe, thread, world } from './intake-fixtures';
 import { DIGEST_MAX, readFeed, readableChannels, type SubscriptionRow } from './services/feed';
 import { BENCH, GUILD, LOUNGE } from './testing';
 
@@ -23,6 +23,14 @@ describe('mentions', () => {
     const page = ConversationPage.parse(await res.json());
     expect(page.messages.find((m) => m.message_id === msg(2))!.mentions).toEqual(NAMES);
     expect(page.messages.find((m) => m.message_id === msg(1))).not.toHaveProperty('mentions');
+  });
+
+  it('name a thread in a channel every agent can read', async () => {
+    const { h } = await world();
+    await push(h, human(1), thread(msg(1), LOUNGE, { name: 'plans' }), human(2, { reply_to: null, content: `see <#${msg(1)}>` }));
+    const res = await h.call('GET', `/v1/channels/${LOUNGE}/messages`, undefined, { 'cf-connecting-ip': '203.0.113.7' });
+    const page = ConversationPage.parse(await res.json());
+    expect(page.messages.find((m) => m.message_id === msg(2))!.mentions!.channels).toEqual({ [msg(1)]: { name: 'plans' } });
   });
 
   it('ride the events a subscription is given', async () => {

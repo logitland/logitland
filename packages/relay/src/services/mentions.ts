@@ -1,7 +1,6 @@
 import type { Mentions } from '@logitland/contracts';
-import type { Relay } from '../context';
-import { agentChannels, ANY_AGENT } from './channels';
-import { chunk, MAX_PARAMS, placeholders } from './events';
+import { readAll, type Relay } from '../context';
+import { accessWith, ANY_AGENT, listChannelsStmt, type ChannelRow } from './channels';
 
 // The names behind Discord's tags in message content (`<@id>`, `<@&id>`, `<#id>`), so readers see names, never a mapping
 // the content didn't already carry. People are named only if they agreed through /consent, by the name their messages
@@ -16,62 +15,64 @@ const KINDS = Object.keys(TAGS) as Kind[];
 
 const tagged = (kind: Kind, content: string) => [...content.matchAll(TAGS[kind])].map((m) => m[1]!);
 
-/** `{ id, name }` rows for these IDs, MAX_PARAMS at a time. `sql` lists the IDs' placeholders first, then `args`. */
-async function named(relay: Relay, ids: string[], sql: (list: string) => string, args: unknown[] = []): Promise<Map<string, string>> {
-  const parts = await Promise.all(
-    chunk(ids, MAX_PARAMS).map(
-      async (part) =>
-        (
-          await relay.db
-            .prepare(sql(placeholders(part.length)))
-            .bind(...part, ...args)
-            .all<{ id: string; name: string | null }>()
-        ).results,
-    ),
-  );
-  return new Map(parts.flat().flatMap((r) => (r.name ? [[r.id, r.name] as const] : [])));
-}
+type Named = { id: string; name: string | null };
 
-const LOOKUPS: Record<Kind, (relay: Relay, ids: string[]) => Promise<Map<string, string>>> = {
-  users: (relay, ids) =>
-    named(
-      relay,
-      ids,
-      (list) => `SELECT k.discord_user_id AS id,
+const nameMap = (rows: Named[]) => new Map(rows.flatMap((r) => (r.name ? [[r.id, r.name] as const] : [])));
+
+/** The people among these IDs (a JSON array) who agreed, by the name their latest message shows. */
+const usersStmt = (relay: Relay, ids: string) =>
+  relay.db
+    .prepare(
+      `SELECT k.discord_user_id AS id,
         COALESCE((SELECT c.display_name FROM conversation c WHERE c.discord_user_id = k.discord_user_id ORDER BY c.message_id DESC LIMIT 1), k.username) AS name
-        FROM consents k WHERE k.discord_user_id IN (${list}) AND k.revoked_at IS NULL`,
-    ),
-  // Discord names @everyone with its @; readers add their own.
-  roles: (relay, ids) => named(relay, ids, (list) => `SELECT id, ltrim(name, '@') AS name FROM guild_roles WHERE id IN (${list})`),
-  async channels(relay, ids) {
-    const readable = new Map((await agentChannels(relay, ANY_AGENT)).filter((c) => c.access.read).map((c) => [c.row.id, c.row.name]));
-    // A thread a person named keeps no name (threads.ts), and a private conversation is its members' alone.
-    const threads = await named(
-      relay,
-      ids.filter((id) => !readable.has(id)),
-      (list) => `SELECT CAST(id AS TEXT) AS id, name FROM threads
-        WHERE id IN (${list}) AND private = 0 AND deleted_at IS NULL AND parent_id IN (SELECT value FROM json_each(?))`,
-      [JSON.stringify([...readable.keys()])],
-    );
-    return new Map([...readable, ...threads]);
-  },
-};
+        FROM consents k WHERE k.discord_user_id IN (SELECT value FROM json_each(?)) AND k.revoked_at IS NULL`,
+    )
+    .bind(ids);
+
+// Discord names @everyone with its @; readers add their own.
+const rolesStmt = (relay: Relay, ids: string) =>
+  relay.db.prepare(`SELECT id, ltrim(name, '@') AS name FROM guild_roles WHERE id IN (SELECT value FROM json_each(?))`).bind(ids);
+
+/** The names behind these tags: people, roles, and channels and threads every agent can read. */
+async function lookUp(relay: Relay, users: string[], roles: string[], channels: string[]): Promise<Map<string, string>[]> {
+  const people = usersStmt(relay, JSON.stringify(users));
+  const named = rolesStmt(relay, JSON.stringify(roles));
+  if (!channels.length) {
+    const [u, r] = await readAll<[Named, Named]>(relay.db, people, named);
+    return [nameMap(u), nameMap(r), new Map()];
+  }
+  const {
+    accessOf,
+    rows: [u, r, rows],
+  } = await accessWith<[Named, Named, ChannelRow]>(relay, people, named, listChannelsStmt(relay));
+  const access = accessOf(ANY_AGENT);
+  const readable = new Map(rows.filter((row) => access(row).read).map((row) => [row.id, row.name]));
+  const rest = channels.filter((id) => !readable.has(id));
+  // A thread a person named keeps no name (threads.ts), and a private conversation is its members' alone.
+  const threads = rest.length
+    ? await relay.db
+        .prepare(
+          `SELECT CAST(id AS TEXT) AS id, name FROM threads WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
+             AND private = 0 AND deleted_at IS NULL AND parent_id IN (SELECT value FROM json_each(?))`,
+        )
+        .bind(JSON.stringify(rest), JSON.stringify([...readable.keys()]))
+        .all<Named>()
+    : { results: [] };
+  return [nameMap(u), nameMap(r), new Map([...readable, ...nameMap(threads.results)])];
+}
 
 /**
  * Looks up the tags in all these contents at once (a page, a digest) and returns each content's own `mentions`: undefined
- * for content that tags no one, else only the tags that resolved, so readers show the rest as unknown.
+ * for content that tags no one, else only the tags that resolved, so readers show the rest as unknown. People and roles are
+ * read in one round trip, with the channels when there are channel tags; threads, in another.
  */
 export async function resolveMentions(
   relay: Relay,
   contents: (string | null | undefined)[],
 ): Promise<(content: string | null | undefined) => Mentions | undefined> {
   const texts = contents.filter((c): c is string => Boolean(c));
-  const names = await Promise.all(
-    KINDS.map((kind) => {
-      const ids = [...new Set(texts.flatMap((c) => tagged(kind, c)))];
-      return ids.length ? LOOKUPS[kind](relay, ids) : new Map<string, string>();
-    }),
-  );
+  const [users = [], roles = [], channels = []] = KINDS.map((kind) => [...new Set(texts.flatMap((c) => tagged(kind, c)))]);
+  const names = users.length || roles.length || channels.length ? await lookUp(relay, users, roles, channels) : KINDS.map(() => new Map<string, string>());
   return (content) => {
     const ids = KINDS.map((kind) => (content ? tagged(kind, content) : []));
     if (!ids.some((list) => list.length)) return undefined;

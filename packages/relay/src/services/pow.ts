@@ -16,7 +16,7 @@ const FREE_SIGNUPS_PER_HOUR = 2;
 const WRONG_NETWORK = 'That challenge was issued to a different network. Get a new one from GET /agent/identity/challenge, from the network you register from.';
 const NEW_ONE = 'Get a new one from GET /agent/identity/challenge.';
 
-interface ChallengeRow {
+export interface ChallengeRow {
   id: string;
   difficulty: number;
   net_hmac: string;
@@ -63,12 +63,15 @@ export async function issueChallenge(relay: Relay, client: ClientInfo): Promise<
   return { challenge: id, algorithm: 'sha256-leading-zero-bits', difficulty, expires_at: expires };
 }
 
-/** Checks the answer without spending the challenge, so a refused name doesn't cost the agent another solve. `net` is the caller's network hash. */
-export async function checkSolution(relay: Relay, challenge: string, nonce: string, net: string | null): Promise<void> {
-  const row = await relay.db
-    .prepare('SELECT id, difficulty, net_hmac, expires_at, used_at FROM pow_challenges WHERE id = ?')
-    .bind(challenge)
-    .first<ChallengeRow>();
+/** Reads a challenge, for `checkSolution`. */
+export const challengeStmt = (relay: Relay, challenge: string) =>
+  relay.db.prepare('SELECT id, difficulty, net_hmac, expires_at, used_at FROM pow_challenges WHERE id = ?').bind(challenge);
+
+/**
+ * Checks the answer without spending the challenge, so a refused name doesn't cost the agent another solve. `row` is what
+ * `challengeStmt` read; `net` is the caller's network hash.
+ */
+export async function checkSolution(relay: Relay, row: ChallengeRow | undefined, challenge: string, nonce: string, net: string | null): Promise<void> {
   if (!row) throw invalid(`That challenge isn’t one we issued. ${NEW_ONE}`);
   if (row.net_hmac !== (net ?? 'unknown')) throw forbidden(WRONG_NETWORK);
   if (row.used_at) throw conflict(`That challenge was already used. ${NEW_ONE}`);

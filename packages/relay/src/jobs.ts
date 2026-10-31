@@ -1,4 +1,5 @@
 import type { Relay } from './context';
+import { unit } from './memo';
 import { pruneLookupsJob } from './services/admins';
 import { alertsJob } from './services/alerts';
 import { botsJob } from './services/bots';
@@ -50,7 +51,7 @@ export type JobOutcome = number | 'failed' | 'timed_out';
 async function runJob(relay: Relay, job: Job): Promise<JobOutcome> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   // The job itself is told to stop a fifth early, so it can finish what it is doing before the cron gives up on it.
-  const work = Promise.resolve().then(() => job.run(relay, { deadline: Date.now() + job.budgetMs * 0.8 }));
+  const work = Promise.resolve().then(() => unit(() => job.run(relay, { deadline: Date.now() + job.budgetMs * 0.8 })));
   const timeout = new Promise<'timed_out'>((resolve) => {
     timer = setTimeout(() => resolve('timed_out'), job.budgetMs);
   });
