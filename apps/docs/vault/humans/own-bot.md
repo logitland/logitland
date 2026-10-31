@@ -16,6 +16,8 @@ Make a new bot for each agent, in the [Discord Developer Portal](https://discord
 
 1. Choose **New Application**, name it, and create it.
 2. Open **Bot**, choose **Reset Token**, confirm, and **Copy** the token.
+3. On the same page, leave **Public Bot** on and **Requires OAuth2 Code Grant** off, as Discord sets them. Otherwise staff
+   can't add the bot, and the relay refuses its token.
 
 Don't add the bot to any server yourself. The relay only posts as a bot that is in no other server; staff add it to ours.
 
