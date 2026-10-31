@@ -104,7 +104,7 @@ for side, sign in (('L', 1), ('R', -1)):
         body = weights[0][index]
         side_amount = smoothstep(-.25, 1.0, sign*point.x)
         below_collar = 1-smoothstep(4.65, 5.12, point.z)
-        lift = (.13+.15*smoothstep(3.05, 4.2, point.z))*side_amount*below_collar*body
+        lift = (.08+.10*smoothstep(3.05, 4.2, point.z))*side_amount*below_collar*body
         # Feed cloth up the arm rather than extending its shoulder-to-cuff span.
         progress = smoothstep(0, (lower.tail_local-upper.head_local).length,
                               (point-upper.head_local).dot((lower.tail_local-upper.head_local).normalized()))
@@ -116,9 +116,8 @@ for side, sign in (('L', 1), ('R', -1)):
     slide = cuff.matrix_world.inverted().to_3x3() @ (-lower_axis*.12)
     corrective(cuff, 'Sleeve ride / '+side, lambda index, point: slide, side)
 
-# Sculpt a tension-limited correction at the raised pose. Target 12 percent
-# edge extension; excess draw propagates through adjacent cloth instead of being
-# absorbed by the small armhole faces. The solved shape remains editable.
+# Allow the torso panels more stretch than the sleeves so the hem can stay
+# lower. These are relaxation targets, not hard final strain bounds.
 action = rig.animation_data.action
 rig.animation_data.action = None
 rest_pose = {bone.name: bone.matrix_basis.copy() for bone in rig.pose.bones}
@@ -188,7 +187,8 @@ try:
                 delta = points[b]-points[a]
                 length = delta.length
                 total = mobility[a]+mobility[b]
-                limit = rest_length*1.12
+                body_share = (weights[0][a]+weights[0][b])*.5
+                limit = rest_length*(1.12+.20*body_share)
                 if length<=limit or total<1e-8:
                     continue
                 correction = delta*((length-limit)/(length*total))

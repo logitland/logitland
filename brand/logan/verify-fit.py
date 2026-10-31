@@ -18,10 +18,18 @@ parts = [obj for obj in bpy.data.collections['01 · Logan / meshes'].objects
          if obj.name.startswith(('Body /', 'Pelvis /', 'Hand /', 'Boot /'))]
 assert not any(obj.name.startswith('Neck /') for obj in scene.objects), 'The head must float above the collar'
 pairs = [('Collar / raised band', 'Head / faceted shell')]
+# Raised sleeves must yield to the complete rigid head, including the headset.
+for garment in ('Jacket / torso', 'Cuff / band.L', 'Cuff / band.R', 'Collar / raised band'):
+    for target in ['Head / faceted shell', 'Screen / glass'] + [
+            obj.name for obj in bpy.data.objects if obj.name.startswith('Headset /')]:
+        if (garment,target) not in pairs:
+            pairs.append((garment,target))
 for side in ('L', 'R'):
     pairs.extend([(f'Cuff / band.{side}', f'Hand / continuous.{side}'),
                   ('Jacket / torso', f'Hand / continuous.{side}'),
                   ('Trouser / continuous pants', f'Boot / continuous.{side}')])
+    pairs.extend([(f'Cuff / band.{side}', f'Hand / continuous.{"R" if side=="L" else "L"}'),
+                  ('Collar / raised band', f'Hand / continuous.{side}')])
 
 
 def check_pose(label):
@@ -45,13 +53,21 @@ def check_pose(label):
     assert reached == set(adjacent), f'{label}: unsupported body parts {set(adjacent)-reached}'
     for a, b in pairs:
         assert not meshes[a]['tree'].overlap(meshes[b]['tree']), f'{label}: {a} clips {b}'
-    print(f'PASS {label}: body supports extremities; cuffs, hems and collar clear')
+    print(f'PASS {label}: body supported; garments clear head, headset, hands and boots')
 
 
 try:
     for frame in (1, 40):
         scene.frame_set(frame)
         check_pose(f'frame {frame}')
+    if scene.get('garment_contact'):
+        # Proves that a moving head pushes the raised sleeve clear, rather than
+        # relying on a correction sculpted only for the saved waving pose.
+        for axis in (0,1,2):
+            for angle in (-20,20):
+                scene.frame_set(40)
+                rig.pose.bones['head'].rotation_euler[axis] = radians(angle)
+                check_pose(f'wave with head {"XYZ"[axis]} {angle} degrees')
     if scene.get('jacket_motion'):
         for frame in (10,20,30):
             scene.frame_set(frame)
