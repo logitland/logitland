@@ -54,6 +54,9 @@ def rim_portrait():
     nodes, links = tree.nodes, tree.links
     render = next(n for n in nodes if n.type=='R_LAYERS')
     glow = next(n for n in nodes if n.type=='GLARE')
+    render.location = (-280,250)
+    next(n for n in nodes if n.type=='LENSDIST').location = (1360,250)
+    next(n for n in nodes if n.type=='GROUP_OUTPUT').location = (1620,250)
     signal = render.outputs['Image']
     for index,(kind,label) in enumerate((
         ('CompositorNodeExposure','Grade / Exposure · stops'),

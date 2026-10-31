@@ -197,6 +197,12 @@ scene['portrait_notes'] = '85mm, f/2.8, focus on eyes, 2-degree roll; pink produ
 
 # Derive staging after production is finished so both scenes share every
 # photographic and geometric choice, with only their palettes differing.
+# Fresh builds establish glass defaults here. Artwork refreshes preserve the
+# artist's existing gloss settings in an already edited studio.
+glass = next(n for n in bpy.data.node_groups['LOGAN / CRT display'].nodes if n.type == 'BSDF_PRINCIPLED')
+for name, value in {'Roughness':.1,'Specular IOR Level':.5,'IOR':1.45,
+                    'Coat Weight':1,'Coat Roughness':.1}.items():
+    glass.inputs[name].default_value = value
 runpy.run_path(str(HERE/'finish-avatar.py'))['finish_avatar']()
 runpy.run_path(str(HERE/'rim-portrait.py'))['rim_portrait']()
 runpy.run_path(str(HERE/'sync-staging.py'))['sync_staging']()
