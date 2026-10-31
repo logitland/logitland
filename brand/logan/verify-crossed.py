@@ -1,4 +1,4 @@
-"""Check the static fold: right arm below left, straight bundled fingers,
+"""Check the static fold: right arm below left, bundled fingers,
 right palm on the left bicep, left fingers under the right bicep, seated cuffs.
 
 Small hidden hand/cloth overlaps are allowed. Inspect solid and material views
@@ -53,13 +53,17 @@ try:
         for first in digits:
             second = rig.pose.bones[first.name.replace('.01.', '.02.')]
             d1, d2 = (first.tail-first.head).normalized(), (second.tail-second.head).normalized()
-            assert d1.dot(d2) > .999, f'{first.name}: finger is curled'
+            bend = degrees(d1.angle(d2))
+            if side == 'R':
+                assert 15 < bend < 45, f'{first.name}: fingers must curve around the bicep'
+            else:
+                assert d1.dot(d2) > .999, f'{first.name}: tucked fingers should stay straight'
             assert d1.dot(middle) > .999, f'{first.name}: fingers are spread'
         for a, b in zip(digits, digits[1:]):
             delta = b.head-a.head
             spacing = (delta-middle*delta.dot(middle)).length
             assert spacing < .22, f'{side}: fingers are not bundled ({spacing:.3f})'
-        print(f'PASS {side}: anatomical elbow, wrist {bend:.1f} degrees, straight bundled fingers')
+        print(f'PASS {side}: anatomical elbow and wrist, bundled fingers')
 
     right = rig.pose.bones['hand.R']
     palm = right.matrix @ Vector((0, .55, .10))
@@ -74,6 +78,10 @@ try:
     assert (torso @ tips).y < (torso @ support).y-.1, 'Left fingers are not underneath the right bicep'
     assert (tips-support).length < .8, 'Left fingers miss the right arm gap'
     print('PASS hands: right palm rests on left bicep; left fingers tuck under right bicep')
+    left = rig.pose.bones['hand.L']
+    palm_normal = (left.matrix.to_3x3() @ Vector((0, 0, 1))).normalized()
+    toward_torso = (rig.pose.bones['torso'].matrix.to_3x3() @ Vector((0, 0, -1))).normalized()
+    assert palm_normal.dot(toward_torso) > .75, 'Downward palm must face the torso'
 
     jacket = bpy.data.objects['Jacket / torso']
     edge_counts = Counter(tuple(sorted(edge)) for face in jacket.data.polygons for edge in face.edge_keys)
@@ -86,6 +94,15 @@ try:
     points, _ = geometry(jacket)
     lining.show_viewport = was_enabled
     bpy.context.view_layer.update()
+    # The crossed fit must not drag the coat waist into the raised sleeve.
+    # This band moved over a full unit in the broken fit, producing the side spike.
+    transform = rig.matrix_world @ rig.pose.bones['torso'].matrix @ rig.data.bones['torso'].matrix_local.inverted() @ rig.matrix_world.inverted() @ jacket.matrix_world
+    basis = jacket.data.shape_keys.key_blocks[0].data
+    waist = [i for i, p in enumerate(basis) if .6 < abs(p.co.x) and 3.6 < p.co.z < 3.9
+             and jacket.data.attributes['Rest weights / torso'].data[i].value > .99]
+    excursion = max((points[i]-transform @ basis[i].co).length for i in waist)
+    assert excursion < .25, f'Coat side is pulled into the arm ({excursion:.3f})'
+    print(f'PASS coat side: maximum waist excursion {excursion:.3f}')
     for side, sign in (('L', 1), ('R', -1)):
         mouth = [i for i in boundary if sign*jacket.data.vertices[i].co.x > 1.1]
         assert mouth, f'No open sleeve mouth on {side}'
