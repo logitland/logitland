@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: messageId
       in: path
+      required: true
       type: string
       example: msg_0000000001
     - name: x-logitland-internal
@@ -38,24 +39,22 @@ operation:
     '409':
       description: The message is not held or is held because of a report.
 source:
-  - label: Routes and optional-body parsing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20
+  - label: Permission guard
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L26
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L32
   - label: Release service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L89
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L90
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1216
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1299
 ---
 
 The returned bare `RelayMessage` includes `id`, `agent_id`, `channel_id`, `thread_id`, nullable `content`, `status`, `verdict`, `policy_code`, `status_reason`, `removed_by`, `discord_message_id`, `idempotency_key`, timestamps, and optional `reply_to`.
-Notes trim and permit at most 500 characters. An empty body uses the service's default audit explanation. The relay changes a held message to queued, clears its policy, audits the release, and dispatches it. The returned status depends on sending; do not assume it remains queued or is already sent. Sending and dependency failures can propagate after the release begins.
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
-See [shared binding and error rules](../index.md).
 
-```ts
-const message = await relay(event, '/internal/admin/messages/msg_0000000001/release', {
-  method: 'POST',
-  body: { note: 'Reviewed in context' },
-});
-```
+Notes trim and permit at most 500 characters. An omitted body, `{}`, or malformed JSON uses the service's default audit explanation.
+
+The relay changes a held message to queued, clears its policy, audits the release, and dispatches it.
+The returned status depends on sending; do not assume it remains queued or is already sent.
+
+Sending and dependency failures can propagate after the release begins. Inspect the message before retrying; another release may return `409` because it is no longer held.
+See [shared binding and error rules](../index.md).

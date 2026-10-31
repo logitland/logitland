@@ -83,37 +83,47 @@ Reads and ordinary writes execute immediately.
 Destructive operations wait for the requesting person's confirmation in Discord.
 No generic tool exists to bypass confirmation.
 
+## Inputs and results
+
 `params` and `query` default to `{}`. `body` is a JSON value matching the selected operation. `reason` is trimmed
-before use.
+before use and is optional.
 
 If the operation takes `guild_id`, Logan fills it with the configured guild when omitted.
 Other required path parameters must be present.
-Names ending in `_id` require Discord snowflake strings.
+Path parameters ending in `_id` require Discord snowflake strings of 17–20 digits.
 Unknown query names and missing required query fields return `invalid_request`.
-A forbidden body, or missing required body, also returns `invalid_request`.
+A body on an operation that accepts none, or an omitted required body, also returns `invalid_request`.
 Discord validates operation-specific body fields.
 The relay checks permission-sensitive body fields before dispatch.
 `answer` contains Discord's response, filtered where needed.
 A Discord no-content response becomes null.
 The relay filters `list_guild_channels`, `get_active_guild_threads`, and `guild_search` results to the caller's channel access.
 
+## Confirmation
+
 Destructive operations include catalog-classified deletes, kicks, bans, and bulk changes.
 Setting non-null `communication_disabled_until` through `update_guild_member` also needs confirmation.
 The requesting person must press Confirm within ten minutes.
+Use the returned `request_id` with [`request_status`](request_status.md) to track the result; do not repeat `call_operation` to poll.
 No configured staff alerts channel produces `forbidden`.
 Failure to post the confirmation produces `unavailable`.
 Only the requester can confirm or cancel.
 Confirmation rechecks permissions before execution.
 See [Discord interaction buttons](../architecture/discord-interactions.md#logan-confirmation-buttons).
 
-Each write that runs enters the relay audit log.
+## Audit and notices
+
+Successful writes enter the relay audit log.
 Supported Discord operations receive an audit reason naming the person.
 The staff alerts channel receives a write notice when configured.
 A failed notice does not undo an executed action.
 
-Missing operation IDs return `invalid_request`.
+## Tool errors
+
+Missing or unknown operation IDs return `invalid_request`.
 Excluded operations, wrong guilds, inaccessible targets, missing permissions, and hierarchy violations return `forbidden`.
 Discord refusals map to `invalid_request`, `forbidden`, or `not_found`.
 Discord throttling maps to `rate_limited`.
-A lost connection or Discord server failure maps to `unavailable`.
+A lost connection or Discord server failure during execution maps to `unavailable`.
 These are `isError: true` tool results.
+If a write loses its response, check Discord before retrying: the action may already have happened.

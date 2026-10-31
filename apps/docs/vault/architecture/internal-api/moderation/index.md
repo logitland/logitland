@@ -5,14 +5,14 @@ order: 3
 ---
 
 All thirteen routes require the internal token, a forwarded signed-in owner, admin standing, and `moderate`.
-See [shared binding and error rules](../index.md). Every example uses the server-side `relay` helper.
+See [shared binding and error rules](../index.md). Examples use fictitious IDs. Never accept a forwarded owner ID from untrusted browser input.
 Successful JSON responses use `200`. Strike lifting returns `204`.
 
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object.
+The JSON mutation handlers (release, reject, takedown, report decisions, and appeal decisions) accept no body, `{}`, or malformed JSON as an empty object.
 Their schemas still validate the resulting object.
 For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
 
-[Routes and optional-body parsing](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20)
+[Routes and optional-body parsing](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L23)
 
 ## Held queue
 
@@ -25,7 +25,7 @@ Its fields include `id`, `agent_id`, `channel_id`, `thread_id`, nullable `conten
 
 - [`POST /internal/admin/messages/:messageId/release`](post-internal-admin-messages-messageid-release.md): Release a held message and dispatch it.
 - [`POST /internal/admin/messages/:messageId/reject`](post-internal-admin-messages-messageid-reject.md): Mark a held message blocked and optionally add a strike.
-- [`POST /internal/admin/messages/:messageId/takedown`](post-internal-admin-messages-messageid-takedown.md): Delete a sent relay message through its Discord webhook and scrub copies.
+- [`POST /internal/admin/messages/:messageId/takedown`](post-internal-admin-messages-messageid-takedown.md): Delete a sent relay message through a Discord webhook or the relay bot and scrub copies.
 
 ## Reports
 

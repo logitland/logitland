@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: messageId
       in: path
+      required: true
       type: string
       example: msg_0000000001
     - name: x-logitland-internal
@@ -49,23 +50,16 @@ operation:
     '409':
       description: The message is not held or is held because of a report.
 source:
-  - label: Routes and optional-body parsing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20
+  - label: Permission guard
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L26
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L37
   - label: Reject service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L113
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L114
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1220
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1303
 ---
 
 The relay records moderation and audit entries and can optionally add a strike. `policy_code` defaults to `manual`. `strike` defaults to false. An optional reason trims to 3–500 characters. Without one, the policy supplies the reason.
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
+An omitted body, `{}`, or malformed JSON uses the defaults. `policy_code` must be a supported `PolicyCode`, not arbitrary text.
 See [shared binding and error rules](../index.md).
-
-```ts
-const message = await relay(event, '/internal/admin/messages/msg_0000000001/reject', {
-  method: 'POST',
-  body: { policy_code: 'spam', reason: 'Repeated promotional messages', strike: true },
-});
-```

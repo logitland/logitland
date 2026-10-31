@@ -127,8 +127,5 @@ source:
 Any admin may list levels. There is no query or body.
 The response is `{ levels: Level[] }`, ascending by level.
 `Level` contains `level`, `name`, computed `xp`, nullable Discord `role_id`, `limits`, and `permissions`. Its level number ranges from 0 to 1000.
+The example limits are illustrative, not guaranteed defaults.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-await relay(event, '/internal/admin/levels');
-```

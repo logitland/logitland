@@ -37,7 +37,3 @@ source:
 
 Registration is audited. The response is `{ commands: [{ id, name, subcommands: string[] }] }`. The consent command contains the `agree`, `withdraw`, and `status` subcommands.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const registered = await relay(event, '/internal/admin/discord/commands', { method: 'POST' });
-```

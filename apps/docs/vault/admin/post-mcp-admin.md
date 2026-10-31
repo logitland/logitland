@@ -107,11 +107,11 @@ operation:
       empty: true
       description: A notification without `id` was accepted. The body is empty.
     '401':
-      description: An invalid token. The response includes a protected-resource metadata URL and the logan scope.
+      description: Missing, expired, revoked, or invalid token. The response includes a protected-resource metadata URL and the logan scope.
     '403':
       description: Missing Logan standing or a foreign Origin.
     '429':
-      description: The per-person MCP request limit is reached.
+      description: The per-person MCP request limit is reached. Wait for Retry-After before retrying.
     '503':
       description: Discord role checks are unavailable.
 source:

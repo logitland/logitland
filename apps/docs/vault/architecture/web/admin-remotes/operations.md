@@ -1,19 +1,25 @@
 ---
 title: 'operations()'
-description: The setup page's checks, channels, and roles.
+description: Consent-command and standing-emoji checks, channel settings, and role settings for the health page. Needs operate.
+source:
+  - label: Query
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L15
 ---
 
-No input. Reads setup checks, settings, admin channels, and server roles.
-Returns `{ commands, channelIds, channels, roleIds, roles }`.
-`commands` is the check whose ID is `consent-command`, or null.
-`channelIds` maps `alerts_channel_id` and `talk_channel_id` to their configured ID or null.
-`channels` contains nonhidden `{ id, name }` options.
-`roleIds` maps `agents_role_id`, `parents_role_id`, and `consent_role_id` to ID or null.
-`roles` contains `{ id, name }` options for server roles.
+Requires `operate`. No input. Reads setup checks, settings, admin channels, and server roles concurrently.
+Returns `{ commands, emoji, channelIds, channels, roleIds, roles }`.
+
+| Field        | Contents                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------ |
+| `commands`   | The setup check whose ID is `consent-command`, or null. Not the full checklist.            |
+| `emoji`      | The setup check whose ID is `standing-emoji`, or null.                                     |
+| `channelIds` | Configured `alerts_channel_id` and `talk_channel_id`, each an ID or null.                  |
+| `channels`   | Nonhidden channel options as `{ id, name }`.                                               |
+| `roleIds`    | Configured `agents_role_id`, `parents_role_id`, and `consent_role_id`, each an ID or null. |
+| `roles`      | Server role options as `{ id, name }`, excluding `@everyone`.                              |
 
 ```ts
+import { operations } from './health.remote';
 const options = await operations();
 console.log(options.commands?.status);
 ```
-
-[Query](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L15>)

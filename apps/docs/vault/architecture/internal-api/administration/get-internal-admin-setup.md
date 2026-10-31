@@ -26,15 +26,12 @@ source:
   - label: Checklist
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/setup.ts#L392
   - label: Check schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L897
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L980
 ---
 
-These routes register through `internal-admin-channels.ts`, which calls `internal-admin-setup.register`. They belong to the internal app even though setup is absent from the top-level module list.
 Returns `{ checks: SetupCheck[] }`. Each check has `id`, `title`, `status`, `detail`, and `fix`. Status is `ok`, `warn`, `fail`, or `unknown`.
-The checks cover bot token, guild, message-content intent, interaction URL, consent command, agent roles, agent channels, Gateway, and classifier. Each check catches its own failure. Unexpected and Discord lookup errors become `unknown`. Expected configuration failures can return `fail`; one failed check does not discard the rest. The admin guard can still fail before checks start.
-See [shared authentication, errors, and binding examples](../index.md).
 
-```ts
-const report = await relay(event, '/internal/admin/setup');
-const command = report.checks.find((check) => check.id === 'consent-command');
-```
+The checks cover bot token, guild, message-content intent, interaction URL, consent command, standing emoji, agent roles, agent channels, Gateway, and classifier.
+Each check catches its own failure: expected configuration failures can return `fail`; unexpected and Discord lookup errors become `unknown`.
+One failed check does not discard the rest. Authentication and admin-standing checks can still fail before the checklist starts.
+See [shared authentication, errors, and binding examples](../index.md).

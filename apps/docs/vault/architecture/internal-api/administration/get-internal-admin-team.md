@@ -30,9 +30,6 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L63
 ---
 
-Returns `{ members: TeamMember[] }`. Each member has `discord_user_id`, `username`, `name`, and nullable `owner_id`. An owner ID appears after the person signs into the dashboard.
+Returns `{ members: TeamMember[] }` for accepted Developer team members, or the application's owner when it has no team.
+Each member has `discord_user_id`, `username`, `name`, and nullable `owner_id`. An owner ID appears after the person signs into the dashboard.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-await relay(event, '/internal/admin/team');
-```

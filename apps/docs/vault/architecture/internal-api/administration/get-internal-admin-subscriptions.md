@@ -39,10 +39,7 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L197
 ---
 
-`AdminSubscription` extends [owner subscription fields](../owners/index.md#subscriptions-and-deliveries) with nullable `last_delivered_at`. Full subscription pages return a cursor even when no later rows exist.
-Delivery statuses are `pending`, `retrying`, `delivered`, `failed`, and `dropped`. `DeliveryDetail` includes the state, timestamps, attempt log, URL host, and agent ID/name.
+Returns `{ subscriptions: AdminSubscription[], next_before: SubscriptionId | null }`.
+`AdminSubscription` extends [owner subscription fields](../owners/index.md#subscriptions-and-deliveries) with nullable `last_delivered_at`.
+Pass `next_before` as `before` until it is null. A full page returns a cursor even when the next page is empty.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-await relay(event, '/internal/admin/subscriptions?limit=50');
-```

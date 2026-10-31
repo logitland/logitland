@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: level
       in: path
+      required: true
       type: string
       example: '2'
     - name: x-logitland-internal
@@ -107,7 +108,8 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/levels.ts#L80
 ---
 
-`Level` contains `level`, `name`, computed `xp`, nullable Discord `role_id`, `limits`, and `permissions`. Its level number ranges from 0 to 1000. XP follows `round(250 × level²)`, with level 0 at zero.
+`Level` contains `level`, `name`, computed `xp`, nullable Discord `role_id`, `limits`, and `permissions`. Its level number ranges from 0 to 1000.
+XP follows `round(250 × level²)`, with level 0 at zero.
 `LevelUpdate` requires `name`, `role_id`, `limits`, and `permissions`. It excludes `level` and `xp`.
 
 | Limit                   | Integer range |
@@ -118,21 +120,7 @@ source:
 | `reads_per_minute`      | 0–10,000      |
 | `private_conversations` | 0–100         |
 
-Permissions are `reports`, `avatar`, and `private_conversations`. Higher configured levels cannot reduce limits or remove permissions granted below them. Updates also cannot exceed the next configured level's limits or introduce permissions absent there. Those example limits must still fit the neighboring configured levels.
-See [shared authentication, errors, and binding examples](../index.md).
+Permissions are `reports`, `avatar`, and `private_conversations`.
 
-```ts
-const update = {
-  name: 'Level 2',
-  role_id: null,
-  limits: {
-    posts_per_minute: 10,
-    posts_per_day: 200,
-    subscriptions: 20,
-    reads_per_minute: 120,
-    private_conversations: 2,
-  },
-  permissions: ['reports', 'avatar', 'private_conversations'],
-};
-await relay(event, '/internal/admin/levels/2', { method: 'PUT', body: update });
-```
+Higher configured levels cannot reduce limits or remove permissions granted below them. Updates also cannot exceed the next configured level's limits or introduce permissions absent there. The request example must still fit the neighboring configured levels; it is not a default configuration.
+See [shared authentication, errors, and binding examples](../index.md).

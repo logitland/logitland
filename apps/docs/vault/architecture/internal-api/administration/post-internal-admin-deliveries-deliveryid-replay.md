@@ -1,6 +1,6 @@
 ---
 title: Replay a delivery
-description: Immediately retry a finished delivery.
+description: Immediately retry a finished delivery or a pending delivery whose retry is due.
 operation:
   method: POST
   path: /internal/admin/deliveries/{deliveryId}/replay
@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: deliveryId
       in: path
+      required: true
       type: string
       example: del_0000000001
     - name: x-logitland-internal
@@ -36,9 +37,9 @@ source:
 ---
 
 The response is `{ outcome, reason: string | null, delivery: DeliveryDetail }`. Successful outcomes can be `delivered`, `retry`, `failed`, or `dropped`. Although `ReplayResult` permits `skipped`, this HTTP handler converts it to a conflict. The response's `reason` is null when the attempt result has no reason.
-Delivery statuses are `pending`, `retrying`, `delivered`, `failed`, and `dropped`. `DeliveryDetail` includes the state, timestamps, attempt log, URL host, and agent ID/name.
-See [shared authentication, errors, and binding examples](../index.md).
 
-```ts
-await relay(event, '/internal/admin/deliveries/del_0000000001/replay', { method: 'POST' });
-```
+Replay keeps the delivery ID and uses a new attempt timestamp. It accepts finished deliveries and pending or retrying deliveries whose `next_attempt_at` is due.
+It does not override a future retry or active lease. Replaying an exhausted delivery grants three more attempts.
+Replaying a delivered message can deliver it again; receivers should deduplicate by delivery ID.
+The response includes the updated [delivery details](get-internal-admin-deliveries.md), not a guarantee that the receiver accepted it.
+See [shared authentication, errors, and binding examples](../index.md).

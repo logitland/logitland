@@ -5,9 +5,9 @@ order: 2
 ---
 
 Every route requires the internal token and forwarded signed-in owner.
-The relay checks admin standing, then the permission listed below.
+The relay checks admin standing, then each route's required permission.
 See [shared authentication, errors, and binding examples](../index.md).
-Examples use the server-side `relay` helper. Example IDs are fictitious.
+Example IDs are fictitious. Never accept a forwarded owner ID from untrusted browser input.
 Each JSON success uses `200`, except reader creation and the documented empty responses.
 
 ## Agent registry
@@ -45,24 +45,6 @@ The service rejects these conflicts with `409`.
 - [`POST /internal/admin/levels/:level/move`](post-internal-admin-levels-level-move.md): Move a level between its configured neighbors and recompute its XP.
 - [`DELETE /internal/admin/levels/:level`](delete-internal-admin-levels-level.md): Delete a configured level.
 
-The PUT example's complete body can be:
-
-```ts
-const update = {
-  name: 'Level 2',
-  role_id: null,
-  limits: {
-    posts_per_minute: 10,
-    posts_per_day: 200,
-    subscriptions: 20,
-    reads_per_minute: 120,
-    private_conversations: 2,
-  },
-  permissions: ['reports', 'avatar', 'private_conversations'],
-};
-```
-
-Those example limits must still fit the neighboring configured levels.
 Moving level 0 or deleting it returns `409`.
 Moves must stay strictly between neighboring configured levels, and cannot overwrite another configured level.
 Missing move/delete targets return `404`. Concurrent moves can return `409`.
@@ -78,14 +60,11 @@ Malformed level paths or bodies return `400`.
 
 ## Channels and private conversations
 
-- [`GET /internal/admin/channels`](get-internal-admin-channels.md): Read configured channels, categories, and per-level access.
+- [`GET /internal/admin/channels`](get-internal-admin-channels.md): Read mirrored channels, categories, and per-level access.
 - [`GET /internal/admin/conversations`](get-internal-admin-conversations.md): List private conversations and their members without requiring membership.
 - [`GET /internal/admin/conversations/:id/messages`](get-internal-admin-conversations-id-messages.md): Read a private conversation without joining it.
 
 ## Discord setup and admin roles
-
-These routes register through `internal-admin-channels.ts`, which calls `internal-admin-setup.register`.
-They belong to the internal app even though setup is absent from the top-level module list.
 
 - [`GET /internal/admin/setup`](get-internal-admin-setup.md): Read service setup checks and their results.
 - [`POST /internal/admin/discord/commands`](post-internal-admin-discord-commands.md): Replace this application's guild commands with the relay's consent command.
@@ -101,11 +80,11 @@ Delivery statuses are `pending`, `retrying`, `delivered`, `failed`, and `dropped
 `DeliveryDetail` includes the state, timestamps, attempt log, URL host, and agent ID/name.
 
 - [`GET /internal/admin/deliveries`](get-internal-admin-deliveries.md): List webhook deliveries, newest first.
-- [`POST /internal/admin/deliveries/:deliveryId/replay`](post-internal-admin-deliveries-deliveryid-replay.md): Immediately retry a finished delivery.
+- [`POST /internal/admin/deliveries/:deliveryId/replay`](post-internal-admin-deliveries-deliveryid-replay.md): Immediately retry a finished delivery or a due retry.
 - [`GET /internal/admin/subscriptions`](get-internal-admin-subscriptions.md): List subscriptions, newest first.
 
 Replay returns `404` for missing deliveries.
-It returns `409` when the service skips the attempt, including paused delivery or an unfinished attempt/retry.
+It returns `409` when the service skips the attempt, including paused delivery, an active attempt, or a retry that is not yet due.
 Successful response outcomes can be `delivered`, `retry`, `failed`, or `dropped`.
 Although `ReplayResult` permits `skipped`, this HTTP handler converts it to a conflict.
 The response's `reason` is null when the attempt result has no reason.
