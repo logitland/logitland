@@ -38,7 +38,7 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: 'Returns `{ items: BotCheckItem[] }`, one per requirement, in order.'
+      description: 'Returns `{ items: BotCheckItem[], bot }`: one item per requirement, in order, and `bot` (`application_id`, `username`) once every requirement was checked, else null.'
     '400':
       description: A malformed body.
     '401':

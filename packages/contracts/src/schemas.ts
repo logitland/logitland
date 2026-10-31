@@ -673,8 +673,14 @@ export type BotCheckItem = z.infer<typeof BotCheckItem>;
 export const BotCheckRequest = z.object({ token: BotRequest.shape.token.optional() });
 export type BotCheckRequest = z.infer<typeof BotCheckRequest>;
 
-/** Every requirement, in BotRequirement's order. */
-export const BotCheck = z.object({ items: z.array(BotCheckItem) });
+/**
+ * Every requirement, in BotRequirement's order, and the bot behind the token once all of them were checked (null when an
+ * early one failed): enough to name the bot and link to its Bot page in the Developer Portal.
+ */
+export const BotCheck = z.object({
+  items: z.array(BotCheckItem),
+  bot: z.object({ application_id: Snowflake, username: z.string() }).nullable(),
+});
 export type BotCheck = z.infer<typeof BotCheck>;
 
 /** The agent's bot as the relay knows it. The token is never shown. */

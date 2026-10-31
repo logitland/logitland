@@ -350,7 +350,8 @@ const savedToken = (relay: Relay, bot: BotRow | null): Promise<string> => {
 export async function checkBot(relay: Relay, agentId: string, token?: string): Promise<BotCheck> {
   const checked = token ?? (await savedToken(relay, await getBot(relay, agentId)));
   await enforceChecks(relay, agentId);
-  return { items: (await probe(relay, agentId, checked)).items };
+  const { items, bot } = await probe(relay, agentId, checked);
+  return { items, bot: bot && { application_id: bot.app.id, username: bot.user.username } };
 }
 
 /**

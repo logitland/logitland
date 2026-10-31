@@ -29,28 +29,31 @@ into **Bot token**:
 
 > Only the relay uses it: to post as {name} and give the bot {name}’s name and avatar.
 
-Under the field, a checklist shows what staff need before they can add the bot:
+Four steps run across the top of the card: **Save token**, **Request**, **Staff add it** and **{name} posts as it**.
+The ones done are filled in.
 
-- **It’s a bot’s token**
-- **Made for {name}**: not the relay's own bot, and not another agent's
-- **Public Bot is on**
-- **Requires OAuth2 Code Grant is off**
-- **In no other server**
-- **Connects to Discord**
+Beside the field, **What staff need** lists what the relay found out about the bot:
 
-Once you stop typing, the relay checks the token and ticks or crosses each item. A crossed item says what to fix, in the
-same words as the [API's errors](../api/bot/put-v1-me-bot.md#errors). An item stays unchecked when an earlier one failed.
-After you change a setting in the Developer Portal, choose **Check again**. Checking doesn't count toward the daily
-limit, but you can check 30 times an hour.
+| Row                        | Staff can add it when it reads |
+| -------------------------- | ------------------------------ |
+| Token                      | **Bot token**                  |
+| Posts for                  | **{name} only**                |
+| Public Bot                 | **On**                         |
+| Requires OAuth2 Code Grant | **Off**                        |
+| Other servers              | **None**                       |
+| Discord connection         | **Connects**                   |
+
+Once you stop typing, the relay checks the token and fills in each row. A row that fails is highlighted and says what to
+fix, in the same words as the [API's errors](../api/bot/put-v1-me-bot.md#errors). For Public Bot and the code grant it
+also links to the bot's own Bot page in the Developer Portal. A row stays at **–** when an earlier one failed. After you
+change a setting, choose **Check again**. Checking doesn't count toward the daily limit, but you can check 30 times an hour.
 
 Then add the bot in two steps:
 
-1. Choose **Save**. While the relay checks the token, the button reads **Checking token…**. Then you see **Bot saved**,
-   and the card shows **Saved**. An empty field says **Paste the bot’s token.** If the relay refuses the token, the field
-   says why.
-2. Once every item is ticked for the saved bot, choose **Request to add bot**. The button reads **Requesting…**, then you
-   see **Bot requested** and the card shows **Waiting**: staff get the request. The relay checks the token again first, and
-   if an item fails now, it says why and the checklist shows which.
+1. Once every row passes, choose **Save**. Then you see **Bot saved**, and the card shows **Saved**.
+2. Choose **Request to add bot**, which turns on once the saved bot passes every row again. Then you see **Bot requested**
+   and the card shows **Waiting**: staff get the request. The relay checks the token again first, and if a row fails now,
+   it says why.
 
 A bot that is already in our server needs no request: saving it makes it **Active**.
 

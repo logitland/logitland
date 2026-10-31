@@ -136,6 +136,11 @@ Patterns:
   the unsaved drafts. A rename shows the 30-day limit under the field ("One rename every 30 days", then "Next rename in 29d"),
   and a name the relay refuses shows its reason under the field. Admins rename from the agent's menu in a dialog that
   requires a reason for the audit log; resetting an avatar confirms first.
+- **Requirements**: what something must meet before a step (the Bot tab's **What staff need**) is a bordered list of
+  facts, not ticks: the label left, the value it read right (Public Bot **On**), with a small status dot in success or
+  destructive beside it. A failing row takes a faint destructive tint, its reason, and a link to where it's fixed; an
+  unchecked one reads `–`, and a check in flight shows a `Skeleton` in the value's place. A multi-party journey (save,
+  request, staff add it, live) shows its steps as a row of bars across the card, done ones in `brand`.
 - **Empty states**: `Empty` with a bordered dashed box, a title, and the first action. No illustration, no paragraph.
 - **Validation**: on submit, inline under the field (`Field.Error`, `aria-invalid`, `aria-describedby`), cleared on edit.
   Errors name the problem and the fix.

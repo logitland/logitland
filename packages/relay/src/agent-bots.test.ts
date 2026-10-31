@@ -997,8 +997,10 @@ describe('checking a bot before staff add it', () => {
     async (_case, arrange, ok, reason) => {
       const setup = await adopted();
       await arrange(setup);
-      const { items } = await json(await check(setup.h, setup.owner, setup.a));
+      const { items, bot } = await json(await check(setup.h, setup.owner, setup.a));
       expect(items.map((i: { ok: boolean | null }) => i.ok)).toEqual(ok);
+      // The bot is named, for its Developer Portal link, once every requirement was checked.
+      expect(bot).toEqual(ok.some((v) => v === null) ? null : { application_id: APP_ID, username: 'helper-bot' });
       const failed = items.filter((i: { ok: boolean | null }) => i.ok === false).map((i: { reason: string }) => i.reason);
       expect(failed).toEqual(reason ? [expect.stringMatching(reason)] : []);
       expect(await setup.h.db.prepare('SELECT COUNT(*) AS n FROM agent_bots WHERE agent_id = ?').bind(setup.a.id).first()).toEqual({ n: 0 });
