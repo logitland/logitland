@@ -10,6 +10,77 @@ import bpy
 HERE = Path(__file__).resolve().parent
 
 
+def lock_eye_raster():
+    """Sample each eye once per phosphor row, switching inside the dark gap.
+
+    SVG coordinates alone cannot align filtered textures with procedural lines.
+    One shared raster drives both the scanline phase and the eye sampling UVs,
+    including while the blink transform changes the artwork's vertical scale.
+    """
+    raster = bpy.data.node_groups.get('LOGAN / CRT raster')
+    if raster is None:
+        raster = bpy.data.node_groups.new('LOGAN / CRT raster','ShaderNodeTree')
+        for name, kind, direction in (
+            ('UV','NodeSocketVector','INPUT'),('Row UV','NodeSocketVector','OUTPUT'),
+            ('Phase','NodeSocketFloat','OUTPUT'),('Dark Fraction','NodeSocketFloat','OUTPUT'),
+        ):
+            raster.interface.new_socket(name=name,socket_type=kind,in_out=direction)
+        nodes, links = raster.nodes, raster.links
+        inp, out = nodes.new('NodeGroupInput'), nodes.new('NodeGroupOutput')
+        xy = nodes.new('ShaderNodeSeparateXYZ')
+        links.new(inp.outputs['UV'],xy.inputs[0])
+        rows = nodes.new('ShaderNodeValue')
+        rows.name = 'Phosphor rows'
+        rows.outputs[0].default_value = 72
+        gap = nodes.new('ShaderNodeValue')
+        gap.name = 'Dark gap fraction'
+        gap.outputs[0].default_value = .28
+
+        def math(operation, a, b=0):
+            node = nodes.new('ShaderNodeMath')
+            node.operation = operation
+            for value, socket in zip((a,b),node.inputs):
+                if isinstance(value,(float,int)):
+                    socket.default_value = value
+                else:
+                    links.new(value,socket)
+            return node.outputs[0]
+
+        y = math('MULTIPLY',xy.outputs['Y'],rows.outputs[0])
+        gap_center = math('MULTIPLY',gap.outputs[0],.5)
+        row = math('FLOOR',math('SUBTRACT',y,gap_center))
+        # Bright band center = (1 + dark fraction)/2; transitions at gap/2.
+        sample = math('DIVIDE',math('ADD',row,math('ADD',gap_center,.5)),rows.outputs[0])
+        uv = nodes.new('ShaderNodeCombineXYZ')
+        links.new(xy.outputs['X'],uv.inputs['X'])
+        links.new(sample,uv.inputs['Y'])
+        links.new(uv.outputs[0],out.inputs['Row UV'])
+        links.new(math('FRACT',y),out.inputs['Phase'])
+        links.new(gap.outputs[0],out.inputs['Dark Fraction'])
+        for index, node in enumerate(nodes):
+            node.location = ((index%5)*230,-(index//5)*220)
+    crt = bpy.data.node_groups['LOGAN / CRT display']
+    if not crt.nodes.get('Shared phosphor raster'):
+        node = crt.nodes.new('ShaderNodeGroup')
+        node.node_tree, node.name = raster, 'Shared phosphor raster'
+        inputs = next(n for n in crt.nodes if n.type=='GROUP_INPUT')
+        threshold = crt.nodes['Math.002']
+        crt.links.new(inputs.outputs['UV'],node.inputs['UV'])
+        crt.links.new(node.outputs['Phase'],threshold.inputs[0])
+        crt.links.new(node.outputs['Dark Fraction'],threshold.inputs[1])
+        for name in ('Math.001','Math'):
+            crt.nodes.remove(crt.nodes[name])
+    for material in bpy.data.materials:
+        if not material.use_nodes or 'Face · 2D CRT display' not in material.name:
+            continue
+        nodes, links = material.node_tree.nodes, material.node_tree.links
+        node = nodes.get('Shared phosphor raster') or nodes.new('ShaderNodeGroup')
+        node.node_tree, node.name = raster, 'Shared phosphor raster'
+        node.location = (nodes['Separate XYZ'].location.x-220,400)
+        links.new(nodes['UV Map'].outputs[0],node.inputs['UV'])
+        links.new(node.outputs['Row UV'],nodes['Separate XYZ'].inputs[0])
+
+
 def dark_features(material, crt):
     """Use the artwork as a negative mask, before staging recolors its phosphor."""
     nodes, links = material.node_tree.nodes, material.node_tree.links
@@ -54,6 +125,8 @@ def setup_screen_controls():
          'Reflection blur in Eevee and Cycles; drives both glass and clearcoat.'),
         ('Screen Diffusion', 'NodeSocketFloat', .5,
          'Soft spread of the emitted artwork beneath the sharp glass reflection.'),
+        ('Glass Reflection', 'NodeSocketFloat', .45,
+         'Strength of the glass highlight, independent of emission and roughness.'),
         ('Diffusion Image', 'NodeSocketColor', None,
          'Blurred artwork, transformed with the same blink controls as the face.'),
     )
@@ -71,6 +144,15 @@ def setup_screen_controls():
             socket.hide_value = True
     for name in ('Roughness', 'Coat Roughness'):
         links.new(inputs.outputs['Glass Roughness'], glass.inputs[name])
+    if not n.get('Glass reflection / strength'):
+        destinations = [link.to_socket for link in glass.outputs[0].links]
+        reflection = n.new('ShaderNodeMixShader')
+        reflection.name = 'Glass reflection / strength'
+        links.new(inputs.outputs['Glass Reflection'],reflection.inputs[0])
+        links.new(glass.outputs[0],reflection.inputs[2])
+        for destination in destinations:
+            links.new(reflection.outputs[0],destination)
+        reflection.location = (glass.location.x+240,glass.location.y)
     if not n.get('Screen diffusion / emission'):
         strength = n.new('ShaderNodeMath')
         strength.name = 'Screen diffusion / brightness'
@@ -157,6 +239,7 @@ def setup_screen_controls():
             hue.location = (crt.location.x-250,-2200)
         material_links.new(composite, crt.inputs['Diffusion Image'])
         dark_features(material, crt)
+    lock_eye_raster()
     bpy.context.view_layer.update()
 
 

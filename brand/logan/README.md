@@ -16,8 +16,9 @@ including the head gradients, SVG chest print, seams, pants, shoes and CRT face.
 The head is matte metal, the CRT screen glossy glass with black features on
 pink phosphor (blue in staging), and the jacket a
 fine woven weatherproof shell with teddy fleece on its inner shell and collar.
-Both enlarged eyes share the same height, with left-facing brows and horizontal
-edges aligned to the 72 CRT rows. The smirk is a tapered crescent. Narrow colored
+Both enlarged eyes share the same height, with left-facing brows. A shared
+shader raster samples the eyes once per CRT row and places their boundaries
+inside the dark gaps, including during blinks. The smirk is a tapered crescent. Narrow colored
 backlights catch the head bevels; shallow subsurface scattering softens cloth
 and rubber. Optical glow and subtle lens distortion complete the portrait.
 Staging differs only in its colors. `sync-staging.py` derives its geometry,
@@ -26,8 +27,9 @@ automatically without changing the saved studio. Run it in Blender and save
 after editing production to update the staging scene in the open file as well.
 
 Select **Screen / glass**, then **Material Properties → Surface** to adjust
-**Glass Roughness** (both reflection layers) and **Screen Diffusion** (the soft
-spread of the emitted artwork beneath the glass). These affect Eevee and Cycles;
+**Glass Roughness** (both reflection layers), **Glass Reflection** (highlight
+intensity) and **Screen Diffusion** (the soft spread of the emitted artwork
+beneath the glass). These affect Eevee and Cycles;
 the Roughness/Metallic fields under **Viewport Display** do not drive the
 rendered shader. Diffusion maps follow each eye's blink independently and preserve the
 black features. The SVG and PNGs are bright masks; the shader reverses them

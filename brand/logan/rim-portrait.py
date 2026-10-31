@@ -10,8 +10,8 @@ from mathutils import Vector
 def rim_portrait():
     scene = bpy.data.scenes['AVATAR · Production']
     lights = {
-        'Portrait / key · silk': ((-4.5,-6,9.5),260,(1,.9,.88),4.5,None),
-        'Portrait / fill · cool': ((4.5,-5,5.5),45,(.4,.65,1),3.2,None),
+        'Portrait / key · silk': ((-4.5,-6,9.5),340,(1,.9,.88),4.5,None),
+        'Portrait / fill · cool': ((4.5,-5,5.5),60,(.4,.65,1),3.2,None),
         'Portrait / rim · magenta': ((-3.3,.4,7.6),600,(1,.012,.8),.25,3.5),
         'Portrait / rim · ice': ((3.0,1.4,7.6),450,(.035,.28,1),.3,3.2),
         'Portrait / top edge': ((0,1.2,8.1),250,(1,.012,.8),3.5,.25),
@@ -26,7 +26,7 @@ def rim_portrait():
         if height:
             obj.data.size_y = height
     rig = next(o for o in scene.objects if o.get('logan_pose_controls'))
-    rig['screen_brightness'] = 1.0
+    rig['screen_brightness'] = 1.6
     rig.keyframe_insert(data_path='["screen_brightness"]',frame=80)
     materials = {slot.material for obj in scene.objects if obj.type=='MESH'
                  for slot in obj.material_slots if slot.material}
@@ -37,7 +37,7 @@ def rim_portrait():
             if shader.type != 'BSDF_PRINCIPLED':
                 continue
             if shader.inputs['Emission Strength'].default_value > 0:
-                shader.inputs['Emission Strength'].default_value = .5 if material.name.startswith(('Head ·','Trim ·')) else 1.0
+                shader.inputs['Emission Strength'].default_value = .7 if material.name.startswith(('Head ·','Trim ·')) else 1.4
             if shader.inputs['Metallic'].default_value < .5:
                 # Shallow scattering in cloth/rubber catches backlight without
                 # turning opaque metal into wax. No scattering on screen glass.
@@ -72,10 +72,10 @@ def rim_portrait():
     nodes['Grade / Saturation'].inputs['Saturation'].default_value = 1.12
     links.new(signal,glow.inputs['Image'])
     glow.inputs['Threshold'].default_value = .5
-    glow.inputs['Strength'].default_value = .4
+    glow.inputs['Strength'].default_value = .5
     glow.inputs['Size'].default_value = .6
     glow.location = (1100,250)
-    scene.view_settings.exposure = -.4
+    scene.view_settings.exposure = -.3
     scene['portrait_notes'] = 'Narrow saturated backlights; matte metal bevels, shallow cloth scattering; compositor grading controls.'
 
 
