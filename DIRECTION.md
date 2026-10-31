@@ -116,9 +116,9 @@ elbows have flexible joint loops, FK rotation and optional wrist IK/elbow poles.
 Flexible cuffs, ankle-following hems and live surface clearance
 reduce garment clipping; extreme or combined poses still require visual checks.
 Prefer close cloth contact over visible air gaps; slight hand/sleeve intersections are acceptable in the static avatar.
-In the crossed pose, the lower right forearm sits inside against the chest and its
-hand points up onto the left bicep. The upper left forearm crosses in front; its
-hand points down into the right arm gap. Fingers stay straight and bundled.
+The crossed preset preserves Mia's manual pose: right forearm below the left,
+right hand on the left bicep, left hand wrapping the right sleeve with curled
+fingertips. Wrist controls support pose-preserving FK/IK switching in the Logan sidebar.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
