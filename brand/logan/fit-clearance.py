@@ -75,7 +75,9 @@ try:
     cage = bpy.data.objects.new(cage_name, data)
     collection.objects.link(cage)
     cage.parent, cage.parent_type, cage.parent_bone = rig, 'BONE', 'head'
-    cage.matrix_world = Matrix.Translation(center) @ Matrix.Diagonal((*(high-low),1))
+    # New lattice coordinates have unit spacing, not a unit-sized bounding box.
+    spacing = Vector(((high.x-low.x)/6, (high.y-low.y)/4, (high.z-low.z)/6))
+    cage.matrix_world = Matrix.Translation(center) @ Matrix.Diagonal((*spacing,1))
     inverse = cage.matrix_world.inverted()
     surface = BVHTree.FromPolygons(points, [p.vertices[:] for p in mesh.polygons])
     # A smooth outward field avoids sending adjacent control points to opposite
@@ -90,7 +92,7 @@ try:
         hit, _, _, distance = surface.ray_cast(center, direction)
         if hit is None:
             continue
-        push = .55*exp(-((radius-distance)/.85)**2)*min(1,radius/.4)
+        push = .22*exp(-((radius-distance)/.55)**2)*min(1,radius/.4)
         point.co_deform = inverse @ (world+direction*push)
     cage.hide_render = True
     cage.hide_set(True)
@@ -111,8 +113,10 @@ for name in garments:
     if name!='Trouser / continuous pants':
         mod = obj.modifiers.new('Lattice head contact', 'LATTICE')
         mod.object = cage
+        mod.strength = 1 if name=='Jacket / torso' else .25
         obj.modifiers.move(len(obj.modifiers)-1, next(i+1 for i,m in enumerate(obj.modifiers) if m.type=='ARMATURE'))
-        contact(obj, proxy, .25)
+        # The jacket's lining needs room below the ear cup during a head tilt.
+        contact(obj, proxy, .18 if name=='Jacket / torso' else .15)
         for side in ('R','L'):
             contact(obj, objects['Hand / continuous.'+side], .15 if name.startswith('Cuff /') else .075)
     else:
