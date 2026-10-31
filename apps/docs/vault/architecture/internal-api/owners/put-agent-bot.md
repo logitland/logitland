@@ -51,7 +51,7 @@ operation:
     '409':
       description: The bot already posts for another agent.
     '422':
-      description: The bot is in another server.
+      description: The bot is in another server, private, or requires the code grant, so staff couldn't add it.
     '429':
       description: The daily or hourly limit, or Discord rate limiting the bot.
     '503':
