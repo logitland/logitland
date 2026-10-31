@@ -3,9 +3,10 @@
 blender --background brand/logan/logan.blend --python brand/logan/pose-crossed-arms.py
 Saves the file. The body turns 30° while the head looks back at the camera.
 The right forearm crosses below and behind the left; its hand points up onto
-the left bicep. The upper left hand points down into the right arm gap. Fingers are straight
-and bundled. The shoulders advance slightly to make room for the fold; elbows
-use their anatomical hinges. Small hidden cloth intersections are intentional.
+the left bicep. Its bundled fingers curve around the bicep. The upper left hand
+points down into the right arm gap with its palm against the torso. The shoulders
+advance to make room for the fold; elbows use their anatomical hinges.
+Small hidden cloth intersections are intentional.
 The sleeves follow a roll-free drape armature and a fitted crossed-arms coat
 shape. Every preset is held, not interpolated.
 """
@@ -20,7 +21,7 @@ DEGREES = {
     'head': (-6.0000, -24.0000, 5.0000),
     'upper_arm.L': (-52.9536, -183.4131, -31.9080),
     'forearm.L': (0, 0, 115.6052),
-    'hand.L': (-5.7860, 147.9841, 36.7945),
+    'hand.L': (-5.248492, -159.140471, 41.742920),
     'upper_arm.R': (-14.8181, -162.5932, 34.5301),
     'forearm.R': (0, 0, -108.3437),
     'hand.R': (55.9341, 128.1031, 81.6691),
@@ -30,12 +31,12 @@ DEGREES = {
     'finger2.02.L': (-12.6900, 0, 0),
     'finger3.01.L': (-5.9127, -.2301, -2.2204),
     'finger3.02.L': (-14.3056, -.2299, -.6242),
-    'finger1.01.R': (-5.9127, .2300, 2.2204),
-    'finger1.02.R': (-14.3056, .2299, .6242),
-    'finger2.01.R': (-4.9530, .2504, 2.8866),
-    'finger2.02.R': (-12.6900, 0, 0),
-    'finger3.01.R': (-5.7302, .2895, 2.8830),
-    'finger3.02.R': (-14.4865, 0, 0),
+    'finger1.01.R': (8.0873, .2300, 2.2204),
+    'finger1.02.R': (13.6944, .2299, .6242),
+    'finger2.01.R': (9.0470, .2504, 2.8866),
+    'finger2.02.R': (15.3100, 0, 0),
+    'finger3.01.R': (8.2698, .2895, 2.8830),
+    'finger3.02.R': (13.5135, 0, 0),
     'thumb.01.L': (1.3578, -3.6420, -33.8512),
     'thumb.02.L': (-3.1458, 4.7631, 25.9940),
     'thumb.01.R': (1.3578, 3.6419, 33.8512),

@@ -221,19 +221,21 @@ start/duration. The screen UV canvas is 1804 × 1128.
    `-- crossed-rear` render it from the other studio angles. Both elbows bend
    anatomically. The lower right forearm sits inside against the chest, with its
    hand pointing up onto the left bicep. The upper left forearm crosses in front
-   and its hand points down into the right arm gap. Fingers are straight and
-   bundled; wrists bend about 40–43°. The poses are held presets:
+   and its hand points down into the right arm gap, palm toward the torso.
+   The upward hand's bundled fingers curl around the bicep; the tucked fingers
+   stay straight. Wrists bend about 40–43°. The poses are held presets:
    `pose-presets.py` makes every rig key constant, so frames between presets
    repeat the previous pose and garment.
    `fit-sleeve-drape.py` adds the hidden **LOGAN · Sleeve drape** armature. The
    jacket and body arms follow it: its shoulders track the pose rig's forward
    movement, and its arm bones aim at the elbow and wrist,
    so the fabric swings with the arm without inheriting the humerus roll that the
-   elbow hinge needs. `fit-crossed-cloth.py` then bakes the driven
-   `Crossed arms cloth` shape key from that skinning. It spreads shoulder motion
-   across the armhole and relaxes neighbouring loops. Sleeve openings follow the
-   actual cuff cross sections without taking on wrist roll. The simple body's
-   shoulder caps retract beneath the coat. The rig's `crossed_cloth`
+   elbow hinge needs. `fit-crossed-cloth.py` reconstructs the driven
+   `Crossed arms cloth` shape key from authored posed surfaces stored in
+   `crossed-tailoring.npz`. They carry the shoulder forward while retaining coat
+   volume, keep the collar base against the neckline, and seat the sleeve mouths
+   in the cuffs. The simple body's upper arms fit beneath the padded sleeves.
+   The rig's `crossed_cloth`
    property blends the fit and is zero in the neutral and wave poses. In the
    crossed preset it also swings the cuffs after the hands without twist, drops
    their sideways-bend bulge and eases the raised-arm correctives to a quarter,
@@ -241,11 +243,14 @@ start/duration. The screen UV canvas is 1804 × 1128.
    out of their cuffs. Hand shrinkwrap is disabled in this preset so the tucked
    fingers can overlap hidden fabric without inflating the sleeve. Small hidden
    overlaps remain intentional; the left fingertips can show from behind.
-   Refit after changing the crossed pose or the garment
-   topology; this is a pose correction, not a live cloth simulation.
+   Reauthor after changing the crossed pose or garment topology: sculpt the
+   corrective keys in frame 80, then run `export-crossed-tailoring.py` to store
+   the posed targets. The fitter rejects changed base topology. These targets
+   are specific to this still pose, not a live cloth simulation.
    `verify-crossed.py` checks the vertical and depth order, opposite hand directions,
-   straight bundled fingers, elbow hinges, wrists under 45°, hand placement and
-   sleeve openings seated in their cuffs. It also checks that frame 66 holds the
+   finger bundling and curl, elbow hinges, wrists under 45°, palm direction,
+   hand placement, waist distortion and sleeve openings seated in their cuffs.
+   It also checks that frame 66 holds the
    wave exactly. Use solid, wireframe and material views to judge the cloth fit;
    this check does not certify collision-free geometry.
 2. Select **LOGAN · Pose me** in the Pose rig collection. Enable viewport Overlays

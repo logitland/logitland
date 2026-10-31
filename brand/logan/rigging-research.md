@@ -1,23 +1,24 @@
 # Logan: established rigging and garment workflows
 
-Researched 2026-10-31. Recommendation, not an implemented rig migration.
+Researched and tested 2026-10-31. The current avatar uses authored posed
+correctives on its existing rig. CloudRig has not been installed or substituted.
 
 ## Recommendation
 
-Use **CloudRig for the reusable control rig, deliberate shoulder weights, and
-Pose Shape Keys for the final garment corrections**. Connect the collar to the
-coat geometrically. Finish the crossed pose with normal arm and finger controls;
-use a short cloth settle only if it improves the contact folds. Preserve the
-approved meshes, materials, floating head and static pose deliverable.
+For this static avatar, use **authored posed garment corrections** with the
+existing shoulder translations and arm controls. The corrective includes the
+collar base so it follows the neckline. Preserve the approved meshes, materials,
+floating head and static pose deliverable. CloudRig remains an option for a
+future reusable control rig; migrating controls is not necessary for this still.
 
 This follows [Blender Studio's published rigging workflow][studio]: generated
 controls, manual weights, then authored corrective shapes. Its tools automate
 rig construction and corrective-shape management; they do not automatically
 find an attractive crossed-arm pose or repair garment topology.
 
-## What the current file actually has
+## Baseline inspection
 
-Read-only inspection of the open `logan.blend`, Blender **5.2.3 LTS**, frame 80:
+Inspection before the correction, at commit `7417022`, in Blender **5.2.3 LTS**, frame 80:
 
 - Jacket cage: **1,043 vertices**; each hand: **410**. The jacket and hands already
   use Armature Preserve Volume. Enabling it again cannot solve the remaining fit.
@@ -109,12 +110,31 @@ for broad shape corrections, but do not know whether a hand is touching a sleeve
 A smaller cage narrows influence; it does not establish physical contact.
 [Mesh Deform][mesh-deform], [CloudRig lattice controls][cloud-components]
 
-## First implementation slice and acceptance
+## Tested implementation
 
-The next bounded slice is a separate candidate using CloudRig's shoulders, arms
-and fingers with Logan's existing geometry. Establish the crossed pose with
-garment contact effects disabled, then repair the collar seam and garment weights.
-Author one crossed-pose correction; add simulation only if it earns its complexity.
+The old crossed correction moved torso vertices according to their distance from
+an upper-arm bone. The coat-side band moved up to 1.038 model units and formed
+the reported spike. Source weight attributes also contain 69 unclassified
+vertices from the Boolean armhole join; those attributes cannot reliably mask
+the correction. The live armature weights themselves are not zero.
+
+The authored target reconstructs the sewn shoulder, carries the upper coat with
+shoulder protraction, restores torso volume and locally relaxes the underarm.
+It transfers back to the original 1,043-vertex mesh. The collar follows the same
+shoulder displacement, and the internal arm fits beneath the padded sleeve.
+The coat-side excursion is 0.209 units. Cuff-mouth gaps measure 0.009 units.
+
+`crossed-tailoring.npz` stores posed surfaces and their base coordinates.
+`fit-crossed-cloth.py` maps these through the existing armature into editable
+shape keys; `export-crossed-tailoring.py` stores subsequent sculpt edits.
+This follows the [posed-mesh corrective workflow][pose-extension] without
+requiring an add-on installation. It is a correction for the approved frame-80
+pose, not a general collision solver. Small contact folds and hidden overlaps
+remain; the numerical checks do not certify collision-free cloth.
+
+Native Cloth, Corrective Smooth alone, and Laplacian Deform were tested on
+separate copies. They did not give an acceptable shoulder shape with this input
+mesh. The simulation proxy is not part of the final model.
 
 The upward hand rests on the opposite bicep, with bundled fingers curved around
 it. The upper arm's downward hand turns its palm against the torso. Raise the arms
