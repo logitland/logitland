@@ -1,17 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1804" height="1128" viewBox="0 0 1804 1128">
   <title>Logan — 2D face layers</title>
+  <!-- Traced from reference/logan.png: brows reach left, pupils glance right, the right brow is cocked. -->
   <rect id="background" width="1804" height="1128" fill="black"/>
   <g id="static" fill="#ff55dd">
-    <path d="M 160 284 L 650 336 Q 668 338 666 356 L 658 431 Q 656 449 638 447 L 148 395 Q 130 393 132 375 L 140 300 Q 142 282 160 284 Z"/>
-    <path d="M 1644 284 L 1154 336 Q 1136 338 1138 356 L 1146 431 Q 1148 449 1166 447 L 1656 395 Q 1674 393 1672 375 L 1664 300 Q 1662 282 1644 284 Z"/>
-    <path d="M 687 840 C 850 875 1000 860 1187 707 C 1010 906 870 990 687 840 Z"/>
+    <path d="M 284 318 H 687 V 405 H 284 Z"/>
+    <path d="M 1070 292 L 1527 214 V 312 L 1070 390 Z"/>
+    <path d="M 806 800 C 890 826 1020 796 1136 700 L 1126 732 C 1030 836 900 858 806 800 Z"/>
   </g>
+  <!-- The rig's blinks squash each eye toward the centre of its first rect. -->
   <g id="eye-R" fill="#ff55dd">
-    <rect x="238" y="374" width="328" height="440" rx="54"/>
-    <rect x="412" y="458" width="86" height="78" rx="8" fill="black"/>
+    <rect x="432" y="360" width="255" height="368" rx="22"/>
+    <rect x="577" y="420" width="70" height="70" rx="6" fill="black"/>
   </g>
   <g id="eye-L" fill="#ff55dd">
-    <rect x="1238" y="374" width="328" height="440" rx="54"/>
-    <rect x="1412" y="458" width="86" height="78" rx="8" fill="black"/>
+    <rect x="1258" y="296" width="269" height="371" rx="22"/>
+    <rect x="1405" y="350" width="70" height="70" rx="6" fill="black"/>
   </g>
 </svg>

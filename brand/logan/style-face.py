@@ -5,9 +5,13 @@ blink controls. The CRT group's Image input also accepts a movie or sequence.
 """
 from math import tau
 from pathlib import Path
+import xml.etree.ElementTree as ET
 import bpy
 
 directory = Path(__file__).resolve().parent
+svg = ET.parse(directory/'face'/'face.svg').getroot()
+canvas_height = float(svg.get('height'))
+SVG = '{http://www.w3.org/2000/svg}'
 rig = bpy.data.objects['LOGAN · Pose me']
 screen = bpy.data.objects['Screen / glass']
 material = bpy.data.materials.get('Face · 2D CRT display') or bpy.data.materials.new('Face · 2D CRT display')
@@ -61,9 +65,11 @@ for index, name in enumerate(('static', 'eye-L', 'eye-R')):
     if name.startswith('eye-'):
         side = name[-1]
         opening = control('Blink '+side, 'max(0.035,1-value)', 'blink_'+side)
-        # Sampling inversely scales the raster around the original eye centre.
-        y = math(nodes, links, 'SUBTRACT', separate.outputs['Y'], .4734)
-        y = math(nodes, links, 'ADD', math(nodes, links, 'DIVIDE', y, opening), .4734)
+        # Sampling inversely scales the raster around the centre of the eye's first rect.
+        eye = svg.find(f"{SVG}g[@id='{name}']/{SVG}rect")
+        centre = 1-(float(eye.get('y'))+float(eye.get('height'))/2)/canvas_height
+        y = math(nodes, links, 'SUBTRACT', separate.outputs['Y'], centre)
+        y = math(nodes, links, 'ADD', math(nodes, links, 'DIVIDE', y, opening), centre)
         combine = nodes.new('ShaderNodeCombineXYZ')
         links.new(separate.outputs['X'], combine.inputs['X'])
         links.new(y, combine.inputs['Y'])
@@ -71,13 +77,14 @@ for index, name in enumerate(('static', 'eye-L', 'eye-R')):
     links.new(vector, texture.inputs['Vector'])
     layers.append(texture.outputs['Color'])
 composite = layers[0]
+# Lighten keeps overlapping brows and eyes one opaque colour; adding would brighten them.
 for layer in layers[1:]:
-    add = nodes.new('ShaderNodeMixRGB')
-    add.blend_type = 'ADD'
-    add.inputs[0].default_value = 1
-    links.new(composite, add.inputs[1])
-    links.new(layer, add.inputs[2])
-    composite = add.outputs[0]
+    lighten = nodes.new('ShaderNodeMixRGB')
+    lighten.blend_type = 'LIGHTEN'
+    lighten.inputs[0].default_value = 1
+    links.new(composite, lighten.inputs[1])
+    links.new(layer, lighten.inputs[2])
+    composite = lighten.outputs[0]
 
 # CRT stays downstream of the artwork, so an animated image uses the same display.
 group = bpy.data.node_groups.get('LOGAN / CRT display')
