@@ -123,6 +123,8 @@ the palms turn.
 Raising either arm slides its sleeve and cuff slightly up the forearm and draws
 the coat's side, back and hem upward. `fit-jacket-motion.py` spreads armhole weights
 and builds editable pose-driven cloth corrections; this is not a cloth simulation.
+The sleeve sections retain their width during the cloth solve, with volume-preserving
+armature deformation at the shoulder and elbow.
 The neutral garment keeps its approved shape. `render-jacket-motion.py` provides
 front, side, rear and halfway-wave views; `verify-fit.py` also checks intermediate,
 mirrored and forward/back arm raises.
