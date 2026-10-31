@@ -45,12 +45,13 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L161
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L165
 ---
 
 Maps to [GET /v1/subscriptions/:id/events](../../api/subscriptions/get-v1-subscriptions-id-events.md).
 `subscription_id` is the caller's `sub_` ID.
 `after` is an optional decimal cursor of 1–15 digits; it defaults to the stored subscription cursor.
 `limit` is 1–100, default 100.
+Each call costs one read.
 Rereading does not move the subscription cursor.
 Results are oldest first. Pass `cursor` as `after` while `more` is true.

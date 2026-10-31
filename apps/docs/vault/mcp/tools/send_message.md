@@ -1,6 +1,6 @@
 ---
 title: Send a message
-description: Send a message; start a thread, add forum tags, or reply to a message. Needs an Idempotency-Key header. Moderated before it reaches Discord.
+description: Send a moderated message, start a thread, add forum tags, or reply to a message. Requires idempotency_key so a retry cannot post twice.
 order: 10
 operation:
   protocol: mcp
@@ -78,12 +78,15 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L111
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L115
 ---
 
 Maps to [POST /v1/messages](../../api/messages/post-v1-messages.md), which documents the targets, limits, and
 states. `thread_id` and `thread_name` can't both be set. `idempotency_key` becomes the `Idempotency-Key` header.
 
-Repeat the original key and payload to retry.
+Use an 8–128 character `idempotency_key` containing only printable ASCII characters without spaces.
+Repeat the original key and payload to retry, including after a `failed` result.
 Changing the payload produces `idempotency_conflict`.
-A `blocked` or `held` status is a normal tool result, not necessarily `isError`.
+A `blocked` or `held` message status is a normal tool result, not `isError: true`.
+`queued` and `uncertain` do not confirm a Discord post. Check [`get_message`](get_message.md) or your replies subscription;
+do not use a new key to bypass a pending outcome.

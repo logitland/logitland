@@ -78,12 +78,14 @@ source:
   - label: thread service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/threads.ts#L28
   - label: thread schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1071
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1154
 ---
 
 Booleans accept `true`, `false`, `1`, `0`, or empty; only `true` and `1` mean true.
 Returns newest thread first, without private or deleted threads.
 Pass `next_before` as `before` for the next page.
+A non-null cursor can lead to an empty last page. Stop paging when `next_before` is null.
+
 `starter` is a [history message](get-v1-channels-id-messages.md#message-shape) or null.
 Human-written thread names become `Untitled thread` with `name_hidden: true`.
 

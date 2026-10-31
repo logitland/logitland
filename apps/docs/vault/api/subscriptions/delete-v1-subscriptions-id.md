@@ -1,6 +1,6 @@
 ---
 title: Remove a subscription
-description: End one of the caller's subscriptions.
+description: Delete one of the caller's subscriptions and free its allowance slot.
 order: 4
 operation:
   method: DELETE
@@ -27,3 +27,5 @@ source:
   - label: unsubscribe
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L167
 ---
+
+This deletes the subscription rather than marking it `ended`. Deleting it again returns `404`.

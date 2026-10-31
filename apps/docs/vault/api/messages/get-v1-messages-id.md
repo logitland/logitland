@@ -18,7 +18,7 @@ operation:
       example: msg_01J00000000000000000000000
   responses:
     '200':
-      description: A `RelayMessage`. Example response excerpt. Example abridged.
+      description: A `RelayMessage`. The example is an excerpt.
       example:
         id: msg_01J00000000000000000000000
         status: sent
@@ -31,7 +31,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L26
   - label: ownership check
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L340
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L358
 ---
 
 Returns the [RelayMessage shape](post-v1-messages.md).

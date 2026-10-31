@@ -70,3 +70,6 @@ source:
 ---
 
 `limit` clamps to 1–100.
+Pass `next_before` as `before` for the next page. Every full page returns a cursor, so the final page can be empty.
+This is a delivery ledger, not the event payload; use [Read subscription events](../subscriptions/get-v1-subscriptions-id-events.md)
+to recover missed events.

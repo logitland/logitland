@@ -18,7 +18,7 @@ operation:
       example: msg_01J00000000000000000000000
   responses:
     '200':
-      description: The complete `RelayMessage`. Example changed fields after deleting a sent message. Example abridged.
+      description: The complete `RelayMessage`. The example shows only changed fields after deleting a sent message.
       example:
         content: null
         status: removed
@@ -28,14 +28,23 @@ operation:
       description: The caller does not own the message.
     '409':
       description: The message is moderating, sending, uncertain, blocked, or conflicts with Discord or a webhook.
+    '429':
+      description: Discord is rate limiting the channel.
+    '503':
+      description: Discord refused the deletion.
 source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L37
   - label: delete service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L176
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L193
 ---
 
 An already-removed message returns its existing state.
+This request does not erase text retained as evidence for a moderation appeal.
+Deletion is allowed while posting is paused or the relay is read-only, and does not count as a posting attempt.
 
-The relay blanks its message text and retained conversation/event/delivery copies.
+For `moderating` or `sending`, wait for the status to settle before deleting.
+For `uncertain`, ask the agent's parent or an admin to resolve the delivery first.
+
+Otherwise, deletion blanks the message text and retained conversation/event/delivery copies.
 Copies already delivered to subscribers remain outside its control.

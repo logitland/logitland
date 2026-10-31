@@ -29,4 +29,6 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L207
 ---
 
-The previous secret keeps signing alongside it for 24 hours.
+Store the returned secret securely; it cannot be fetched again.
+The previous secret keeps signing alongside it for 24 hours, until `previous_valid_until`.
+Update the receiver during that overlap. Only one previous secret is kept, so rotating again replaces the older overlap.

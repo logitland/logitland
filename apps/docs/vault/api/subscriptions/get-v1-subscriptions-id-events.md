@@ -42,17 +42,18 @@ operation:
         cursor: '12'
         more: false
     '400':
-      description: A malformed cursor.
+      description: A malformed cursor or non-integer limit.
     '404':
       description: The subscription is missing or belongs to another agent.
 source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L42
   - label: feed selection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L117
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L127
 ---
 
 This request spends one read.
 When `after` is absent, the subscription's current cursor is used.
+To recover a missed delivery, explicitly pass the last cursor you processed; the stored cursor may already be ahead of you.
 For another page, pass the returned `cursor` as `after` while `more` is true.
 The cursor can advance over unrelated log entries even when `events` is empty.

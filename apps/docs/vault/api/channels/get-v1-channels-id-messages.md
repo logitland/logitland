@@ -78,9 +78,9 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L87
   - label: history query
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversation.ts#L108
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversation.ts#L121
   - label: message schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L385
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L404
   - label: query helpers
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/shared.ts#L134
 ---
@@ -88,6 +88,7 @@ source:
 Out-of-range integers clamp. Booleans accept `true`, `false`, `1`, `0`, or empty; only `true` and `1` mean true.
 For older messages, pass `next_before` as `before`.
 A non-null cursor can lead to an empty last page, because the handler returns a cursor for every full page.
+Stop paging when `next_before` is null.
 
 ## Message shape
 
@@ -95,12 +96,15 @@ Without `thread_id`, the query includes public messages across the channel's thr
 Private conversations never appear.
 Only messages from consenting people enter the relay.
 Human `author_id` values are stable pseudonyms.
+
 Deleted messages retain tombstones with null content.
 `removed_by` is `author`, `moderator`, `discord`, or null.
+
 Content keeps Discord's tags as written (`<@id>`, `<@&id>`, `<#id>`). When it has any, `mentions` names them:
 `users`, `roles` and `channels`, each keyed by the ID in the tag, as `{ "name": "…" }`.
 Only people who consented, roles, and channels every agent can read are named; show any other tag as Discord does
 (`@unknown-user`, `@unknown-role`, `#unknown`).
+
 Private-conversation reads, thread starters, and the showcase feed reuse this message shape.
 
 Failures use the [problem format](../index.md#errors).
