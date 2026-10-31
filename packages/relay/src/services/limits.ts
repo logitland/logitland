@@ -30,15 +30,36 @@ export async function hit(relay: Relay, l: Limit, cost = 1, capped = false): Pro
 
 /** `hit` for every limit at once, in one round trip; each answers in the order given. */
 export async function hitAll(relay: Relay, limits: Limit[], cost = 1, capped = false): Promise<LimitResult[]> {
+  return count(relay, limits, cost, capped, false);
+}
+
+/**
+ * `hit` for each limit in order, stopping at the first one exceeded as a loop of `hit`s would, in one round trip. The
+ * limits after it are not counted against; they answer not ok.
+ */
+export async function hitInOrder(relay: Relay, limits: Limit[], cost = 1, capped = false): Promise<LimitResult[]> {
+  return count(relay, limits, cost, capped, true);
+}
+
+async function count(relay: Relay, limits: Limit[], cost: number, capped: boolean, inOrder: boolean): Promise<LimitResult[]> {
   if (!limits.length) return [];
   const now = relay.now();
-  const sql = `INSERT INTO rate_counters (key, window_start, count) VALUES (?, ?, ?) ON CONFLICT (key, window_start) DO UPDATE SET count = count + excluded.count${
-    capped ? ' WHERE count < ?' : ''
-  } RETURNING count`;
-  const rows = await readAll<Counted[]>(
-    relay.db,
-    ...limits.map((l) => relay.db.prepare(sql).bind(l.key, windowStart(now, l.windowSeconds), cost, ...(capped ? [l.limit] : []))),
-  );
+  const at = (l: Limit) => [l.key, windowStart(now, l.windowSeconds)] as const;
+  // In order, each limit is counted only if every one before it has room. The batch counts the last limit first, so the
+  // ones before it still hold their counts from before this hit.
+  const stmts = limits.map((l, i) => {
+    const before = inOrder ? limits.slice(0, i) : [];
+    return relay.db
+      .prepare(
+        `INSERT INTO rate_counters (key, window_start, count) SELECT ?, ?, ? WHERE ${[
+          'true',
+          ...before.map(() => 'coalesce((SELECT count FROM rate_counters WHERE key = ? AND window_start = ?), 0) + ? <= ?'),
+        ].join(' AND ')} ON CONFLICT (key, window_start) DO UPDATE SET count = count + excluded.count${capped ? ' WHERE count < ?' : ''} RETURNING count`,
+      )
+      .bind(...at(l), cost, ...before.flatMap((b) => [...at(b), cost, b.limit]), ...(capped ? [l.limit] : []));
+  });
+  const rows = await readAll<Counted[]>(relay.db, ...(inOrder ? stmts.reverse() : stmts));
+  if (inOrder) rows.reverse();
   return limits.map((l, i) => {
     const count = rows[i]![0]?.count ?? l.limit + cost;
     return { ok: count <= l.limit, count, limit: l.limit, retryAfterSeconds: retryAfter(now, l) };
@@ -63,17 +84,9 @@ export async function peekAll(relay: Relay, limits: Limit[]): Promise<number[]> 
 
 type Counted = { count: number };
 
-/**
- * Counts `cost` (one by default) against every limit and throws 429 for the first one exceeded. A refused request counts
- * against none of them: every limit is looked at first (one round trip), then all are counted (another).
- */
+/** Counts `cost` (one by default) against every limit in order and throws 429 at the first one exceeded. */
 export async function enforce(relay: Relay, limits: Limit[], message: string, cost = 1): Promise<void> {
-  if (limits.length > 1) {
-    const counts = await peekAll(relay, limits);
-    const i = limits.findIndex((l, i) => counts[i]! + cost > l.limit);
-    if (i >= 0) throw rateLimited(message, retryAfter(relay.now(), limits[i]!));
-  }
-  const over = (await hitAll(relay, limits, cost, true)).find((r) => !r.ok);
+  const over = (await hitInOrder(relay, limits, cost, true)).find((r) => !r.ok);
   if (over) throw rateLimited(message, over.retryAfterSeconds);
 }
 

@@ -3,7 +3,7 @@ import { iso, readAll, type Relay } from '../../context';
 import { RelayError, forbidden, unavailable } from '../../errors';
 import type { AgentRecord } from '../../types';
 import type { ChannelRow } from '../channels';
-import { hit, hitAll, type Limit } from '../limits';
+import { hit, hitInOrder, type Limit } from '../limits';
 import type { Settings } from '../settings';
 import {
   CROSS_AGENT_DUPLICATES,
@@ -81,7 +81,7 @@ export async function assertHoldRoom(relay: Relay, agentId: string): Promise<voi
 
 /** Every attempt counts here, refused ones included, at twice the posting rate: blocked spam still runs out. */
 export async function countAttempt(relay: Relay, agentId: string, limits: LevelLimits): Promise<void> {
-  const hits = await hitAll(
+  const hits = await hitInOrder(
     relay,
     [
       { key: `attempt:${agentId}:m`, limit: limits.posts_per_minute * 2, windowSeconds: MINUTE },
@@ -265,7 +265,7 @@ export async function enforceRates(relay: Relay, checks: RateCheck[], counts: nu
     const wait = Math.max(1, full.windowSeconds - (nowSeconds % full.windowSeconds));
     throw new PolicyError(429, 'rate_limited', 'rate_limit', full.message(wait), { retryAfterSeconds: wait });
   }
-  const hits = await hitAll(relay, checks);
+  const hits = await hitInOrder(relay, checks);
   const i = hits.findIndex((r) => !r.ok);
   if (i >= 0) {
     const wait = hits[i]!.retryAfterSeconds;
