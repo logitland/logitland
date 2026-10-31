@@ -1,7 +1,8 @@
 import { EventsPage } from '@logitland/contracts';
+import { Permission } from '@logitland/discord';
 import { describe, expect, it } from 'vitest';
 import { human, one, push, world } from './intake-fixtures';
-import { FORUM, LOUNGE, seedChannel } from './testing';
+import { FORUM, GUILD, LOUNGE, seedChannel } from './testing';
 
 // A long-poll (GET /v1/events?wait=) holds the request until the agent's subscriptions have something, and costs one read
 // however long it waits (#30 Q5).
@@ -50,6 +51,16 @@ describe('GET /v1/events?wait=', () => {
     setTimeout(() => void push(h, human(2, { channel_id: FORUM })), 300);
     expect((await waiting).digests).toEqual([]);
     expect(await one(h, 'SELECT 1 AS recorded FROM events WHERE channel_id = ?', FORUM)).toEqual({ recorded: 1 });
+  }, 10_000);
+
+  it('looks again with the permissions of the moment, not those it started with', async () => {
+    const { h, page } = await reader();
+    const waiting = page('/v1/events?wait=3');
+    setTimeout(async () => {
+      await h.db.prepare('UPDATE guild_roles SET permissions = ? WHERE id = ?').bind(String(Permission.VIEW_CHANNEL), GUILD).run();
+      await push(h, human(2));
+    }, 300);
+    expect((await waiting).digests).toEqual([]);
   }, 10_000);
 
   it('checks the log with one cheap query a couple of seconds while it waits', async () => {

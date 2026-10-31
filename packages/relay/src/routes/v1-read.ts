@@ -2,6 +2,7 @@ import { LIMITS, type ChannelList, type EventsPage, type Scope } from '@logitlan
 import type { MiddlewareHandler } from 'hono';
 import type { Relay } from '../context';
 import { RelayError, invalid, unavailable } from '../errors';
+import { fresh } from '../memo';
 import { agentChannels, ANY_AGENT, toAgentChannel, usableChannel } from '../services/channels';
 import { readPage } from '../services/conversation';
 import { eventTail } from '../services/events';
@@ -135,7 +136,7 @@ export const register: RegisterRoutes = (app, relay) => {
       const now = await eventTail(relay);
       if (now === tail) continue;
       tail = now;
-      ({ digests, capped } = await take());
+      ({ digests, capped } = await fresh(take));
     }
     const hints = await hintsFor(relay, agent, { capped, ...(digests.length ? {} : { emptyPoll: { waitSeconds: wait } }) });
     return c.json({ digests, ...hints } satisfies EventsPage);

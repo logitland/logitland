@@ -7,7 +7,10 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 const units = new AsyncLocalStorage<Map<string, Promise<unknown>>>();
 
 /** Runs `work` as one unit of work, with its own memory; inside one already (a send made inline by a request), it joins it. */
-export const unit = <T>(work: () => Promise<T>): Promise<T> => (units.getStore() ? work() : units.run(new Map(), work));
+export const unit = <T>(work: () => Promise<T>): Promise<T> => (units.getStore() ? work() : fresh(work));
+
+/** Runs `work` as a unit of its own even inside another, so it reads current config: each look of a long-poll. */
+export const fresh = <T>(work: () => Promise<T>): Promise<T> => units.run(new Map(), work);
 
 /** What `load` returns, loaded once per unit of work under `key`. A failed load is not kept. */
 export function once<T>(key: string, load: () => Promise<T>): Promise<T> {
