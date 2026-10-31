@@ -111,6 +111,7 @@ try:
         swung, offset = swung-axis*swung.dot(axis), offset-axis*offset.dot(axis)
         twist = degrees(swung.angle(offset))
         assert twist<15, f'Upper sleeve {side} wrings {twist:.0f}° around the arm'
+        assert area>.6*rest_area, f'Upper sleeve {side} inlay pinched to {area/rest_area:.0%} of its area'
     # The outer cloth around each shoulder joint stays one surface: a crater
     # folded through itself crosses its own faces (the earlier fit: 112).
     faces = [tuple(p.vertices) for p in cloth.data.polygons]
@@ -122,7 +123,6 @@ try:
         folds = sum(a in near and b in near for a, b in crossing)
         print(f'Shoulder {side}: {folds} crossing face pairs within 1 of the joint')
         assert folds<=SHOULDER_CROSSINGS, f'Shoulder {side} folds through itself ({folds} crossing face pairs)'
-        assert area>.6*rest_area, f'Upper sleeve {side} inlay pinched to {area/rest_area:.0%} of its area'
     lining.show_viewport = True
     print('PASS crossed arms: anatomical elbow bends; forearms across chest; opposed palm contacts; '
           'untwisted upper sleeves; clear sleeves, cuffs and hands')
