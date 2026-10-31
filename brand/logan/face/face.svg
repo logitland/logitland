@@ -14,10 +14,10 @@
        The rect is the pupil. -->
   <g id="eye-R" fill="#ff55dd">
     <path d="M 340 360 H 780 V 450 H 660 V 720 H 340 Z"/>
-    <rect x="445" y="535" width="110" height="110" fill="black"/>
+    <rect x="470" y="480" width="150" height="150" fill="black"/>
   </g>
   <g id="eye-L" fill="#ff55dd">
     <path d="M 1230 300 H 1670 V 390 H 1550 V 660 H 1230 Z"/>
-    <rect x="1335" y="470" width="110" height="110" fill="black"/>
+    <rect x="1360" y="420" width="150" height="150" fill="black"/>
   </g>
 </svg>
