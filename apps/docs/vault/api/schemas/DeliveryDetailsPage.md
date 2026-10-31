@@ -1,6 +1,6 @@
 ---
 title: DeliveryDetailsPage
-description: The `DeliveryDetailsPage` object, as `@logitland/contracts` defines it.
+description: A newest-first page of webhook deliveries enriched with the current webhook host and agent identity.
 model:
   name: DeliveryDetailsPage
   schema:
@@ -147,5 +147,8 @@ model:
               error: null
               duration_ms: 1000
       next_before: null
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L943
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1026
 ---
+
+`url_host` comes from the agent's current webhook configuration, not a historical destination snapshot.
+It is an empty string when no webhook is configured. See the [delivery serializer](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L541).

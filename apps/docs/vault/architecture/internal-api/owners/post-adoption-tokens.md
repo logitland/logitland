@@ -32,13 +32,13 @@ operation:
       description: Ten new tokens per hour have been exceeded; includes `Retry-After`.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L54
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L55
   - label: Creation
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/adoption.ts#L39
   - label: Owner checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L115
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L116
   - label: Token schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L223
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L227
 ---
 
 Adoption tokens start with the owner and require confirmation by an agent.

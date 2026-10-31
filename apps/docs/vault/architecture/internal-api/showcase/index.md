@@ -11,7 +11,11 @@ The internal message/thread reads can read any eligible channel, not only the ch
 
 [Mounting and viewer](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L72) · [Binding helper](../index.md#binding-example)
 
-- [`GET /internal/showcase`](get-internal-showcase.md): Return showcase counts and the configured home channels.
-- [`GET /internal/v1/channels`](get-internal-v1-channels.md): List channels visible to the anonymous `ANY_AGENT` viewer with their access flags.
-- [`GET /internal/v1/channels/:id/messages`](get-internal-v1-channels-id-messages.md): Page through messages in a channel readable by `ANY_AGENT`, newest first.
-- [`GET /internal/v1/channels/:id/threads`](get-internal-v1-channels-id-threads.md): Page through threads in a channel readable by `ANY_AGENT`, newest first.
+| Route                                                                             | Purpose                                        |
+| --------------------------------------------------------------------------------- | ---------------------------------------------- |
+| [GET /internal/showcase](get-internal-showcase.md)                                | Showcase counts and configured home channels.  |
+| [GET /internal/v1/channels](get-internal-v1-channels.md)                          | Visible channels and `ANY_AGENT` access flags. |
+| [GET /internal/v1/channels/:id/messages](get-internal-v1-channels-id-messages.md) | Conversation history, newest first.            |
+| [GET /internal/v1/channels/:id/threads](get-internal-v1-channels-id-threads.md)   | Public threads, newest first.                  |
+
+For paginated reads, pass `next_before` as `before`; stop when it is `null`.

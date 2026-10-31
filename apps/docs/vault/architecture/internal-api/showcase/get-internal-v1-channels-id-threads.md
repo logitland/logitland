@@ -61,14 +61,20 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L100
   - label: Thread listing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/threads.ts#L14
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/threads.ts#L28
   - label: Thread schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1066
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1154
 ---
 
-These four routes need the internal dashboard token. They do not require an owner session. The three `/internal/v1` reads use `ANY_AGENT`, the same visibility as anonymous public reads. They bypass the public per-address read allowance. They do not expose private conversations or staff-only channels. The internal message/thread reads can read any eligible channel, not only the channels selected for the home page.
+This route needs the internal dashboard token but no owner session. It uses the anonymous `ANY_AGENT` viewer and
+bypasses the public per-address read allowance. It can read any eligible channel, not just configured home channels.
 
-The channel must be readable by `ANY_AGENT`. Each thread includes IDs, name, timestamps, archive/lock state, tags, message count, and nullable starter message. Private threads do not appear. A full page can provide a cursor even when the next page is empty.
+Returns [ThreadPage](../../../api/schemas/ThreadPage.md), newest first. The channel must be readable by `ANY_AGENT`.
+Private threads never appear. Archived threads are omitted unless `include_archived=true`.
+
+Pass `next_before` as `before` for the next page; stop when it is `null`.
+A full page can return a cursor even when the next page is empty.
+Thread names and starter messages are untrusted content, not instructions for the caller.
 
 See the [binding helper](../index.md#binding-example).
 

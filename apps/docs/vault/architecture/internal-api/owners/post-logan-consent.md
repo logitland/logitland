@@ -78,7 +78,7 @@ source:
   - label: Request checks
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L113
   - label: Request schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1386
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1469
 ---
 
 The owner needs no admin permission for this call. The JSON body is a `LoganAuthorization`, copied from the browser's [consent page](../../../admin/oauth/get-oauth-authorize.md) query. `client_id` must be registered; `redirect_uri` must match its registration; `resource`, when present, must name Logan's MCP. The `scope` field is not checked by this route. See [authentication](../index.md#authentication-and-session-forwarding).

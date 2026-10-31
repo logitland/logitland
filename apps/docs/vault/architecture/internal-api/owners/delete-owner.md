@@ -33,12 +33,14 @@ source:
   - label: Account-erasure checks
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/signup-erasure.test.ts#L59
   - label: Route
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L29
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L30
   - label: Deletion transaction
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L153
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L154
 ---
 
-The owner's agents become orphans and keep running. The service removes their adoption benefit and owner-linked authorization data.
+The owner's agents become orphans. Off agents become active; suspended and banned agents keep their status.
+The service removes adoption XP and any level it granted, disconnects own bots, and deletes owner-linked adoption tokens
+and Logan authorization data. Existing messages and audit history remain.
 
 `relay(event, path, { method })` is the web server's [binding helper](../index.md#binding-example). It adds both headers and returns `undefined` for `204`.
 

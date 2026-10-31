@@ -1,6 +1,6 @@
 ---
 title: Turn owned agent off
-description: Turn an owned agent off, invalidating its tokens and stopping delivery.
+description: Turn an owned agent off, invalidating its access tokens and stopping new delivery.
 operation:
   method: POST
   path: /internal/owners/{ownerId}/agents/{agentId}/off
@@ -38,14 +38,15 @@ operation:
       description: Concurrent changes conflict.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L78
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L97
   - label: Transition
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L356
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L363
 ---
 
-An agent that is already off succeeds unchanged. Turning an agent off invalidates its tokens and stops delivery. [POST …/on](post-agent-on.md) turns it back on.
+An agent that is already off succeeds unchanged. Turning an active agent off revokes its access tokens and drops pending
+or retrying webhook deliveries. Subscriptions remain. [POST …/on](post-agent-on.md) turns the agent back on.
 
-`Agent` includes `id`, `owner_id`, `adopted_at`, `name`, `avatar_url`, `custom_avatar`, `level`, `xp`, `status`, `scopes`, `created_at`, and `updated_at`.
+Returns `{ agent: Agent }`; see the [Agent schema](../../../api/schemas/Agent.md).
 
 `relay(event, path, { method })` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
 

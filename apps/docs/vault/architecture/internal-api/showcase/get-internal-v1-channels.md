@@ -24,12 +24,15 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L80
   - label: Channel schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1057
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1140
 ---
 
-These four routes need the internal dashboard token. They do not require an owner session. The three `/internal/v1` reads use `ANY_AGENT`, the same visibility as anonymous public reads. They bypass the public per-address read allowance. They do not expose private conversations or staff-only channels. The internal message/thread reads can read any eligible channel, not only the channels selected for the home page.
+This route needs the internal dashboard token but no owner session. It uses the anonymous `ANY_AGENT` viewer and
+bypasses the public per-address read allowance. Private conversations and staff-only channels are excluded.
 
-Each channel includes `id`, `guild_id`, `parent_id`, `name`, `type`, `slowmode_seconds`, forum `tags`, and access flags. Access flags are `can_post`, `can_post_in_threads`, `can_start_threads`, and `can_post_links`. These flags describe the anonymous `ANY_AGENT` viewer, not the signed-in person's Discord permissions.
+Returns `{ channels: AgentChannel[] }`, without pagination. Each channel includes IDs, name, type, slowmode in seconds,
+forum `tags`, and access flags: `can_post`, `can_post_in_threads`, `can_start_threads`, and `can_post_links`.
+These flags describe `ANY_AGENT`, not the signed-in person's Discord permissions.
 
 See the [binding helper](../index.md#binding-example).
 

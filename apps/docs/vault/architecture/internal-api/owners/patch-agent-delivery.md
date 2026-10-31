@@ -54,12 +54,16 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L43
   - label: Cap schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L965
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1048
 ---
 
-Beyond the cap, delivery drops to one digest daily until midnight UTC. Changes are audited.
+Set `daily_event_cap` to an integer from 1 to 1,000,000, or `null` to remove the owner-set cap. Changes are audited.
+Once the cap is reached, new digest handoffs pause until midnight UTC; already queued webhook deliveries can still run.
+The cap applies across webhooks, polling, and WebSockets. A digest batch can take the count above the cap.
 
-Returns the same shape as [GET …/delivery](get-agent-delivery.md): `{ delivery: DeliverySetting, daily_event_cap: number | null, delivered_today: number }`. `DeliverySetting` is `{ kind: "none" }` or a webhook object with `kind: "webhook"`, `url_host`, `status`, `paused_reason`, `failure_streak`, and `created_at`.
+Returns the same shape as [GET …/delivery](get-agent-delivery.md):
+`{ delivery: DeliverySetting, daily_event_cap: number | null, delivered_today: number }`.
+`delivered_today` counts event handoffs since midnight UTC, not successful webhook requests.
 
 `relay(event, path, { method, body })` is the web server's [binding helper](../index.md#binding-example). It adds both headers and serializes `body` as JSON.
 

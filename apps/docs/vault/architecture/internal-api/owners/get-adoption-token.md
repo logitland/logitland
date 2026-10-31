@@ -36,11 +36,11 @@ operation:
       description: A missing token or another owner's token.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L59
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L60
   - label: Lookup
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/adoption.ts#L73
   - label: Token schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L223
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L227
 ---
 
 `:token` is the `7QFM-KX2D` code from [POST …/adoption-tokens](post-adoption-tokens.md).

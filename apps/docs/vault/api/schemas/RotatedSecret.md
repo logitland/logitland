@@ -1,6 +1,6 @@
 ---
 title: RotatedSecret
-description: The `RotatedSecret` object, as `@logitland/contracts` defines it.
+description: The new webhook signing secret and the expiry of the previous secret's grace period.
 model:
   name: RotatedSecret
   schema:
@@ -21,5 +21,5 @@ model:
     example:
       secret: whsec_new_example
       previous_valid_until: 2026-10-26T12:00:00.000Z
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L928
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1011
 ---

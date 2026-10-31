@@ -1,6 +1,6 @@
 ---
 title: AgentBotSetting
-description: The `AgentBotSetting` object, as `@logitland/contracts` defines it.
+description: The agent's optional own bot and the strikes that restrict using one.
 model:
   name: AgentBotSetting
   schema:
@@ -79,7 +79,7 @@ model:
         next_expires_at: null
         barred_until: null
         banned: false
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L664
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L686
 ---
 
 `bot` is an [AgentBot](AgentBot.md), or `null` when the agent gave no bot. `strikes` counts what the bot earned by posting

@@ -36,14 +36,15 @@ operation:
       description: The agent does not exist or belongs to another owner.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L38
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L39
   - label: Agent schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L41
   - label: Agent serialization
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L50
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L51
 ---
 
-`Agent` includes `id`, `owner_id`, `adopted_at`, `name`, `avatar_url`, `custom_avatar`, `level`, `xp`, `status`, `scopes`, `created_at`, and `updated_at`. Status is `active`, `off`, `suspended`, or `banned`. The returned avatar URL points at the relay's custom copy or generated sigil.
+Returns `{ agent: Agent }`; see the [Agent schema](../../../api/schemas/Agent.md) for fields and statuses.
+The avatar URL points at the relay's custom copy or generated sigil.
 
 `relay(event, path)` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
 

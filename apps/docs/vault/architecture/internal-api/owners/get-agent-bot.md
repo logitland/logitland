@@ -27,7 +27,7 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: 'Returns `{ bot: AgentBot | null }`.'
+      description: Returns `AgentBotSetting`, including the optional bot and strike restrictions, never the token.
     '401':
       description: A missing or wrong internal token.
     '403':
@@ -37,8 +37,8 @@ operation:
 source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L73
-  - label: AgentBot schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L621
+  - label: AgentBotSetting schema
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L686
 ---
 
 The same [`AgentBotSetting`](../../../api/schemas/AgentBotSetting.md) as [GET /v1/me/bot](../../../api/bot/get-v1-me-bot.md). The token is never shown.

@@ -31,14 +31,16 @@ operation:
       description: A missing or different owner header.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L34
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L35
   - label: Agent schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L41
   - label: Agent serialization
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L50
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L51
 ---
 
-`Agent` includes `id`, `owner_id`, `adopted_at`, `name`, `avatar_url`, `custom_avatar`, `level`, `xp`, `status`, `scopes`, `created_at`, and `updated_at`. Status is `active`, `off`, `suspended`, or `banned`. The returned avatar URL points at the relay's custom copy or generated sigil.
+Returns `{ agents: Agent[] }` in adoption order, oldest first, without pagination.
+See the [Agent schema](../../../api/schemas/Agent.md) for fields and statuses.
+Avatar URLs point at the relay's custom copies or generated sigils.
 
 `relay(event, path)` is the web server's [binding helper](../index.md#binding-example). It adds both headers.
 

@@ -9,7 +9,7 @@ The public Worker mounts a separate app, so `/internal/*` does not exist on the 
 these routes: the dashboards' [remote functions](../web/index.md) call them for the signed-in person. The `https://relay`
 URL in the examples addresses the binding, not an internet host.
 
-[Backend entrypoints](https://github.com/logitland/logitland/blob/main/apps/backend/src/index.ts#L72) · [Internal route registry](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L80) · [Web binding client](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/relay.ts#L9)
+[Backend entrypoints](https://github.com/logitland/logitland/blob/main/apps/backend/src/index.ts#L95) · [Internal route registry](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L80) · [Web binding client](https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/relay.ts#L9)
 
 | Group                                     | Called by                 | Covers                                                              |
 | ----------------------------------------- | ------------------------- | ------------------------------------------------------------------- |
@@ -102,8 +102,8 @@ Errors with `retryAfterSeconds` also carry a rounded-up `Retry-After` header, at
 
 Integer query values must be whole numbers. The helper clamps them to the documented minimum and maximum.
 An absent or empty value uses the default. Invalid integers return `400`.
-Boolean query values accept `true`, `false`, `1`, `0`, or an empty string; absence means false.
+Boolean query values accept `true`, `false`, `1`, `0`, or an empty string. Only `true` and `1` mean true; absence means false.
 Discord snowflakes remain strings with 17–20 digits.
 Relay IDs use a prefix and 10–26 Crockford base32 characters.
 
-[App limits and errors](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L16) · [Problem serialization](https://github.com/logitland/logitland/blob/main/packages/relay/src/errors.ts#L23) · [Query parsing](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/shared.ts#L134) · [ID schemas](https://github.com/logitland/logitland/blob/main/packages/contracts/src/ids.ts#L1)
+[App limits and errors](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L32) · [Problem serialization](https://github.com/logitland/logitland/blob/main/packages/relay/src/errors.ts#L32) · [Query parsing](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/shared.ts#L134) · [ID schemas](https://github.com/logitland/logitland/blob/main/packages/contracts/src/ids.ts#L1)

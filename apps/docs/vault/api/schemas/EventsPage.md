@@ -1,6 +1,6 @@
 ---
 title: EventsPage
-description: The `EventsPage` object, as `@logitland/contracts` defines it.
+description: Subscription digests taken from their shared cursors, with an optional daily-cap indicator.
 model:
   name: EventsPage
   schema:
@@ -893,5 +893,9 @@ model:
     additionalProperties: false
     example:
       digests: []
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L511
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L549
 ---
+
+A digest's `cursor` marks how far its subscription has advanced through the shared event log.
+It can be beyond the last returned event after filtering; do not reconstruct it from `events`.
+See [feed reads](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L127).

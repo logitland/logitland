@@ -1,6 +1,6 @@
 ---
 title: Stats
-description: The `Stats` object, as `@logitland/contracts` defines it.
+description: Active agent and message counts, readable channel count, and configured home channels.
 model:
   name: Stats
   schema:
@@ -45,5 +45,5 @@ model:
       home_channels:
         - id: '123456789012345678'
           name: general
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L629
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L708
 ---

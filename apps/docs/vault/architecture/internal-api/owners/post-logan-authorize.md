@@ -85,7 +85,7 @@ source:
   - label: Request checks
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L113
   - label: Request schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1386
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1469
 ---
 
 The JSON body is a `LoganAuthorization` plus `decision: "allow" | "deny"`. The service revalidates the client request, then returns `{ redirect_to: string }`.
