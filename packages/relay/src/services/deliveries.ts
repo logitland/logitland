@@ -1,7 +1,7 @@
 import { LIMITS, newId, type DeliveryDetail, type DeliveryStatus } from '@logitland/contracts';
 import { signHeaders } from '@logitland/webhooks';
 import { iso, readAll, type DeliveryMessage, type Relay, type Stmt } from '../context';
-import { unit } from '../memo';
+import { fresh, unit } from '../memo';
 import { audit } from './audit';
 import { accessWith, listChannelsStmt, type ChannelRow, type Viewer } from './channels';
 import { DestinationRefused, preflightDestination } from './destinations';
@@ -512,13 +512,15 @@ async function deliverBatch(relay: Relay, messages: readonly QueuedMessage[]): P
     return out;
   }
   // A slow receiver holds up only its own delivery, not the rest of the batch.
+  // Each queued item reads current permissions, even if earlier receivers waited through a role change.
   for (const part of chunk(messages, BATCH_CONCURRENCY)) {
     const results = await Promise.all(
       part.map(async (m): Promise<AttemptResult | null> => {
         try {
           const body = m.body as Partial<{ delivery_id: unknown; push: unknown }> | null;
           if (typeof body?.push === 'string') {
-            await pushDue(relay, body.push);
+            const agentId = body.push;
+            await fresh(() => pushDue(relay, agentId));
             m.ack();
             return null;
           }
@@ -527,7 +529,7 @@ async function deliverBatch(relay: Relay, messages: readonly QueuedMessage[]): P
             return null;
           }
           const id = body.delivery_id;
-          const result = await attemptDelivery(relay, id, { paused: false });
+          const result = await fresh(() => attemptDelivery(relay, id, { paused: false }));
           if (result.outcome === 'retry') {
             const delaySeconds = Math.min(result.afterSeconds, QUEUE_MAX_DELAY_SECONDS);
             // The Queue now holds this retry, so the cron scan should leave the row alone until well after it is due.

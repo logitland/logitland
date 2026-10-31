@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { Permission } from '@logitland/discord';
 import { contents, poll, say } from './deliveries.testkit';
 import { readFeed, type SubscriptionRow } from './services/feed';
 import { attemptDelivery, backoffSeconds, drainDue, handleDeliveryBatch, pushDue } from './services/deliveries';
-import { LOUNGE } from './testing';
+import { GUILD, LOUNGE } from './testing';
 import { all, delivery, hooked, next, receive, reply, webhook } from './webhook.testkit';
 
 describe('what a receiver can ask for', () => {
@@ -73,6 +74,25 @@ describe('a delivery that is dropped while its attempt runs', () => {
 });
 
 describe('a Queue batch', () => {
+  it('rechecks role permissions for deliveries that start after an earlier receiver finishes', async () => {
+    const { s, id } = await hooked();
+    const ids = [id];
+    for (let i = 0; i < 10; i++) ids.push(await next(s));
+    const { requests } = receive(s, async () => {
+      // A Gateway role update arrives while the first group is in flight.
+      await s.db.prepare('UPDATE guild_roles SET permissions = ? WHERE id = ?').bind(String(Permission.VIEW_CHANNEL), GUILD).run();
+      return new Response(null, { status: 200 });
+    });
+    const results = await handleDeliveryBatch(
+      s.relay,
+      ids.map((delivery_id) => ({ body: { delivery_id }, ack() {}, retry() {} })),
+    );
+    expect(results.slice(0, 10).map((r) => r.outcome)).toEqual(Array(10).fill('delivered'));
+    expect(results[10]).toMatchObject({ outcome: 'dropped' });
+    expect((await delivery(s, ids[10]!)).status).toBe('dropped');
+    expect(requests).toHaveLength(10);
+  });
+
   it('works its deliveries at the same time, so one slow receiver does not hold up the rest', async () => {
     const { s, id } = await hooked();
     const ids = [id];
