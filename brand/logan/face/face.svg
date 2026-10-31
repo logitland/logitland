@@ -10,14 +10,14 @@
              C 1058.6 817.5 914.1 852 816.1 816 A 17 17 0 0 1 827.9 784 Z" fill="#ff55dd"/>
   </g>
   <!-- The rig's blinks squash each eye toward the centre of its pupil rect. -->
-  <!-- Laguz with a 170-wide stem and a 90-thick arm: the point is the stem's top-left
-       corner, the arm drops at 30° to 120 past the stem and is cut square. The rect is the pupil. -->
+  <!-- Each eye is a 170-wide stem whose 90-thick brow runs straight right, 120 past it.
+       The rect is the pupil. -->
   <g id="eye-R" fill="#ff55dd">
-    <path d="M 470 290 L 760 457 V 561 L 640 492 V 810 H 470 Z"/>
+    <path d="M 470 290 H 760 V 380 H 640 V 810 H 470 Z"/>
     <rect x="520" y="585" width="100" height="100" fill="black"/>
   </g>
   <g id="eye-L" fill="#ff55dd">
-    <path d="M 1250 220 L 1540 387 V 491 L 1420 422 V 740 H 1250 Z"/>
+    <path d="M 1250 220 H 1540 V 310 H 1420 V 740 H 1250 Z"/>
     <rect x="1300" y="515" width="100" height="100" fill="black"/>
   </g>
 </svg>
