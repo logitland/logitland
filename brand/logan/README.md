@@ -204,17 +204,18 @@ start/duration. The screen UV canvas is 1804 × 1128.
 
 1. Choose frame **1** for neutral, **40** for the wave, or **80** for crossed arms.
    `pose-crossed-arms.py` keys the crossed-arms pose; `render.py -- crossed` renders it.
-   Its palms face inward and its fingers curl toward the palms. The forearms are
-   vertically staggered so the sleeves and cuffs have room to meet without clipping.
+   Both elbows bend anatomically and the forearms fold across the chest. The right
+   hand rests over the left bicep; the left hand tucks behind the right upper arm.
+   Fingers curl toward their palms, with the tucked thumb folded out of the way.
    `fit-crossed-cloth.py` loads a baked, pose-specific sleeve correction from
-   `crossed-cloth.json`: restrained cloth settling plus forearm compression.
-   The cloth trial used pinned torso vertices, self-collision, and arm colliders
-   padded by .13 scene units. Only 12% of the sleeve settling was retained, capped
-   at .035 units, with the cuff fit constrained to preserve its shape.
+   `crossed-cloth.json`. It decouples sleeve roll from humerus rotation, distributes
+   shoulder movement, compresses the contacting forearms, and fits fabric beneath
+   the palms. Cuff contact is fitted in world space, including object offsets.
    `crossed_cloth` blends this correction; it is zero in neutral and wave poses.
    Re-bake after changing the crossed pose or garment topology.
-   `verify-crossed.py` runs the fit suite and checks frame 80 for backward curls,
-   wrist orientation, opposite-sleeve contact, and cuff clearance.
+   This is a tailored pose correction, not a live cloth simulation.
+   `verify-crossed.py` runs the fit suite and checks frame 80 for anatomical bends,
+   forearms across the chest, palm contact directions, and hand/sleeve/cuff clearance.
 2. Select **LOGAN · Pose me** in the Pose rig collection. Enable viewport Overlays
    and enter **Pose Mode**. Rotate the named body, arm, leg, hand, and finger bones.
    The saved poses use FK: rotate `upper_arm` at the shoulder and `forearm` around

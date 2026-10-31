@@ -1,4 +1,4 @@
-"""Prove frame 80 has forward finger curls and clearance between folded arms.
+"""Prove frame 80 folds the forearms across the chest with clear garment contact.
 
 Includes the existing fit suite. Cuffs intentionally overlap their own sleeve;
 opposite sleeves/cuffs, hands and the torso must stay clear.
@@ -35,11 +35,21 @@ try:
         hand = rig.pose.bones['hand.'+side]
         palm_normal = hand.matrix.to_3x3() @ Vector((0,0,1))
         toward_body = rig.pose.bones['root'].matrix.to_3x3() @ Vector((0,0,-1))
-        assert palm_normal.dot(toward_body)>.6, f'Palm {side} faces away from the folded arms'
+        # The upper hand rests on the outside; the lower hand slips behind the
+        # opposite bicep, so its palm faces forward into the back of that sleeve.
+        contact_direction = toward_body if side=='R' else -toward_body
+        assert palm_normal.dot(contact_direction)>.6, f'Palm {side} faces away from its sleeve contact'
+        upper = rig.pose.bones['upper_arm.'+side]
+        lower = rig.pose.bones['forearm.'+side]
+        sign = 1 if side=='L' else -1
+        assert lower.rotation_euler.z*sign>0, f'Elbow {side} bends backward'
+        across = rig.pose.bones['root'].matrix.to_3x3() @ Vector((-sign,0,0))
+        assert (lower.tail-lower.head).normalized().dot(across)>.85, f'Forearm {side} does not fold across the chest'
+        assert hand.head.z>lower.head.z and hand.head.z>upper.head.z-.9, f'Hand {side} hangs below the crossed-arm fold'
         for finger in ('finger1','finger2','finger3'):
             base = rig.pose.bones[f'{finger}.01.{side}'].head
             tip = rig.pose.bones[f'{finger}.02.{side}'].tail
             assert (tip-base).dot(palm_normal)>.02, f'{finger}.{side} bends backward'
-    print('PASS crossed arms: sleeves and cuffs clear; palms inward; fingers curl toward palms')
+    print('PASS crossed arms: anatomical elbow bends; forearms across chest; opposed palm contacts; clear sleeves, cuffs and hands')
 finally:
     scene.frame_set(80)

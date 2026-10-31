@@ -2,9 +2,9 @@
 
 blender --background brand/logan/logan.blend --python brand/logan/pose-crossed-arms.py
 Saves the file. The body turns 30° while the head looks back at the camera. The
-right forearm crosses above the left, with room for the sleeves and cuffs. The
-elbows bend backward around local Z so the upper arms roll only slightly and
-their pink panels stay on the outside of the sleeves.
+right forearm crosses above the left. Its hand rests over the opposite bicep;
+the left hand tucks behind the right upper arm. Elbows use their anatomical
+hinges, while the baked garment correction lets fabric slide around arm roll.
 """
 from math import radians
 from pathlib import Path
@@ -15,13 +15,15 @@ FRAME = 80
 DEGREES = {
     'root': (0.0, 30.0, 0.0),
     'head': (-6.0, -24.0, 5.0),
-    'upper_arm.L': (36.39255, -19.85475, -41.13433),
-    'forearm.L': (0.2, -1.0, -76.55915),
-    'hand.L': (0.0, 58.87076, -10.0),
-    'upper_arm.R': (63.83820, 15.99976, 42.74237),
-    'forearm.R': (-0.1, 1.0, 98.42323),
-    'hand.R': (0.0, -24.36802, -10.0),
-    **{f'{finger}.{joint}.{side}': (35.0, 0.0, 0.0)
+    'upper_arm.L': (-36.863846, 174.255324, -36.219380),
+    'forearm.L': (0.0, 0.0, 109.099841),
+    'hand.L': (-10.850855, 80.943725, 7.054290),
+    'thumb.01.L': (30.529562, 4.026630, -14.679747),
+    'thumb.02.L': (-3.135258, 0.730205, 26.215557),
+    'upper_arm.R': (-53.755990, -164.885725, 50.867281),
+    'forearm.R': (0.0, 0.0, -99.287127),
+    'hand.R': (-6.229030, 143.840861, -31.074547),
+    **{f'{finger}.{joint}.{side}': (18.0 if side=='L' else 28.0 if joint=='01' else 22.0, 0.0, 0.0)
        for finger in ('finger1', 'finger2', 'finger3') for joint in ('01', '02') for side in 'LR'},
 }
 

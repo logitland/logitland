@@ -1,8 +1,8 @@
-"""Install the baked sleeve settle and compression for the frame-80 pose.
+"""Install the tailored sleeve contact correction for the frame-80 fold.
 
-The small cloth contribution was settled with a pinned torso and padded arm
-colliders, then constrained to preserve the faceted silhouette. These offsets
-belong to this pose and topology; re-simulate after changing either.
+Fabric slides around humerus roll instead of twisting with it. The shoulder
+blend, forearm compression and contact offsets retain the existing mesh. These
+offsets belong to this pose and topology; refit after changing either.
 """
 import json
 from pathlib import Path
@@ -12,7 +12,7 @@ rig = bpy.data.objects['LOGAN · Pose me']
 scene = bpy.context.scene
 fields = json.loads(Path(__file__).with_name('crossed-cloth.json').read_text())
 rig['crossed_cloth'] = 1.0
-rig.id_properties_ui('crossed_cloth').update(min=0,max=1,description='Baked sleeve settling for the crossed-arms pose')
+rig.id_properties_ui('crossed_cloth').update(min=0,max=1,description='Tailored sleeve contact for the crossed-arms pose')
 name = 'LOGAN / crossed sleeve settle'
 group = bpy.data.node_groups.get(name)
 if group:
