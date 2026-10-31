@@ -4,6 +4,36 @@ The current deliverable is a static avatar render. Frames 1, 40 and 80 select
 individual pose presets; motion between them is not an animation deliverable.
 GIF work is deferred until requested.
 
+## Discord portraits
+
+**avatar-studio.blend** contains two editable scenes: **AVATAR · Production**
+(pink) and **AVATAR · Staging** (blue). Both preserve the manually posed crossed
+arms from the master. The studio uses an 85mm perspective camera at f/2.8,
+eye focus, a slight camera roll, five area lights, a real Poly Haven HDRI,
+and a generated server-room background plate. All colored accents emit light,
+including the head gradients, SVG chest print, seams, pants, shoes and CRT face.
+Nylon sheen, ceramic clearcoat, optical glow and subtle lens distortion complete
+the portrait. Staging has independent materials and face controls.
+
+Upload `renders/logan-avatar-512.png` or `renders/logan-staging-avatar-512.png`
+to Discord. The matching files without `-512` are the 2048px masters.
+`renders/logan-avatar-size-check.jpg` previews the circular crop at several sizes.
+The original `logan.blend` remains the modeling and rigging source.
+
+```sh
+blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/avatar-studio.py
+blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-avatar.py
+blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-avatar.py -- staging
+python3 brand/logan/export-avatar-icons.py
+```
+
+Rebuilding the studio replaces its art-direction edits with the script's settings.
+Rendering leaves the saved studio untouched. Add `-- preview` to the production
+render command, or `preview` after `staging`, for a smaller draft in `/tmp`.
+Environment provenance is in [environment/README.md](environment/README.md).
+
+## Character master
+
 Open **logan.blend** in Blender 5.2 or newer. It contains the character, a 38-bone
 rig, editable gradient materials, neon bloom, studio lights, a portrait camera,
 and the packed full-body concept image. The side and back geometry interpret the

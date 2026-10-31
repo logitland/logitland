@@ -82,8 +82,8 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
-Logan's deliverable is a static avatar render. Saved frames are pose presets;
-animation is outside the current scope. A GIF may be considered if Mia requests it.
+Logan has pink production and blue staging portraits in `brand/logan/avatar-studio.blend`, with emissive accents, HDRI reflections and a cinematic server-room setting.
+Saved frames are static pose presets; animation and GIF work wait for Mia's request.
 Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigged
 3D interpretation of the supplied pink-screen robot concept, with continuous deforming
 sleeves and trousers with full faceted volumes. Recessed pink emission spans the
