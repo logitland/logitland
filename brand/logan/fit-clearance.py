@@ -29,7 +29,7 @@ for name in garments:
             modifier.use_even_offset = False
             modifier.use_quality_normals = True
         if name.startswith('Cuff /') and modifier.type=='SHRINKWRAP':
-            modifier.offset = .15
+            modifier.offset = .025
 for name in (proxy_name, 'Deform cage / head contact'):
     if objects.get(name):
         bpy.data.objects.remove(objects[name], do_unlink=True)
@@ -147,7 +147,7 @@ for name in garments:
     obj = objects[name]
     if name!='Trouser / continuous pants':
         for side in ('R','L'):
-            contact(obj, objects['Hand / continuous.'+side], .15 if name.startswith('Cuff /') else .075)
+            contact(obj, objects['Hand / continuous.'+side], .025 if name.startswith('Cuff /') else .015)
         mod = obj.modifiers.new('Local head contact', 'NODES')
         mod.node_group = group
     else:

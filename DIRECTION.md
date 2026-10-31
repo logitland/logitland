@@ -122,6 +122,8 @@ the clothes. The head floats above the collar with no neck mesh. Continuous
 elbows have flexible joint loops, FK rotation and optional wrist IK/elbow poles.
 Flexible cuffs, ankle-following hems and live surface clearance
 reduce garment clipping; extreme or combined poses still require visual checks.
+Prefer close cloth contact over visible air gaps; slight hand/sleeve intersections
+are acceptable in the static avatar.
 
 The documentation at `/docs` is built with npm Svartz 2.1.3.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
