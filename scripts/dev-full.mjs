@@ -240,7 +240,7 @@ mkdirSync(docsHost, { recursive: true });
 for (const file of ['package.json', 'svartz.config.ts', 'svelte.config.js', 'vite.config.ts', 'tsconfig.json']) {
   copyFileSync(join(docs, file), join(docsHost, file));
 }
-for (const dir of ['src', 'vault', 'node_modules']) {
+for (const dir of ['src', 'static', 'vault', 'node_modules']) {
   if (!existsSync(join(docsHost, dir))) symlinkSync(join(docs, dir), join(docsHost, dir), 'dir');
 }
 const docsUrl = `http://${WEB_HOST}:${ports.docs}`;

@@ -66,19 +66,19 @@ catalogs:
   ts6:
     typescript: 6.0.3
 
-# Newer than pnpm's minimum release age: formsnap (see the catalog note) and Svartz 2.1.3 (2026-10-29),
-# the published version used by apps/docs, with duplicate navigation URL and dependency scan fixes.
+# Newer than pnpm's minimum release age: formsnap (see the catalog note) and Svartz 2.2.0 (2026-10-31),
+# the published version used by apps/docs, with the header logo (`theme.logo`).
 # @svartz/vite pins theme-minimal, so it installs too.
 minimumReleaseAgeExclude:
   - formsnap@2.1.0
   - '@mia-cx/discord-catalog@0.1.0'
 
-  - '@svartz/config@2.1.3'
-  - '@svartz/core@2.1.3'
-  - '@svartz/plugins@2.1.3'
-  - '@svartz/theme-api-docs@2.1.3'
-  - '@svartz/theme-mcp-docs@2.1.3'
-  - '@svartz/theme-minimal@2.1.3'
-  - '@svartz/ui@2.1.3'
-  - '@svartz/vite@2.1.3'
-  - svartz@2.1.3
+  - '@svartz/config@2.2.0'
+  - '@svartz/core@2.2.0'
+  - '@svartz/plugins@2.2.0'
+  - '@svartz/theme-api-docs@2.2.0'
+  - '@svartz/theme-mcp-docs@2.2.0'
+  - '@svartz/theme-minimal@2.2.0'
+  - '@svartz/ui@2.2.0'
+  - '@svartz/vite@2.2.0'
+  - svartz@2.2.0
