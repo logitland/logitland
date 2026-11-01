@@ -1,8 +1,8 @@
-import { BotRequest, ClaimDecision, OwnerSignIn, ProfileUpdate } from '@logitland/contracts';
+import { BotCheckRequest, BotRequest, ClaimDecision, OwnerSignIn, ProfileUpdate } from '@logitland/contracts';
 import { RelayError, parse } from '../errors';
 import { adminStanding } from '../services/admins';
 import { cancelAdoptionToken, createAdoptionToken, getAdoptionToken } from '../services/adoption';
-import { botSetting, removeBot, setBot } from '../services/bots';
+import { botSetting, checkBot, removeBot, requestBot, setBot } from '../services/bots';
 import { decideClaim, lookupClaim } from '../services/claims';
 import { deleteOwner, getOwner, listOwnerAgents, ownedAgent, revokeRegistration, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
 import { listLevels } from '../services/levels';
@@ -79,6 +79,16 @@ export const register: RegisterRoutes = (app, relay) => {
     const ownerId = c.req.param('ownerId');
     const agent = await ownedAgent(relay, ownerId, c.req.param('agentId'));
     return c.json(await setBot(relay, agent, parse(BotRequest, await body(c)).token, { type: 'owner', id: ownerId }));
+  });
+
+  app.post('/internal/owners/:ownerId/agents/:agentId/bot/check', async (c) => {
+    const agent = await ownedAgent(relay, c.req.param('ownerId'), c.req.param('agentId'));
+    return c.json(await checkBot(relay, agent.id, parse(BotCheckRequest, await body(c)).token));
+  });
+
+  app.post('/internal/owners/:ownerId/agents/:agentId/bot/request', async (c) => {
+    const agent = await ownedAgent(relay, c.req.param('ownerId'), c.req.param('agentId'));
+    return c.json(await requestBot(relay, agent));
   });
 
   app.delete('/internal/owners/:ownerId/agents/:agentId/bot', async (c) => {

@@ -34,7 +34,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L31
   - label: projection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L136
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L149
 ---
 
 No scope is checked. [Own bot](index.md#status) explains each `status` and `paused_reason`, and

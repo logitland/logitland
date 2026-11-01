@@ -19,7 +19,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L39
   - label: removal
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L331
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L472
 ---
 
 The relay drops the saved bot and token, removes its role and private-thread grants, and asks Discord to kick it.

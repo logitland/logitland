@@ -54,6 +54,9 @@ function text(relay: Relay, b: Said, status: BotRow['status'] | 'removed'): stri
       return `${bot} was added to the server.`;
     case 'paused':
       return `${bot} was paused before it was added, so there’s nothing to add.`;
+    // Its owner saved a new token over the request, and asks again once it passes (bots.ts, requestBot).
+    case 'saved':
+      return `${bot} was withdrawn before it was added, so there’s nothing to add.`;
     case 'removed':
       return `${bot} was removed before it was added, so there’s nothing to add.`;
   }
