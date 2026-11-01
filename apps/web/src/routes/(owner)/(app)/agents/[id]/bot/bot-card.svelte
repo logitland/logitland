@@ -139,7 +139,9 @@
     try {
       saved = await leaveOtherServers(agentId);
       leaveOpen = false;
-      toast.success('Left the other servers');
+      // The fresh checklist, not the request finishing, says whether every other server is gone.
+      if (saved.items.find((item) => item.requirement === 'no_other_server')?.ok) toast.success('Left the other servers');
+      else toast.error('The bot is still in other servers. Leave them again.');
     } catch (failure) {
       toast.error(messageOf(failure));
     }

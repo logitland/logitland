@@ -380,16 +380,20 @@ export async function leaveOtherServers(relay: Relay, agentId: string, actor: Pi
   const rest = relay.discord.withToken(token);
   const guildId = relay.config.discord.guildId;
   let left = 0;
+  let complete = false;
   // Discord lists 200 servers a page, so the bot leaves a page's others and looks again until a page has none.
   for (let round = 0; round < LEAVE_ROUNDS; round++) {
     const others = (await ask(() => rest.getCurrentUserGuilds())).filter((g) => g.id !== guildId);
-    if (!others.length) break;
+    if (!others.length) {
+      complete = true;
+      break;
+    }
     for (const guild of others) {
       await ask(() => rest.leaveGuild(guild.id));
       left++;
     }
   }
-  relay.log.info('bots.left_servers', { agent_id: agentId, left });
+  relay.log.info('bots.left_servers', { agent_id: agentId, left, complete });
   await auditStmt(relay, {
     ...actor,
     action: 'agent.bot_left_servers',
@@ -397,7 +401,8 @@ export async function leaveOtherServers(relay: Relay, agentId: string, actor: Pi
     target_id: agentId,
     diff: { left: { from: left, to: 0 } },
   }).run();
-  // The hourly check this request counted covers the fresh checklist too.
+  // The hourly check this request counted covers the fresh checklist too. Its no_other_server item tells the owner whether
+  // the rounds ran out before every other server was gone.
   return checklist(relay, agentId, token);
 }
 

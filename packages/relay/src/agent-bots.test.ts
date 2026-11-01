@@ -1099,4 +1099,15 @@ describe('checking a bot before staff add it', () => {
     expect(bot.guilds).toEqual([]);
     expect((await json(res)).items.every((i: { ok: boolean }) => i.ok)).toBe(true);
   });
+
+  it('answers Other servers still failing when the rounds run out before every server is gone', async () => {
+    const { h, a, owner, bot } = await adopted();
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    bot.guilds.push(...Array.from({ length: 5001 }, (_, i) => String(200000000000000000n + BigInt(i))));
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    const { items } = await json(await call('POST', '/leave-servers'));
+    expect(bot.guilds).toHaveLength(1);
+    expect(items.find((i: { requirement: string }) => i.requirement === 'no_other_server').ok).toBe(false);
+  });
 });
