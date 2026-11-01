@@ -225,7 +225,7 @@
           <section aria-labelledby="bot-needs" class="rounded-xl border">
             <header class="flex min-h-11 items-center justify-between gap-3 border-b py-1 pr-1.5 pl-4">
               <h3 id="bot-needs" class="text-sm font-medium">What staff need</h3>
-              {#if shown}
+              {#if shown || (!typed && bot?.status === 'saved')}
                 <Button size="sm" variant="ghost" disabled={checking || busy !== undefined} onclick={() => check(typed || undefined)}>
                   {#if checking}<Spinner />Checking…{:else}Check again{/if}
                 </Button>

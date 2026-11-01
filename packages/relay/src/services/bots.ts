@@ -321,12 +321,21 @@ async function probe(relay: Relay, agentId: string, token: string): Promise<Prob
       'invalid_request',
       `Your bot is in ${others === 1 ? 'another server' : `${others} other servers`}. The relay only posts as a bot that is in no other server: remove it from ${others === 1 ? 'that server' : 'them'}, then try again.`,
     );
-  const { url } = await ask(() => rest.getGatewayBot());
-  try {
-    await identifyOnce(open, url, token);
-  } catch (error) {
-    relay.log.warn('bots.identify_failed', { agent_id: agentId, error });
-    failures.connects = unavailable('Your bot couldn’t connect to Discord. Try again in a minute.', 60);
+  // Discord needs the bot to have connected once ever, so a bot the relay already connected skips the IDENTIFY (bot_connections):
+  // every check, save and request would otherwise open a session, and two inside Discord's session-start window fail falsely.
+  const connected = await relay.db.prepare('SELECT 1 AS hit FROM bot_connections WHERE bot_user_id = ?').bind(user.id).first();
+  if (!connected) {
+    const { url } = await ask(() => rest.getGatewayBot());
+    try {
+      await identifyOnce(open, url, token);
+      await relay.db
+        .prepare('INSERT OR IGNORE INTO bot_connections (bot_user_id, connected_at) VALUES (?, ?)')
+        .bind(user.id, iso(relay.now()))
+        .run();
+    } catch (error) {
+      relay.log.warn('bots.identify_failed', { agent_id: agentId, error });
+      failures.connects = unavailable('Your bot couldn’t connect to Discord. Try again in a minute.', 60);
+    }
   }
   return probed(failures, 'connects', { user, app, inServer: guilds.some((g) => g.id === guildId) });
 }
@@ -727,20 +736,21 @@ async function check(relay: Relay, bot: BotRow): Promise<void> {
   if (guilds.some((g) => g.id !== guildId)) return pause(relay, bot, OTHER_SERVER);
   const status: AgentBotStatus = guilds.some((g) => g.id === guildId) ? 'active' : 'waiting';
   const now = iso(relay.now());
+  // Status still what was read: an owner re-saving (to saved) or a pause mid-check wins over whatever this writes.
   const found = await botOf(relay, bot.agent_id, [
     relay.db
       .prepare(
-        "UPDATE agent_bots SET status = ?, checked_at = ?, updated_at = CASE WHEN status = ? THEN updated_at ELSE ? END WHERE agent_id = ? AND bot_user_id = ? AND status != 'paused'",
+        'UPDATE agent_bots SET status = ?, checked_at = ?, updated_at = CASE WHEN status = ? THEN updated_at ELSE ? END WHERE agent_id = ? AND bot_user_id = ? AND status = ? RETURNING agent_id',
       )
-      .bind(status, now, status, now, bot.agent_id, bot.bot_user_id),
+      .bind(status, now, status, now, bot.agent_id, bot.bot_user_id, bot.status),
   ]);
   if (status !== bot.status) relay.log.info('bots.status', { agent_id: bot.agent_id, from: bot.status, to: status });
-  if (found) {
+  if (found && found.bot.status === status) {
     const shown = await showIdentity(relay, found.bot, found.agent);
     if (status === 'active') await syncRoles(relay, shown, found.agent.level);
   }
   // Added: the mod queue's message says so and the request is done. Gone from the server again: a new request.
-  if (status !== bot.status) await syncQueue(relay, bot.agent_id);
+  if (status !== bot.status && found?.bot.status === status) await syncQueue(relay, bot.agent_id);
 }
 
 /**

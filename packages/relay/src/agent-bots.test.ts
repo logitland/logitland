@@ -41,6 +41,8 @@ function discordWithBot(h: Harness) {
     codeGrant: false,
     /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
     holdGateway: 0,
+    /** A promise the answer about the bot's servers waits for, so a test can hold a check across an owner's save. */
+    holdGuilds: undefined as Promise<void> | undefined,
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
     beforeAnswer: undefined as ((m: { id: string; content: string }) => Promise<unknown>) | undefined,
     /** The relay's application emoji: every standing emoji, as after setup. */
@@ -73,7 +75,10 @@ function discordWithBot(h: Harness) {
       }
       // Public: Discord lets only an application's owner add a private bot, so staff can add only a public one.
       if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: !bot.private, bot_require_code_grant: bot.codeGrant });
-      if (path === '/users/@me/guilds') return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
+      if (path === '/users/@me/guilds') {
+        await bot.holdGuilds;
+        return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
+      }
       if (path === '/gateway/bot') {
         await gateway();
         return Response.json({ url: 'wss://gateway.discord.gg', shards: 1, session_start_limit: {} });
@@ -832,6 +837,27 @@ describe('staff adding the bot from the mod queue', () => {
     expect((await json(await (await asStaff(h))('/internal/admin/bots'))).bots).toEqual([]);
   });
 
+  it('keeps the bot saved when its owner re-saves it while a check is asking Discord', async () => {
+    const { h, a, owner, bot } = await queued();
+    await give(h, a);
+    h.advance(DAY);
+    let release!: () => void;
+    bot.holdGuilds = new Promise<void>((resolve) => (release = resolve));
+    const guildCalls = () => h.discordCalls.filter((c) => new URL(c.url).pathname === '/api/v10/users/@me/guilds').length;
+    const seen = guildCalls();
+    const job = botsJob(h.relay, { deadline: Date.now() + 10_000 });
+    // The job's check is parked asking Discord which servers the waiting bot is in.
+    while (guildCalls() === seen) await new Promise((resolve) => setTimeout(resolve, 0));
+    bot.holdGuilds = undefined;
+    const resaved = await h.internal('PUT', `/internal/owners/${owner.id}/agents/${a.id}/bot`, { token: BOT_TOKEN }, asOwner(owner.id));
+    expect((await json(resaved)).bot.status).toBe('saved');
+
+    release();
+    await job;
+    expect(await h.db.prepare('SELECT status FROM agent_bots WHERE agent_id = ?').bind(a.id).first()).toEqual({ status: 'saved' });
+    expect(await staffAlerts(h)).toEqual([waiting(a)]);
+  });
+
   it('posts one message for a waiting bot, linking to its page, whose Add to server link is Discord’s for this bot and server', async () => {
     const { h, a, owner } = await queued();
     await give(h, a);
@@ -1006,6 +1032,20 @@ describe('checking a bot before staff add it', () => {
       expect(await setup.h.db.prepare('SELECT COUNT(*) AS n FROM agent_bots WHERE agent_id = ?').bind(setup.a.id).first()).toEqual({ n: 0 });
     },
   );
+
+  it('connects a bot to the Gateway once ever, not once a check, save or request', async () => {
+    const { h, a, owner } = await adopted();
+    let opened = 0;
+    const socket = h.relay.openSocket!;
+    h.relay.openSocket = (url, events) => (opened++, socket(url, events));
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    expect((await call('POST', '/check', { token: BOT_TOKEN })).status).toBe(200);
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    expect((await call('POST', '/request')).status).toBe(200);
+    expect(opened).toBe(1);
+    expect(h.identified).toEqual([BOT_TOKEN]);
+  });
 
   it('counts toward neither the day’s bot nor its hourly attempts', async () => {
     const { h, a, owner } = await adopted();
