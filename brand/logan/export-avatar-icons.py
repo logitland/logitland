@@ -1,9 +1,10 @@
-"""Export Discord upload images and a circular size-check sheet from the renders.
+"""Export six portrait sizes and a circular size-check sheet from 4096px masters.
 
-Run with Python and Pillow after rendering both avatar scenes.
+Run with Python and Pillow after rendering both avatar scenes with -- master.
 Upload the square 512px PNGs; Discord applies its own circular mask.
 """
 from pathlib import Path
+from shutil import copyfile
 from PIL import Image, ImageDraw, ImageFont
 
 folder = Path(__file__).resolve().parent/'renders'
@@ -13,8 +14,12 @@ font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 24)
 small = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 16)
 
 for column, (stem, title) in enumerate((('logan-avatar', 'LOGAN'), ('logan-staging-avatar', 'LOGAN / STAGING'))):
-    original = Image.open(folder/(stem+'.png')).convert('RGB')
-    original.resize((512, 512), Image.Resampling.LANCZOS).save(folder/(stem+'-512.png'), optimize=True)
+    original = Image.open(folder/(stem+'-4096.png')).convert('RGB')
+    if original.size != (4096,4096):
+        raise ValueError(f'{stem}: render a 4096px master before exporting sizes')
+    for size in (2048,1024,512,256,128):
+        original.resize((size,size),Image.Resampling.LANCZOS).save(folder/f'{stem}-{size}.png',optimize=True)
+    copyfile(folder/(stem+'-2048.png'),folder/(stem+'.png'))
     x = 20+column*520
     draw.text((x+15, 20), title, font=font, fill='#f0edf5')
     for size, y, offset in ((460, 70, 15), (128, 570, 15), (64, 570, 190), (32, 570, 310)):
