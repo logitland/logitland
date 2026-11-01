@@ -260,4 +260,3 @@ scene['jacket_motion'] = True
 rig.update_tag()
 bpy.context.view_layer.update()
 print('Distributed armhole weights; added driven coat lift and sleeve ride')
-
