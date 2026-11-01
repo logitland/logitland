@@ -124,6 +124,9 @@ export async function commitPlan(relay: Relay, stmts: Stmt[], events: { at: numb
   return { recorded: recorded.length };
 }
 
+/** eventTail as a statement, to read in one round trip (one transaction) with others. */
+export const eventTailStmt = (relay: Relay) => relay.db.prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM events');
+
 export async function eventTail(relay: Relay): Promise<number> {
-  return (await relay.db.prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM events').first<{ n: number }>())?.n ?? 0;
+  return (await eventTailStmt(relay).first<{ n: number }>())?.n ?? 0;
 }

@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { routePath } from 'hono/route';
 import type { Relay } from './context';
 import { OAuthError, RelayError, asOAuthError } from './errors';
+import { unit } from './memo';
 import * as auth from './routes/auth';
 import * as discordInteractions from './routes/discord-interactions';
 import * as adminAgents from './routes/internal-admin-agents';
@@ -51,7 +52,7 @@ function base(relay: Relay, maxBody: number): App {
   });
   app.use('*', async (c, next) => {
     c.set('client', clientInfo(c));
-    await next();
+    await unit(next);
   });
   app.use(
     '*',

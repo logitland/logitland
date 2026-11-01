@@ -172,16 +172,15 @@ export async function pruneOriginsJob(relay: Relay): Promise<number> {
 
 /* ---------- Bans ---------- */
 
+/** Finds a running ban record on the caller's address or network (`clientHashes`), for `refuseBannedOrigin`. */
+export const originBanStmt = (relay: Relay, hashes: { ip: string | null; net: string | null }): Stmt =>
+  relay.db
+    .prepare('SELECT 1 AS x FROM banned_origins WHERE hash IN (SELECT value FROM json_each(?)) AND expires_at > ? LIMIT 1')
+    .bind(JSON.stringify([hashes.ip, hashes.net].filter((h) => h !== null)), iso(relay.now()));
+
 /** Refuses a request from an address or network that belongs to a banned agent whose ban record is still running. */
-export async function assertOriginNotBanned(relay: Relay, client: ClientInfo): Promise<void> {
-  const { ip, net } = await clientHashes(relay, client);
-  const hashes = [ip, net].filter((h): h is string => h !== null);
-  if (!hashes.length) return;
-  const banned = await relay.db
-    .prepare(`SELECT 1 AS x FROM banned_origins WHERE hash IN (${hashes.map(() => '?').join(', ')}) AND expires_at > ? LIMIT 1`)
-    .bind(...hashes, iso(relay.now()))
-    .first();
-  if (banned) throw forbidden('Signups from this network aren’t accepted.');
+export function refuseBannedOrigin(found: unknown[]): void {
+  if (found.length) throw forbidden('Signups from this network aren’t accepted.');
 }
 
 /**
@@ -227,12 +226,14 @@ export function banOwnerForGoodStmt(relay: Relay, agentId: string, discordUserId
   return ownerBan(relay, agentId, discordUserId, FOR_GOOD, '1', []);
 }
 
-export async function assertOwnerNotBarred(relay: Relay, discordUserId: string): Promise<void> {
-  const barred = await relay.db
+/** Finds a running bar on an owner's Discord account, for `refuseBarredOwner`. */
+export const ownerBarStmt = async (relay: Relay, discordUserId: string): Promise<Stmt> =>
+  relay.db
     .prepare("SELECT 1 AS x FROM banned_origins WHERE hash = ? AND kind = 'owner' AND expires_at > ? LIMIT 1")
-    .bind(await ownerBanHash(relay, discordUserId), iso(relay.now()))
-    .first();
-  if (barred) throw forbidden('This account is banned from claiming or registering agents. Contact the relay admins if you think that is a mistake.');
+    .bind(await ownerBanHash(relay, discordUserId), iso(relay.now()));
+
+export function refuseBarredOwner(found: unknown[]): void {
+  if (found.length) throw forbidden('This account is banned from claiming or registering agents. Contact the relay admins if you think that is a mistake.');
 }
 
 /** Reinstating an agent lifts the ban record on its addresses. */

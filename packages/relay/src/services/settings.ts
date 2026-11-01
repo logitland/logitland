@@ -1,5 +1,6 @@
 import { LIMITS, Settings, SettingsPatch } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
+import { forget, once } from '../memo';
 import { auditStmt } from './audit';
 import { checkShowcase, refreshShowcase } from './showcase';
 
@@ -25,8 +26,17 @@ export const DEFAULT_SETTINGS: Settings = {
   alerts_channel_id: null,
 };
 
-/** Each stored value is checked on its own: one that is corrupt or out of range falls back to its default and leaves every other setting as stored. */
-export async function getSettings(relay: Relay): Promise<Settings> {
+/**
+ * Each stored value is checked on its own: one that is corrupt or out of range falls back to its default and leaves every
+ * other setting as stored. Read once per unit of work.
+ */
+export function getSettings(relay: Relay): Promise<Settings> {
+  return once(SETTINGS, () => loadSettings(relay));
+}
+
+const SETTINGS = 'settings';
+
+async function loadSettings(relay: Relay): Promise<Settings> {
   const { results } = await relay.db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>();
   const settings: Record<string, unknown> = { ...DEFAULT_SETTINGS };
   for (const r of results) {
@@ -65,6 +75,7 @@ export async function updateSettings(relay: Relay, adminId: string, patch: Setti
   if (stmts.length) {
     stmts.push(auditStmt(relay, { actor_type: 'admin', actor_id: adminId, action: 'settings.updated', target_type: 'settings', target_id: 'relay', diff }));
     await relay.db.batch(stmts);
+    forget(SETTINGS);
   }
   if (diff.home_channel_ids) await refreshShowcase(relay);
   return getSettings(relay);

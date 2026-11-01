@@ -1,6 +1,6 @@
 import type { AdminBot } from '@logitland/contracts';
 import { DiscordError } from '@logitland/discord';
-import { iso, type Relay, type Stmt } from '../context';
+import { iso, readAll, type Relay, type Stmt } from '../context';
 import { notFound } from '../errors';
 import type { BotRow } from './bots';
 import { chunk, MAX_PARAMS, placeholders } from './events';
@@ -78,13 +78,25 @@ const save = (relay: Relay, b: QueueRow, channelId: string, messageId: string) =
     .bind(channelId, messageId, shows(b), b.agent_id, b.bot_user_id, b.status)
     .run();
 
+const queuedStmt = (relay: Relay, agentId: string) => relay.db.prepare(`${SELECT} WHERE b.agent_id = ?`).bind(agentId);
+
+/** The agent's bot, with the agent's name and its owner as the mod queue's message shows them. */
+export function queuedBot(relay: Relay, agentId: string): Promise<QueueRow | null> {
+  return queuedStmt(relay, agentId).first<QueueRow>();
+}
+
 /**
  * Brings the agent's bot's message up to date: posts one for a new request (a bot that is waiting, with no open message) and
  * rewrites an open one. A finished request's message stays as it last read. Failures are logged and botsJob tries again.
  */
 export async function syncQueue(relay: Relay, agentId: string): Promise<void> {
-  const b = await relay.db.prepare(`${SELECT} WHERE b.agent_id = ?`).bind(agentId).first<QueueRow>();
+  await syncMessage(relay, await queuedBot(relay, agentId));
+}
+
+/** syncQueue, for the bot already read. */
+async function syncMessage(relay: Relay, b: QueueRow | null | undefined): Promise<void> {
   if (!b || b.queue_shows === shows(b)) return;
+  const agentId = b.agent_id;
   const open = isOpen(b);
   if (!open && b.status !== 'waiting') return;
   const content = text(relay, b, b.status);
@@ -108,10 +120,9 @@ export async function syncQueue(relay: Relay, agentId: string): Promise<void> {
 }
 
 /** For removeBot's batch, which deletes the bot's row: an open message is kept with what it should say (closeRemoved). */
-export async function queueRemoved(relay: Relay, bot: BotRow): Promise<Stmt[]> {
+export function queueRemoved(relay: Relay, bot: QueueRow): Stmt[] {
   if (!isOpen(bot)) return [];
-  const agent = await relay.db.prepare('SELECT name FROM agents WHERE id = ?').bind(bot.agent_id).first<{ name: string }>();
-  const content = text(relay, { ...bot, agent_name: agent?.name ?? bot.agent_id, owner_discord_id: null }, 'removed');
+  const content = text(relay, { ...bot, owner_discord_id: null }, 'removed');
   return [
     relay.db
       .prepare('INSERT OR REPLACE INTO bot_queue_closings (message_id, channel_id, agent_id, content, attempted_at) VALUES (?, ?, ?, ?, ?)')
@@ -144,7 +155,9 @@ export async function closeRemoved(relay: Relay, messageId?: string): Promise<nu
 export const queueDeleted = (relay: Relay, messageIds: string[]): Stmt[] =>
   chunk(messageIds, MAX_PARAMS).map((part) =>
     relay.db
-      .prepare(`UPDATE agent_bots SET queue_channel_id = NULL, queue_message_id = NULL, queue_shows = NULL WHERE queue_message_id IN (${placeholders(part.length)})`)
+      .prepare(
+        `UPDATE agent_bots SET queue_channel_id = NULL, queue_message_id = NULL, queue_shows = NULL WHERE queue_message_id IN (${placeholders(part.length)})`,
+      )
       .bind(...part),
   );
 
@@ -163,8 +176,12 @@ export async function retryQueue(relay: Relay): Promise<number> {
     .bind(iso(new Date(now.getTime() - SETTLE_MS)), RETRIES_PER_RUN)
     .all<{ agent_id: string }>();
   for (const { agent_id } of results) {
-    await relay.db.prepare('UPDATE agent_bots SET queue_attempted_at = ? WHERE agent_id = ?').bind(iso(now), agent_id).run();
-    await syncQueue(relay, agent_id);
+    const [, [b]] = await readAll<[unknown, QueueRow]>(
+      relay.db,
+      relay.db.prepare('UPDATE agent_bots SET queue_attempted_at = ? WHERE agent_id = ?').bind(iso(now), agent_id),
+      queuedStmt(relay, agent_id),
+    );
+    await syncMessage(relay, b);
   }
   return results.length + (await closeRemoved(relay));
 }
@@ -190,7 +207,7 @@ export async function waitingBots(relay: Relay): Promise<AdminBot[]> {
 
 /** An agent's bot, whatever its status. */
 export async function adminBot(relay: Relay, agentId: string): Promise<AdminBot> {
-  const b = await relay.db.prepare(`${SELECT} WHERE b.agent_id = ?`).bind(agentId).first<QueueRow>();
+  const b = await queuedBot(relay, agentId);
   if (!b) throw notFound('This agent has no bot');
   return toAdminBot(relay, b);
 }

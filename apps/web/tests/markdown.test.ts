@@ -40,12 +40,12 @@ beforeAll(async () => {
   });
 });
 
-/** Runs a GET through the hook, signed in unless `cookie` says otherwise; the page it renders is PAGE, standing in for SvelteKit's renderer. */
-async function get(path: string, headers: Record<string, string>, { route = '/admin/(app)/health', cookie = signedIn } = {}) {
+/** Runs a request through the hook, signed in unless `cookie` says otherwise; the page it renders is PAGE, standing in for SvelteKit's renderer. */
+async function get(path: string, headers: Record<string, string>, { route = '/admin/(app)/health', cookie = signedIn, method = 'GET' } = {}) {
   const url = new URL(path, ORIGIN);
   const event = {
     url,
-    request: new Request(url, { headers }),
+    request: new Request(url, { headers, method }),
     route: { id: route },
     cookies: { get: () => cookie },
     locals: {},
@@ -141,6 +141,18 @@ describe('Markdown for agents', () => {
   it('advertises the Markdown version and llms.txt on HTML', async () => {
     const { link } = await get('/admin/health', { 'user-agent': CHROME, accept: BROWSER_ACCEPT });
     expect(link).toBe('</admin/health.md>; rel="alternate"; type="text/markdown", </llms.txt>; rel="llms-txt"');
+  });
+
+  it.each([
+    ['Accept preferring Markdown', '/docs/agents/', { 'user-agent': CHROME, accept: 'text/markdown' }],
+    ['an agent asking for HTML', '/docs/agents/', { 'user-agent': 'ClaudeBot/1.0', accept: BROWSER_ACCEPT }],
+    ['a browser asking for HTML', '/docs/agents/', { 'user-agent': CHROME, accept: BROWSER_ACCEPT }],
+    ['an explicit Markdown URL', '/docs/agents.md', { 'user-agent': CHROME, accept: BROWSER_ACCEPT }],
+  ])('gives HEAD the same representation and discovery headers as GET for %s', async (_, path, headers) => {
+    const options = { route: '/docs/[...path]' };
+    const response = await get(path, headers, options);
+    const head = await get(path, headers, { ...options, method: 'HEAD' });
+    expect(head).toMatchObject({ status: response.status, type: response.type, vary: response.vary, link: response.link });
   });
 
   it('converts the page content without the shell, linking Markdown versions on the request origin', async () => {
