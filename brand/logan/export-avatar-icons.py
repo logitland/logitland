@@ -10,8 +10,8 @@ from PIL import Image, ImageDraw, ImageFont
 folder = Path(__file__).resolve().parent/'renders'
 sheet = Image.new('RGB', (1040, 750), '#151720')
 draw = ImageDraw.Draw(sheet)
-font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 24)
-small = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 16)
+font = ImageFont.load_default(size=24)
+small = ImageFont.load_default(size=16)
 
 for column, (stem, title) in enumerate((('logan-avatar', 'LOGAN'), ('logan-staging-avatar', 'LOGAN / STAGING'))):
     original = Image.open(folder/(stem+'-4096.png')).convert('RGB')

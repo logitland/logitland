@@ -261,6 +261,8 @@ def setup_screen_controls():
             texture = nodes.new('ShaderNodeTexImage')
             texture.name = 'Screen diffusion / '+layer
             texture.image = bpy.data.images.load(str(HERE/'face'/f'{layer}-diffusion.png'), check_existing=True)
+            if texture.image.packed_file:
+                texture.image.unpack(method='REMOVE')
             texture.image.reload()
             texture.image.pack()
             texture.extension = 'CLIP'

@@ -115,7 +115,13 @@ def refresh_face():
             continue
         for layer in ('static', 'eye-L', 'eye-R'):
             texture = material.node_tree.nodes['2D artwork / '+layer]
-            texture.image.filepath = str(HERE/'face'/f'{layer}.png')
+            path = HERE/'face'/f'{layer}.png'
+            if not path.is_file():
+                raise FileNotFoundError(path)
+            # Packed entries retain their own old source path after relocation.
+            if texture.image.packed_file:
+                texture.image.unpack(method='REMOVE')
+            texture.image.filepath = str(path)
             texture.image.reload()
             texture.image.pack()
             if layer == 'static':
@@ -147,6 +153,8 @@ def finish_avatar():
         if 'command room plate' in name:
             # Neutral rack silhouettes support both saturated accent palettes.
             image = bpy.data.images.load(str(HERE/'environment/server-room-neutral.png'), check_existing=True)
+            if image.packed_file:
+                image.unpack(method='REMOVE')
             image.reload()
             image.pack()
             texture = next(n for n in material.node_tree.nodes if n.type == 'TEX_IMAGE')
