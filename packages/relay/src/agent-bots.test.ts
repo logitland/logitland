@@ -1063,7 +1063,8 @@ describe('checking a bot before staff add it', () => {
 
   it('lets an owner save a bot in other servers, make it leave them, then request it', async () => {
     const { h, a, owner, bot } = await adopted();
-    bot.guilds.push(OTHER_SERVER);
+    // In ours too, as if staff had added it: still saved, not active, while it is in another.
+    bot.guilds.push(OTHER_SERVER, GUILD);
     const call = (method: string, path: string, body?: unknown) =>
       h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
     // The agent's own PUT saves and requests in one go, so it still refuses a bot in another server.
@@ -1074,8 +1075,6 @@ describe('checking a bot before staff add it', () => {
     expect(items.find((i: { requirement: string }) => i.requirement === 'no_other_server').ok).toBe(false);
     expect((await call('POST', '/request')).status).toBe(422);
 
-    // Ours too, as if staff had added it: the bot leaves only the others.
-    bot.guilds.push(GUILD);
     const left = await json(await call('POST', '/leave-servers'));
     expect(bot.guilds).toEqual([GUILD]);
     expect(left.items.map((i: { ok: boolean }) => i.ok)).toEqual([true, true, true, true, true, true]);

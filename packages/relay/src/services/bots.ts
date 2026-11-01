@@ -461,7 +461,8 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   const { user, app, inServer } = bot!;
 
   const now = iso(relay.now());
-  const status: AgentBotStatus = inServer ? 'active' : actor.type === 'agent' ? 'waiting' : 'saved';
+  // A bot still in other servers stays saved even if staff already added it: it posts only once it has left them.
+  const status: AgentBotStatus = inServer && !refusal ? 'active' : actor.type === 'agent' ? 'waiting' : 'saved';
   const sealed = await relay.secrets.seal(token, tokenAad(agent.id));
   const cutoff = iso(new Date(relay.now().getTime() - SET_INTERVAL_SECONDS * 1000));
   const diff = { bot_user_id: { from: previous?.bot_user_id ?? null, to: user.id }, status: { from: previous?.status ?? null, to: status } };
