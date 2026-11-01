@@ -51,6 +51,9 @@ export class RateLimitedError extends DiscordError {
     rateLimit: RateLimit,
     /** The 429 wasn't Discord's JSON (Cloudflare's IP-level block answers HTML), so its retry_after may be guessed. */
     readonly cloudflare = false,
+    /** The 429's body (cut to 2,000 characters) and Cloudflare's ray ID, for asking Discord about it. */
+    readonly body: string | null = null,
+    readonly ray: string | null = null,
   ) {
     super(`Rate limited for ${retryAfterSeconds}s (${rateLimit.scope ?? 'unknown'} scope)`, 429, null, rateLimit);
     this.name = 'RateLimitedError';
@@ -526,10 +529,14 @@ export class DiscordRest {
   }
 
   private async rateLimited(res: Response, rl: RateLimit): Promise<RateLimitedError> {
-    const data = (await res.json().catch(() => null)) as { retry_after?: number; global?: boolean } | null;
+    const text = await res.text().catch(() => '');
+    let data: { retry_after?: number; global?: boolean } | null = null;
+    try {
+      data = JSON.parse(text) as { retry_after?: number; global?: boolean };
+    } catch {}
     const header = Number(res.headers.get('retry-after'));
     const retry = Number.isFinite(header) && header > 0 ? header : (data?.retry_after ?? 1);
-    return new RateLimitedError(retry, { ...rl, global: rl.global || Boolean(data?.global) }, data === null);
+    return new RateLimitedError(retry, { ...rl, global: rl.global || Boolean(data?.global) }, data === null, text.slice(0, 2000), res.headers.get('cf-ray'));
   }
 
   private async send<T>(method: string, path: string, body: unknown, bot: boolean, uncertainOnTimeout = false, auditReason?: string): Promise<T> {

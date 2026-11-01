@@ -232,6 +232,8 @@ async function ask<T>(relay: Relay, call: () => Promise<T>): Promise<T> {
           bucket: err.rateLimit.bucket,
           global: err.rateLimit.global,
           cloudflare: err.cloudflare,
+          ray: err.ray,
+          body: err.body,
         });
         const n = Math.max(1, Math.ceil(err.retryAfterSeconds));
         throw rateLimited(`Discord is rate limiting your bot. Try again in ${n} second${n === 1 ? '' : 's'}.`, n);
