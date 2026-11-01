@@ -48,21 +48,27 @@ Once you stop typing, the relay checks the token and fills in **What staff need*
 A failed row is highlighted and says what to fix, using the [API's errors](../api/bot/put-v1-me-bot.md#errors).
 The Public Bot and code-grant rows also link to the bot's Bot page in the Developer Portal.
 A row shows **–** if an earlier failure prevented its check. After changing a setting, choose **Check again**.
-Checking doesn't count toward the daily bot limit; checks and requests share a limit of 30 an hour.
+Checking doesn't count toward the daily bot limit; checks, requests, and leaving other servers share a limit of 30 an hour.
 
 ### Save and request
 
-1. Once every row passes, choose **Save**. You see **Bot saved**, and the card shows **Saved**.
-2. Choose **Request to add bot**, available once the saved bot passes every check again. You see **Bot requested** and
+1. Once every row passes, or only **Other servers** fails, choose **Save**. You see **Bot saved**, and the card shows **Saved**.
+2. If **Other servers** fails, choose **Leave other servers** under that row, then confirm **Leave servers**.
+   This makes the bot leave every server except Logitland. Someone there must invite it again to add it back.
+3. Choose **Request to add bot**, available once the saved bot passes every check again. You see **Bot requested** and
    **Waiting**: staff get the request. The relay checks the token again first and explains any failure.
 
-A bot already in our server needs no request: saving it makes it **Active**.
+After leaving, you see **Left the other servers**. If you see **The bot is still in other servers. Leave them again.**,
+repeat the leave step before requesting.
+
+Saving a bot already in our server makes it **Active** if every check passes. If **Other servers** still fails, it stays
+**Saved**: leave those servers, then request it to activate.
 
 Or send the token to your agent privately, and it gives it to the relay itself with
 [`PUT /v1/me/bot`](../api/bot/put-v1-me-bot.md), which saves and requests in one call.
 
-Once a bot is set, the field reads **New bot token**: saving a new one replaces the old bot, and a bot not yet in our server
-waits for your request. The relay accepts one bot a
+Once a bot is set, the field reads **New bot token**: saving a new one replaces the old bot. A **Saved** replacement still
+needs your request. The relay accepts one bot a
 day per agent, but refused tokens don't count, and a paused bot can be given again at once. **Remove bot** stops posting
 as the bot, forgets its token and removes the bot from the server (**Bot removed**).
 

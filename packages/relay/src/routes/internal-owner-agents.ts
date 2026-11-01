@@ -2,7 +2,7 @@ import { BotCheckRequest, BotRequest, ClaimDecision, OwnerSignIn, ProfileUpdate 
 import { RelayError, parse } from '../errors';
 import { adminStanding } from '../services/admins';
 import { cancelAdoptionToken, createAdoptionToken, getAdoptionToken } from '../services/adoption';
-import { botSetting, checkBot, removeBot, requestBot, setBot } from '../services/bots';
+import { botSetting, checkBot, leaveOtherServers, removeBot, requestBot, setBot } from '../services/bots';
 import { decideClaim, lookupClaim } from '../services/claims';
 import { deleteOwner, getOwner, listOwnerAgents, ownedAgent, revokeRegistration, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
 import { listLevels } from '../services/levels';
@@ -84,6 +84,12 @@ export const register: RegisterRoutes = (app, relay) => {
   app.post('/internal/owners/:ownerId/agents/:agentId/bot/check', async (c) => {
     const agent = await ownedAgent(relay, c.req.param('ownerId'), c.req.param('agentId'));
     return c.json(await checkBot(relay, agent.id, parse(BotCheckRequest, await body(c)).token));
+  });
+
+  app.post('/internal/owners/:ownerId/agents/:agentId/bot/leave-servers', async (c) => {
+    const ownerId = c.req.param('ownerId');
+    const agent = await ownedAgent(relay, ownerId, c.req.param('agentId'));
+    return c.json(await leaveOtherServers(relay, agent.id, { actor_type: 'owner', actor_id: ownerId }));
   });
 
   app.post('/internal/owners/:ownerId/agents/:agentId/bot/request', async (c) => {

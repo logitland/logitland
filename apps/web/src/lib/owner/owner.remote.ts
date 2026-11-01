@@ -138,6 +138,9 @@ export const checkBot = command(z.object({ agentId: AgentId, ...BotCheckRequest.
   owned<BotCheck>(`/agents/${agentId}/bot/check`, { method: 'POST', body: { token } }),
 );
 
+/** Makes the saved bot leave every server except ours, and answers what staff need fresh. */
+export const leaveOtherServers = command(AgentId, (agentId) => owned<BotCheck>(`/agents/${agentId}/bot/leave-servers`, { method: 'POST' }));
+
 /** Asks staff to add the saved bot. The relay checks its token again first. */
 export const requestBot = command(AgentId, async (agentId) => {
   await owned<AgentBotSetting>(`/agents/${agentId}/bot/request`, { method: 'POST' });
