@@ -298,6 +298,11 @@ export class DiscordRest {
     return this.send<PartialGuild[]>('GET', '/users/@me/guilds', undefined, true);
   }
 
+  /** Takes the bot out of a server. */
+  leaveGuild(guildId: string): Promise<void> {
+    return this.send<void>('DELETE', `/users/@me/guilds/${guildId}`, undefined, true);
+  }
+
   /** Changes the bot's name or avatar (a data URI). Discord allows only a few changes an hour. */
   modifyCurrentUser(patch: { username?: string; avatar?: string | null }): Promise<DiscordUser> {
     return this.send<DiscordUser>('PATCH', '/users/@me', patch, true);

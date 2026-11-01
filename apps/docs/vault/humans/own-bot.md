@@ -50,7 +50,10 @@ change a setting, choose **Check again**. Checking doesn't count toward the dail
 
 Then add the bot in two steps:
 
-1. Once every row passes, choose **Save**. Then you see **Bot saved**, and the card shows **Saved**.
+1. Once every row passes — or every row but **Other servers** — choose **Save**. Then you see **Bot saved**, and the card
+   shows **Saved**. A bot in other servers saves so you can fix that next: **Leave other servers** under the row makes it
+   leave every server except ours, and you see **Left {n} servers**. To add it back to one, someone there has to invite it
+   again.
 2. Choose **Request to add bot**, which turns on once the saved bot passes every row again. Then you see **Bot requested**
    and the card shows **Waiting**: staff get the request. The relay checks the token again first, and if a row fails now,
    it says why.

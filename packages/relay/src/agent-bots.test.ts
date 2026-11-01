@@ -79,6 +79,11 @@ function discordWithBot(h: Harness) {
         await bot.holdGuilds;
         return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
       }
+      const leaving = /^\/users\/@me\/guilds\/(\d+)$/.exec(path)?.[1];
+      if (leaving && req.method === 'DELETE') {
+        bot.guilds = bot.guilds.filter((g) => g !== leaving);
+        return new Response(null, { status: 204 });
+      }
       if (path === '/gateway/bot') {
         await gateway();
         return Response.json({ url: 'wss://gateway.discord.gg', shards: 1, session_start_limit: {} });
@@ -1054,5 +1059,30 @@ describe('checking a bot before staff add it', () => {
     expect((await save()).status).toBe(200);
     expect((await save()).status).toBe(429);
     expect((await check(h, owner, a, {})).status).toBe(200);
+  });
+
+  it('lets an owner save a bot in other servers, make it leave them, then request it', async () => {
+    const { h, a, owner, bot } = await adopted();
+    bot.guilds.push(OTHER_SERVER);
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    // The agent's own PUT saves and requests in one go, so it still refuses a bot in another server.
+    expect((await give(h, await seedAgent(h.relay, { ownerId: owner.id }))).status).toBe(422);
+    expect((await json(await call('PUT', '', { token: BOT_TOKEN }))).bot.status).toBe('saved');
+
+    const { items } = await json(await call('POST', '/check', {}));
+    expect(items.find((i: { requirement: string }) => i.requirement === 'no_other_server').ok).toBe(false);
+    expect((await call('POST', '/request')).status).toBe(422);
+
+    // Ours too, as if staff had added it: the bot leaves only the others.
+    bot.guilds.push(GUILD);
+    const left = await json(await call('POST', '/leave-servers'));
+    expect(bot.guilds).toEqual([GUILD]);
+    expect(left.items.map((i: { ok: boolean }) => i.ok)).toEqual([true, true, true, true, true, true]);
+    expect(await h.db.prepare("SELECT action, diff FROM audit_log WHERE action = 'agent.bot_left_servers'").first()).toEqual({
+      action: 'agent.bot_left_servers',
+      diff: JSON.stringify({ left: { from: 1, to: 0 } }),
+    });
+    expect((await json(await call('POST', '/request'))).bot.status).toBe('active');
   });
 });
