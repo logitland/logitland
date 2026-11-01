@@ -1,25 +1,17 @@
-"""Replace staging with an exact production duplicate, then swap only its colors.
+"""Replace staging with an exact production duplicate, then invert only its face.
 
 Run after production art direction. Copies the current pose, camera, geometry,
 lights, grading and render settings together, preserving production's appearance.
 """
 from pathlib import Path
-import colorsys
 import runpy
 import bpy
 
 HERE = Path(__file__).resolve().parent
 
 
-def blue(color):
-    hue, saturation, value = colorsys.rgb_to_hsv(*color[:3])
-    if saturation > .25 and (hue > .73 or hue < .02):
-        return (*colorsys.hsv_to_rgb(.59, saturation, value), color[3])
-    return tuple(color)
-
-
 def sync_staging():
-    """Keep staging identical to production apart from character accent hues."""
+    """Keep staging's pink character and lighting; invert only screen polarity."""
     production = bpy.data.scenes['AVATAR · Production']
     old = bpy.data.scenes.get('AVATAR · Staging')
     if old:
@@ -44,10 +36,6 @@ def sync_staging():
     copies = {}
     face_polarity = runpy.run_path(str(HERE/'screen-controls.py'))['dark_features']
     for obj in staging.objects:
-        if obj.type == 'LIGHT':
-            rgba = (*obj.data.color,1)
-            obj.data.color = blue(rgba)[:3]
-            continue
         if obj.type != 'MESH':
             continue
         for slot in obj.material_slots:
@@ -67,33 +55,16 @@ def sync_staging():
                         for target in variable.targets:
                             if target.id == source_rig:
                                 target.id = target_rig
-            nodes, links = material.node_tree.nodes, material.node_tree.links
+            nodes = material.node_tree.nodes
             if 'Face · 2D CRT display' in source.name:
                 crt = next(n for n in nodes if n.type == 'GROUP' and n.node_tree.name == 'LOGAN / CRT display')
                 face_polarity(material,crt)
-                continue
-            material.diffuse_color = blue(material.diffuse_color)
-            for node in list(nodes):
-                for socket in list(node.inputs)+list(node.outputs):
-                    if socket.type == 'RGBA' and hasattr(socket,'default_value'):
-                        socket.default_value = blue(socket.default_value)
-                if node.type == 'VALTORGB':
-                    for element in node.color_ramp.elements:
-                        element.color = blue(element.color)
-                if node.type == 'TEX_IMAGE' and 'original SVG print' in source.name:
-                    destinations = [link.to_socket for link in node.outputs['Color'].links]
-                    hue = nodes.new('ShaderNodeHueSaturation')
-                    hue.name = 'Staging / blue SVG ink'
-                    hue.inputs['Hue'].default_value = .25
-                    links.new(node.outputs['Color'],hue.inputs['Color'])
-                    for destination in destinations:
-                        links.new(hue.outputs[0],destination)
     staging.compositing_node_group = production.compositing_node_group.copy()
     for node in staging.compositing_node_group.nodes:
         if node.type == 'R_LAYERS':
             node.scene = staging
     staging.render.filepath = str(HERE/'renders/logan-staging-avatar.png')
-    staging['portrait_notes'] = 'Production pose and framing; blue body accents, pink-on-black face, ivory fleece and neutral server room.'
+    staging['portrait_notes'] = 'Production character, pink accents, lighting and framing; only the face is inverted to pink on black.'
     bpy.context.window.scene = production
     bpy.context.view_layer.update()
     return staging

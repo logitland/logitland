@@ -7,7 +7,7 @@
 `server-room-neutral.png` is the current background, generated with `gpt-image-2.5`
 through the image-gen skill. Its brief: out-of-focus graphite server racks at
 the edges, broad soft white practical lights, and a quiet smoky grey center.
-The restrained palette supports both pink and blue Logan. Soft focus keeps
+The restrained palette supports both screen polarities on pink Logan. Soft focus keeps
 the robot legible at avatar size. Both portraits use the same plate.
 It is an ordinary image, not an HDR lighting map. The camera-only plane keeps
 its painted lights separate from the actual HDRI and portrait lights. The plate

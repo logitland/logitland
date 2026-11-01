@@ -7,6 +7,44 @@ import bpy
 from mathutils import Vector
 
 
+def soft_fabric_edges(scene):
+    """Wrap backlight through cloth and fibers without lighting the collar backing."""
+    materials = {slot.material for o in scene.objects if o.type=='MESH'
+                 for slot in o.material_slots if slot.material}
+    for material in materials:
+        if not material.name.startswith('Jacket ·'):continue
+        nodes,links = material.node_tree.nodes,material.node_tree.links
+        shader = next(n for n in nodes if n.type=='BSDF_PRINCIPLED')
+        if 'teddy' in material.name:
+            shader.inputs['Subsurface Weight'].default_value = .85 if 'fibers' in material.name else .15
+            shader.inputs['Subsurface Scale'].default_value = .002
+            shader.inputs['Subsurface Radius'].default_value = (1,1,1)
+            continue
+        if not any(word in material.name for word in ('charcoal','shadow facet','light facet','nylon')):continue
+        scatter = nodes.get('Fabric / shallow scattering') or nodes.new('ShaderNodeSubsurfaceScattering')
+        scatter.name = 'Fabric / shallow scattering'
+        scatter.inputs['Color'].default_value = (.3,.23,.27,1)
+        scatter.inputs['Scale'].default_value = .12
+        scatter.inputs['Radius'].default_value = (1,.7,.85)
+        scatter.inputs['Anisotropy'].default_value = .35
+        for link in shader.inputs['Normal'].links:
+            links.new(link.from_socket,scatter.inputs['Normal'])
+        output = next(n for n in nodes if n.type=='OUTPUT_MATERIAL')
+        mix = nodes.get('Fabric / scattering blend') or nodes.get('Fabric / grazing scatter')
+        if mix is None:
+            original = output.inputs['Surface'].links[0].from_socket
+            mix = nodes.new('ShaderNodeMixShader')
+            links.new(original,mix.inputs[1])
+        mix.name = mix.label = 'Fabric / scattering blend'
+        for link in list(mix.inputs[0].links):links.remove(link)
+        mix.inputs[0].default_value = .55
+        for name in ('Fabric / grazing angle','Fabric / edge scatter weight'):
+            if nodes.get(name):nodes.remove(nodes[name])
+        links.new(scatter.outputs[0],mix.inputs[2]);links.new(mix.outputs[0],output.inputs['Surface'])
+        scatter.location = (440,-600)
+        mix.location = (700,0)
+
+
 def light_edges(scene):
     """Use pink rear strip lights for a narrow silhouette and soft fabric edges."""
     lights = {
@@ -66,6 +104,7 @@ def light_edges(scene):
         shader.inputs[name].default_value = value
     if edge.name not in shell.data.materials:shell.data.materials.append(edge)
     bevel.material = shell.data.materials.find(edge.name)
+    soft_fabric_edges(scene)
 
 
 def rim_portrait():

@@ -4,6 +4,7 @@ The collar keeps its original topology. Each small shared tuft is rooted in
 the inner/rim surface after the contact modifiers, so the pile follows posing.
 """
 import math
+import bmesh
 import bpy
 from mathutils import Vector
 
@@ -21,6 +22,12 @@ def fleece_lining():
             node.color_ramp.elements[0].color = (.44,.34,.24,1)
             node.color_ramp.elements[1].color = (.82,.72,.58,1)
     material.diffuse_color = (.65,.55,.43,1)
+    # Fibers need more scattering than the solid backing, which otherwise leaks
+    # a bright stripe through the inside of the collar.
+    fiber = bpy.data.materials.get('Jacket · teddy fibers')
+    if fiber is None:
+        fiber = material.copy()
+        fiber.name = 'Jacket · teddy fibers'
     source = scene.objects.get(SOURCE)
     if source is None:
         vertices, faces = [], []
@@ -47,15 +54,24 @@ def fleece_lining():
                     a = start+ring*3+corner
                     b = start+ring*3+(corner+1)%3
                     faces.append((a,b,b+3,a+3))
+            faces.extend(((start+2,start+1,start),(start+27,start+28,start+29)))
         mesh = bpy.data.meshes.new(SOURCE)
         mesh.from_pydata(vertices,[],faces)
         for face in mesh.polygons:
             face.use_smooth = True
-        mesh.materials.append(material)
+        mesh.materials.append(fiber)
         source = bpy.data.objects.new(SOURCE,mesh)
         scene.collection.objects.link(source)
         source.hide_render = True
         source.hide_set(True)
+    source.data.materials[0] = fiber
+    # Existing tuft sources need closed tips for random-walk subsurface paths.
+    if len(source.data.polygons) == 81:
+        bm = bmesh.new();bm.from_mesh(source.data);bm.verts.ensure_lookup_table()
+        for start in (0,30,60):
+            for cap in ((start+2,start+1,start),(start+27,start+28,start+29)):
+                bm.faces.new([bm.verts[i] for i in cap])
+        bm.normal_update();bm.to_mesh(source.data);bm.free()
     group = bpy.data.node_groups.get(GROUP)
     if group is None:
         group = bpy.data.node_groups.new(GROUP,'GeometryNodeTree')

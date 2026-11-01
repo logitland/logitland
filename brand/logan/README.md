@@ -7,7 +7,8 @@ GIF work is deferred until requested.
 ## Discord portraits
 
 **avatar-studio.blend** contains two editable scenes: **AVATAR · Production**
-(pink) and **AVATAR · Staging** (blue). Both preserve the manually posed crossed
+(black-on-pink face) and **AVATAR · Staging** (pink-on-black face). Both keep pink
+accents and lighting, and preserve the manually posed crossed
 arms from the master. Both use Mia's close 14mm framing, the same pose,
 face-focused depth of field, a slight camera roll, five area
 lights, a real Poly Haven HDRI and a shared generated server-room backdrop:
@@ -22,18 +23,23 @@ shader raster samples the eyes once per CRT row and places their boundaries
 inside the dark gaps, including during blinks. Shared curved coordinates bow
 the scanlines and artwork together; adjust **Curvature** on the material's
 **CRT curvature / curved raster** node. The smirk is a tapered crescent. Narrow pink
-rear strip lights catch the head bevels, collar and shoulders; staging swaps them
-to blue. Subsurface scattering and sheen soften cloth
+rear strip lights catch the head bevels, collar and shoulders. Subsurface scattering and sheen soften cloth
 and rubber. Optical glow and subtle lens distortion complete the portrait.
-Staging differs only in its colors. `sync-staging.py` derives its geometry,
+Staging differs only in screen polarity. `sync-staging.py` derives its geometry,
 pose, camera, materials and lighting from production; staging exports run this
 automatically without changing the saved studio. Run it in Blender and save
 after editing production to update the staging scene in the open file as well.
+Use **Z → R** in the viewport for Cycles Rendered shading and its subsurface
+scattering. Material Preview uses Eevee, even when the scene engine is Cycles.
 
 The exposed collar lining has warm ivory-beige, sheep-like curly teddy fleece rooted in its inner
 and rim faces. **Collar / raised band → Modifiers → Teddy fleece / rooted pile**
 controls tuft density. `fleece-lining.py` builds the shared tuft and scatters it
 after the collar's posing/contact modifiers; the coat mesh stays low-poly.
+Closed tuft fibers have their own scattering material, separate from the solid
+collar backing. A subsurface layer wraps backlight through the charcoal cloth;
+its strength is the **Fac** input of **Fabric / scattering blend** in the jacket
+material nodes.
 
 Select **Screen / glass**, then **Material Properties → Surface** to adjust
 **Glass Roughness** (both reflection layers), **Glass Reflection** (highlight
@@ -56,14 +62,15 @@ shutter setting controls motion blur; ISO is not an exposure control in the
 standard camera. `rim-portrait.py` establishes the rim lights and grading setup.
 
 Upload `renders/logan-avatar-512.png` or `renders/logan-staging-avatar-512.png`
-to Discord. The matching files without `-512` are the 2048px masters.
+to Discord. Both portraits have 4096, 2048, 1024, 512, 256 and 128px PNGs,
+named with their size suffix. The unsuffixed filenames are 2048px copies.
 `renders/logan-avatar-size-check.jpg` previews the circular crop at several sizes.
 The original `logan.blend` remains the modeling and rigging source.
 
 ```sh
 blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/avatar-studio.py
-blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-avatar.py
-blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-avatar.py -- staging
+blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-avatar.py -- master
+blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-avatar.py -- staging master
 python3 brand/logan/export-avatar-icons.py
 ```
 
