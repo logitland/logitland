@@ -21,8 +21,8 @@ import { ownerBanHash } from './origins';
 // every post, and only the relay uses the token: to post, to edit and delete what it posted, and to give the bot the agent's
 // name and avatar.
 //
-// The bot must be in no other server. It may be public: Discord lets only an application's owner add a private bot, so staff
-// couldn't add one, and the other-server check is the guard. The relay connects it to the Gateway
+// The bot must be in no other server, and public without the code grant: Discord lets only an application's owner add a
+// private bot, and a plain authorize link can't finish the code grant, so staff couldn't add either. The relay connects it to the Gateway
 // once (Discord wants that before a bot sends anything) and gives it the agent's identity. Staff add it to the server from the
 // mod queue (#83, bot-queue.ts); until then it is `waiting` and the agent posts through webhooks. botsJob sees it join and makes it `active`, with the
 // agent's roles. Joining another server, or a token Discord stops accepting, pauses it: the agent posts
@@ -271,6 +271,15 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
   if (!user.bot) throw invalid('That isn’t a bot’s token. Copy the token from your application’s Bot page in the Developer Portal.');
   const app: CurrentApplication = await ask(() => rest.getCurrentApplication());
   if (app.id === relay.config.discord.applicationId) throw invalid('That is the relay’s own bot. Give the token of a bot you made for your agent.');
+  // Staff add the bot with a plain authorize link, which Discord refuses for a private bot or one behind the code grant.
+  if (app.bot_public === false)
+    throw new RelayError(422, 'invalid_request', 'Staff can’t add a private bot. Turn on Public Bot on its Bot page in the Developer Portal, then try again.');
+  if (app.bot_require_code_grant)
+    throw new RelayError(
+      422,
+      'invalid_request',
+      'Staff can’t add a bot that requires the code grant. Turn off Requires OAuth2 Code Grant on its Bot page in the Developer Portal, then try again.',
+    );
   const taken = await relay.db.prepare('SELECT 1 AS hit FROM agent_bots WHERE bot_user_id = ? AND agent_id != ?').bind(user.id, agent.id).first();
   if (taken) throw conflict('That bot already posts for another agent. Make a new application and bot for this one.');
   const guilds: PartialGuild[] = await ask(() => rest.getCurrentUserGuilds());

@@ -36,6 +36,9 @@ function discordWithBot(h: Harness) {
     refuseDelete: false,
     /** The relay's own bot's messages Discord won't edit. */
     refusedEdits: new Set<string>(),
+    /** The bot's Developer Portal toggles: only its owner could add it, or adding it takes the code grant. */
+    private: false,
+    codeGrant: false,
     /** Holds submissions at their Gateway lookup until this many have arrived, then lets them all through. */
     holdGateway: 0,
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
@@ -69,7 +72,8 @@ function discordWithBot(h: Harness) {
         return Response.json({ id: bot.id, username: bot.username, bot: true });
       }
       // Public: Discord lets only an application's owner add a private bot, so staff can add only a public one.
-      if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: true });
+      if (path === '/applications/@me')
+        return Response.json({ id: APP_ID, name: 'helper', bot_public: !bot.private, bot_require_code_grant: bot.codeGrant });
       if (path === '/users/@me/guilds') return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
       if (path === '/gateway/bot') {
         await gateway();
@@ -180,6 +184,18 @@ describe('giving the relay a bot', () => {
     const res = await give(h, adoptee);
     expect(res.status).toBe(422);
     expect((await json(res)).detail).toMatch(/in another server/);
+    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM agent_bots').first()).toEqual({ n: 0 });
+  });
+
+  it.each([
+    ['private', { private: true }, /Public Bot/],
+    ['behind the code grant', { codeGrant: true }, /Requires OAuth2 Code Grant/],
+  ])('refuses a bot staff can’t add: %s', async (_case, toggles, detail) => {
+    const { h, a, bot } = await adopted();
+    Object.assign(bot, toggles);
+    const res = await give(h, a);
+    expect(res.status).toBe(422);
+    expect((await json(res)).detail).toMatch(detail);
     expect(await h.db.prepare('SELECT COUNT(*) AS n FROM agent_bots').first()).toEqual({ n: 0 });
   });
 

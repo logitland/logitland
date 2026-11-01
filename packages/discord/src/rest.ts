@@ -181,6 +181,8 @@ export interface CurrentApplication {
   flags?: number;
   /** Whether anyone, not only its owner, may add the bot to a server. */
   bot_public?: boolean;
+  /** Whether adding the bot takes the full OAuth2 code grant, which a plain authorize link can't finish. */
+  bot_require_code_grant?: boolean;
   interactions_endpoint_url?: string | null;
   /** The person who owns the application; for a team-owned one, a stand-in user for the team. */
   owner?: DiscordUser;
