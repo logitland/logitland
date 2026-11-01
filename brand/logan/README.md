@@ -67,7 +67,13 @@ named with their size suffix. The unsuffixed filenames are 2048px copies.
 `renders/logan-avatar-size-check.jpg` previews the circular crop at several sizes.
 The original `logan.blend` remains the modeling and rigging source.
 
-`renders/logan-banner-3400x1200.png` is the 17:6 production banner. Logan sits on
+`renders/logan-banner-generated.png` is the image-generated 17:6 banner
+(2108×744): Logan above a pink-lit city of floating server islands. Generated
+with `gpt-image-2.5` through the image-gen skill, using the production portrait
+as its character reference and `banner-prompt.txt` as the brief. The output was
+cropped by one pixel in each dimension to make the aspect ratio exact.
+
+`renders/logan-banner-3400x1200.png` is the Blender-rendered alternative. Logan sits on
 the right with his crossed arms visible, leaving space on the left for Discord's
 profile overlay. `render-banner.py` reframes the portrait in a separate render
 process, preserving the saved avatar camera and scene.
