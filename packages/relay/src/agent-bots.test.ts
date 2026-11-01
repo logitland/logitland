@@ -77,7 +77,13 @@ function discordWithBot(h: Harness) {
       if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: !bot.private, bot_require_code_grant: bot.codeGrant });
       if (path === '/users/@me/guilds') {
         await bot.holdGuilds;
-        return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
+        // Discord lists 200 a page.
+        return Response.json(bot.guilds.slice(0, 200).map((id) => ({ id, name: 'a server' })));
+      }
+      const leaving = /^\/users\/@me\/guilds\/(\d+)$/.exec(path)?.[1];
+      if (leaving && req.method === 'DELETE') {
+        bot.guilds = bot.guilds.filter((g) => g !== leaving);
+        return new Response(null, { status: 204 });
       }
       if (path === '/gateway/bot') {
         await gateway();
@@ -1054,5 +1060,54 @@ describe('checking a bot before staff add it', () => {
     expect((await save()).status).toBe(200);
     expect((await save()).status).toBe(429);
     expect((await check(h, owner, a, {})).status).toBe(200);
+  });
+
+  it('lets an owner save a bot in other servers, make it leave them, then request it', async () => {
+    const { h, a, owner, bot } = await adopted();
+    // In ours too, as if staff had added it: still saved, not active, while it is in another.
+    bot.guilds.push(OTHER_SERVER, GUILD);
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    // The agent's own PUT saves and requests in one go, so it still refuses a bot in another server.
+    expect((await give(h, await seedAgent(h.relay, { ownerId: owner.id }))).status).toBe(422);
+    expect((await json(await call('PUT', '', { token: BOT_TOKEN }))).bot.status).toBe('saved');
+
+    const { items } = await json(await call('POST', '/check', {}));
+    expect(items.find((i: { requirement: string }) => i.requirement === 'no_other_server').ok).toBe(false);
+    expect((await call('POST', '/request')).status).toBe(422);
+
+    const left = await json(await call('POST', '/leave-servers'));
+    expect(bot.guilds).toEqual([GUILD]);
+    expect(left.items.map((i: { ok: boolean }) => i.ok)).toEqual([true, true, true, true, true, true]);
+    expect(await h.db.prepare("SELECT action, diff FROM audit_log WHERE action = 'agent.bot_left_servers'").first()).toEqual({
+      action: 'agent.bot_left_servers',
+      diff: JSON.stringify({ left: { from: 1, to: 0 } }),
+    });
+    expect((await json(await call('POST', '/request'))).bot.status).toBe('active');
+  });
+
+  it('leaves servers past the first page, and the fresh checklist costs no second check', async () => {
+    const { h, a, owner, bot } = await adopted();
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    bot.guilds.push(...Array.from({ length: 250 }, (_, i) => String(200000000000000000n + BigInt(i))));
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    // The save's own probe isn't an hourly check: use up all but one.
+    for (let i = 0; i < 29; i++) expect((await call('POST', '/check', {})).status).toBe(200);
+    const res = await call('POST', '/leave-servers');
+    expect(res.status).toBe(200);
+    expect(bot.guilds).toEqual([]);
+    expect((await json(res)).items.every((i: { ok: boolean }) => i.ok)).toBe(true);
+  });
+
+  it('answers Other servers still failing when the rounds run out before every server is gone', async () => {
+    const { h, a, owner, bot } = await adopted();
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    bot.guilds.push(...Array.from({ length: 5001 }, (_, i) => String(200000000000000000n + BigInt(i))));
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    const { items } = await json(await call('POST', '/leave-servers'));
+    expect(bot.guilds).toHaveLength(1);
+    expect(items.find((i: { requirement: string }) => i.requirement === 'no_other_server').ok).toBe(false);
   });
 });

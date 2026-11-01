@@ -319,7 +319,7 @@ async function probe(relay: Relay, agentId: string, token: string): Promise<Prob
     failures.no_other_server = new RelayError(
       422,
       'invalid_request',
-      `Your bot is in ${others === 1 ? 'another server' : `${others} other servers`}. The relay only posts as a bot that is in no other server: remove it from ${others === 1 ? 'that server' : 'them'}, then try again.`,
+      `Your bot is in ${others === 1 ? 'another server' : `${others} other servers`}. Staff add only a bot that is in no other server.`,
     );
   // Discord needs the bot to have connected once ever, so a bot the relay already connected skips the IDENTIFY (bot_connections):
   // every check, save and request would otherwise open a session, and two inside Discord's session-start window fail falsely.
@@ -359,8 +359,51 @@ const savedToken = (relay: Relay, bot: BotRow | null): Promise<string> => {
 export async function checkBot(relay: Relay, agentId: string, token?: string): Promise<BotCheck> {
   const checked = token ?? (await savedToken(relay, await getBot(relay, agentId)));
   await enforceChecks(relay, agentId);
-  const { items, bot } = await probe(relay, agentId, checked);
+  return checklist(relay, agentId, checked);
+}
+
+async function checklist(relay: Relay, agentId: string, token: string): Promise<BotCheck> {
+  const { items, bot } = await probe(relay, agentId, token);
   return { items, bot: bot && { application_id: bot.app.id, username: bot.user.username } };
+}
+
+/** Pages of up to 200 servers: leaving each page's others shows the next, so this many covers any bot. */
+const LEAVE_ROUNDS = 25;
+
+/**
+ * Makes the saved bot leave every server except Logitland's (POST …/bot/leave-servers), so its no_other_server check passes
+ * and it can be requested. Counts against the hourly checks; answers the checklist fresh.
+ */
+export async function leaveOtherServers(relay: Relay, agentId: string, actor: Pick<AuditInput, 'actor_type' | 'actor_id'>): Promise<BotCheck> {
+  const token = await savedToken(relay, await getBot(relay, agentId));
+  await enforceChecks(relay, agentId);
+  const rest = relay.discord.withToken(token);
+  const guildId = relay.config.discord.guildId;
+  let left = 0;
+  let complete = false;
+  // Discord lists 200 servers a page, so the bot leaves a page's others and looks again until a page has none.
+  for (let round = 0; round < LEAVE_ROUNDS; round++) {
+    const others = (await ask(() => rest.getCurrentUserGuilds())).filter((g) => g.id !== guildId);
+    if (!others.length) {
+      complete = true;
+      break;
+    }
+    for (const guild of others) {
+      await ask(() => rest.leaveGuild(guild.id));
+      left++;
+    }
+  }
+  relay.log.info('bots.left_servers', { agent_id: agentId, left, complete });
+  await auditStmt(relay, {
+    ...actor,
+    action: 'agent.bot_left_servers',
+    target_type: 'agent',
+    target_id: agentId,
+    diff: { left: { from: left, to: 0 } },
+  }).run();
+  // The hourly check this request counted covers the fresh checklist too. Its no_other_server item tells the owner whether
+  // the rounds ran out before every other server was gone.
+  return checklist(relay, agentId, token);
 }
 
 /**
@@ -398,7 +441,8 @@ export async function requestBot(relay: Relay, agent: AgentRecord): Promise<Agen
 }
 
 /**
- * Gives the relay an adopted agent's bot (#84), replacing any it had, once its token meets every requirement (probe). The
+ * Gives the relay an adopted agent's bot (#84), replacing any it had, once its token meets the requirements its actor must
+ * pass (probe): an owner's save overlooks only the bot being in other servers, which its page can then fix (leaveOtherServers). The
  * relay connects it once and gives it the agent's name and avatar. It is `active` at once when staff already added it.
  * Otherwise an agent's bot is `waiting`, and the mod queue asks staff to add it; an owner's is `saved` until they request it
  * (requestBot). An owner whose bot was kicked for its third strike can't give one for a while, and one banned for a fourth
@@ -426,12 +470,15 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
     [{ key: `bot:set:${agent.id}:h`, limit: ATTEMPTS_PER_AGENT_PER_HOUR, windowSeconds: 3600 }],
     `A bot can be given ${ATTEMPTS_PER_AGENT_PER_HOUR} times an hour. Try again later.`,
   );
-  const { refusal, bot } = await probe(relay, agent.id, token);
-  if (refusal) throw refusal;
+  const { refusal, items, bot } = await probe(relay, agent.id, token);
+  // An owner may still save a bot that is in other servers — its page offers to make it leave them — but requesting it
+  // waits until it has (requestBot). An agent's PUT saves and requests in one go, so its token must pass every check.
+  if (refusal && (actor.type === 'agent' || items.some((item) => item.ok === false && item.requirement !== 'no_other_server'))) throw refusal;
   const { user, app, inServer } = bot!;
 
   const now = iso(relay.now());
-  const status: AgentBotStatus = inServer ? 'active' : actor.type === 'agent' ? 'waiting' : 'saved';
+  // A bot still in other servers stays saved even if staff already added it: it posts only once it has left them.
+  const status: AgentBotStatus = inServer && !refusal ? 'active' : actor.type === 'agent' ? 'waiting' : 'saved';
   const sealed = await relay.secrets.seal(token, tokenAad(agent.id));
   const cutoff = iso(new Date(relay.now().getTime() - SET_INTERVAL_SECONDS * 1000));
   const diff = { bot_user_id: { from: previous?.bot_user_id ?? null, to: user.id }, status: { from: previous?.status ?? null, to: status } };

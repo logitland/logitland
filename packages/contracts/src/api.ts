@@ -391,6 +391,12 @@ export const DASHBOARD_API: Endpoint[] = [
   },
   {
     method: 'POST',
+    path: '/internal/owners/:ownerId/agents/:agentId/bot/leave-servers',
+    auth: 'owner',
+    summary: 'Make the saved bot leave every server except this one, then answers the checks fresh.',
+  },
+  {
+    method: 'POST',
     path: '/internal/owners/:ownerId/agents/:agentId/bot/request',
     auth: 'owner',
     summary: 'Ask staff to add the saved bot, once its token passes every check. It is `waiting` until they do.',

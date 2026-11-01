@@ -6,6 +6,7 @@
   import { untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import * as Alert from '#lib/components/ui/alert/index.js';
+  import * as AlertDialog from '#lib/components/ui/alert-dialog/index.js';
   import { Badge, type BadgeVariant } from '#lib/components/ui/badge/index.js';
   import { Button } from '#lib/components/ui/button/index.js';
   import * as Card from '#lib/components/ui/card/index.js';
@@ -15,7 +16,7 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { formatDate, plural } from '#lib/fixtures/owner/format.js';
   import { messageOf } from '#lib/owner/errors.js';
-  import { checkBot, removeBot, requestBot, setBot } from '#lib/owner/owner.remote.js';
+  import { checkBot, leaveOtherServers, removeBot, requestBot, setBot } from '#lib/owner/owner.remote.js';
 
   /**
    * The agent's own Discord bot, which the relay posts as instead of a webhook once staff add it to the server. Four steps run
@@ -57,7 +58,8 @@
 
   let token = $state('');
   let error = $state<string>();
-  let busy = $state<'saving' | 'removing' | 'requesting'>();
+  let busy = $state<'saving' | 'removing' | 'requesting' | 'leaving'>();
+  let leaveOpen = $state(false);
   /** The checklists for the saved bot and for the token in the field, and the token whose check counts. */
   let saved = $state<BotCheck>();
   let pasted = $state<BotCheck>();
@@ -68,8 +70,8 @@
   const checkable = $derived(BotRequest.safeParse({ token: typed }).success);
   const shown = $derived(typed ? (checkable ? pasted : undefined) : bot?.status === 'saved' ? saved : undefined);
   const passes = (check: BotCheck | undefined) => check?.items.every((item) => item.ok) ?? false;
-  /** Save waits for the pasted token to pass, and Request for the saved bot to. */
-  const savable = $derived(checkable && passes(pasted));
+  /** Save waits for the pasted token to pass every item but Other servers, which Leave other servers fixes after; Request for the saved bot to pass. */
+  const savable = $derived(checkable && (pasted?.items.every((item) => item.ok || item.requirement === 'no_other_server') ?? false));
   const ready = $derived(!typed && passes(saved));
   /** The requirements show beside the field until the bot is requested, and again for any new token pasted. */
   const listed = $derived(!bot || bot.status === 'saved' || bot.status === 'paused' || typed !== '');
@@ -128,6 +130,20 @@
       toast.error(messageOf(failure));
       // It no longer passes: the checklist shows what changed.
       check();
+    }
+    busy = undefined;
+  }
+
+  async function leave() {
+    busy = 'leaving';
+    try {
+      saved = await leaveOtherServers(agentId);
+      leaveOpen = false;
+      // The fresh checklist, not the request finishing, says whether every other server is gone.
+      if (saved.items.find((item) => item.requirement === 'no_other_server')?.ok) toast.success('Left the other servers');
+      else toast.error('The bot is still in other servers. Leave them again.');
+    } catch (failure) {
+      toast.error(messageOf(failure));
     }
     busy = undefined;
   }
@@ -262,6 +278,15 @@
                         <ExternalLinkIcon aria-hidden="true" />
                       </Button>
                     {/if}
+                    {#if item.requirement === 'no_other_server'}
+                      {#if !typed && bot}
+                        <Button size="sm" variant="outline" class="mt-2" disabled={busy !== undefined} onclick={() => (leaveOpen = true)}>
+                          Leave other servers
+                        </Button>
+                      {:else if typed && shown?.items.every((i) => i === item || i.ok)}
+                        <p class="mt-1 text-xs text-muted-foreground">Save the token, then you can make the bot leave them.</p>
+                      {/if}
+                    {/if}
                   {/if}
                 </li>
               {/each}
@@ -287,4 +312,22 @@
       {/if}
     </Card.Footer>
   </form>
+
+  <AlertDialog.Root bind:open={leaveOpen}>
+    <AlertDialog.Content>
+      <AlertDialog.Header>
+        <AlertDialog.Title>Leave other servers?</AlertDialog.Title>
+        <AlertDialog.Description>
+          {bot?.username} leaves every server except Logitland. To add it back to one, someone there has to invite it again.
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel disabled={busy === 'leaving'}>Cancel</AlertDialog.Cancel>
+        <Button variant="destructive" disabled={busy === 'leaving'} onclick={leave}>
+          {#if busy === 'leaving'}<Spinner />{/if}
+          Leave servers
+        </Button>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 </Card.Root>
