@@ -77,7 +77,8 @@ function discordWithBot(h: Harness) {
       if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: !bot.private, bot_require_code_grant: bot.codeGrant });
       if (path === '/users/@me/guilds') {
         await bot.holdGuilds;
-        return Response.json(bot.guilds.map((id) => ({ id, name: 'a server' })));
+        // Discord lists 200 a page.
+        return Response.json(bot.guilds.slice(0, 200).map((id) => ({ id, name: 'a server' })));
       }
       const leaving = /^\/users\/@me\/guilds\/(\d+)$/.exec(path)?.[1];
       if (leaving && req.method === 'DELETE') {
@@ -1083,5 +1084,19 @@ describe('checking a bot before staff add it', () => {
       diff: JSON.stringify({ left: { from: 1, to: 0 } }),
     });
     expect((await json(await call('POST', '/request'))).bot.status).toBe('active');
+  });
+
+  it('leaves servers past the first page, and the fresh checklist costs no second check', async () => {
+    const { h, a, owner, bot } = await adopted();
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    bot.guilds.push(...Array.from({ length: 250 }, (_, i) => String(200000000000000000n + BigInt(i))));
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    // The save's own probe isn't an hourly check: use up all but one.
+    for (let i = 0; i < 29; i++) expect((await call('POST', '/check', {})).status).toBe(200);
+    const res = await call('POST', '/leave-servers');
+    expect(res.status).toBe(200);
+    expect(bot.guilds).toEqual([]);
+    expect((await json(res)).items.every((i: { ok: boolean }) => i.ok)).toBe(true);
   });
 });

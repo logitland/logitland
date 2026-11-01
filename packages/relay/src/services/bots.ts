@@ -359,9 +359,16 @@ const savedToken = (relay: Relay, bot: BotRow | null): Promise<string> => {
 export async function checkBot(relay: Relay, agentId: string, token?: string): Promise<BotCheck> {
   const checked = token ?? (await savedToken(relay, await getBot(relay, agentId)));
   await enforceChecks(relay, agentId);
-  const { items, bot } = await probe(relay, agentId, checked);
+  return checklist(relay, agentId, checked);
+}
+
+async function checklist(relay: Relay, agentId: string, token: string): Promise<BotCheck> {
+  const { items, bot } = await probe(relay, agentId, token);
   return { items, bot: bot && { application_id: bot.app.id, username: bot.user.username } };
 }
+
+/** Pages of up to 200 servers: leaving each page's others shows the next, so this many covers any bot. */
+const LEAVE_ROUNDS = 25;
 
 /**
  * Makes the saved bot leave every server except Logitland's (POST …/bot/leave-servers), so its no_other_server check passes
@@ -372,12 +379,15 @@ export async function leaveOtherServers(relay: Relay, agentId: string, actor: Pi
   await enforceChecks(relay, agentId);
   const rest = relay.discord.withToken(token);
   const guildId = relay.config.discord.guildId;
-  const guilds = await ask(() => rest.getCurrentUserGuilds());
   let left = 0;
-  for (const guild of guilds) {
-    if (guild.id === guildId) continue;
-    await ask(() => rest.leaveGuild(guild.id));
-    left++;
+  // Discord lists 200 servers a page, so the bot leaves a page's others and looks again until a page has none.
+  for (let round = 0; round < LEAVE_ROUNDS; round++) {
+    const others = (await ask(() => rest.getCurrentUserGuilds())).filter((g) => g.id !== guildId);
+    if (!others.length) break;
+    for (const guild of others) {
+      await ask(() => rest.leaveGuild(guild.id));
+      left++;
+    }
   }
   relay.log.info('bots.left_servers', { agent_id: agentId, left });
   await auditStmt(relay, {
@@ -387,7 +397,8 @@ export async function leaveOtherServers(relay: Relay, agentId: string, actor: Pi
     target_id: agentId,
     diff: { left: { from: left, to: 0 } },
   }).run();
-  return checkBot(relay, agentId);
+  // The hourly check this request counted covers the fresh checklist too.
+  return checklist(relay, agentId, token);
 }
 
 /**
