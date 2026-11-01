@@ -56,7 +56,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L13
   - label: projection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L243
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L252
   - label: schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L124
 ---

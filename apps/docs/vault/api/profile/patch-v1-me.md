@@ -49,9 +49,9 @@ operation:
       description: The avatar store or name moderator is unavailable.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L17
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L18
   - label: profile service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L271
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L280
   - label: avatar checks
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/avatars.ts#L34
   - label: input

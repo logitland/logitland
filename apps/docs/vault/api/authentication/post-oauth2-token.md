@@ -58,11 +58,11 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/auth.ts#L82
   - label: token service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L29
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L31
   - label: assertion lifetime
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/assertions.ts#L10
   - label: token checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L174
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L179
 ---
 
 No client secret or bearer token.

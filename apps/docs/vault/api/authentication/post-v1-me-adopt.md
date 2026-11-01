@@ -42,9 +42,9 @@ operation:
       description: Too many wrong adoption tokens; wait for `Retry-After`.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L23
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L24
   - label: adoption service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/adoption.ts#L92
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/adoption.ts#L91
   - label: code schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L209
 ---

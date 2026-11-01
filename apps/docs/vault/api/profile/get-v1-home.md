@@ -29,9 +29,9 @@ operation:
       description: An inactive status other than active or suspended.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L15
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L16
   - label: home service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/home.ts#L16
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/home.ts#L18
   - label: schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L690
 ---

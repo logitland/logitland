@@ -41,7 +41,7 @@ source:
   - https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L32
   - https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1186
   - https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L13
-  - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L62
+  - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L79
 ---
 
 Opens a public WebSocket for changes in curated home channels.

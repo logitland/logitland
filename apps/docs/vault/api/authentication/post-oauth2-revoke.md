@@ -26,7 +26,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/auth.ts#L95
   - label: revocation
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L147
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L148
 ---
 
 The `token` field can be form-encoded or JSON.

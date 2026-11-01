@@ -99,6 +99,44 @@ Revised 2026-10-25: adopted agents can post as their own Discord bots.)
 
 ## Current state
 
+Logan's production and staging portraits in `brand/logan/avatar-studio.blend` share the same pink accents, lighting, pose and framing. Only the CRT face changes: black on pink in production, pink on black in staging. Pink backlights sit against a subdued neutral server room. His head is matte plastic with subsurface edge glow, screen convex glossy CRT glass with a curved raster, and coat a weatherproof woven shell with ivory-beige teddy fleece inside the collar. Exports use 4096px masters with 2048, 1024, 512, 256 and 128px copies. His 17:6 banner is image-generated from the portrait reference, placing him above a pink-lit city of floating server islands.
+Saved frames are static pose presets; animation and GIF work wait for Mia's request.
+Logan's reusable mascot master lives in `brand/logan/logan.blend`: a rigged
+3D interpretation of the supplied pink-screen robot concept, with continuous deforming
+sleeves and trousers with full faceted volumes. Recessed pink emission spans the
+outer sleeves; the monitor's top-front and bottom-back chamfers have half-turn
+symmetry. The original SVG mark prints directly on the coat fabric. Magenta
+surface gradients, neon bloom, rear detailing, studio lighting, and neutral,
+waving and crossed-arms poses are included. The face uses 2D textures on the screen, passed through a CRT shader; the editable face source is `brand/logan/face/face.svg`.
+Every visible mascot detail must share the supporting surface, be extruded from
+it, or overlap it, except the deliberately floating head. Garment hems and openings belong to the cloth mesh; colour
+graphics belong in materials. Inspect attachment in side and bent views, and
+run `brand/logan/verify.py` against the saved master before delivering revisions.
+The rigged master imports the crystal-like `brand/logan/head-study.blend`, including its reduced depth and gradients.
+`brand/logan/jacket-study.blend` preserves the approved torso, collar, sleeves, cuffs and sleeve posing.
+Its construction is a windproof shell: the reference's broad center panel is a
+storm flap covering the zipper, with pocket facings and folded fabric edges.
+Sleeves share the torso mesh through real armholes. The collar has a low-poly,
+worn shape; back detail comes from the yoke, seam, contrasting panels and pleat.
+The coat is hollow, with open neck, hem and wrists and inward cloth thickness.
+Raised arms slide the sleeves up slightly and draw the coat body upward, spreading cloth tension through the shoulder and torso.
+`brand/logan/pants-study.blend` is one connected garment with continuous knees and recessed lower-leg lights.
+Shoes are separate. Both garment studies are integrated into the master and its poses;
+the arm rig and hands follow the jacket's inward sleeve fit.
+`brand/logan/hands-study.blend` supplies shared palms, articulated tapered digits and wrists fitted to the cuffs.
+`brand/logan/shoes-study.blend` supplies the rigged boots: integral instep
+straps, layered soles, transverse tread, open lined collars and recessed pink lights.
+The studies remain separate editable sources for the integrated assets.
+A skinned graphite torso, arms and legs support the hands and boots beneath
+the clothes. The head floats above the collar with no neck mesh. Continuous
+elbows have flexible joint loops, FK rotation and optional wrist IK/elbow poles.
+Flexible cuffs, ankle-following hems and live surface clearance
+reduce garment clipping; extreme or combined poses still require visual checks.
+Prefer close cloth contact over visible air gaps; slight hand/sleeve intersections are acceptable in the static avatar.
+The crossed preset preserves Mia's manual pose: right forearm below the left,
+right hand on the left bicep, left hand wrapping the right sleeve with curled
+fingertips. Wrist controls support pose-preserving FK/IK switching in the Logan sidebar.
+
 The docs at `/docs` are built with Svartz; dependencies are declared in `apps/docs/package.json`.
 Navigation leads from human and agent guides to Agent API, Agent MCP, and Admin API. Architecture groups private
 implementation contracts and fake Discord; maintainer operations and local development come last.
@@ -106,7 +144,7 @@ API and MCP renderers share one reference theme, with coloured method badges, sc
 Its sidebar has nested collapsible folders. Both themes inherit minimal, giving guides a right-hand ToC and every page
 previous/next navigation; API and MCP pages keep their examples column.
 WebSocket and browser/form endpoints use reference layouts with protocol-appropriate examples; layout loads remain guides.
-Marketing, dashboards, and docs share Funnel Sans, lime-and-ink tokens, colour preferences, and Markdown controls.
+Marketing, dashboards, and docs share Funnel Sans, design tokens, colour preferences, and Markdown controls.
 Every docs page is indexed in `/llms.txt` and available as Markdown. The docs integration is merged into `main`.
 
 `main` has the relay rebuilt on the map's decisions (`packages/relay`, `apps/backend`): auth.md signup and two-way

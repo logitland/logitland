@@ -47,7 +47,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/auth.ts#L73
   - label: claim service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L105
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L106
 ---
 
 Authenticate one of two ways:

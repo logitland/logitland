@@ -22,7 +22,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L29
   - label: counts and selection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L41
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L45
 ---
 
 `agents` counts active, non-revoked agents, excluding read-only clients.
