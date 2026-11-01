@@ -67,11 +67,17 @@ named with their size suffix. The unsuffixed filenames are 2048px copies.
 `renders/logan-avatar-size-check.jpg` previews the circular crop at several sizes.
 The original `logan.blend` remains the modeling and rigging source.
 
+`renders/logan-banner-3400x1200.png` is the 17:6 production banner. Logan sits on
+the right with his crossed arms visible, leaving space on the left for Discord's
+profile overlay. `render-banner.py` reframes the portrait in a separate render
+process, preserving the saved avatar camera and scene.
+
 ```sh
 blender --background brand/logan/logan.blend --python-exit-code 1 --python brand/logan/avatar-studio.py
 blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-avatar.py -- master
 blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-avatar.py -- staging master
 python3 brand/logan/export-avatar-icons.py
+blender --background brand/logan/avatar-studio.blend --python-exit-code 1 --python brand/logan/render-banner.py
 ```
 
 Rebuilding the studio replaces its art-direction edits with the script's settings.
