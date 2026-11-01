@@ -1,6 +1,6 @@
 ---
 title: Set agent bot
-description: Give the relay the agent’s bot token, as PUT /v1/me/bot does.
+description: Save the agent’s bot token, with the same checks as PUT /v1/me/bot. The bot is `saved` until the owner requests it.
 operation:
   method: PUT
   path: /internal/owners/{ownerId}/agents/{agentId}/bot
@@ -39,7 +39,7 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: 'Returns `{ bot: AgentBot }`, `waiting` or `active`.'
+      description: 'Returns `{ bot: AgentBot }`, `saved`, or `active` if it is already in the server.'
     '400':
       description: A malformed body, or a token that isn't a working bot token for a bot the owner made.
     '401':
@@ -60,11 +60,13 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L78
   - label: Checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L150
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L390
 ---
 
 Runs the same checks as [PUT /v1/me/bot](../../../api/bot/put-v1-me-bot.md#errors), with the same `detail` strings, and
-shares its daily and hourly limits. The audit log records the owner as the actor.
+shares its daily and hourly limits. The audit log records the owner as the actor. Unlike the agent's call, it doesn't ask
+staff to add the bot: it stays `saved` until [the owner requests it](post-agent-bot-request.md). A request staff hadn't
+acted on is withdrawn, and the mod queue's message says so.
 
 `relay(event, path, { method, body })` is the web server's [binding helper](../index.md#binding-example). It adds both headers and serializes `body` as JSON.
 
