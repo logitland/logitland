@@ -213,16 +213,34 @@ export async function deleteBotPost(relay: Relay, row: MessageRow & { discord_me
   }
 }
 
-/** Discord's answers about a token, worded for whoever gave it. */
-async function ask<T>(call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (err) {
-    if (err instanceof RateLimitedError) throw rateLimited('Discord is rate limiting your bot. Try again shortly.', err.retryAfterSeconds);
-    if (err instanceof DiscordError && err.status === 401)
-      throw invalid('Discord didn’t accept that token. Copy your bot’s token again from the Developer Portal (your application, Bot, Reset Token).');
-    if (err instanceof DiscordError) throw unavailable('Discord refused to tell the relay about your bot. Try again in a minute.', 60);
-    throw unavailable('Discord couldn’t be reached to check your bot. Try again in a minute.', 60);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Discord's answers about a token, worded for whoever gave it. A rate limit of a few seconds is waited out, then tried again. */
+async function ask<T>(relay: Relay, call: () => Promise<T>): Promise<T> {
+  for (let retries = 0; ; retries++) {
+    try {
+      return await call();
+    } catch (err) {
+      if (err instanceof RateLimitedError) {
+        if (err.retryAfterSeconds <= 5 && retries < 2) {
+          await sleep(Math.ceil(err.retryAfterSeconds * 1000) + 50);
+          continue;
+        }
+        relay.log.warn('bots.discord_rate_limited', {
+          retry_after: err.retryAfterSeconds,
+          scope: err.rateLimit.scope,
+          bucket: err.rateLimit.bucket,
+          global: err.rateLimit.global,
+          cloudflare: err.cloudflare,
+        });
+        const n = Math.max(1, Math.ceil(err.retryAfterSeconds));
+        throw rateLimited(`Discord is rate limiting your bot. Try again in ${n} second${n === 1 ? '' : 's'}.`, n);
+      }
+      if (err instanceof DiscordError && err.status === 401)
+        throw invalid('Discord didn’t accept that token. Copy your bot’s token again from the Developer Portal (your application, Bot, Reset Token).');
+      if (err instanceof DiscordError) throw unavailable('Discord refused to tell the relay about your bot. Try again in a minute.', 60);
+      throw unavailable('Discord couldn’t be reached to check your bot. Try again in a minute.', 60);
+    }
   }
 }
 
@@ -288,7 +306,7 @@ async function probe(relay: Relay, agentId: string, token: string): Promise<Prob
   const rest = relay.discord.withToken(token);
   let user: DiscordUser;
   try {
-    user = await ask(() => rest.getCurrentUser());
+    user = await ask(relay, () => rest.getCurrentUser());
   } catch (err) {
     // ask words a token Discord refused as invalid.
     if (err instanceof RelayError && err.status === 400) return probed({ bot_token: err }, 'bot_token');
@@ -296,7 +314,7 @@ async function probe(relay: Relay, agentId: string, token: string): Promise<Prob
   }
   if (!user.bot)
     return probed({ bot_token: invalid('That isn’t a bot’s token. Copy the token from your application’s Bot page in the Developer Portal.') }, 'bot_token');
-  const app: CurrentApplication = await ask(() => rest.getCurrentApplication());
+  const app: CurrentApplication = await ask(relay, () => rest.getCurrentApplication());
   if (app.id === relay.config.discord.applicationId)
     return probed({ this_agent: invalid('That is the relay’s own bot. Give the token of a bot you made for your agent.') }, 'this_agent');
   const taken = await relay.db.prepare('SELECT 1 AS hit FROM agent_bots WHERE bot_user_id = ? AND agent_id != ?').bind(user.id, agentId).first();
@@ -316,7 +334,7 @@ async function probe(relay: Relay, agentId: string, token: string): Promise<Prob
       'invalid_request',
       'Staff can’t add a bot that requires the code grant. Turn off Requires OAuth2 Code Grant on its Bot page in the Developer Portal, then try again.',
     );
-  const guilds: PartialGuild[] = await ask(() => rest.getCurrentUserGuilds());
+  const guilds: PartialGuild[] = await ask(relay, () => rest.getCurrentUserGuilds());
   const others = guilds.filter((g) => g.id !== guildId).length;
   if (others)
     failures.no_other_server = new RelayError(
@@ -328,7 +346,7 @@ async function probe(relay: Relay, agentId: string, token: string): Promise<Prob
   // every check, save and request would otherwise open a session, and two inside Discord's session-start window fail falsely.
   const connected = await relay.db.prepare('SELECT 1 AS hit FROM bot_connections WHERE bot_user_id = ?').bind(user.id).first();
   if (!connected) {
-    const { url } = await ask(() => rest.getGatewayBot());
+    const { url } = await ask(relay, () => rest.getGatewayBot());
     try {
       await identifyOnce(open, url, token);
       await relay.db
@@ -386,13 +404,13 @@ export async function leaveOtherServers(relay: Relay, agentId: string, actor: Pi
   let complete = false;
   // Discord lists 200 servers a page, so the bot leaves a page's others and looks again until a page has none.
   for (let round = 0; round < LEAVE_ROUNDS; round++) {
-    const others = (await ask(() => rest.getCurrentUserGuilds())).filter((g) => g.id !== guildId);
+    const others = (await ask(relay, () => rest.getCurrentUserGuilds())).filter((g) => g.id !== guildId);
     if (!others.length) {
       complete = true;
       break;
     }
     for (const guild of others) {
-      await ask(() => rest.leaveGuild(guild.id));
+      await ask(relay, () => rest.leaveGuild(guild.id));
       left++;
     }
   }

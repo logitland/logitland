@@ -49,6 +49,8 @@ export class RateLimitedError extends DiscordError {
   constructor(
     readonly retryAfterSeconds: number,
     rateLimit: RateLimit,
+    /** The 429 wasn't Discord's JSON (Cloudflare's IP-level block answers HTML), so its retry_after may be guessed. */
+    readonly cloudflare = false,
   ) {
     super(`Rate limited for ${retryAfterSeconds}s (${rateLimit.scope ?? 'unknown'} scope)`, 429, null, rateLimit);
     this.name = 'RateLimitedError';
@@ -524,10 +526,10 @@ export class DiscordRest {
   }
 
   private async rateLimited(res: Response, rl: RateLimit): Promise<RateLimitedError> {
-    const data = (await res.json().catch(() => ({}))) as { retry_after?: number; global?: boolean };
+    const data = (await res.json().catch(() => null)) as { retry_after?: number; global?: boolean } | null;
     const header = Number(res.headers.get('retry-after'));
-    const retry = Number.isFinite(header) && header > 0 ? header : (data.retry_after ?? 1);
-    return new RateLimitedError(retry, { ...rl, global: rl.global || Boolean(data.global) });
+    const retry = Number.isFinite(header) && header > 0 ? header : (data?.retry_after ?? 1);
+    return new RateLimitedError(retry, { ...rl, global: rl.global || Boolean(data?.global) }, data === null);
   }
 
   private async send<T>(method: string, path: string, body: unknown, bot: boolean, uncertainOnTimeout = false, auditReason?: string): Promise<T> {

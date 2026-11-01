@@ -43,6 +43,8 @@ function discordWithBot(h: Harness) {
     holdGateway: 0,
     /** A promise the answer about the bot's servers waits for, so a test can hold a check across an owner's save. */
     holdGuilds: undefined as Promise<void> | undefined,
+    /** Leave-guild calls answer 429 with this many retry-after seconds, one per call, before they work. */
+    leaveRateLimits: [] as number[],
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
     beforeAnswer: undefined as ((m: { id: string; content: string }) => Promise<unknown>) | undefined,
     /** The relay's application emoji: every standing emoji, as after setup. */
@@ -82,6 +84,12 @@ function discordWithBot(h: Harness) {
       }
       const leaving = /^\/users\/@me\/guilds\/(\d+)$/.exec(path)?.[1];
       if (leaving && req.method === 'DELETE') {
+        const retry = bot.leaveRateLimits.shift();
+        if (retry !== undefined)
+          return Response.json(
+            { message: 'You are being rate limited.', retry_after: retry },
+            { status: 429, headers: { 'retry-after': String(retry), 'x-ratelimit-scope': 'user' } },
+          );
         bot.guilds = bot.guilds.filter((g) => g !== leaving);
         return new Response(null, { status: 204 });
       }
@@ -1109,5 +1117,33 @@ describe('checking a bot before staff add it', () => {
     const { items } = await json(await call('POST', '/leave-servers'));
     expect(bot.guilds).toHaveLength(1);
     expect(items.find((i: { requirement: string }) => i.requirement === 'no_other_server').ok).toBe(false);
+  });
+
+  it('waits out a short rate limit while the saved bot leaves other servers', async () => {
+    const { h, a, owner, bot } = await adopted();
+    bot.guilds.push(OTHER_SERVER);
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    expect((await json(await call('PUT', '', { token: BOT_TOKEN }))).bot.status).toBe('saved');
+
+    bot.leaveRateLimits.push(0.1);
+    const left = await json(await call('POST', '/leave-servers'));
+    expect(bot.guilds).toEqual([]);
+    expect(left.items.map((i: { ok: boolean }) => i.ok)).toEqual([true, true, true, true, true, true]);
+  });
+
+  it('says how long to wait when Discord rate limits the leave for longer', async () => {
+    const { h, a, owner, bot } = await adopted();
+    bot.guilds.push(OTHER_SERVER);
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    expect((await json(await call('PUT', '', { token: BOT_TOKEN }))).bot.status).toBe('saved');
+
+    bot.leaveRateLimits.push(30);
+    const res = await call('POST', '/leave-servers');
+    expect(res.status).toBe(429);
+    expect((await json(res)).detail).toContain('30 seconds');
+    expect(bot.guilds).toEqual([OTHER_SERVER]);
+    expect(h.log.lines.some((l) => l.event === 'bots.discord_rate_limited' && l.fields.retry_after === 30)).toBe(true);
   });
 });
