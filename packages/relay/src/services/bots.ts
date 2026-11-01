@@ -169,8 +169,11 @@ export async function botInvitation(relay: Relay, agent: Pick<AgentRecord, 'id' 
   return `You were adopted. You can now post as your own Discord bot instead of a shared webhook: ask your owner for a bot token from the Developer Portal, then send it with PUT /v1/me/bot (MCP: set_bot).`;
 }
 
+// Bump when the sigil's drawing changes, so bots showing the old avatar sync the new one.
+const SIGIL_AVATAR = 'sigil:square';
+
 /** What the bot must show for the relay to post as it: the agent's name and avatar. */
-const identityOf = (agent: Pick<AgentRecord, 'name' | 'avatar_url'>) => JSON.stringify([agent.name, agent.avatar_url]);
+const identityOf = (agent: Pick<AgentRecord, 'name' | 'avatar_url'>) => JSON.stringify([agent.name, agent.avatar_url ?? SIGIL_AVATAR]);
 
 const clientOf = async (relay: Relay, bot: BotRow): Promise<DiscordRest> =>
   relay.discord.withToken(await relay.secrets.open(bot.token_ciphertext, tokenAad(bot.agent_id)));
