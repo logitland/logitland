@@ -1,0 +1,31 @@
+"""Rasterize editable SVG layers and their diffusion maps; needs ImageMagick/Pillow.
+
+Run with system Python after editing face.svg. The face material keeps the
+brightest of the black-backed layers, so overlaps stay one solid colour and eye
+motion stays separate from the fixed artwork.
+"""
+from copy import deepcopy
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import xml.etree.ElementTree as ET
+from PIL import Image, ImageFilter
+
+directory = Path(__file__).resolve().parent
+source = ET.parse(directory/'face.svg').getroot()
+magick = shutil.which('magick') or '/opt/homebrew/bin/magick'
+ET.register_namespace('', 'http://www.w3.org/2000/svg')
+for name in ('static', 'eye-L', 'eye-R'):
+    layer = deepcopy(source)
+    for child in list(layer):
+        if child.get('id') not in (None, 'background', name):
+            layer.remove(child)
+    with tempfile.NamedTemporaryFile(suffix='.svg') as temporary:
+        ET.ElementTree(layer).write(temporary.name, encoding='unicode')
+        subprocess.run([magick, '-background', 'black', temporary.name,
+                        '-alpha', 'off', str(directory/f'{name}.png')], check=True)
+    # Optical diffusion sits beneath the sharp glass reflection. Separate eye
+    # maps use the same UV transforms as their artwork, so the glow also blinks.
+    image = Image.open(directory/f'{name}.png').convert('RGB')
+    image.filter(ImageFilter.GaussianBlur(28)).save(directory/f'{name}-diffusion.png')

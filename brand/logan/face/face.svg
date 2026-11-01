@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1804" height="1128" viewBox="0 0 1804 1128">
+  <title>Logan — 2D face layers</title>
+  <!-- Each eye is cubic Laguz: the arm is the left-facing brow.
+       Both eyes share a baseline; the pupils glance right. -->
+  <rect id="background" width="1804" height="1128" fill="black"/>
+  <!-- A tapered, asymmetric crescent: a quiet left corner and a lifted right tip.
+       Filled outline keeps the smirk clean at avatar sizes. -->
+  <g id="static">
+    <path d="M 735 817 C 842 842 1016 811 1112 746
+             C 1097 813 1008 867 908 878
+             C 832 884 769 857 735 817 Z" fill="#ff55dd"/>
+  </g>
+  <!-- The rig's blinks squash each eye toward the centre of its pupil rect. -->
+  <!-- Enlarged eyes: every horizontal edge is on the 72-row CRT raster.
+       Row pitch is 1128/72 = 15 2/3 SVG pixels. The rect is the pupil. -->
+  <g id="eye-R" fill="#ff55dd">
+    <path d="M 164 313.333333 H 648 V 705 H 296 V 407.333333 H 164 Z"/>
+    <rect x="434" y="438.666667" width="165" height="156.666666" fill="black"/>
+  </g>
+  <g id="eye-L" fill="#ff55dd">
+    <path d="M 1124 313.333333 H 1608 V 705 H 1256 V 407.333333 H 1124 Z"/>
+    <rect x="1394" y="438.666667" width="165" height="156.666666" fill="black"/>
+  </g>
+</svg>
