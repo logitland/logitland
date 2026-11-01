@@ -88,5 +88,6 @@ if rig.get('logan_pose_controls'):
             bone.keyframe_insert('location', frame=FRAME)
             bone.keyframe_insert('rotation_euler', frame=FRAME)
     controls['hold_keys'](rig)
-bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)
+if __name__ == '__main__':
+    bpy.ops.wm.save_as_mainfile(filepath=bpy.data.filepath, compress=True)
 print('Keyed CROSSED ARMS at frame', FRAME)

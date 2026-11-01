@@ -997,7 +997,7 @@ readme=bpy.data.texts.get('START HERE · Logan') or bpy.data.texts.new('START HE
 readme.clear()
 readme.write('''LOGAN — master character
 
-Frame 1: neutral. Frame 40: hello. Timeline markers name both poses.
+Frame 1: neutral. Frame 40: hello. Frame 80: crossed arms. Timeline markers name each pose.
 Select LOGAN · Pose me, enter Pose Mode, rotate the named bones.
 Enable viewport Overlays to see bones; Alt-R clears a selected bone rotation.
 Root moves the whole character; torso/head/limbs and every finger are articulated.
@@ -1021,6 +1021,7 @@ runpy.run_path(str(ASSET_DIR/'fit-jacket-motion.py'))
 runpy.run_path(str(ASSET_DIR/'fit-clearance.py'))
 runpy.run_path(str(ASSET_DIR/'style-face.py'))
 runpy.run_path(str(ASSET_DIR/'setup-pose-controls.py'))
+runpy.run_path(str(ASSET_DIR/'pose-crossed-arms.py'))
 bpy.ops.wm.save_as_mainfile(filepath=str(ASSET_DIR/'logan.blend'),compress=True)
 result={'blend':str(ASSET_DIR/'logan.blend'),'objects':len(scene.objects),'bones':len(arm_data.bones)}
 print(result)
