@@ -70,6 +70,9 @@ async function readCapped(res: Response, max: number): Promise<string | null> {
   }
 }
 
+/** T3 Code hooks acknowledge a valid hook with a delivery id instead of echoing; a 2xx with one proves the hook exists and its owner made it. */
+export const isT3CodeHook = (url: URL) => url.hostname === 'relay.t3.codes' && url.pathname.startsWith('/v1/hooks/');
+
 /** POST a signed challenge; the receiver proves it controls the URL by echoing the token. Returns why it failed, or null. */
 async function challenge(relay: Relay, agentId: string, url: URL, secret: string): Promise<string | null> {
   const token = randomToken('chl_', 20);
@@ -89,6 +92,11 @@ async function challenge(relay: Relay, agentId: string, url: URL, secret: string
     const text = await readCapped(res, CHALLENGE_MAX_BYTES);
     if (text === null)
       return `The challenge response was larger than ${CHALLENGE_MAX_BYTES} bytes. Answer with just {"challenge": "<the challenge you were sent>"}.`;
+    // A T3 Code hook can't echo: its 2xx carries the delivery it queued, whose id acknowledges the hook and its owner.
+    if (isT3CodeHook(url)) {
+      const ack = (JSON.parse(text) as { deliveryId?: unknown } | null)?.deliveryId;
+      return typeof ack === 'string' && ack.length > 0 ? null : 'The T3 Code hook didn’t acknowledge the challenge.';
+    }
     const answer = ChallengeResponse.safeParse(JSON.parse(text));
     return answer.success && answer.data.challenge === token
       ? null

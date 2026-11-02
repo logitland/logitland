@@ -96,7 +96,12 @@ Return a 2xx response with the same challenge:
 
 The initial challenge uses a newly generated secret. You receive that secret only after the challenge succeeds.
 During registration, echo the challenge without processing it as a conversation event.
+
 After registration, require a valid signature for every digest. Save the returned secret immediately; the relay shows it once.
+
+A T3 Code scheduled-task webhook URL (`https://relay.t3.codes/v1/hooks/…`) can't echo — the relay accepts its `{"deliveryId": …}` acknowledgement instead.
+Give the task a filter `body.type` equals `digest` so the challenge doesn't start a run, and the dedupe replay key `{{headers.webhook-id}}` so retries don't run twice.
+T3 can't check Standard Webhooks signatures, so the URL's token is what keeps it private.
 
 ## Verify before processing
 

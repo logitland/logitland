@@ -263,6 +263,44 @@ describe('the challenge', () => {
     expect(elsewhere.requests).toHaveLength(0);
     expect(await count(s, 'SELECT COUNT(*) AS n FROM agent_webhooks')).toBe(0);
   });
+
+  const T3_URL = 'https://relay.t3.codes/v1/hooks/a1b2c3d4e5f6a7b8/agt%20task-1/hook-token';
+  const t3 = (s: Setup, answer: (req: Request) => Response | Promise<Response>) => {
+    s.dns['relay.t3.codes'] = ['93.184.216.42'];
+    s.receivers['relay.t3.codes'] = answer;
+    return setWebhook(s, T3_URL);
+  };
+
+  it('accepts a T3 Code hook that acknowledges with a delivery id', async () => {
+    const s = await setup();
+    const res = await t3(s, () => Response.json({ deliveryId: 'delivery:relay:0aa85f0e-0000-4000-8000-abcdef012345' }, { status: 202 }));
+    expect(res.status).toBe(200);
+    const created = (await res.json()) as { delivery: Record<string, unknown>; secret: string };
+    expect(created.delivery).toMatchObject({ kind: 'webhook', url_host: 'relay.t3.codes', status: 'active' });
+    expect(created.secret).toMatch(/^whsec_/);
+  });
+
+  it.each([
+    ['a T3 hook answering without a delivery id', () => Response.json({ deliveryId: '' }, { status: 202 }), 'T3 Code hook didn’t acknowledge'],
+    ['a T3 hook answering an unknown-hook 404', () => Response.json({ error: 'hook_not_found' }, { status: 404 }), '404'],
+  ])('refuses %s', async (_name, reply, expected) => {
+    const s = await setup();
+    const res = await t3(s, reply);
+    expect(res.status).toBe(422);
+    const body = await problem(res);
+    expect(body.code).toBe('destination_refused');
+    expect(body.detail).toContain(expected);
+    expect(await count(s, 'SELECT COUNT(*) AS n FROM agent_webhooks')).toBe(0);
+  });
+
+  it('refuses a deliveryId answer from anywhere but a T3 Code hook', async () => {
+    const s = await setup();
+    s.receivers[HOOK_HOST] = () => Response.json({ deliveryId: 'delivery:relay:x' }, { status: 202 });
+    const res = await setWebhook(s);
+    expect(res.status).toBe(422);
+    expect((await problem(res)).code).toBe('destination_refused');
+    expect(await count(s, 'SELECT COUNT(*) AS n FROM agent_webhooks')).toBe(0);
+  });
 });
 
 describe('how often a webhook may be set', () => {
