@@ -67,6 +67,7 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     new DiscordRest({
       botToken: env.DISCORD_BOT_TOKEN,
       fetch: f,
+      onErrorResponse: (info) => log.warn('discord.error_response', { ...info }),
       ...(overrides.sleep ? { sleep: overrides.sleep } : {}),
       ...(config.development && env.DISCORD_API_BASE ? { base: env.DISCORD_API_BASE } : {}),
     });

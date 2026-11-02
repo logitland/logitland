@@ -243,12 +243,24 @@ export interface CreateMessageBody {
   flags?: number;
 }
 
+/** A response Discord refused, with its request's retry count: every header and the whole body, tokens redacted. */
+export interface DiscordErrorResponse {
+  method: string;
+  route: string;
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  retry: number;
+}
+
 export interface RestOptions {
   botToken?: string;
   fetch?: typeof fetch;
   base?: string;
   timeoutMs?: number;
   userAgent?: string;
+  /** Called for every non-2xx response, retried 429s included, before it is thrown or waited out. */
+  onErrorResponse?: (info: DiscordErrorResponse) => void;
   /** How pacing and 429 retries wait; real time by default. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -278,6 +290,11 @@ function routeKey(method: string, path: string): string {
   if (major.startsWith('/webhooks/')) rest = rest.replace(/^\/[\w.-]+/, '/:token');
   else rest = rest.replace(/^\/interactions\/:id\/[\w.-]+/, '/interactions/:id/:token');
   return `${method} ${major}${rest}`;
+}
+
+/** The route for logs: snowflakes kept, webhook and interaction tokens redacted. */
+function safeRoute(path: string): string {
+  return path.split('?')[0]!.replace(/(\/(?:webhooks|interactions)\/\d{15,25})\/[\w.-]+/, '$1/:token');
 }
 
 /** A response's JSON, or null when it isn't (Cloudflare's 429 page, a bare 204). */
@@ -556,6 +573,7 @@ export class DiscordRest {
     }
     const rateLimit = readRateLimit(res.headers);
     const text = await res.text().catch(() => '');
+    if (!res.ok) this.opts.onErrorResponse?.({ method: 'POST', route: safeRoute(path), status: res.status, headers: Object.fromEntries(res.headers), body: text, retry: 0 });
     if (res.status === 429) throw this.rateLimited(res, rateLimit, text);
     if (res.status >= 500 || res.status === 408) {
       throw new UncertainSendError(new DiscordError(`Discord returned ${res.status}`, res.status, null, rateLimit));
@@ -630,6 +648,8 @@ export class DiscordRest {
       const rl = readRateLimit(res.headers);
       this.readBucket(key, major, rl);
       const text = await res.text().catch(() => '');
+      if (!res.ok)
+        this.opts.onErrorResponse?.({ method, route: safeRoute(path), status: res.status, headers: Object.fromEntries(res.headers), body: text, retry });
       // A 429 did nothing on Discord's side, so even a POST is safe to send again.
       if (res.status === 429) {
         const err = this.rateLimited(res, rl, text);
