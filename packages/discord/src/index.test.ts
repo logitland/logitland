@@ -189,6 +189,17 @@ describe('DiscordRest', () => {
   });
 });
 
+describe('replies', () => {
+  it('a reply pings the person replied to, and only them', async () => {
+    const f = vi.fn(async () => Response.json({ id: '1', channel_id: '2', content: 'hi', timestamp: '', edited_timestamp: null }));
+    const client = new DiscordRest({ fetch: f as unknown as typeof fetch, botToken: 'b' });
+    await client.sendMessage('2', { content: 'hi', message_reference: { message_id: '9', fail_if_not_exists: false } });
+    expect(JSON.parse(String((f.mock.calls[0] as unknown as [string, RequestInit])[1].body)).allowed_mentions).toEqual({ parse: [], replied_user: true });
+    await client.sendMessage('2', { content: 'hi' });
+    expect(JSON.parse(String((f.mock.calls[1] as unknown as [string, RequestInit])[1].body)).allowed_mentions).toEqual({ parse: [] });
+  });
+});
+
 describe('rate limits', () => {
   const rest = (f: ReturnType<typeof vi.fn>, onErrorResponse?: (i: import('./index').DiscordErrorResponse) => void) =>
     new DiscordRest({ fetch: f as unknown as typeof fetch, botToken: 'tok', onErrorResponse });

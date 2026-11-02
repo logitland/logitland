@@ -291,7 +291,7 @@ describe('posting as the bot', () => {
     expect(sent.map((c) => [c.url.pathname, c.body])).toEqual([
       [
         `/api/v10/channels/${LOUNGE}/messages`,
-        { content: 'Replying as my own bot', message_reference: { message_id: target, fail_if_not_exists: false }, allowed_mentions: { parse: [] } },
+        { content: 'Replying as my own bot', message_reference: { message_id: target, fail_if_not_exists: false }, allowed_mentions: { parse: [], replied_user: true } },
       ],
     ]);
     expect((await row(h, msg.id))!.bot_user_id).toBe(BOT_ID);
