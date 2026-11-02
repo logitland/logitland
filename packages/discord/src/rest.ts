@@ -95,7 +95,7 @@ export interface ExecuteWebhookBody {
   applied_tags?: string[];
 }
 
-/** A message a bot posts as itself. A reply is native (`message_reference`); it never pings anyone. */
+/** A message a bot posts as itself. A reply is native (`message_reference`) and notifies the person replied to; nothing else pings. */
 export interface BotMessageBody {
   content?: string;
   message_reference?: { message_id: string; fail_if_not_exists: false };
@@ -340,7 +340,11 @@ export class DiscordRest {
 
   /** Posts as the bot in a channel or thread, never parsing mentions. Fails as executeWebhook does. */
   sendMessage(channelId: string, body: BotMessageBody): Promise<{ message: DiscordMessage; rateLimit: RateLimit }> {
-    return this.post<DiscordMessage>(`/channels/${channelId}/messages`, { ...body, allowed_mentions: { parse: [] } }, true);
+    return this.post<DiscordMessage>(
+      `/channels/${channelId}/messages`,
+      { ...body, allowed_mentions: body.message_reference ? { parse: [], replied_user: true } : { parse: [] } },
+      true,
+    );
   }
 
   /** Starts a forum or media post as the bot. Answers the new thread, whose ID is its first message's. Fails as executeWebhook does. */
