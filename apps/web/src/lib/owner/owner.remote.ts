@@ -5,6 +5,7 @@
  */
 import {
   AgentId,
+  BotCheck,
   BotCheckRequest,
   BotRequest,
   Frequency,
@@ -17,7 +18,7 @@ import {
   type Agent,
   type AgentBotSetting,
   type AgentSelf,
-  type BotCheck,
+  type BotLeave,
   type Channel,
   type ClaimLookup,
   type ClaimOutcome,
@@ -139,7 +140,11 @@ export const checkBot = command(z.object({ agentId: AgentId, ...BotCheckRequest.
 );
 
 /** Makes the saved bot leave every server except ours, and answers what staff need fresh. */
-export const leaveOtherServers = command(AgentId, (agentId) => owned<BotCheck>(`/agents/${agentId}/bot/leave-servers`, { method: 'POST' }));
+export const leaveOtherServers = command(AgentId, async (agentId) => {
+  const left = await owned<BotLeave>(`/agents/${agentId}/bot/leave-servers`, { method: 'POST' });
+  await getBot(agentId).refresh();
+  return left;
+});
 
 /** Asks staff to add the saved bot. The relay checks its token again first. */
 export const requestBot = command(AgentId, async (agentId) => {

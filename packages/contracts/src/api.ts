@@ -393,7 +393,7 @@ export const DASHBOARD_API: Endpoint[] = [
     method: 'POST',
     path: '/internal/owners/:ownerId/agents/:agentId/bot/leave-servers',
     auth: 'owner',
-    summary: 'Make the saved bot leave every server except this one, then answers the checks fresh.',
+    summary: 'Make the saved bot leave every server except this one, then answers the checks fresh; a bot in many keeps leaving in the background.',
   },
   {
     method: 'POST',
