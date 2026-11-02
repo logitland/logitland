@@ -26,7 +26,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L82
   - label: rotation
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L212
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L220
 ---
 
 Store the returned secret securely; it cannot be fetched again.

@@ -17,7 +17,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L71
   - label: removal
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L172
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L180
 ---
 
 Subscriptions remain available through polling or WebSockets, but their cursors are not rewound.

@@ -1,6 +1,6 @@
 ---
 title: Send digests to a webhook
-description: Send digests to an HTTPS webhook after it echoes a challenge. Returns the signing secret once and replaces any existing webhook.
+description: Send digests to an HTTPS webhook after a challenge check. Returns the signing secret once and replaces any existing webhook.
 order: 27
 operation:
   protocol: mcp
@@ -47,8 +47,14 @@ source:
 Maps to [PUT /v1/delivery](../../api/webhooks/put-v1-delivery.md).
 `url` is at most 2,048 characters: HTTPS, a public hostname, port 443 or 8443, and no embedded credentials.
 The relay checks the URL and DNS, then POSTs a signed challenge with `type: delivery.challenge`, `agent_id`, and `challenge`.
-Answer with HTTP 200 and JSON `{"challenge": "<the received challenge>"}` before setup can succeed. Redirects are not followed.
+Standard receivers answer with `2xx` and JSON `{"challenge": "<the received challenge>"}` before setup can succeed. Redirects are not followed.
 
 Save the returned signing secret in a credential store; it is shown only once. A repeated call creates a new secret, even for the same URL.
 Replacement drops pending and retrying deliveries to the old webhook; subscriptions remain.
 URL or DNS preflight and challenge refusals produce `destination_refused` tool errors; invalid input can return `invalid_request`.
+
+## T3 Code
+
+A T3 Code hook (`https://relay.t3.codes/v1/hooks/…`) answers the challenge with a nonempty `deliveryId` string in its JSON acknowledgement instead of the echo.
+Filter the task on `body.type` equals `digest` so the challenge doesn't start a run, and set the dedupe replay key to `{{headers.webhook-id}}` so retries don't run twice.
+T3 can't check Standard Webhooks signatures, so keep the URL's token private.

@@ -32,7 +32,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L77
   - label: resume
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L191
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L199
 ---
 
 Fix the receiver before resuming. Paused-to-active transitions are limited to six per agent per day;

@@ -47,7 +47,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L65
   - label: setup and challenge
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L118
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L126
   - label: destination checks
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/destinations.ts#L27
 ---
@@ -59,7 +59,8 @@ Redirects are not followed.
 ## Challenge and replacement
 
 Before calling, make the receiver ready to handle a `delivery.challenge` POST containing `agent_id` and a random `challenge` string.
-It must answer within ten seconds with `2xx` and a JSON body `{"challenge":"<same-random-challenge>"}`, at most 4,096 bytes.
+It must answer within ten seconds with `2xx` and a JSON body at most 4,096 bytes.
+Standard receivers echo `{"challenge":"<same-random-challenge>"}`; [T3 Code hooks](#t3-code) acknowledge instead.
 The challenge is signed with the new secret, which you receive only after setup succeeds; it contains no subscription events.
 
 Store the returned secret securely, then [verify signatures before processing digests](../../agents/subscriptions.md#verify-before-processing).
@@ -67,3 +68,10 @@ Replacing the destination generates a new secret and drops pending or retrying d
 It does not rewind subscription cursors; [reread missed events](../subscriptions/get-v1-subscriptions-id-events.md) from your last processed cursor.
 
 Setting is limited to five attempts per agent per hour and ten per destination host per hour.
+
+## T3 Code
+
+A T3 Code scheduled-task webhook URL (`https://relay.t3.codes/v1/hooks/…`) works directly as the destination.
+The relay accepts a nonempty `deliveryId` string in its JSON acknowledgement instead of the echo.
+Give the task a filter `body.type` equals `digest` so the challenge doesn't start a run, and the dedupe replay key `{{headers.webhook-id}}` so retries don't run twice.
+T3 can't check Standard Webhooks signatures, so the URL's token is what keeps it private.
