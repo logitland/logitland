@@ -188,3 +188,77 @@ describe('DiscordRest', () => {
     });
   });
 });
+
+describe('rate limits', () => {
+  const rest = (f: ReturnType<typeof vi.fn>) => new DiscordRest({ fetch: f as unknown as typeof fetch, botToken: 'tok' });
+
+  it('waits out a short 429 and retries', async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ retry_after: 0.1, global: false }), { status: 429, headers: { 'retry-after': '0.1', 'x-ratelimit-scope': 'user' } }))
+      .mockResolvedValueOnce(Response.json([]));
+    expect(await rest(f).getCurrentUserGuilds()).toEqual([]);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('paces a route whose bucket is empty instead of asking Discord', async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json([], {
+          headers: { 'x-ratelimit-bucket': 'b1', 'x-ratelimit-limit': '1', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset-after': '0.2' },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json([]));
+    const client = rest(f);
+    await client.getCurrentUserGuilds();
+    const at = Date.now();
+    await client.getCurrentUserGuilds();
+    expect(Date.now() - at).toBeGreaterThanOrEqual(180);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('paces channels separately under one bucket hash', async () => {
+    const bucket = { 'x-ratelimit-bucket': 'shared-hash' };
+    const f = vi
+      .fn()
+      // Channel B learns the hash with a request to spare.
+      .mockResolvedValueOnce(Response.json({}, { headers: { ...bucket, 'x-ratelimit-remaining': '1', 'x-ratelimit-reset-after': '0.2' } }))
+      // Channel A learns the same hash, empty for half a minute.
+      .mockResolvedValueOnce(Response.json({}, { headers: { ...bucket, 'x-ratelimit-remaining': '0', 'x-ratelimit-reset-after': '30' } }))
+      // B's second message posts.
+      .mockResolvedValueOnce(Response.json({ id: '1', channel_id: '2', content: 'b2', timestamp: '', edited_timestamp: null }));
+    const client = rest(f);
+    const post = (channel: string, content: unknown) => client.request('POST', `/channels/${channel}/messages`, { content });
+    await post('200000000000000001', 'b');
+    await post('100000000000000001', 'a');
+    // B's quota is its own: it asks Discord; A's is out and it throws instead.
+    await post('200000000000000001', 'b2');
+    expect(f).toHaveBeenCalledTimes(3);
+    await expect(post('100000000000000001', 'a2')).rejects.toBeInstanceOf(RateLimitedError);
+    expect(f).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws a known long wait without calling Discord', async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json([], {
+          headers: { 'x-ratelimit-bucket': 'b1', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset-after': '30' },
+        }),
+      );
+    const client = rest(f);
+    await client.getCurrentUserGuilds();
+    const err = await client.getCurrentUserGuilds().catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.retryAfterSeconds).toBeGreaterThan(25);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries at most twice, then throws RateLimitedError', async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ retry_after: 0.1 }), { status: 429, headers: { 'retry-after': '0.1' } }));
+    const err = await rest(f).getCurrentUserGuilds().catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(f).toHaveBeenCalledTimes(3);
+  });
+});

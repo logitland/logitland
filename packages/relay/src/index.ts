@@ -41,6 +41,8 @@ export type { AgentPrincipal, AgentRecord, ClientInfo } from './types';
 
 export interface RelayOverrides {
   fetch?: typeof fetch;
+  /** How the Discord client waits out pacing and retries; real time by default. */
+  sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
   moderator?: Moderator;
   resolver?: Resolver;
@@ -59,9 +61,15 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
   if (problems.length) throw new ConfigError(problems);
   const config = buildConfig(env);
   const f = overrides.fetch ?? fetch.bind(globalThis);
+  const log = overrides.log ?? consoleLogger({ service: 'relay' });
   const discord =
     overrides.discord ??
-    new DiscordRest({ botToken: env.DISCORD_BOT_TOKEN, fetch: f, ...(config.development && env.DISCORD_API_BASE ? { base: env.DISCORD_API_BASE } : {}) });
+    new DiscordRest({
+      botToken: env.DISCORD_BOT_TOKEN,
+      fetch: f,
+      ...(overrides.sleep ? { sleep: overrides.sleep } : {}),
+      ...(config.development && env.DISCORD_API_BASE ? { base: env.DISCORD_API_BASE } : {}),
+    });
   const moderator =
     overrides.moderator ??
     (env.TYPESAFE_API_KEY
@@ -85,6 +93,6 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     openSocket: overrides.openSocket ?? null,
     fetch: f,
     now: overrides.now ?? (() => new Date()),
-    log: overrides.log ?? consoleLogger({ service: 'relay' }),
+    log,
   };
 }

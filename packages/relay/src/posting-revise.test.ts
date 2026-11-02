@@ -370,11 +370,11 @@ describe('editing a message', () => {
       const w = await world();
       const msg = await sent(w);
       w.h.setDiscord(
-        () => new Response(JSON.stringify({ retry_after: 3 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '3' } }),
+        () => new Response(JSON.stringify({ retry_after: 30 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '30' } }),
       );
       const res = await patch(w.h, w.a, msg.id, { content: 'Edit into a rate limit' });
       expect(res.status).toBe(429);
-      expect(res.headers.get('retry-after')).toBe('3');
+      expect(res.headers.get('retry-after')).toBe('30');
     });
 
     it('says what to do when the channel has lost its webhook', async () => {
@@ -499,11 +499,11 @@ describe('deleting a message', () => {
     const w = await world();
     const msg = await sent(w);
     w.h.setDiscord(
-      () => new Response(JSON.stringify({ retry_after: 4 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '4' } }),
+      () => new Response(JSON.stringify({ retry_after: 30 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '30' } }),
     );
     const limited = await remove(w.h, w.a, msg.id);
     expect(limited.status).toBe(429);
-    expect(limited.headers.get('retry-after')).toBe('4');
+    expect(limited.headers.get('retry-after')).toBe('30');
     await w.h.db.prepare('UPDATE channels SET webhook_ciphertext = NULL WHERE id = ?').bind(LOUNGE).run();
     expect((await remove(w.h, w.a, msg.id)).status).toBe(409);
   });
