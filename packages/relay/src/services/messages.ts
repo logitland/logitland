@@ -39,7 +39,13 @@ export interface SendOutcome {
 }
 
 const statusFor = (s: MessageStatus): SendOutcome['httpStatus'] => (s === 'sent' ? 201 : s === 'blocked' || s === 'failed' || s === 'removed' ? 200 : 202);
+/** A request that dies mid-way stops hiding receipts after this: then the trigger emits again. */
+const ANSWER_WINDOW_MS = 60_000;
+
 const outcome = (row: MessageRow): SendOutcome => ({ message: toRelayMessage(row), httpStatus: statusFor(row.status) });
+
+/** The row with the request's receipt window closed, so the answer carries the status the agent already got and every change after emits one. */
+const answered = (relay: Relay, id: string) => relay.db.prepare('UPDATE relay_messages SET answering_until = NULL WHERE id = ? RETURNING *').bind(id).first<MessageRow>();
 
 /** What a message is placed as: still moderating, or already decided by the fixed rules or the duplicate check. */
 interface Placement {
@@ -103,8 +109,8 @@ async function place(relay: Relay, d: Draft, to: Placement, trail: LogEntry[]): 
   const id = newId('message');
   const insert = relay.db
     .prepare(
-      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, bot_user_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING RETURNING *`,
+      `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, bot_user_id, answering_until, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING RETURNING *`,
     )
     .bind(
       id,
@@ -127,6 +133,7 @@ async function place(relay: Relay, d: Draft, to: Placement, trail: LogEntry[]): 
       d.hash,
       d.textHash,
       d.botUserId,
+      iso(new Date(relay.now().getTime() + ANSWER_WINDOW_MS)),
       at,
       at,
     );
@@ -201,9 +208,9 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
   // Only one of several concurrent retries gets to run the message again.
   const claimed = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'moderating', verdict = NULL, policy_code = NULL, status_reason = NULL, held_kind = NULL, review_attempts = 0, next_review_at = NULL, bot_user_id = ?, updated_at = ? WHERE id = ? AND status = 'failed' RETURNING *",
+      "UPDATE relay_messages SET status = 'moderating', verdict = NULL, policy_code = NULL, status_reason = NULL, held_kind = NULL, review_attempts = 0, next_review_at = NULL, bot_user_id = ?, answering_until = ?, updated_at = ? WHERE id = ? AND status = 'failed' RETURNING *",
     )
-    .bind(draft.botUserId, iso(now), found.id)
+    .bind(draft.botUserId, iso(new Date(now.getTime() + ANSWER_WINDOW_MS)), iso(now), found.id)
     .first<MessageRow>();
   if (!claimed) return outcome((await getRow(relay, found.id))!);
   return run(relay, principal, channel, settings, { ...draft, existing: claimed }, found);
@@ -254,12 +261,12 @@ async function run(
     if (!row) return winner(relay, agent.id, draft.idempotencyKey, draft.digest);
     // Keeping on at a fixed rule earns a strike; the agent is told in the answer to this message.
     const note = to.status === 'blocked' && to.policy ? await escalateRuleBlocks(relay, agent.id, to.policy) : null;
-    if (!note) return outcome(row);
+    if (!note) return outcome((await answered(relay, row.id))!);
     const noted = await relay.db
       .prepare("UPDATE relay_messages SET status_reason = COALESCE(status_reason || ' ', '') || ? WHERE id = ? RETURNING *")
       .bind(note, row.id)
       .first<MessageRow>();
-    return outcome(noted!);
+    return outcome((await answered(relay, noted!.id))!);
   };
 
   await refusing(() => countAttempt(relay, agent.id, limits));
@@ -321,9 +328,9 @@ async function run(
   // Null when someone else (the sweeper) moved the message first: then it is read as they left it.
   const moved = decision.kind === 'unavailable' ? await outage(relay, row, agent.id, decision) : await settle(relay, row, agent, decision, 'moderating');
   const after = moved ?? (await getRow(relay, row.id))!;
-  if (after.status !== 'queued') return outcome(after);
+  if (after.status !== 'queued') return outcome((await answered(relay, after.id))!);
   await dispatch(relay, after);
-  return outcome((await getRow(relay, row.id))!);
+  return outcome((await answered(relay, row.id))!);
 }
 
 /** The message needs a reviewer but the agent already has as many waiting as allowed: it is not accepted, and can be sent again later. */

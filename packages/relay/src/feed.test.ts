@@ -94,9 +94,8 @@ describe('the replies subscription', () => {
     await say(s, 'an answer', { replyTo: mine.discord_message_id });
     await say(s, 'unrelated chatter');
     const [replies] = (await poll(s)).digests;
-    expect(replies!.events.map((e) => e.type)).toEqual(['message.status', 'message.created']);
-    expect(replies!.events[0]).toMatchObject({ data: { id: mine.id, status: 'sent' } });
-    expect(contents(replies!)[1]).toBe('an answer');
+    expect(replies!.events.map((e) => e.type)).toEqual(['message.created']);
+    expect(contents(replies!)[0]).toBe('an answer');
   });
 });
 
@@ -158,12 +157,67 @@ describe('hints', () => {
   });
 });
 
-describe('message.status', () => {
-  it('is addressed to the author alone', async () => {
+describe('replies to the agent', () => {
+  const digestsFor = async (s: Setup, id: string) => (await poll(s)).digests.find((d) => (d as { subscription?: string; subscription_id?: string }).subscription === id || (d as { subscription_id?: string }).subscription_id === id);
+
+  it('arrive on the replies subscription only when the agent has one', async () => {
     const s = await setup();
     fakeDiscord(s);
-    await post(s, 'mine alone', 'status-only-0001');
+    const channel = await subscribe(s);
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'reply-route-001');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    // The reply alone never makes the channel subscription due; the replies one is due.
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms ?? null).toBeNull();
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(replies.id).first())?.next_due_ms).not.toBeNull();
+    await say(s, 'ordinary chatter');
+    const digests = (await poll(s)).digests;
+    const onReplies = digests.find((d) => d.subscription_id === replies.id);
+    const onChannel = digests.find((d) => d.subscription_id === channel.id);
+    expect(contents(onReplies!)).toContain('an answer');
+    expect(contents(onChannel!)).toEqual(['ordinary chatter']);
+  });
+
+  it('arrive on the channel subscription when there is no replies subscription', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s);
+    const replies = await subscribe(s, { kind: 'replies' });
+    await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth);
+    const mine = await post(s, 'a question', 'reply-route-002');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    const onChannel = await digestsFor(s, channel.id);
+    expect(contents(onChannel!)).toContain('an answer');
+  });
+});
+
+describe('message.status', () => {
+  const statuses = (s: Setup, id: string) =>
+    s.db
+      .prepare("SELECT json_extract(payload, '$.data.status') AS status FROM events WHERE type = 'message.status' AND json_extract(payload, '$.data.id') = ?")
+      .bind(id)
+      .all<{ status: string }>()
+      .then((r) => r.results.map((e) => e.status));
+
+  it('does not receipt the status the POST answer already gave, then emits the next change', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const mine = await post(s, 'mine alone', 'status-only-0001');
+    expect(await statuses(s, mine.id)).toEqual([]);
+    // A change after the request answered still receipts, addressed to the author alone.
+    await s.db.prepare("UPDATE relay_messages SET status = 'removed', updated_at = ? WHERE id = ?").bind(s.relay.now().toISOString(), mine.id).run();
+    expect(await statuses(s, mine.id)).toEqual(['removed']);
     const { results } = await s.db.prepare("SELECT agent_id, guild_id FROM events WHERE type = 'message.status'").all<{ agent_id: string; guild_id: string }>();
     expect(results).toEqual([{ agent_id: s.agent.id, guild_id: GUILD }]);
+  });
+
+  it('receipts a send that finished in the background, and a dead request stops hiding them', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    // As the request died mid-way: its window is already past, so the next status change emits.
+    const mine = await post(s, 'died waiting', 'status-dead-0001');
+    await s.db.prepare("UPDATE relay_messages SET answering_until = '2000-01-01T00:00:00.000Z' WHERE id = ?").bind(mine.id).run();
+    await s.db.prepare("UPDATE relay_messages SET status = 'removed', updated_at = ? WHERE id = ?").bind(s.relay.now().toISOString(), mine.id).run();
+    expect(await statuses(s, mine.id)).toEqual(['removed']);
   });
 });

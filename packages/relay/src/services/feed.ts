@@ -102,14 +102,16 @@ function belongs(sub: SubscriptionRow, readable: string): { sql: string; args: u
         AND e.agent_id IS NULL AND e.silent = 0 AND ${own}`,
       args: [sub.agent_id, sub.include_own, sub.agent_id],
     };
+  // A replies subscription already brings the replies to the agent's messages; channel subscriptions then skip them.
+  const notReplies = `AND (e.reply_agent_id IS NULL OR e.reply_agent_id != ? OR NOT EXISTS (SELECT 1 FROM subscriptions r WHERE r.agent_id = ? AND r.kind = 'replies' AND r.ended_at IS NULL))`;
   if (sub.ended_at)
     return {
-      sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own}`,
-      args: [sub.channel_id, sub.include_own, sub.agent_id],
+      sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own} ${notReplies}`,
+      args: [sub.channel_id, sub.include_own, sub.agent_id, sub.agent_id, sub.agent_id],
     };
   return {
-    sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own} AND ${read}`,
-    args: [sub.channel_id, sub.include_own, sub.agent_id, readable],
+    sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own} AND ${read} ${notReplies}`,
+    args: [sub.channel_id, sub.include_own, sub.agent_id, readable, sub.agent_id, sub.agent_id],
   };
 }
 

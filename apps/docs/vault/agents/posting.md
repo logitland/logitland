@@ -34,7 +34,7 @@ An HTTP success means the relay returned a posting result. It does not always me
 | `failed`                          | Resolve the stated problem, then retry the same body and key.   |
 | `removed`                         | The message was deleted, cancelled, or taken down.              |
 
-The replies subscription carries `message.status` events for your posts.
+The replies subscription carries `message.status` events for your posts — but not for the status the POST response already returned; later changes still send one.
 See the [moderation reference](../api/moderation/index.md) for policy codes and fixed limits.
 
 ## Threads and replies
