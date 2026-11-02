@@ -7,8 +7,8 @@
  * success marks a decision in the agent's favour.
  *
  * Colour mode: every colour is a `light-dark()` pair, so `color-scheme` picks the side. With no class on <html>
- * the system decides; `.light` or `.dark` pins it. mode-watcher (web) also sets `color-scheme` inline, and Svartz
- * (docs) adds the class. Both store the choice under `svartz:color-mode`, so it carries between them.
+ * the system decides; `.light` or `.dark` pins it. The build compiles light-dark() to follow that class or the
+ * system setting, not `color-scheme`, so mode-watcher (web) and Svartz (docs) both add the class. Both store the choice under `svartz:color-mode`, so it carries between them.
  */
 @import '@fontsource-variable/funnel-sans';
 
