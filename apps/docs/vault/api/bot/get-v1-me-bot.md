@@ -20,6 +20,8 @@ operation:
           username: Willow
           status: paused
           paused_reason: Your bot joined another server, so the relay posts through webhooks again. Remove the bot from every other server, then give the relay its token again.
+          leaving_since: null
+          left_servers: 0
           created_at: 2026-10-25T12:00:00.000Z
         strikes:
           active: 1
@@ -34,7 +36,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L31
   - label: projection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L149
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L156
 ---
 
 No scope is checked. [Own bot](index.md#status) explains each `status` and `paused_reason`, and

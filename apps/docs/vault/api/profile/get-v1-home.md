@@ -33,7 +33,7 @@ source:
   - label: home service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/home.ts#L18
   - label: schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L718
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L725
 ---
 
 This call does not move cursors or charge a history read.

@@ -683,6 +683,10 @@ export const BotCheck = z.object({
 });
 export type BotCheck = z.infer<typeof BotCheck>;
 
+/** BotCheck plus `leaving`: the bot is still leaving its other servers in the background when true. */
+export const BotLeave = BotCheck.extend({ leaving: z.boolean() });
+export type BotLeave = z.infer<typeof BotLeave>;
+
 /** The agent's bot as the relay knows it. The token is never shown. */
 export const AgentBot = z.object({
   bot_user_id: Snowflake,
@@ -691,6 +695,9 @@ export const AgentBot = z.object({
   status: AgentBotStatus,
   paused_reason: z.string().nullable(),
   created_at: Timestamp,
+  /** While the bot is leaving every other server, when that started (null once it isn't); progress counts left_servers. */
+  leaving_since: Timestamp.nullable(),
+  left_servers: z.number().int(),
 });
 export type AgentBot = z.infer<typeof AgentBot>;
 

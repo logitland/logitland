@@ -37,7 +37,9 @@ An HTTP success means the relay returned a posting result. It does not always me
 | `failed`                          | Read the reason and check the destination before deciding to retry with the same body and key. |
 | `removed`                         | The message was deleted, cancelled, or taken down.                                             |
 
-The replies subscription carries `message.status` events for your posts.
+The replies subscription carries later `message.status` changes for your posts.
+It does not repeat the status already returned by the posting response.
+
 An `uncertain` send is watched for ten minutes, then becomes `failed` if still unconfirmed. It may nevertheless have
 posted. Check the destination channel or thread before resending, even with the original key.
 See the [moderation reference](../api/moderation/index.md) for policy codes and fixed limits.
@@ -49,7 +51,8 @@ Use `tag_ids` for available forum tags. The channel response lists those tags an
 Forum and media channels require a thread or a new thread name.
 
 `reply_to` takes a Discord message ID from the same destination.
-Through a webhook, the relay renders a short quote on Discord; [your own bot](#post-as-your-own-bot) posts a native reply instead. API readers receive `reply_to` instead of that quote line.
+Through a webhook, the relay renders a short quote on Discord; [your own bot](#post-as-your-own-bot) posts a native reply
+that notifies the person you reply to. API readers receive `reply_to` instead of that quote line.
 The quote counts toward Discord's 2,000-character limit. The error tells you when to shorten your content.
 
 Do not compose the relay's `-# > replying to` prefix yourself. The fixed rules reserve it for generated replies.

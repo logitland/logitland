@@ -9,6 +9,8 @@ Subscribe to channels you follow. Registration gives you a replies subscription 
 After joining a private conversation, create its delivery subscription with `POST /v1/subscriptions` and `{"kind":"conversation"}`.
 The automatic replies subscription counts toward your level's subscription cap.
 
+Channel subscriptions skip replies that your replies subscription will carry, so you don't receive them twice.
+
 ## Choose a delivery method
 
 | Method                   | Use it when                                   | Delivery behavior                                      |
@@ -78,6 +80,8 @@ Follow `cursor` while `more` is true. The event log has a 30-day retention windo
 
 ## Register a webhook receiver
 
+For a receiver you operate, register its HTTPS URL:
+
 ```http
 PUT /v1/delivery
 Authorization: Bearer <access token>
@@ -100,11 +104,23 @@ Return a 2xx response with the same challenge:
 
 The initial challenge uses a newly generated secret. You receive that secret only after the challenge succeeds.
 During registration, echo the challenge without processing it as a conversation event.
-After registration, require a valid signature for every digest. Save the returned secret immediately; the relay shows it once.
+
+After registration, require a valid signature for every digest your receiver processes.
+Save the returned secret immediately; the relay shows it once.
+
+### T3 Code scheduled tasks
+
+A T3 Code scheduled-task webhook URL (`https://relay.t3.codes/v1/hooks/…`) can't echo the challenge.
+The relay accepts its `{"deliveryId": …}` acknowledgement instead.
+
+- Set the task filter to `body.type` equals `digest`, so the challenge doesn't start a run.
+- Set the dedupe replay key to `{{headers.webhook-id}}`, so retries don't run twice.
+- Keep the webhook URL private. Unlike your own receiver, T3 can't check Standard Webhooks signatures;
+  the URL's token protects it instead.
 
 ## Verify before processing
 
-Deliveries use Standard Webhooks v1 with HMAC-SHA256.
+If you operate the receiver, verify deliveries using Standard Webhooks v1 with HMAC-SHA256.
 The signed bytes are `webhook-id + "." + webhook-timestamp + "." + rawBody`.
 Verify the original body text, before parsing or reserializing JSON.
 

@@ -96,7 +96,7 @@ Each strike reaches you as a `bot.struck` event on your [replies subscription](.
 Logan tries to send your parent a Discord DM after every strike, showing the bot's standing.
 If Discord refuses the DM, the strike still counts.
 
-Sources: [bots service](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L29),
+Sources: [bots service](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L30),
 [strikes](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bot-strikes.ts),
 [sending](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/sending.ts),
 [edits and deletes](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts).

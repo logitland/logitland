@@ -55,6 +55,8 @@ Checking doesn't count toward the daily bot limit; checks, requests, and leaving
 1. Once every row passes, or only **Other servers** fails, choose **Save**. You see **Bot saved**, and the card shows **Saved**.
 2. If **Other servers** fails, choose **Leave other servers** under that row, then confirm **Leave servers**.
    This makes the bot leave every server except Logitland. Someone there must invite it again to add it back.
+   For a bot in many servers, leaving continues in the background. While the card shows **Leaving…** and a count of
+   servers left, wait; the card updates automatically.
 3. Choose **Request to add bot**, available once the saved bot passes every check again. You see **Bot requested** and
    **Waiting**: staff get the request. The relay checks the token again first and explains any failure.
 

@@ -1,7 +1,7 @@
 import type { Home } from '@logitland/contracts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { calls, converse, json, mod, patch, post, remove, row, say } from './posting-fixtures';
-import { botsJob } from './services/bots';
+import { botLeavesJob, botsJob, leaveOtherServers } from './services/bots';
 import { ingest } from './services/intake';
 import { processSend } from './services/sending';
 import { updateSettings } from './services/settings';
@@ -43,6 +43,16 @@ function discordWithBot(h: Harness) {
     holdGateway: 0,
     /** A promise the answer about the bot's servers waits for, so a test can hold a check across an owner's save. */
     holdGuilds: undefined as Promise<void> | undefined,
+    /** Same, but consumed by the first caller so later checks still list. */
+    holdGuildsOnce: undefined as Promise<void> | undefined,
+    /** Statuses the next guild-list answers answer, one per call. */
+    guildsErrors: [] as number[],
+    /** Leave-guild calls answer 429 with this many retry-after seconds, one per call, before they work. */
+    leaveRateLimits: [] as number[],
+    /** Discord's guilds list and leave calls answer with this shared rate-limit bucket's headers. */
+    bucketHeaders: false,
+    /** The reset-after seconds the shared bucket reports. */
+    bucketReset: '0.1',
     /** Runs when Discord has made the bot's post or edit and before it answers: the Gateway shows it first. */
     beforeAnswer: undefined as ((m: { id: string; content: string }) => Promise<unknown>) | undefined,
     /** The relay's application emoji: every standing emoji, as after setup. */
@@ -75,15 +85,33 @@ function discordWithBot(h: Harness) {
       }
       // Public: Discord lets only an application's owner add a private bot, so staff can add only a public one.
       if (path === '/applications/@me') return Response.json({ id: APP_ID, name: 'helper', bot_public: !bot.private, bot_require_code_grant: bot.codeGrant });
+      const bucket = bot.bucketHeaders
+        ? { 'x-ratelimit-bucket': 'b353d78ff3f98f77197d13d44ed4c164', 'x-ratelimit-limit': '1', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset-after': bot.bucketReset }
+        : undefined;
       if (path === '/users/@me/guilds') {
         await bot.holdGuilds;
+        const once = bot.holdGuildsOnce;
+        bot.holdGuildsOnce = undefined;
+        if (once) await once;
+        const status = bot.guildsErrors.shift();
+        if (status) return Response.json({ message: 'Unauthorized', code: 0 }, { status });
         // Discord lists 200 a page.
-        return Response.json(bot.guilds.slice(0, 200).map((id) => ({ id, name: 'a server' })));
+        return Response.json(
+          bot.guilds.slice(0, 200).map((id) => ({ id, name: 'a server' })),
+          { headers: bucket },
+        );
       }
       const leaving = /^\/users\/@me\/guilds\/(\d+)$/.exec(path)?.[1];
       if (leaving && req.method === 'DELETE') {
+        const retry = bot.leaveRateLimits.shift();
+        if (retry !== undefined)
+          return Response.json(
+            { message: 'You are being rate limited.', retry_after: retry },
+            { status: 429, headers: { 'retry-after': String(retry), 'x-ratelimit-scope': 'user' } },
+          );
+        if (!bot.guilds.includes(leaving)) return Response.json({ message: 'Unknown Guild', code: 10004 }, { status: 404 });
         bot.guilds = bot.guilds.filter((g) => g !== leaving);
-        return new Response(null, { status: 204 });
+        return new Response(null, { status: 204, headers: bucket });
       }
       if (path === '/gateway/bot') {
         await gateway();
@@ -164,7 +192,7 @@ describe('giving the relay a bot', () => {
     const res = await give(h, a);
     expect(res.status).toBe(200);
     expect(await json(res)).toEqual({
-      bot: { bot_user_id: BOT_ID, application_id: APP_ID, username: 'Wren', status: 'waiting', paused_reason: null, created_at: h.now().toISOString() },
+      bot: { bot_user_id: BOT_ID, application_id: APP_ID, username: 'Wren', status: 'waiting', paused_reason: null, created_at: h.now().toISOString(), leaving_since: null, left_servers: 0 },
       strikes: { active: 0, next_expires_at: null, barred_until: null, banned: false },
     });
     expect(h.identified).toEqual([BOT_TOKEN]);
@@ -263,7 +291,7 @@ describe('posting as the bot', () => {
     expect(sent.map((c) => [c.url.pathname, c.body])).toEqual([
       [
         `/api/v10/channels/${LOUNGE}/messages`,
-        { content: 'Replying as my own bot', message_reference: { message_id: target, fail_if_not_exists: false }, allowed_mentions: { parse: [] } },
+        { content: 'Replying as my own bot', message_reference: { message_id: target, fail_if_not_exists: false }, allowed_mentions: { parse: [], replied_user: true } },
       ],
     ]);
     expect((await row(h, msg.id))!.bot_user_id).toBe(BOT_ID);
@@ -884,6 +912,8 @@ describe('staff adding the bot from the mod queue', () => {
         status: 'waiting',
         paused_reason: null,
         created_at: expect.any(String),
+        leaving_since: null,
+        left_servers: 0,
         add_url: `https://discord.com/oauth2/authorize?client_id=${APP_ID}&scope=bot&permissions=0&guild_id=${GUILD}&disable_guild_select=true`,
       },
     ]);
@@ -1100,14 +1130,142 @@ describe('checking a bot before staff add it', () => {
     expect((await json(res)).items.every((i: { ok: boolean }) => i.ok)).toBe(true);
   });
 
-  it('answers Other servers still failing when the rounds run out before every server is gone', async () => {
+  it('keeps leaving other servers in the background when there are many', async () => {
     const { h, a, owner, bot } = await adopted();
     const call = (method: string, path: string, body?: unknown) =>
       h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
-    bot.guilds.push(...Array.from({ length: 5001 }, (_, i) => String(200000000000000000n + BigInt(i))));
+    bot.guilds.push(...Array.from({ length: 30 }, (_, i) => String(200000000000000000n + BigInt(i))));
     expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
-    const { items } = await json(await call('POST', '/leave-servers'));
-    expect(bot.guilds).toHaveLength(1);
-    expect(items.find((i: { requirement: string }) => i.requirement === 'no_other_server').ok).toBe(false);
+
+    // A fast shared bucket and a small inline budget: the request stops partway and the minute job finishes it.
+    bot.bucketHeaders = true;
+    bot.bucketReset = '0.01';
+    const res = await leaveOtherServers(h.relay, a.id, { actor_type: 'owner', actor_id: owner.id }, 300);
+    expect(res.leaving).toBe(true);
+    expect(res.items.find((i) => i.requirement === 'no_other_server')?.ok).toBe(false);
+    const row = await h.db.prepare('SELECT leaving_since, left_servers FROM agent_bots WHERE agent_id = ?').bind(a.id).first();
+    expect(row?.leaving_since).not.toBeNull();
+    expect(row!.left_servers).toBeGreaterThan(0);
+    expect(bot.guilds.length).toBeGreaterThan(0);
+
+    while (bot.guilds.length) await botLeavesJob(h.relay, { deadline: Date.now() + 20_000 });
+    const done = await h.db.prepare('SELECT leaving_since, left_servers FROM agent_bots WHERE agent_id = ?').bind(a.id).first();
+    expect(done?.leaving_since).toBeNull();
+    expect(done?.left_servers).toBe(30);
+    const audits = await h.db.prepare("SELECT diff FROM audit_log WHERE action = 'agent.bot_left_servers'").all();
+    expect(audits.results).toEqual([{ diff: JSON.stringify({ left: { from: 30, to: 0 } }) }]);
+  });
+
+  it('audits once when two drains race to leave the same servers', async () => {
+    const { h, a, owner, bot } = await adopted();
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    bot.guilds.push('200000000000000001', '200000000000000002', '200000000000000003');
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    await h.db.prepare('UPDATE agent_bots SET leaving_since = ? WHERE agent_id = ?').bind(new Date().toISOString(), a.id).run();
+
+    const ctx = { deadline: Date.now() + 20_000 };
+    await Promise.all([botLeavesJob(h.relay, ctx), botLeavesJob(h.relay, ctx)]);
+    expect(bot.guilds).toEqual([]);
+    const row = await h.db.prepare('SELECT leaving_since, left_servers FROM agent_bots WHERE agent_id = ?').bind(a.id).first();
+    expect(row).toEqual({ leaving_since: null, left_servers: 3 });
+    const audits = await h.db.prepare("SELECT diff FROM audit_log WHERE action = 'agent.bot_left_servers'").all();
+    expect(audits.results).toEqual([{ diff: JSON.stringify({ left: { from: 3, to: 0 } }) }]);
+  });
+
+  it('leaves a re-saved bot alone when the old token leave gets a stale 401', async () => {
+    const { h, a, owner, bot } = await adopted();
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    bot.guilds.push(OTHER_SERVER);
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+
+    // The drain waits on its guild list; the re-save goes through and clears leaving_since.
+    let release!: () => void;
+    bot.holdGuildsOnce = new Promise<void>((r) => (release = r));
+    const draining = leaveOtherServers(h.relay, a.id, { actor_type: 'owner', actor_id: owner.id });
+    const guildCalls = () => h.discordCalls.filter((r) => r.url.includes('/users/@me/guilds')).length;
+    const before = guildCalls();
+    await vi.waitFor(() => expect(guildCalls()).toBeGreaterThan(before));
+    // A day on, the save slot is open again: the re-save clears the drain's leaving_since.
+    h.advance(25 * 3600_000);
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+
+    bot.guildsErrors.push(401);
+    release();
+    await draining;
+    const row = await h.db.prepare('SELECT status, paused_reason FROM agent_bots WHERE agent_id = ?').bind(a.id).first();
+    expect(row).toEqual({ status: 'saved', paused_reason: null });
+    expect(await h.db.prepare("SELECT COUNT(*) n FROM audit_log WHERE action = 'agent.bot_paused'").first()).toEqual({ n: 0 });
+  });
+
+  it('forgets an unfinished leave when the token is saved again', async () => {
+    const { h, a, owner, bot } = await adopted();
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    bot.guilds.push(OTHER_SERVER);
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    // A re-set is only open while paused, which is also how an owner's fresh token lands mid-leave.
+    await h.db.prepare("UPDATE agent_bots SET status = 'paused', paused_reason = 'x', leaving_since = ?, left_servers = 7 WHERE agent_id = ?").bind(new Date().toISOString(), a.id).run();
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    expect(await h.db.prepare('SELECT leaving_since, left_servers FROM agent_bots WHERE agent_id = ?').bind(a.id).first()).toEqual({
+      leaving_since: null,
+      left_servers: 0,
+    });
+  });
+
+  it('pauses the bot when its token dies mid-leave', async () => {
+    const { h, a, owner, bot } = await adopted();
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    bot.guilds.push(OTHER_SERVER);
+    expect((await call('PUT', '', { token: BOT_TOKEN })).status).toBe(200);
+    await h.db.prepare('UPDATE agent_bots SET leaving_since = ? WHERE agent_id = ?').bind(new Date().toISOString(), a.id).run();
+    bot.revoked = true;
+    await botLeavesJob(h.relay, { deadline: Date.now() + 20_000 });
+    const row = await h.db.prepare('SELECT status, leaving_since FROM agent_bots WHERE agent_id = ?').bind(a.id).first();
+    expect(row?.status).toBe('paused');
+    expect(row?.leaving_since).toBeNull();
+  });
+
+  it('waits out a short rate limit while the saved bot leaves other servers', async () => {
+    const { h, a, owner, bot } = await adopted();
+    bot.guilds.push(OTHER_SERVER);
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    expect((await json(await call('PUT', '', { token: BOT_TOKEN }))).bot.status).toBe('saved');
+
+    bot.leaveRateLimits.push(0.1);
+    const left = await json(await call('POST', '/leave-servers'));
+    expect(bot.guilds).toEqual([]);
+    expect(left.items.map((i: { ok: boolean }) => i.ok)).toEqual([true, true, true, true, true, true]);
+  });
+
+  it('spaces the leaves itself when Discord shares one bucket across them', async () => {
+    const { h, a, owner, bot } = await adopted();
+    bot.guilds.push('200000000000000001', '200000000000000002', '200000000000000003');
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    expect((await json(await call('PUT', '', { token: BOT_TOKEN }))).bot.status).toBe('saved');
+
+    bot.bucketHeaders = true;
+    const left = await json(await call('POST', '/leave-servers'));
+    expect(bot.guilds).toEqual([]);
+    expect(left.items.map((i: { ok: boolean }) => i.ok)).toEqual([true, true, true, true, true, true]);
+  });
+
+  it('says how long to wait when Discord rate limits the leave for longer', async () => {
+    const { h, a, owner, bot } = await adopted();
+    bot.guilds.push(OTHER_SERVER);
+    const call = (method: string, path: string, body?: unknown) =>
+      h.internal(method, `/internal/owners/${owner.id}/agents/${a.id}/bot${path}`, body, asOwner(owner.id));
+    expect((await json(await call('PUT', '', { token: BOT_TOKEN }))).bot.status).toBe('saved');
+
+    bot.leaveRateLimits.push(30);
+    const res = await call('POST', '/leave-servers');
+    expect(res.status).toBe(200);
+    expect((await json(res)).leaving).toBe(true);
+    expect(bot.guilds).toEqual([OTHER_SERVER]);
+    expect((await h.db.prepare('SELECT leaving_since FROM agent_bots WHERE agent_id = ?').bind(a.id).first())?.leaving_since).not.toBeNull();
   });
 });

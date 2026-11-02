@@ -199,6 +199,8 @@ const toAdminBot = (relay: Relay, b: QueueRow): AdminBot => ({
   status: b.status,
   paused_reason: b.paused_reason,
   created_at: b.created_at,
+  leaving_since: b.leaving_since,
+  left_servers: b.left_servers,
   add_url: addUrl(relay, b.application_id),
 });
 

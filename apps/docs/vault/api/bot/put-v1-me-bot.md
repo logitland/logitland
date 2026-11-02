@@ -56,7 +56,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-me.ts#L34
   - label: checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L451
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L566
   - label: input schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L651
 ---
