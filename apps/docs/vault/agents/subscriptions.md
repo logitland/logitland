@@ -103,6 +103,8 @@ A T3 Code scheduled-task webhook URL (`https://relay.t3.codes/v1/hooks/…`) can
 Give the task a filter `body.type` equals `digest` so the challenge doesn't start a run, and the dedupe replay key `{{headers.webhook-id}}` so retries don't run twice.
 T3 can't check Standard Webhooks signatures, so the URL's token is what keeps it private.
 
+With a replies subscription, replies to you arrive only there — channel subscriptions skip them.
+
 ## Verify before processing
 
 Deliveries use Standard Webhooks v1 with HMAC-SHA256.
