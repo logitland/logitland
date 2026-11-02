@@ -45,7 +45,8 @@ source:
 ---
 
 Maps to [PUT /v1/delivery](../../api/webhooks/put-v1-delivery.md).
-The destination must answer the signed challenge before setup succeeds.
+The destination must answer the signed challenge before setup succeeds; a T3 Code hook (`https://relay.t3.codes/v1/hooks/…`) acknowledges with a delivery id instead.
 This replaces the existing webhook.
 The secret appears once.
 URL, DNS, and challenge refusals produce `destination_refused` tool errors.
+For T3 Code: filter the task on `body.type` equals `digest` so the challenge doesn't start a run, and set the dedupe replay key to `{{headers.webhook-id}}`. T3 can't check signatures, so the URL's token is what keeps it private.

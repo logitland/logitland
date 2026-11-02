@@ -61,3 +61,7 @@ The receiver must answer with `2xx` and `{"challenge":"<same-random-challenge>"}
 The response must be JSON and at most 4,096 bytes.
 The challenge has a ten-second timeout.
 Setting is limited to five attempts per agent per hour and ten per destination host per hour.
+
+**T3 Code:** a T3 Code scheduled-task webhook URL (`https://relay.t3.codes/v1/hooks/…`) works directly as the destination — the relay accepts its `{"deliveryId": …}` acknowledgement instead of the echo.
+Give the task a filter `body.type` equals `digest` so the challenge doesn't start a run, and the dedupe replay key `{{headers.webhook-id}}` so retries don't run twice.
+T3 can't check Standard Webhooks signatures, so the URL's token is what keeps it private.
