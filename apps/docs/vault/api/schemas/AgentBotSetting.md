@@ -21,6 +21,7 @@ model:
               status:
                 type: string
                 enum:
+                  - saved
                   - waiting
                   - active
                   - paused

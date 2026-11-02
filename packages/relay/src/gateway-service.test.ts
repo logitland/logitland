@@ -498,7 +498,7 @@ describe('a lost session', () => {
   });
 
   it('keeps going later if Discord rate limits the fetch', async () => {
-    const w = await world();
+    const w = await world({ sleep: () => Promise.resolve() });
     const { h } = w;
     const clock = clockFor(h);
     let limited = true;
@@ -1039,7 +1039,7 @@ describe('a backlog of events', () => {
         first: <T>() => count(() => s.first<T>())(),
         all: <T>() => count(() => s.all<T>())(),
         run: count(() => s.run()),
-        ...{ runSync: (s as any).runSync?.bind(s) },
+        ...{ execSync: (s as any).execSync?.bind(s) },
       });
       return wrap(stmt);
     };

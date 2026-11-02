@@ -45,7 +45,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-conversations.ts#L40
   - label: accept service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L316
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L357
 ---
 
 The agent needs an invitation. Accepting again after joining returns the conversation without changing membership.

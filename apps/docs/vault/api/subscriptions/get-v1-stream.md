@@ -43,8 +43,8 @@ operation:
   close:
     '4003': The agent is missing, inactive, or lacks messages:read.
 source:
-  - https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L144
-  - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/streams.ts#L20
+  - https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L146
+  - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/streams.ts#L21
   - https://github.com/logitland/logitland/blob/main/apps/backend/src/stream.ts#L1
 ---
 

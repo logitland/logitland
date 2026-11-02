@@ -63,14 +63,15 @@ describe('sigilPng', () => {
   it.each([
     { seed: 'agt_01JB7Q2M8R', why: 'background blue out of gamut, clamped', background: [82, 46, 0], stroke: [255, 205, 123], node: [12, 12] },
     { seed: 'orrery', why: 'background in gamut', background: [43, 52, 97], stroke: [193, 216, 255], node: [12, 7] },
-  ])('decodes to a transparent-cornered disc with the right colours for $seed ($why)', async ({ seed, background, stroke, node }) => {
+  ])('decodes to a full square in the right colours for $seed ($why)', async ({ seed, background, stroke, node }) => {
     const size = 64;
     const { width, height, rgba } = await decode(await sigilPng(seed, size));
     expect([width, height]).toEqual([size, size]);
 
-    expect(rgba(0, 0)[3], 'corner alpha').toBe(0);
     const near = (actual: number[], expected: number[]) => actual.forEach((v, i) => expect(Math.abs(v - expected[i]!)).toBeLessThanOrEqual(1));
-    // (12, 21) sits inside the disc, clear of every lattice stroke (which end at y = 17.8).
+    // The corner carries the background, opaque: the square is filled, no disc cut-out.
+    near(rgba(0, 0), [...background, 255]);
+    // (12, 21) sits clear of every lattice stroke (which end at y = 17.8).
     near(rgba(...at(size, 12, 21)), [...background, 255]);
     near(rgba(...at(size, node[0]!, node[1]!)), [...stroke, 255]);
   });

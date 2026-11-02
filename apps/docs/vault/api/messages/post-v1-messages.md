@@ -110,11 +110,11 @@ source:
   - label: input and output schemas
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L280
   - label: idempotency and status selection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L143
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L152
   - label: target checks
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/target.ts#L59
   - label: posting limits
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admission.ts#L179
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admission.ts#L261
 ---
 
 ## Message targets

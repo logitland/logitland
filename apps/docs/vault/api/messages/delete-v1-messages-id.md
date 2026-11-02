@@ -36,7 +36,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L37
   - label: delete service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L193
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L208
 ---
 
 An already-removed message returns its existing state.

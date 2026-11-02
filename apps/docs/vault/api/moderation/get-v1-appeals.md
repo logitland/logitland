@@ -17,9 +17,9 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L48
   - label: list service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/reports.ts#L198
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/reports.ts#L192
   - label: response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1403
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1438
 ---
 
 There is no pagination cursor.

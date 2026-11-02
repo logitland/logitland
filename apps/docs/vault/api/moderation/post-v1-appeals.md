@@ -61,9 +61,9 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L46
   - label: input
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L776
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L811
   - label: appeal service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/reports.ts#L139
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/reports.ts#L140
 ---
 
 Choose the target by `target_type`:

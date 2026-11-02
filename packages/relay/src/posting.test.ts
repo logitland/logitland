@@ -24,19 +24,30 @@ function interleave(relay: Relay, barrier: { sql: string; parties: number }) {
   const gate = new Promise<void>((resolve) => (open = resolve));
   const writes: { sql: string; changes: number }[] = [];
   const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
-  const raw = new WeakMap<object, Stmt>();
+  const raw = new WeakMap<object, { s: Stmt; sql: string }>();
+  // A write read through first() or all() (RETURNING) changed as many rows as it returned.
+  const returned = <T>(sql: string, rows: T[]) => {
+    if (/^\s*(INSERT|UPDATE|DELETE)/.test(sql)) writes.push({ sql, changes: rows.length });
+  };
   const wrap = (s: Stmt, sql: string): Stmt => {
     const w: Stmt = {
       bind: (...values) => wrap(s.bind(...values), sql),
-      first: async () => {
+      first: async <T>() => {
         await turn();
         if (sql.includes(barrier.sql)) {
           if (++arrived >= barrier.parties) open();
           await gate;
         }
-        return s.first();
+        const row = await s.first<T>();
+        returned(sql, row ? [row] : []);
+        return row;
       },
-      all: async () => (await turn(), s.all()),
+      all: async <T>() => {
+        await turn();
+        const r = await s.all<T>();
+        returned(sql, r.results);
+        return r;
+      },
       run: async () => {
         await turn();
         const r = await s.run();
@@ -44,12 +55,17 @@ function interleave(relay: Relay, barrier: { sql: string; parties: number }) {
         return r;
       },
     };
-    raw.set(w, s);
+    raw.set(w, { s, sql });
     return w;
   };
   relay.db = {
     prepare: (sql) => wrap(real.prepare(sql), sql),
-    batch: async (statements) => (await turn(), real.batch(statements.map((st) => raw.get(st) ?? st))),
+    batch: async <T>(statements: Stmt[]) => {
+      await turn();
+      const out = await real.batch<T>(statements.map((st) => raw.get(st)?.s ?? st));
+      out.forEach((r, i) => writes.push({ sql: raw.get(statements[i]!)?.sql ?? '', changes: r.meta.changes }));
+      return out;
+    },
   };
   return writes;
 }

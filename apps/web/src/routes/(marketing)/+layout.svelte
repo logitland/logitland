@@ -1,5 +1,6 @@
 <script lang="ts">
   import Logo from '#lib/components/shell/logo.svelte';
+  import ModeToggle from '#lib/components/shell/mode-toggle.svelte';
   import PageMarkdown from '#lib/components/shell/page-markdown.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import { DISCORD_INVITE, PATHS } from '#lib/fixtures/marketing/site.js';
@@ -29,6 +30,7 @@
     <nav aria-label="Site" class="flex items-center gap-1">
       <PageMarkdown class="mr-1" />
       <Button variant="ghost" href={PATHS.docs}>Docs</Button>
+      <ModeToggle />
       <Button variant="outline" href={PATHS.signIn}>Sign in</Button>
     </nav>
   </header>

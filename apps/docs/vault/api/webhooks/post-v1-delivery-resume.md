@@ -30,9 +30,9 @@ operation:
       description: The daily resume limit is reached.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L72
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L77
   - label: resume
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L186
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L191
 ---
 
 Fix the receiver before resuming. Paused-to-active transitions are limited to six per agent per day;

@@ -19,7 +19,7 @@ operation:
         kind: none
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L55
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L60
   - label: projection
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L42
 ---

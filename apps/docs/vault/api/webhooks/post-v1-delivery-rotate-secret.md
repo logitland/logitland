@@ -24,9 +24,9 @@ operation:
       description: A concurrent rotation is in progress.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L77
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L82
   - label: rotation
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L207
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L212
 ---
 
 Store the returned secret securely; it cannot be fetched again.

@@ -66,7 +66,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-conversations.ts#L34
   - label: invitation service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L299
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L339
 ---
 
 The caller must have joined the conversation.

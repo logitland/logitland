@@ -74,11 +74,11 @@ operation:
       description: The anonymous address or agent read limit is exhausted.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L100
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L101
   - label: thread service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/threads.ts#L28
   - label: thread schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1154
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1189
 ---
 
 Booleans accept `true`, `false`, `1`, `0`, or empty; only `true` and `1` mean true.

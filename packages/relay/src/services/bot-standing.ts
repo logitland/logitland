@@ -1,7 +1,7 @@
 import type { BotStrikeEffect } from '@logitland/contracts';
 import { CANNOT_MESSAGE_USER, DiscordError, IS_COMPONENTS_V2, type CreateMessageBody } from '@logitland/discord';
 import type { Relay } from '../context';
-import { BOT_BAR_DAYS, botSetting } from './bots';
+import { BOT_BAR_DAYS } from './bots';
 import { sigilUrl } from './identity';
 import { standingGlyphs, type StandingGlyphs } from './standing-emoji';
 
@@ -143,28 +143,24 @@ export function standingMessage(s: Standing, glyph: StandingGlyphs): CreateMessa
 }
 
 /**
- * DMs the agent's owner its bot's standing after a strike. A failure, such as an owner who doesn't take DMs from the server's
- * members, is logged and nothing else is sent: the strike stands either way.
+ * DMs the agent's owner (`owner`, their Discord user ID) its bot's standing after a strike. A failure, such as an owner who
+ * doesn't take DMs from the server's members, is logged and nothing else is sent: the strike stands either way.
  */
-export async function dmOwnerStanding(relay: Relay, agentId: string, strike: Strike): Promise<void> {
+export async function dmOwnerStanding(
+  relay: Relay,
+  agent: { id: string; name: string; avatar_url: string | null; owner: string },
+  strike: Strike & Pick<Standing, 'strikes' | 'nextExpiresAt'>,
+): Promise<void> {
   try {
-    const agent = await relay.db
-      .prepare('SELECT a.id, a.name, a.avatar_url, a.owner_id, o.discord_user_id AS owner FROM agents a JOIN owners o ON o.id = a.owner_id WHERE a.id = ?')
-      .bind(agentId)
-      .first<{ id: string; name: string; avatar_url: string | null; owner_id: string; owner: string }>();
-    if (!agent) return;
-    const { strikes } = await botSetting(relay, agent);
     const standing: Standing = {
       ...strike,
       agent: { id: agent.id, name: agent.name, avatarUrl: agent.avatar_url ?? sigilUrl(relay, agent.id) },
-      strikes: strikes.active,
-      nextExpiresAt: strikes.next_expires_at,
       botTabUrl: `${relay.config.dashboardUrl}/agents/${agent.id}/bot`,
     };
     const dm = await relay.discord.createDmChannel(agent.owner);
     await relay.discord.createMessage(dm.id, standingMessage(standing, await standingGlyphs(relay)));
   } catch (error) {
     const closed = error instanceof DiscordError && error.code === CANNOT_MESSAGE_USER;
-    relay.log.warn('bot_strikes.owner_dm_failed', { agent_id: agentId, closed, error });
+    relay.log.warn('bot_strikes.owner_dm_failed', { agent_id: agent.id, closed, error });
   }
 }

@@ -76,7 +76,7 @@ operation:
       description: The anonymous address or agent read limit is exhausted.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L87
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L88
   - label: history query
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversation.ts#L121
   - label: message schema

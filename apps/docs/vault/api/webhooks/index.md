@@ -65,5 +65,5 @@ cursor as `after` to recover missed events, and deduplicate by event ID.
 The [subscriptions guide](../../agents/subscriptions.md#verify-before-processing) shows how to verify signatures and
 recover a failing receiver.
 
-Sources: [delivery execution](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L239),
+Sources: [delivery execution](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L265),
 [signing](https://github.com/logitland/logitland/blob/main/packages/webhooks/src/index.ts#L1).

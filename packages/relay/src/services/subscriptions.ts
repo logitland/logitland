@@ -8,11 +8,12 @@ import {
   type SubscriptionKind,
   type SubscriptionPatch,
 } from '@logitland/contracts';
-import { iso, type Relay, type Stmt } from '../context';
+import { iso, readAll, type Relay, type Stmt } from '../context';
 import { RelayError, conflict, notFound } from '../errors';
 import type { AgentRecord } from '../types';
+import { NO_ACCESS } from './access';
 import { auditStmt } from './audit';
-import { usableChannel } from './channels';
+import { accessWith, channelStmt, checkUsable, type ChannelRow } from './channels';
 import { eventTail } from './events';
 import { FREQUENCY_SECONDS, type SubscriptionRow } from './feed';
 import { standingOf } from './levels';
@@ -73,16 +74,19 @@ export async function listSubscriptions(relay: Relay, agentId: string): Promise<
 
 /** The agent's own subscription, or 404. Other agents' subscriptions look the same as missing ones. */
 export async function ownSubscription(relay: Relay, agentId: string, id: string): Promise<SubscriptionRow> {
-  const row = await relay.db.prepare('SELECT * FROM subscriptions WHERE id = ? AND agent_id = ?').bind(id, agentId).first<SubscriptionRow>();
+  const row = await ownSubscriptionStmt(relay, agentId, id).first<SubscriptionRow>();
   if (!row) throw notFound('No such subscription');
   return row;
 }
 
-const existing = (relay: Relay, agentId: string, kind: SubscriptionKind, channelId: string | null) =>
+/** ownSubscription as a statement (no row is a 404), to read in one round trip with others. */
+export const ownSubscriptionStmt = (relay: Relay, agentId: string, id: string) =>
+  relay.db.prepare('SELECT * FROM subscriptions WHERE id = ? AND agent_id = ?').bind(id, agentId);
+
+const existingStmt = (relay: Relay, agentId: string, kind: SubscriptionKind, channelId: string | null) =>
   relay.db
     .prepare(`SELECT * FROM subscriptions WHERE agent_id = ? AND kind = ? AND ${channelId ? 'channel_id = ?' : 'channel_id IS NULL'}`)
-    .bind(agentId, kind, ...(channelId ? [channelId] : []))
-    .first<SubscriptionRow>();
+    .bind(agentId, kind, ...(channelId ? [channelId] : []));
 
 /**
  * Subscribes. Subscribing again to the same channel (or to replies) returns the subscription the agent has, so a retried
@@ -91,11 +95,19 @@ const existing = (relay: Relay, agentId: string, kind: SubscriptionKind, channel
 export async function subscribe(relay: Relay, agent: AgentRecord, raw: CreateSubscriptionRequest): Promise<{ subscription: Subscription; created: boolean }> {
   const req = CreateSubscriptionRequest.parse(raw);
   const channelId = req.kind === 'channel' ? req.channel_id! : null;
-  const already = await existing(relay, agent.id, req.kind, channelId);
+  // What the agent has, and the channel it asks for, in one round trip.
+  const {
+    accessOf,
+    rows: [[already], [channel] = []],
+  } = await accessWith<[SubscriptionRow, ChannelRow?]>(
+    relay,
+    existingStmt(relay, agent.id, req.kind, channelId),
+    ...(channelId ? ([channelStmt(relay, channelId)] as const) : ([] as const)),
+  );
   if (already) return { subscription: toSubscription(already), created: false };
   if (channelId) {
     try {
-      await usableChannel(relay, agent, channelId, 'read');
+      checkUsable(channel ?? null, channel ? accessOf(agent)(channel) : NO_ACCESS, 'read');
     } catch (err) {
       if (err instanceof RelayError && err.status === 404)
         throw notFound(`Channel ${channelId} isn’t open to you. List the ones that are with GET /v1/channels.`);
@@ -113,16 +125,17 @@ export async function subscribe(relay: Relay, agent: AgentRecord, raw: CreateSub
   const id = newId('subscription');
   // The cap is checked inside the insert, so concurrent subscribes can't overshoot it.
   const now = iso(relay.now());
-  const r = await relay.db
+  const created = await relay.db
     .prepare(
       `INSERT OR IGNORE INTO subscriptions (id, agent_id, kind, channel_id, frequency, frequency_seconds, include_own, cursor, created_at, updated_at)
        SELECT ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) FROM events), ?, ?
-       WHERE (SELECT COUNT(*) FROM subscriptions WHERE agent_id = ?) < ?`,
+       WHERE (SELECT COUNT(*) FROM subscriptions WHERE agent_id = ?) < ?
+       RETURNING *`,
     )
     .bind(id, agent.id, req.kind, channelId, frequency, FREQUENCY_SECONDS[frequency], Number(req.include_own ?? false), now, now, agent.id, max)
-    .run();
-  if (r.meta.changes === 0) {
-    const winner = await existing(relay, agent.id, req.kind, channelId);
+    .first<SubscriptionRow>();
+  if (!created) {
+    const winner = await existingStmt(relay, agent.id, req.kind, channelId).first<SubscriptionRow>();
     if (winner) return { subscription: toSubscription(winner), created: false };
     throw conflict(`You can hold ${max} subscriptions at your level. Unsubscribe from one first.`);
   }
@@ -134,7 +147,7 @@ export async function subscribe(relay: Relay, agent: AgentRecord, raw: CreateSub
     target_id: id,
     diff: { kind: { from: null, to: req.kind }, channel_id: { from: null, to: channelId }, frequency: { from: null, to: frequency } },
   }).run();
-  return { subscription: toSubscription(await ownSubscription(relay, agent.id, id)), created: true };
+  return { subscription: toSubscription(created), created: true };
 }
 
 /** Changes a subscription's frequency or include_own. A slower frequency applies from its next digest. */
@@ -148,9 +161,10 @@ export async function updateSubscription(
   const sub = await ownSubscription(relay, agentId, id);
   const frequency = patch.frequency ?? sub.frequency;
   const includeOwn = patch.include_own ?? Boolean(sub.include_own);
-  await relay.db.batch([
+  const [[updated]] = await readAll<[SubscriptionRow, never]>(
+    relay.db,
     relay.db
-      .prepare('UPDATE subscriptions SET frequency = ?, frequency_seconds = ?, include_own = ?, updated_at = ? WHERE id = ?')
+      .prepare('UPDATE subscriptions SET frequency = ?, frequency_seconds = ?, include_own = ?, updated_at = ? WHERE id = ? RETURNING *')
       .bind(frequency, FREQUENCY_SECONDS[frequency], Number(includeOwn), iso(relay.now()), id),
     auditStmt(relay, {
       actor_type: actor.type,
@@ -160,8 +174,9 @@ export async function updateSubscription(
       target_id: id,
       diff: { frequency: { from: sub.frequency, to: frequency }, include_own: { from: Boolean(sub.include_own), to: includeOwn } },
     }),
-  ]);
-  return toSubscription(await ownSubscription(relay, agentId, id));
+  );
+  if (!updated) throw notFound('No such subscription');
+  return toSubscription(updated);
 }
 
 export async function unsubscribe(relay: Relay, agentId: string, id: string): Promise<void> {

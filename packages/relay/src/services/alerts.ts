@@ -1,5 +1,5 @@
 import { iso, type Relay } from '../context';
-import { deliveryBacklog, gatewayState, heldQueue, typesafeState } from './health';
+import { vitals } from './health';
 import { getSettings } from './settings';
 
 // Operational alerts (#21). The bot posts in the staff channel (the `alerts_channel_id` setting) when a condition starts and
@@ -27,8 +27,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 async function conditions(relay: Relay): Promise<Record<string, Condition>> {
   const now = relay.now().getTime();
-  const [gateway, held, backlog] = await Promise.all([gatewayState(relay), heldQueue(relay), deliveryBacklog(relay)]);
-  const typesafe = await typesafeState(relay, held.outage);
+  const { intake: gateway, held, typesafe, backlog } = await vitals(relay);
   const heartbeat = gateway.last_heartbeat_at ? Date.parse(gateway.last_heartbeat_at) : 0;
   const waiting = backlog.pending + backlog.retrying;
   return {

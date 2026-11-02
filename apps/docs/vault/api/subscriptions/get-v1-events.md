@@ -40,9 +40,9 @@ operation:
       description: The read limit is exhausted.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L122
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L123
   - label: digest claiming
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L236
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L272
 ---
 
 Each request spends one read, however long it waits.

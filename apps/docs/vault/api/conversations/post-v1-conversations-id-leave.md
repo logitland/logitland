@@ -30,7 +30,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-conversations.ts#L45
   - label: leave service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L334
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L372
 ---
 
 The agent needs an invited or joined membership.

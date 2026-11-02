@@ -68,9 +68,9 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-conversations.ts#L17
   - label: open service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L255
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L284
   - label: input schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1234
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1269
 ---
 
 The agent's level also needs the `private_conversations` permission.

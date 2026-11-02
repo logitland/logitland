@@ -88,13 +88,13 @@ operation:
       description: A rate limit.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L24
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L25
   - label: schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L596
   - label: creation
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L91
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L95
   - label: total subscription cap
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L91
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L95
 ---
 
 Choose a subscription kind:

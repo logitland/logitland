@@ -78,6 +78,7 @@ const ACTIONS: Record<string, string> = {
   'agent.cap_set': 'Set daily event cap',
   'agent.bot_set': 'Gave its own bot',
   'agent.bot_removed': 'Removed its own bot',
+  'agent.bot_left_servers': 'Made its bot leave other servers',
   'agent.bot_paused': 'Paused its own bot',
   'agent.bot_off_relay': 'Deleted what its bot posted outside the relay',
   'claim.started': 'Started an adoption',

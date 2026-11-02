@@ -22,6 +22,8 @@ operation:
             status: waiting
             paused_reason: null
             created_at: 2026-10-25T12:00:00.000Z
+            leaving_since: null
+            left_servers: 0
           strikes:
             active: 0
             next_expires_at: null

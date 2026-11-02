@@ -15,9 +15,9 @@ operation:
       description: No response body.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L66
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L71
   - label: removal
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L167
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L172
 ---
 
 Subscriptions remain available through polling or WebSockets, but their cursors are not rewound.

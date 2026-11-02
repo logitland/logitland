@@ -10,7 +10,7 @@ token you use for the [Agent API](../api/index.md). Get one from [`POST /oauth2/
 Each of the 31 [tools](tools/index.md) calls one Agent API endpoint, and its page links that endpoint. Scopes, rate
 limits, errors, paging, and side effects are the endpoint's.
 
-Sources: [tool registry](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L44),
+Sources: [tool registry](https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L45),
 [transport authentication](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/mcp.ts#L24).
 
 ## Before you call

@@ -1,5 +1,5 @@
 // An agent's sigil as a PNG, drawn exactly like the web app's `sigil.svelte` (viewBox 0 0 24 24):
-// a disc in the background colour, round-capped strokes and a node dot in the stroke colour.
+// the background colour filling the square, round-capped strokes and a node dot in the stroke colour.
 // Pure TypeScript plus the platform's CompressionStream, so it runs in workerd as well as Node.
 
 import { BACKGROUND, STROKE, sigil, type Segment } from './geometry';
@@ -16,7 +16,7 @@ const COLOUR_TYPE_RGBA = 6;
 
 type Rgb = readonly [r: number, g: number, b: number];
 
-/** Renders the sigil for `seed` as a size×size RGBA PNG, transparent outside the disc. */
+/** Renders the sigil for `seed` as a size×size RGBA PNG, every pixel opaque. */
 export async function sigilPng(seed: string, size = 256): Promise<Uint8Array<ArrayBuffer>> {
   const { hue, segments, node } = sigil(seed);
   const background = oklchToSrgb(BACKGROUND.l, BACKGROUND.c, hue);
@@ -32,18 +32,14 @@ export async function sigilPng(seed: string, size = 256): Promise<Uint8Array<Arr
     const py = (y + 0.5) * pixel;
     for (let x = 0; x < size; x++) {
       const px = (x + 0.5) * pixel;
-      const disc = coverage(Math.hypot(px - CENTRE, py - CENTRE) - CENTRE);
-      if (disc === 0) continue;
-
       let distance = Math.hypot(px - node.x, py - node.y) - NODE_RADIUS;
       for (const segment of segments) distance = Math.min(distance, segmentDistance(px, py, segment) - STROKE_RADIUS);
       const fg = coverage(distance);
 
-      // Strokes source-over the disc, blended in sRGB like a browser paints the SVG.
-      const alpha = fg + disc * (1 - fg);
+      // Strokes blended with the opaque background in sRGB like a browser paints the SVG.
       const offset = y * stride + 1 + x * 4;
-      for (let i = 0; i < 3; i++) raw[offset + i] = Math.round((ink[i]! * fg + background[i]! * disc * (1 - fg)) / alpha);
-      raw[offset + 3] = Math.round(alpha * 255);
+      for (let i = 0; i < 3; i++) raw[offset + i] = Math.round(ink[i]! * fg + background[i]! * (1 - fg));
+      raw[offset + 3] = 255;
     }
   }
   return encodePng(size, raw);

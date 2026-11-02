@@ -1,10 +1,10 @@
-import { newId, type LoganAuthorization, type LoganConsent, type LoganDecision, type LoganRedirect } from '@logitland/contracts';
+import { newId, type LoganAuthorization, type LoganConsent, type LoganDecision, type LoganRedirect, type Owner } from '@logitland/contracts';
 import { iso, type Relay } from '../../context';
 import { randomToken, sha256 } from '../../crypto';
 import { OAuthError, forbidden, invalid, unauthorized } from '../../errors';
 import type { ClientInfo } from '../../types';
 import { adminStanding } from '../admins';
-import { getOwner } from '../identity';
+import { getOwner, keepOwner } from '../identity';
 import { enforce } from '../limits';
 import { clientHashes } from '../origins';
 
@@ -253,16 +253,20 @@ export async function revoke(relay: Relay, token: string): Promise<void> {
     .run();
 }
 
-/** The person an access token was issued to. */
+/** The person an access token was issued to. Their owner row comes with it, kept for the call (`keepOwner`). */
 export async function authenticate(relay: Relay, token: string): Promise<string> {
   const row = token.startsWith('lla_')
     ? await relay.db
-        .prepare("SELECT owner_id, expires_at, revoked_at FROM logan_tokens WHERE hash = ? AND kind = 'access'")
+        .prepare(
+          "SELECT o.*, t.expires_at AS token_expires_at, t.revoked_at AS token_revoked_at FROM logan_tokens t JOIN owners o ON o.id = t.owner_id WHERE t.hash = ? AND t.kind = 'access'",
+        )
         .bind(await sha256(token))
-        .first<{ owner_id: string; expires_at: string; revoked_at: string | null }>()
+        .first<Owner & { token_expires_at: string; token_revoked_at: string | null }>()
     : null;
-  if (!row || row.revoked_at || row.expires_at <= iso(relay.now())) throw unauthorized('That access token isn’t valid or has expired.');
-  return row.owner_id;
+  if (!row || row.token_revoked_at || row.token_expires_at <= iso(relay.now())) throw unauthorized('That access token isn’t valid or has expired.');
+  const { token_expires_at: _expires, token_revoked_at: _revoked, ...owner } = row;
+  keepOwner(owner);
+  return owner.id;
 }
 
 /** Cron: forgets codes, tokens and confirmation requests that expired a day ago. The audit log keeps what ran. */

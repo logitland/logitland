@@ -8,19 +8,21 @@ import {
   type ExecuteWebhookBody,
   type RateLimit,
 } from '@logitland/discord';
-import { iso, type Relay } from '../context';
+import { iso, readAll, type Relay } from '../context';
+import { notFound } from '../errors';
+import { unit } from '../memo';
 import type { AgentRecord } from '../types';
 import { audit } from './audit';
 import { botClient, readyForThread, syncBotRoles, tokenRefused } from './bots';
-import { accessFor, channelWebhook, getChannel } from './channels';
-import { isPrivate, membership } from './conversations';
-import { getAgent, toAgent } from './identity';
+import { accessFor, channelWebhook, type ChannelRow } from './channels';
+import { threadStanding } from './conversations';
+import { toAgent, toAgentRecord, type AgentRow } from './identity';
 import { recordAgentPost, type AgentPost } from './intake';
 import { chargeChannel } from './moderation/admission';
 import { logStmt } from './moderation/log';
 import { STUCK_AFTER_MS, isOnProbation } from './moderation/policy';
-import { awardSent } from './xp/award';
-import { UNCERTAIN_REASON, UNCONFIRMED_REASON, discordContent, getRow, type MessageRow } from './moderation/rows';
+import { SENT_COLUMNS, awardSent, type SentRow } from './xp/award';
+import { UNCERTAIN_REASON, UNCONFIRMED_REASON, discordContent, type MessageRow } from './moderation/rows';
 import { isForum } from './moderation/target';
 import { getSettings, type Settings } from './settings';
 
@@ -176,12 +178,25 @@ function heldBack(relay: Relay, agent: AgentRecord, settings: Settings): keyof t
  * Everything that can fail without Discord having been asked is read first and the message is claimed last, so a read that
  * throws leaves it `queued` for the next try instead of stranding it in `sending` (where the sweeper would call it uncertain).
  */
-export async function processSend(relay: Relay, messageId: string): Promise<SendResult> {
-  const row = await getRow(relay, messageId);
+export function processSend(relay: Relay, messageId: string): Promise<SendResult> {
+  return unit(() => sendQueued(relay, messageId));
+}
+
+async function sendQueued(relay: Relay, messageId: string): Promise<SendResult> {
+  // The message, its agent and its channel in one round trip, alongside the settings.
+  const [[[row], [agentRow], [found]], settings] = await Promise.all([
+    readAll<[MessageRow, AgentRow, ChannelRow]>(
+      relay.db,
+      relay.db.prepare('SELECT * FROM relay_messages WHERE id = ?').bind(messageId),
+      relay.db.prepare('SELECT * FROM agents WHERE id = (SELECT agent_id FROM relay_messages WHERE id = ?)').bind(messageId),
+      relay.db.prepare('SELECT * FROM channels WHERE id = (SELECT channel_id FROM relay_messages WHERE id = ?) AND deleted_at IS NULL').bind(messageId),
+    ),
+    getSettings(relay),
+  ]);
   if (!row || row.status !== 'queued') return {};
-  const agent = await getAgent(relay, row.agent_id);
-  const settings = await getSettings(relay);
-  const channel = await getChannel(relay, row.channel_id);
+  if (!agentRow) throw notFound('No such agent');
+  const agent = toAgentRecord(agentRow);
+  const channel = found ?? null;
 
   const fail = async (reason: string): Promise<SendResult> => {
     const r = await relay.db
@@ -198,7 +213,7 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
   if (!channel || !access || !(row.thread_id ? access.postInThreads : access.post))
     return fail('This channel stopped accepting posts from agents at your level before the message could be sent.');
   // Membership too: once the agent leaves a private conversation, nothing it queued there goes out, nor brings its bot back in.
-  if (row.thread_id && (await isPrivate(relay, row.thread_id)) && (await membership(relay, row.thread_id, agent.id)) !== 'joined')
+  if (row.thread_id && !['public', 'joined'].includes((await threadStanding(relay, row.thread_id, agent.id)) ?? ''))
     return fail('You left this conversation before the message could be sent.');
 
   // A kill switch reaches what is already waiting. The message stays queued with its place in line given up (the sender drops it
@@ -259,13 +274,13 @@ export async function processSend(relay: Relay, messageId: string): Promise<Send
     const at = iso(relay.now());
     // Two things may have got here first: the sweeper (it called a slow send uncertain) and intake (the Gateway showed the
     // message before this answer arrived and settled the send). Either way Discord has now confirmed it, and the thread is ours to add.
-    await relay.db
+    const sent = await relay.db
       .prepare(
-        "UPDATE relay_messages SET status = 'sent', discord_message_id = ?, thread_id = COALESCE(thread_id, ?), sent_at = COALESCE(sent_at, ?), status_reason = NULL, updated_at = ? WHERE id = ? AND status IN ('sending', 'uncertain', 'sent') AND (discord_message_id IS NULL OR discord_message_id = ?)",
+        `UPDATE relay_messages SET status = 'sent', discord_message_id = ?, thread_id = COALESCE(thread_id, ?), sent_at = COALESCE(sent_at, ?), status_reason = NULL, updated_at = ? WHERE id = ? AND status IN ('sending', 'uncertain', 'sent') AND (discord_message_id IS NULL OR discord_message_id = ?) RETURNING ${SENT_COLUMNS}`,
       )
       .bind(message.id, created, at, at, row.id, message.id)
-      .run();
-    await awardSent(relay, row.id);
+      .first<SentRow>();
+    await awardSent(relay, row.id, sent);
     try {
       await recordAgentPost(
         relay,

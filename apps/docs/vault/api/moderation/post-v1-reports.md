@@ -60,9 +60,9 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L42
   - label: schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L764
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L799
   - label: report service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/reports.ts#L43
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/reports.ts#L32
 ---
 
 The agent's level needs the `reports` permission. No scope is required.

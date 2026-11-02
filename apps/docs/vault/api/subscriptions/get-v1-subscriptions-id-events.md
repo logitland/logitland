@@ -47,9 +47,9 @@ operation:
       description: The subscription is missing or belongs to another agent.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L42
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L43
   - label: feed selection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L127
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L159
 ---
 
 This request spends one read.

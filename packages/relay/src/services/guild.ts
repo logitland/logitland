@@ -1,4 +1,6 @@
 import { iso, type Relay, type Stmt } from '../context';
+import { forget } from '../memo';
+import { GUILD_ROLES } from './channels';
 import { commitPlan, planEvent, type PlannedEvent } from './events';
 import { refreshShowcase } from './showcase';
 import type { IntakeEvent } from './intake';
@@ -90,16 +92,21 @@ export async function applyGuildEvents(relay: Relay, events: GuildEvent[]): Prom
   const now = iso(relay.now());
   const stmts = events.map((e) => statement(relay, e, now));
   const planned: { at: number; event: PlannedEvent }[] = [];
+  const deleted = events.flatMap((e) => (e.kind === 'channel_delete' ? [e.channel_id] : []));
+  const { results: open } = deleted.length
+    ? await relay.db
+        .prepare('SELECT id, guild_id FROM channels WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL')
+        .bind(JSON.stringify(deleted))
+        .all<{ id: string; guild_id: string }>()
+    : { results: [] };
+  const guildOf = new Map(open.map((c) => [c.id, c.guild_id]));
   for (const e of events) {
     if (e.kind !== 'channel_delete') continue;
-    const channel = await relay.db
-      .prepare('SELECT guild_id FROM channels WHERE id = ? AND deleted_at IS NULL')
-      .bind(e.channel_id)
-      .first<{ guild_id: string }>();
-    if (!channel) continue;
+    const guildId = guildOf.get(e.channel_id);
+    if (!guildId) continue;
     const event = planEvent(relay, {
       type: 'channel.deleted',
-      guildId: channel.guild_id,
+      guildId,
       channelId: e.channel_id,
       messageId: null,
       sourceKey: `channel-deleted:${e.channel_id}`,
@@ -112,6 +119,7 @@ export async function applyGuildEvents(relay: Relay, events: GuildEvent[]): Prom
     );
   }
   await commitPlan(relay, stmts, planned);
+  forget(GUILD_ROLES);
   if (planned.length) relay.log.info('guild.channels_deleted', { count: planned.length });
   // Which channels every agent can read may have changed, and the home page shows only those.
   await refreshShowcase(relay);

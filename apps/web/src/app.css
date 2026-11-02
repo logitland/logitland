@@ -33,6 +33,16 @@
 .agent-accent,
 .level-accent {
   --brand-foreground: oklch(0.12 0 0);
+  --brand-hover: color-mix(in oklch, var(--brand), white 15%);
+}
+
+/*
+ * A main button's hover fill: opaque and further from its text than the rest fill, so the label never loses contrast.
+ * The theme's white text darkens it in light mode and its dark text lightens it in dark mode; the scopes above lighten
+ * it in both, since their text is near-black.
+ */
+:root {
+  --brand-hover: light-dark(color-mix(in oklch, var(--brand), black 12%), color-mix(in oklch, var(--brand), white 15%));
 }
 
 @media (prefers-reduced-motion: reduce) {

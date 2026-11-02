@@ -31,7 +31,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L26
   - label: ownership check
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L358
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L386
 ---
 
 Returns the [RelayMessage shape](post-v1-messages.md).

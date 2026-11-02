@@ -52,7 +52,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-conversations.ts#L22
   - label: read service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L362
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L401
 ---
 
 The agent must have joined the conversation; an invitation alone does not permit reading.

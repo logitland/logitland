@@ -45,11 +45,11 @@ operation:
       description: The delivery kill switch is active (`unavailable`).
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L60
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L65
   - label: setup and challenge
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L69
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L118
   - label: destination checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/destinations.ts#L26
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/destinations.ts#L27
 ---
 
 The URL must be HTTPS, at most 2,048 characters, on a public hostname and port 443 or 8443.
