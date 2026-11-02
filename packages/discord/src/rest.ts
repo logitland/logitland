@@ -273,16 +273,16 @@ const RETRY_LIMIT = 2;
 /** Small slack over Discord's reset-after, which is rounded down. */
 const RESET_SLACK_MS = 50;
 
-/**
- * Discord keys rate-limit buckets by the route with its major parameters (the id after /channels/, /guilds/ or /webhooks/
- * at the start of the path) kept and every other snowflake made :id. Webhook and interaction tokens are secrets, so they
- * become :token.
- */
 /** The path's major parameter, when it has one — Discord's bucket hash doesn't include it, so two channels can't share quota. */
 function majorOf(path: string): string {
   return /^\/(?:channels|guilds|webhooks)\/\d{15,25}/.exec(path.split('?')[0]!)?.[0] ?? '';
 }
 
+/**
+ * Discord keys rate-limit buckets by the route with its major parameters (the id after /channels/, /guilds/ or /webhooks/
+ * at the start of the path) kept and every other snowflake made :id. Webhook and interaction tokens are secrets, so they
+ * become :token.
+ */
 function routeKey(method: string, path: string): string {
   const p = path.split('?')[0]!;
   const major = majorOf(path);
