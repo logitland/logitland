@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BotRequest, type AgentBot, type AgentBotStatus, type BotCheck, type BotRequirement, type BotStrikes } from '@logitland/contracts';
+  import { BotRequest, type AgentBot, type AgentBotStatus, type BotCheck, type BotLeave, type BotRequirement, type BotStrikes } from '@logitland/contracts';
   import BanIcon from '@lucide/svelte/icons/ban';
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
   import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
@@ -16,7 +16,7 @@
   import { Spinner } from '#lib/components/ui/spinner/index.js';
   import { formatDate, plural } from '#lib/fixtures/owner/format.js';
   import { messageOf } from '#lib/owner/errors.js';
-  import { checkBot, leaveOtherServers, removeBot, requestBot, setBot } from '#lib/owner/owner.remote.js';
+  import { checkBot, getBot, leaveOtherServers, removeBot, requestBot, setBot } from '#lib/owner/owner.remote.js';
 
   /**
    * The agent's own Discord bot, which the relay posts as instead of a webhook once staff add it to the server. Four steps run
@@ -61,7 +61,7 @@
   let busy = $state<'saving' | 'removing' | 'requesting' | 'leaving'>();
   let leaveOpen = $state(false);
   /** The checklists for the saved bot and for the token in the field, and the token whose check counts. */
-  let saved = $state<BotCheck>();
+  let saved = $state<BotCheck | BotLeave>();
   let pasted = $state<BotCheck>();
   let latest: string | undefined;
   let checking = $state(false);
@@ -137,16 +137,36 @@
   async function leave() {
     busy = 'leaving';
     try {
-      saved = await leaveOtherServers(agentId);
+      const result = await leaveOtherServers(agentId);
+      saved = result;
       leaveOpen = false;
+      if (result.leaving) toast.info('Leaving the other servers. A bot in many servers takes a while; this page updates when it’s done.');
       // The fresh checklist, not the request finishing, says whether every other server is gone.
-      if (saved.items.find((item) => item.requirement === 'no_other_server')?.ok) toast.success('Left the other servers');
+      else if (saved.items.find((item) => item.requirement === 'no_other_server')?.ok) toast.success('Left the other servers');
       else toast.error('The bot is still in other servers. Leave them again.');
     } catch (failure) {
       toast.error(messageOf(failure));
     }
     busy = undefined;
   }
+
+  // While the bot leaves in the background, refresh it (not the checklist, which spends the hourly checks) until it's done.
+  let wasLeaving = false;
+  $effect(() => {
+    if (!bot?.leaving_since) return;
+    const timer = setInterval(() => getBot(agentId).refresh(), 15_000);
+    return () => clearInterval(timer);
+  });
+  $effect(() => {
+    const leaving = Boolean(bot?.leaving_since);
+    if (wasLeaving && !leaving)
+      void (async () => {
+        await check();
+        if (saved?.items.find((item) => item.requirement === 'no_other_server')?.ok) toast.success('Left the other servers');
+        else toast.error('The bot is still in other servers. Leave them again.');
+      })();
+    wasLeaving = leaving;
+  });
 
   async function remove() {
     busy = 'removing';
@@ -280,9 +300,13 @@
                     {/if}
                     {#if item.requirement === 'no_other_server'}
                       {#if !typed && bot}
-                        <Button size="sm" variant="outline" class="mt-2" disabled={busy !== undefined} onclick={() => (leaveOpen = true)}>
-                          Leave other servers
-                        </Button>
+                        {#if bot.leaving_since}
+                          <p class="mt-1 text-xs text-muted-foreground">Leaving… {bot.left_servers} left so far</p>
+                        {:else}
+                          <Button size="sm" variant="outline" class="mt-2" disabled={busy !== undefined} onclick={() => (leaveOpen = true)}>
+                            Leave other servers
+                          </Button>
+                        {/if}
                       {:else if typed && shown?.items.every((i) => i === item || i.ok)}
                         <p class="mt-1 text-xs text-muted-foreground">Save the token, then you can make the bot leave them.</p>
                       {/if}

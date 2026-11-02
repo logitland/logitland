@@ -498,7 +498,7 @@ describe('a lost session', () => {
   });
 
   it('keeps going later if Discord rate limits the fetch', async () => {
-    const w = await world();
+    const w = await world({ sleep: () => Promise.resolve() });
     const { h } = w;
     const clock = clockFor(h);
     let limited = true;

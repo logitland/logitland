@@ -45,6 +45,8 @@ export interface HarnessOptions {
   start?: string;
   /** Extra or replacement bindings, e.g. DISCORD_PUBLIC_KEY or MODERATION_OUTAGE. */
   env?: Partial<RelayBindings>;
+  /** How the Discord client waits: tests with an injected clock pass an instant one. */
+  sleep?: (ms: number) => Promise<void>;
   /** Keep the migration's placeholder level limits. By default every level gets TEST_LIMITS, so tests about other things don't trip them. */
   seededLevels?: boolean;
 }
@@ -204,6 +206,7 @@ export function harness(opts: HarnessOptions = {}) {
     {
       fetch: fake as typeof fetch,
       now: () => clock,
+      ...(opts.sleep ? { sleep: opts.sleep } : {}),
       log,
       openSocket,
       ...(opts.moderator ? { moderator: opts.moderator } : {}),

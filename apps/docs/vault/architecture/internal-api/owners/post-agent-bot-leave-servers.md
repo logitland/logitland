@@ -1,6 +1,6 @@
 ---
 title: Leave other servers
-description: Make the saved bot leave every server except this one, then answers the checks fresh.
+description: Make the saved bot leave every server except this one, then answers the checks fresh; a bot in many keeps leaving in the background.
 operation:
   method: POST
   path: /internal/owners/{ownerId}/agents/{agentId}/bot/leave-servers
@@ -48,7 +48,8 @@ source:
 The **Bot** tab's **Leave other servers**, shown when the saved bot's `no_other_server` check fails. With the saved token
 the relay asks Discord which servers the bot is in and makes it leave each but this one (DELETE /users/@me/guilds), then
 audits how many it left (`agent.bot_left_servers`) and answers the checklist fresh. The call counts toward the 30 checks
-an hour, not the day's bot.
+an hour, not the day's bot. A bot in many servers keeps leaving in the background: `leaving` is true, and its Bot tab
+shows progress (`leaving_since`, `left_servers`) until the last server is gone.
 
 ```ts
 const { items } = await relay(event, `/internal/owners/${ownerId}/agents/agt_0000000001/bot/leave-servers`, {

@@ -66,8 +66,8 @@ export function stranger(n: number, over: Record<string, unknown> = {}) {
  * A relay with an open channel (#lounge, with a webhook), a closed one (#bench), one agent and its message AGENT_POST in
  * #lounge (stored directly: no event). HUMAN agreed before any of the fixtures' messages.
  */
-export async function world(opts: { start?: string; agreed?: boolean } = {}) {
-  const h = harness(opts.start ? { start: opts.start } : {});
+export async function world(opts: { start?: string; agreed?: boolean; sleep?: (ms: number) => Promise<void> } = {}) {
+  const h = harness({ ...(opts.start ? { start: opts.start } : {}), ...(opts.sleep ? { sleep: opts.sleep } : {}) });
   if (opts.agreed !== false) await agree(h, HUMAN);
   await seedChannel(h.relay, { id: LOUNGE, access: 'post' });
   await seedChannel(h.relay, { id: BENCH, access: 'off', name: 'bench', webhookUrl: null });

@@ -6,6 +6,7 @@ import {
   type AgentBotStatus,
   type BotCheck,
   type BotCheckItem,
+  type BotLeave,
   type BotStrikes,
   type ChannelType,
 } from '@logitland/contracts';
@@ -58,6 +59,10 @@ export interface BotRow {
   queue_message_id: string | null;
   queue_shows: string | null;
   queue_attempted_at: string | null;
+  /** While the bot is leaving every other server, when that started; null when it isn't. */
+  leaving_since: string | null;
+  /** Servers it has left since leaving_since, for the Bot tab's progress. */
+  left_servers: number;
 }
 
 /** Sealed to its agent (reseal.ts re-seals it under a new key the same way). */
@@ -87,6 +92,8 @@ export const toAgentBot = (r: BotRow | null): AgentBot | null =>
     status: r.status,
     paused_reason: r.paused_reason,
     created_at: r.created_at,
+    leaving_since: r.leaving_since,
+    left_servers: r.left_servers,
   };
 
 export const botStmt = (relay: Relay, agentId: string) => relay.db.prepare('SELECT * FROM agent_bots WHERE agent_id = ?').bind(agentId);
@@ -213,36 +220,28 @@ export async function deleteBotPost(relay: Relay, row: MessageRow & { discord_me
   }
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Discord's answers about a token, worded for whoever gave it. A rate limit of a few seconds is waited out, then tried again. */
+/** Discord's answers about a token, worded for whoever gave it. The client waits out short rate limits itself (DiscordRest). */
 async function ask<T>(relay: Relay, call: () => Promise<T>): Promise<T> {
-  for (let retries = 0; ; retries++) {
-    try {
-      return await call();
-    } catch (err) {
-      if (err instanceof RateLimitedError) {
-        if (err.retryAfterSeconds <= 5 && retries < 2) {
-          await sleep(Math.ceil(err.retryAfterSeconds * 1000) + 50);
-          continue;
-        }
-        relay.log.warn('bots.discord_rate_limited', {
-          retry_after: err.retryAfterSeconds,
-          scope: err.rateLimit.scope,
-          bucket: err.rateLimit.bucket,
-          global: err.rateLimit.global,
-          cloudflare: err.cloudflare,
-          ray: err.ray,
-          body: err.body,
-        });
-        const n = Math.max(1, Math.ceil(err.retryAfterSeconds));
-        throw rateLimited(`Discord is rate limiting your bot. Try again in ${n} second${n === 1 ? '' : 's'}.`, n);
-      }
-      if (err instanceof DiscordError && err.status === 401)
-        throw invalid('Discord didn’t accept that token. Copy your bot’s token again from the Developer Portal (your application, Bot, Reset Token).');
-      if (err instanceof DiscordError) throw unavailable('Discord refused to tell the relay about your bot. Try again in a minute.', 60);
-      throw unavailable('Discord couldn’t be reached to check your bot. Try again in a minute.', 60);
+  try {
+    return await call();
+  } catch (err) {
+    if (err instanceof RateLimitedError) {
+      relay.log.warn('bots.discord_rate_limited', {
+        retry_after: err.retryAfterSeconds,
+        scope: err.rateLimit.scope,
+        bucket: err.rateLimit.bucket,
+        global: err.rateLimit.global,
+        cloudflare: err.cloudflare,
+        ray: err.ray,
+        body: err.body,
+      });
+      const n = Math.max(1, Math.ceil(err.retryAfterSeconds));
+      throw rateLimited(`Discord is rate limiting your bot. Try again in ${n} second${n === 1 ? '' : 's'}.`, n);
     }
+    if (err instanceof DiscordError && err.status === 401)
+      throw invalid('Discord didn’t accept that token. Copy your bot’s token again from the Developer Portal (your application, Bot, Reset Token).');
+    if (err instanceof DiscordError) throw unavailable('Discord refused to tell the relay about your bot. Try again in a minute.', 60);
+    throw unavailable('Discord couldn’t be reached to check your bot. Try again in a minute.', 60);
   }
 }
 
@@ -390,43 +389,136 @@ async function checklist(relay: Relay, agentId: string, token: string): Promise<
   return { items, bot: bot && { application_id: bot.app.id, username: bot.user.username } };
 }
 
-/** Pages of up to 200 servers: leaving each page's others shows the next, so this many covers any bot. */
-const LEAVE_ROUNDS = 25;
+/** How long one leave-servers request drains itself before the minute job (botLeavesJob) takes over. */
+const LEAVE_INLINE_MS = 8_000;
+
+/**
+ * Makes the bot leave every other server until the deadline, a refused token, or a finished list. left_servers is bumped
+ * per leave under the captured leaving_since, so progress survives a cut-off and stops when another run owns the leave. On
+ * done it audits agent.bot_left_servers with the run's total, once.
+ */
+async function drainLeaves(
+  relay: Relay,
+  bot: BotRow,
+  deadline: number,
+  actor: Pick<AuditInput, 'actor_type' | 'actor_id'>,
+): Promise<{ outcome: 'done' | 'waiting' | 'paused'; left: number }> {
+  const guildId = relay.config.discord.guildId!;
+  const rest = await clientOf(relay, bot);
+  const since = bot.leaving_since;
+  let left = 0;
+  // Someone re-saved or paused the bot, or another drain finished it: this run stands down.
+  const bump = async () => {
+    const r = await relay.db
+      .prepare('UPDATE agent_bots SET left_servers = left_servers + 1 WHERE agent_id = ? AND leaving_since = ?')
+      .bind(bot.agent_id, since)
+      .run();
+    return r.meta.changes > 0;
+  };
+  // A re-save replaced the token mid-drain: its 401 belongs to the old token and pauses nothing (pause checks the token).
+  const pause401 = async () => ({ outcome: (await pause(relay, bot, TOKEN_REFUSED)) ? ('paused' as const) : ('waiting' as const), left });
+  // Discord lists 200 servers a page and lets a bot leave about one a second: the page's others leave, then the next page.
+  while (Date.now() < deadline) {
+    let guilds: PartialGuild[];
+    try {
+      guilds = await rest.getCurrentUserGuilds();
+    } catch (error) {
+      if (error instanceof DiscordError && error.status === 401) return pause401();
+      if (error instanceof RateLimitedError) return { outcome: 'waiting', left };
+      throw error;
+    }
+    const others = guilds.filter((g) => g.id !== guildId);
+    if (!others.length) {
+      const done = await relay.db
+        .prepare('UPDATE agent_bots SET leaving_since = NULL WHERE agent_id = ? AND leaving_since = ? RETURNING left_servers')
+        .bind(bot.agent_id, since)
+        .first<{ left_servers: number }>();
+      // Only the run that clears the flag audits, and it reports what every run left in total.
+      if (!done) return { outcome: 'waiting', left };
+      await auditStmt(relay, {
+        ...actor,
+        action: 'agent.bot_left_servers',
+        target_type: 'agent',
+        target_id: bot.agent_id,
+        diff: { left: { from: done.left_servers, to: 0 } },
+      }).run();
+      relay.log.info('bots.left_servers', { agent_id: bot.agent_id, left: done.left_servers });
+      return { outcome: 'done', left };
+    }
+    for (const guild of others) {
+      if (Date.now() >= deadline) return { outcome: 'waiting', left };
+      try {
+        await rest.leaveGuild(guild.id);
+        left++;
+      } catch (error) {
+        if (error instanceof DiscordError && error.status === 401) return pause401();
+        // Already gone (the job and this drain raced, say): counts, but didn't bump.
+        if (error instanceof DiscordError && error.status === 404) {
+          left++;
+          continue;
+        }
+        // A rate limit longer than the client waits out: the job resumes it.
+        if (error instanceof RateLimitedError) return { outcome: 'waiting', left };
+        throw error;
+      }
+      if (!(await bump())) return { outcome: 'waiting', left };
+    }
+  }
+  return { outcome: 'waiting', left };
+}
+
+/** Resumes leaving other servers for the bots whose owners asked it to (leaveOtherServers): Discord allows one a second. */
+export async function botLeavesJob(relay: Relay, ctx: { deadline: number }): Promise<number> {
+  if (!relay.config.discord.guildId) return 0;
+  const { results } = await relay.db
+    .prepare("SELECT * FROM agent_bots WHERE leaving_since IS NOT NULL AND status != 'paused' ORDER BY leaving_since LIMIT ?")
+    .bind(CHECKS_PER_RUN)
+    .all<BotRow>();
+  let left = 0;
+  for (const bot of results) {
+    if (Date.now() >= ctx.deadline) break;
+    try {
+      left += (await drainLeaves(relay, bot, ctx.deadline, { actor_type: 'system', actor_id: 'bots' })).left;
+    } catch (error) {
+      relay.log.error('bots.leave_failed', { agent_id: bot.agent_id, error });
+    }
+  }
+  return left;
+}
 
 /**
  * Makes the saved bot leave every server except Logitland's (POST …/bot/leave-servers), so its no_other_server check passes
- * and it can be requested. Counts against the hourly checks; answers the checklist fresh.
+ * and it can be requested. A bot in more servers than the inline drain covers keeps leaving every minute through
+ * botLeavesJob: `leaving` is then true and the checklist says Other servers still fails.
  */
-export async function leaveOtherServers(relay: Relay, agentId: string, actor: Pick<AuditInput, 'actor_type' | 'actor_id'>): Promise<BotCheck> {
+export async function leaveOtherServers(
+  relay: Relay,
+  agentId: string,
+  actor: Pick<AuditInput, 'actor_type' | 'actor_id'>,
+  inlineMs = LEAVE_INLINE_MS,
+): Promise<BotLeave> {
   const token = await savedToken(relay, await getBot(relay, agentId));
   await enforceChecks(relay, agentId);
-  const rest = relay.discord.withToken(token);
-  const guildId = relay.config.discord.guildId;
-  let left = 0;
-  let complete = false;
-  // Discord lists 200 servers a page, so the bot leaves a page's others and looks again until a page has none.
-  for (let round = 0; round < LEAVE_ROUNDS; round++) {
-    const others = (await ask(relay, () => rest.getCurrentUserGuilds())).filter((g) => g.id !== guildId);
-    if (!others.length) {
-      complete = true;
-      break;
-    }
-    for (const guild of others) {
-      await ask(relay, () => rest.leaveGuild(guild.id));
-      left++;
-    }
-  }
-  relay.log.info('bots.left_servers', { agent_id: agentId, left, complete });
-  await auditStmt(relay, {
-    ...actor,
-    action: 'agent.bot_left_servers',
-    target_type: 'agent',
-    target_id: agentId,
-    diff: { left: { from: left, to: 0 } },
-  }).run();
-  // The hourly check this request counted covers the fresh checklist too. Its no_other_server item tells the owner whether
-  // the rounds ran out before every other server was gone.
-  return checklist(relay, agentId, token);
+  const found = await botOf(relay, agentId, [
+    relay.db.prepare('UPDATE agent_bots SET leaving_since = ?, left_servers = 0 WHERE agent_id = ?').bind(iso(relay.now()), agentId),
+  ]);
+  const drained = await drainLeaves(relay, found!.bot, Date.now() + inlineMs, actor).catch((error: unknown) => {
+    // Whatever went wrong mid-drain, the flag stays set and the minute job resumes: the request still answers.
+    relay.log.error('bots.leave_failed', { agent_id: agentId, error });
+    return { outcome: 'waiting' as const, left: 0 };
+  });
+  const { outcome } = drained;
+  // Still leaving (or paused): don't spend the token's budget re-listing for a checklist the job's finish will change.
+  if (outcome !== 'done')
+    return {
+      items: probed(
+        { no_other_server: new RelayError(422, 'invalid_request', 'Your bot is in other servers. Staff add only a bot that is in no other server.') },
+        'no_other_server',
+      ).items,
+      bot: null,
+      leaving: outcome === 'waiting',
+    };
+  return { ...(await checklist(relay, agentId, token)), leaving: false };
 }
 
 /**
@@ -514,7 +606,7 @@ export async function setBot(relay: Relay, agent: AgentRecord, token: string, ac
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7 WHERE ${DAILY_SET_OPEN}
          ON CONFLICT (agent_id) DO UPDATE SET bot_user_id = excluded.bot_user_id, application_id = excluded.application_id, username = excluded.username,
            token_ciphertext = excluded.token_ciphertext, status = excluded.status, paused_reason = NULL, identity = NULL, checked_at = excluded.checked_at,
-           created_at = excluded.created_at, updated_at = excluded.updated_at`,
+           created_at = excluded.created_at, updated_at = excluded.updated_at, leaving_since = NULL, left_servers = 0`,
       )
       .bind(agent.id, user.id, app.id, user.username, sealed, status, now, cutoff),
     relay.db
@@ -758,15 +850,16 @@ async function takeBack(relay: Relay, grants: Grant[]): Promise<number> {
   return grants.length;
 }
 
-async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
+async function pause(relay: Relay, bot: BotRow, reason: string): Promise<boolean> {
   const now = iso(relay.now());
+  // Only the token that was judged: one saved since then is left alone.
   const r = await relay.db
     .prepare(
-      "UPDATE agent_bots SET status = 'paused', paused_reason = ?, checked_at = ?, updated_at = ? WHERE agent_id = ? AND bot_user_id = ? AND status != 'paused'",
+      "UPDATE agent_bots SET status = 'paused', paused_reason = ?, checked_at = ?, updated_at = ?, leaving_since = NULL WHERE agent_id = ? AND bot_user_id = ? AND token_ciphertext = ? AND status != 'paused'",
     )
-    .bind(reason, now, now, bot.agent_id, bot.bot_user_id)
+    .bind(reason, now, now, bot.agent_id, bot.bot_user_id, bot.token_ciphertext)
     .run();
-  if (r.meta.changes === 0) return;
+  if (r.meta.changes === 0) return false;
   relay.log.warn('bots.paused', { agent_id: bot.agent_id });
   await auditStmt(relay, {
     actor_type: 'system',
@@ -779,6 +872,7 @@ async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
   }).run();
   await syncQueue(relay, bot.agent_id);
   await revokeGrants(relay, bot.bot_user_id);
+  return true;
 }
 
 /** Pauses the agent's bot after Discord refused its token mid-send; the message goes out through the webhook instead. */
@@ -798,12 +892,12 @@ async function check(relay: Relay, bot: BotRow): Promise<void> {
   try {
     guilds = await rest.getCurrentUserGuilds();
   } catch (error) {
-    if (error instanceof DiscordError && error.status === 401) return pause(relay, bot, TOKEN_REFUSED);
+    if (error instanceof DiscordError && error.status === 401) return void (await pause(relay, bot, TOKEN_REFUSED));
     relay.log.warn('bots.check_failed', { agent_id: bot.agent_id, error });
     await relay.db.prepare('UPDATE agent_bots SET checked_at = ? WHERE agent_id = ?').bind(iso(relay.now()), bot.agent_id).run();
     return;
   }
-  if (guilds.some((g) => g.id !== guildId)) return pause(relay, bot, OTHER_SERVER);
+  if (guilds.some((g) => g.id !== guildId)) return void (await pause(relay, bot, OTHER_SERVER));
   const status: AgentBotStatus = guilds.some((g) => g.id === guildId) ? 'active' : 'waiting';
   const now = iso(relay.now());
   // Status still what was read: an owner re-saving (to saved) or a pause mid-check wins over whatever this writes.
