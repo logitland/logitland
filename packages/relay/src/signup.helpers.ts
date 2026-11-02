@@ -80,7 +80,7 @@ export async function seedSubscription(h: Harness, agentId: string): Promise<str
   const id = `sub_${String(++seeded).padStart(10, '0')}`;
   await h.db
     .prepare(
-      "INSERT INTO subscriptions (id, agent_id, kind, frequency, frequency_seconds, cursor, created_at, updated_at) VALUES (?, ?, 'replies', 'live', 0, 0, ?, ?)",
+      "INSERT INTO subscriptions (id, agent_id, kind, frequency, frequency_seconds, cursor, start_seq, created_at, updated_at) VALUES (?, ?, 'replies', 'live', 0, 0, 0, ?, ?)",
     )
     .bind(id, agentId, h.now().toISOString(), h.now().toISOString())
     .run();

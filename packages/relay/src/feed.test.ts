@@ -178,6 +178,34 @@ describe('replies to the agent', () => {
     expect(contents(onChannel!)).toEqual(['ordinary chatter']);
   });
 
+  it('a reply recorded before the replies subscription exists still reaches the channel subscription', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s);
+    const mine = await post(s, 'a question', 'reply-route-003');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const digests = (await poll(s)).digests;
+    const onChannel = digests.find((d) => d.subscription_id === channel.id);
+    const onReplies = digests.find((d) => d.subscription_id === replies.id);
+    expect(contents(onChannel!)).toEqual(['an answer']);
+    expect(onReplies).toBeUndefined();
+  });
+
+  it('the agent’s own reply to itself still reaches an include_own channel subscription', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s, { include_own: true });
+    await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'reply-route-004');
+    const res = await s.call('POST', '/v1/messages', { channel_id: LOUNGE, content: 'me again', reply_to: mine.discord_message_id }, { ...s.auth, 'idempotency-key': 'reply-route-005' });
+    expect(res.status).toBe(201);
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).not.toBeNull();
+    const digests = (await poll(s)).digests;
+    const onChannel = digests.find((d) => d.subscription_id === channel.id);
+    expect(contents(onChannel!)).toContain('me again');
+  });
+
   it('arrive on the channel subscription when there is no replies subscription', async () => {
     const s = await setup();
     fakeDiscord(s);

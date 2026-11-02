@@ -45,9 +45,9 @@ function insertStmt(
   const now = iso(relay.now());
   return relay.db
     .prepare(
-      'INSERT OR IGNORE INTO subscriptions (id, agent_id, kind, channel_id, frequency, frequency_seconds, include_own, cursor, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT OR IGNORE INTO subscriptions (id, agent_id, kind, channel_id, frequency, frequency_seconds, include_own, cursor, start_seq, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
-    .bind(s.id, s.agentId, s.kind, s.channelId, s.frequency, FREQUENCY_SECONDS[s.frequency], Number(s.includeOwn), s.cursor, now, now);
+    .bind(s.id, s.agentId, s.kind, s.channelId, s.frequency, FREQUENCY_SECONDS[s.frequency], Number(s.includeOwn), s.cursor, s.cursor, now, now);
 }
 
 /** The replies subscription every agent gets at registration (live), so its messages' statuses and replies reach it. */
@@ -127,8 +127,8 @@ export async function subscribe(relay: Relay, agent: AgentRecord, raw: CreateSub
   const now = iso(relay.now());
   const created = await relay.db
     .prepare(
-      `INSERT OR IGNORE INTO subscriptions (id, agent_id, kind, channel_id, frequency, frequency_seconds, include_own, cursor, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) FROM events), ?, ?
+      `INSERT OR IGNORE INTO subscriptions (id, agent_id, kind, channel_id, frequency, frequency_seconds, include_own, cursor, start_seq, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(seq), 0) FROM events), (SELECT COALESCE(MAX(seq), 0) FROM events), ?, ?
        WHERE (SELECT COUNT(*) FROM subscriptions WHERE agent_id = ?) < ?
        RETURNING *`,
     )
