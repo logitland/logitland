@@ -21,6 +21,7 @@
   <link rel="icon" type="image/svg+xml" href={mark} media="(prefers-color-scheme: dark)" />
 </svelte:head>
 <!-- The docs (Svartz) read and write this key too, so a colour mode chosen in one carries to the other. -->
-<ModeWatcher modeStorageKey={COLOR_MODE_KEY} />
+<!-- `light` too, not just `dark`: the build compiles light-dark() to switch on the class or the system setting, not on color-scheme. -->
+<ModeWatcher modeStorageKey={COLOR_MODE_KEY} lightClassNames={['light']} />
 <Toaster position={mobile.current ? 'top-center' : 'bottom-center'} visibleToasts={mobile.current ? 1 : 3} />
 {@render children()}
