@@ -1,16 +1,15 @@
 import { newId, type MessageStatus, type OwnerMessage, type PolicyCode, type RelayMessage, type SendMessageRequest, type Verdict } from '@logitland/contracts';
-import { iso, type Relay } from '../context';
+import { iso, readAll, type Relay, type Stmt } from '../context';
 import { sha256 } from '../crypto';
 import { RelayError, conflict, invalid, notFound } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
 import { activeBot } from './bots';
 import { usableChannel, type ChannelRow } from './channels';
-import type { ConversationRow } from './conversation';
-import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds } from './moderation/admission';
-import { hit } from './limits';
-import { Trail, writeLog } from './moderation/log';
-import { checkLoop } from './moderation/loops';
+import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds, rateChecks } from './moderation/admission';
+import { hit, peekAll } from './limits';
+import { Trail, logStmt, logStmtWhere, writeLog, type LogEntry } from './moderation/log';
+import { checkLoop, recentConversation } from './moderation/loops';
 import { decide, settle } from './moderation/pipeline';
 import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PROBATION_MAX_AUTO_ARCHIVE_MINUTES, PolicyError, isOnProbation } from './moderation/policy';
 import { standingOf } from './levels';
@@ -19,7 +18,7 @@ import { evaluateRules, judge } from './moderation/rules';
 import { checkLive, checkShape, isForum, replyLine, type Target } from './moderation/target';
 import { dispatch } from './sending';
 import { getSettings, type Settings } from './settings';
-import { escalateRuleBlocks } from './strikes';
+import { activeStrikeCount, escalateRuleBlocks } from './strikes';
 
 // POST /v1/messages and what happens to a message afterwards. The order is the point:
 // kill switches, channel and thread rules, the idempotency lookup, then (for a new attempt only) attempt counting,
@@ -75,27 +74,37 @@ interface Draft {
   botUserId: string | null;
 }
 
-/** Stores the message in the given state. Null means another request got there first (or the sweeper did). */
-async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow | null> {
+/**
+ * Stores the message in the given state and logs the trail behind it, in one round trip. Null means another request got there
+ * first (or the sweeper did), and nothing was logged.
+ */
+async function place(relay: Relay, d: Draft, to: Placement, trail: LogEntry[]): Promise<MessageRow | null> {
   const at = iso(relay.now());
   const content = to.redact ? null : d.target.text;
   const threadName = to.redact ? null : (d.req.thread_name ?? null);
   const heldKind = to.status === 'held' ? 'review' : null;
   if (d.existing) {
-    if (to.status === 'moderating') return d.existing;
-    const r = await relay.db
-      .prepare(
-        "UPDATE relay_messages SET status = ?, verdict = ?, policy_code = ?, status_reason = ?, held_kind = ?, content = ?, thread_name = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
-      )
-      .bind(to.status, to.verdict, to.policy, to.reason, heldKind, content, threadName, at, d.existing.id)
-      .run();
-    return r.meta.changes > 0 ? getRow(relay, d.existing.id) : null;
+    if (to.status === 'moderating') {
+      await writeLog(relay, d.agentId, d.existing.id, trail);
+      return d.existing;
+    }
+    // The log goes first, guarded as the update is, so it is written exactly when the update applies.
+    const placed = await readAll<MessageRow[]>(
+      relay.db,
+      ...trail.map((e) => logStmtWhere(relay, d.agentId, d.existing!.id, e, "id = ? AND status = 'moderating'", d.existing!.id)),
+      relay.db
+        .prepare(
+          "UPDATE relay_messages SET status = ?, verdict = ?, policy_code = ?, status_reason = ?, held_kind = ?, content = ?, thread_name = ?, updated_at = ? WHERE id = ? AND status = 'moderating' RETURNING *",
+        )
+        .bind(to.status, to.verdict, to.policy, to.reason, heldKind, content, threadName, at, d.existing.id),
+    );
+    return placed.at(-1)![0] ?? null;
   }
   const id = newId('message');
-  const r = await relay.db
+  const insert = relay.db
     .prepare(
       `INSERT INTO relay_messages (id, agent_id, channel_id, thread_id, thread_name, tag_ids, auto_archive_minutes, reply_to, reply_prefix, content, status, verdict, policy_code, status_reason, held_kind, idempotency_key, payload_digest, content_hash, text_hash, bot_user_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (agent_id, idempotency_key) DO NOTHING RETURNING *`,
     )
     .bind(
       id,
@@ -120,9 +129,9 @@ async function place(relay: Relay, d: Draft, to: Placement): Promise<MessageRow 
       d.botUserId,
       at,
       at,
-    )
-    .run();
-  return r.meta.changes > 0 ? getRow(relay, id) : null;
+    );
+  const placed = await readAll<MessageRow[]>(relay.db, insert, ...trail.map((e) => logStmtWhere(relay, d.agentId, id, e, 'id = ?', id)));
+  return placed[0]![0] ?? null;
 }
 
 /** A concurrent request with the same key won the insert: whatever it made is the answer. */
@@ -192,12 +201,12 @@ export async function sendMessage(relay: Relay, principal: AgentPrincipal, req: 
   // Only one of several concurrent retries gets to run the message again.
   const claimed = await relay.db
     .prepare(
-      "UPDATE relay_messages SET status = 'moderating', verdict = NULL, policy_code = NULL, status_reason = NULL, held_kind = NULL, review_attempts = 0, next_review_at = NULL, bot_user_id = ?, updated_at = ? WHERE id = ? AND status = 'failed'",
+      "UPDATE relay_messages SET status = 'moderating', verdict = NULL, policy_code = NULL, status_reason = NULL, held_kind = NULL, review_attempts = 0, next_review_at = NULL, bot_user_id = ?, updated_at = ? WHERE id = ? AND status = 'failed' RETURNING *",
     )
     .bind(draft.botUserId, iso(now), found.id)
-    .run();
-  if (claimed.meta.changes === 0) return outcome((await getRow(relay, found.id))!);
-  return run(relay, principal, channel, settings, { ...draft, existing: (await getRow(relay, found.id))! }, found);
+    .first<MessageRow>();
+  if (!claimed) return outcome((await getRow(relay, found.id))!);
+  return run(relay, principal, channel, settings, { ...draft, existing: claimed }, found);
 }
 
 async function run(
@@ -218,34 +227,39 @@ async function run(
     try {
       return await step();
     } catch (err) {
+      const logged: Stmt[] = [];
       if (err instanceof PolicyError) {
         trail.add('admission', 'block', err.policy, err.detail ?? null, 'limits');
         // A flood of limit refusals is logged once a minute, so refused requests can't fill the log.
         const flood = err.status === 429 && !(await hit(relay, { key: `refusedlog:${agent.id}:m`, limit: 1, windowSeconds: 60 }, 1, true)).ok;
-        if (!flood) await writeLog(relay, agent.id, draft.existing?.id ?? null, trail.entries);
+        if (!flood) logged.push(...trail.entries.map((e) => logStmt(relay, agent.id, draft.existing?.id ?? null, e)));
       }
       if (failed) {
-        await relay.db
-          .prepare(
-            "UPDATE relay_messages SET status = 'failed', verdict = ?, policy_code = ?, status_reason = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
-          )
-          .bind(failed.verdict, failed.policy_code, failed.status_reason, iso(relay.now()), failed.id)
-          .run();
+        logged.push(
+          relay.db
+            .prepare(
+              "UPDATE relay_messages SET status = 'failed', verdict = ?, policy_code = ?, status_reason = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
+            )
+            .bind(failed.verdict, failed.policy_code, failed.status_reason, iso(relay.now()), failed.id),
+        );
       }
+      if (logged.length) await relay.db.batch(logged);
       throw err;
     }
   };
 
   // Terminal decisions (fixed rules, duplicates) are stored as they are, with the whole trail behind them.
   const decided = async (to: Placement): Promise<SendOutcome> => {
-    const row = await place(relay, draft, to);
+    const row = await place(relay, draft, to, trail.entries);
     if (!row) return winner(relay, agent.id, draft.idempotencyKey, draft.digest);
-    await writeLog(relay, agent.id, row.id, trail.entries);
     // Keeping on at a fixed rule earns a strike; the agent is told in the answer to this message.
     const note = to.status === 'blocked' && to.policy ? await escalateRuleBlocks(relay, agent.id, to.policy) : null;
     if (!note) return outcome(row);
-    await relay.db.prepare("UPDATE relay_messages SET status_reason = COALESCE(status_reason || ' ', '') || ? WHERE id = ?").bind(note, row.id).run();
-    return outcome((await getRow(relay, row.id))!);
+    const noted = await relay.db
+      .prepare("UPDATE relay_messages SET status_reason = COALESCE(status_reason || ' ', '') || ? WHERE id = ? RETURNING *")
+      .bind(note, row.id)
+      .first<MessageRow>();
+    return outcome(noted!);
   };
 
   await refusing(() => countAttempt(relay, agent.id, limits));
@@ -263,49 +277,50 @@ async function run(
     });
   }
 
-  const dup = await findDuplicate(relay, {
+  // What the rest of admission and the classifier read, read at once; the checks then decide in order: duplicates, the loop
+  // breaker, rates. A new forum or media post joins no conversation.
+  const rates = rateChecks({
     agentId: agent.id,
-    channelId: channel.id,
-    textHash: draft.textHash,
-    excludeId: draft.existing?.id ?? null,
-    length: normalise(draft.target.text ?? '').length,
+    limits,
+    probation,
+    channel,
+    net: draft.net,
+    startsThread: Boolean(req.thread_name),
+    viaBot: Boolean(draft.botUserId),
   });
+  const [dup, conversation, strikes, counts] = await refusing(() =>
+    Promise.all([
+      findDuplicate(relay, {
+        agentId: agent.id,
+        channelId: channel.id,
+        textHash: draft.textHash,
+        excludeId: draft.existing?.id ?? null,
+        length: normalise(draft.target.text ?? '').length,
+      }),
+      req.thread_name && isForum(channel) ? [] : recentConversation(relay, channel.id, req.thread_id ?? null),
+      activeStrikeCount(relay, agent.id),
+      peekAll(relay, rates),
+    ]),
+  );
   trail.add('limits', dup?.verdict ?? 'pass', dup?.policy ?? null, dup?.reason ?? null, 'limits');
   if (dup?.verdict === 'hold') await refusing(() => assertHoldRoom(relay, agent.id));
   if (dup) return decided({ status: dup.verdict === 'block' ? 'blocked' : 'held', verdict: dup.verdict, policy: dup.policy, reason: dup.reason });
 
-  const conversation: ConversationRow[] = await refusing(() =>
-    checkLoop(relay, {
-      agentId: agent.id,
-      channelId: channel.id,
-      threadId: req.thread_id ?? null,
-      startsThread: Boolean(req.thread_name) && isForum(channel),
-    }),
-  );
-  await refusing(() =>
-    enforceRates(relay, {
-      agentId: agent.id,
-      limits,
-      probation,
-      channel,
-      net: draft.net,
-      startsThread: Boolean(req.thread_name),
-      viaBot: Boolean(draft.botUserId),
-    }),
-  );
+  await refusing(async () => {
+    checkLoop(conversation, agent.id, relay.now());
+    await enforceRates(relay, rates, counts);
+  });
   trail.add('admission', 'pass', null, null, 'limits');
 
-  const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null });
+  const row = await place(relay, draft, { status: 'moderating', verdict: null, policy: null, reason: null }, trail.entries);
   if (!row) return winner(relay, agent.id, draft.idempotencyKey, draft.digest);
-  await writeLog(relay, agent.id, row.id, trail.entries);
 
-  const decision = await decide(relay, row, agent, { probation, conversation });
+  const decision = await decide(relay, row, agent, { probation, conversation, channel, strikes });
   const wouldHold = decision.kind === 'hold' || (decision.kind === 'unavailable' && relay.config.moderationOutage === 'hold');
   if (wouldHold && (await pendingHolds(relay, agent.id)) >= MAX_PENDING_HOLDS) await refuseHold(relay, row, agent.id);
-  if (decision.kind === 'unavailable') await outage(relay, row, agent.id, decision);
-  else await settle(relay, row, agent, decision, 'moderating');
-
-  const after = (await getRow(relay, row.id))!;
+  // Null when someone else (the sweeper) moved the message first: then it is read as they left it.
+  const moved = decision.kind === 'unavailable' ? await outage(relay, row, agent.id, decision) : await settle(relay, row, agent, decision, 'moderating');
+  const after = moved ?? (await getRow(relay, row.id))!;
   if (after.status !== 'queued') return outcome(after);
   await dispatch(relay, after);
   return outcome((await getRow(relay, row.id))!);
@@ -314,44 +329,57 @@ async function run(
 /** The message needs a reviewer but the agent already has as many waiting as allowed: it is not accepted, and can be sent again later. */
 async function refuseHold(relay: Relay, row: MessageRow, agentId: string): Promise<never> {
   const error = holdCapError();
-  await relay.db
-    .prepare(
-      "UPDATE relay_messages SET status = 'failed', verdict = NULL, policy_code = 'rate_limit', status_reason = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
-    )
-    .bind(error.detail!, iso(relay.now()), row.id)
-    .run();
-  await writeLog(relay, agentId, row.id, [
-    { layer: 'admission', verdict: 'block', policy: 'rate_limit', reason: error.detail!, source: 'limits', latencyMs: null },
+  await relay.db.batch([
+    relay.db
+      .prepare(
+        "UPDATE relay_messages SET status = 'failed', verdict = NULL, policy_code = 'rate_limit', status_reason = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
+      )
+      .bind(error.detail!, iso(relay.now()), row.id),
+    logStmt(relay, agentId, row.id, { layer: 'admission', verdict: 'block', policy: 'rate_limit', reason: error.detail!, source: 'limits', latencyMs: null }),
   ]);
   throw error;
 }
 
-/** Nothing answered. Hold the message for an automatic re-check, or refuse it, as the relay is configured. */
-async function outage(relay: Relay, row: MessageRow, agentId: string, d: { reason: string; source: string; latencyMs: number }): Promise<void> {
+/**
+ * Nothing answered. Hold the message for an automatic re-check, or refuse it, as the relay is configured. Answers the held
+ * message, or null when someone else moved it first.
+ */
+async function outage(relay: Relay, row: MessageRow, agentId: string, d: { reason: string; source: string; latencyMs: number }): Promise<MessageRow | null> {
   const at = iso(relay.now());
-  const log = (verdict: 'hold' | 'block', reason: string) =>
-    writeLog(relay, agentId, row.id, [
-      { layer: 'classifier', verdict, policy: 'outage', reason: `${reason} (${d.reason})`, source: d.source, latencyMs: d.latencyMs },
-    ]);
+  const entry = (verdict: 'hold' | 'block', reason: string): LogEntry => ({
+    layer: 'classifier',
+    verdict,
+    policy: 'outage',
+    reason: `${reason} (${d.reason})`,
+    source: d.source,
+    latencyMs: d.latencyMs,
+  });
   if (relay.config.moderationOutage === 'refuse') {
     const reason = 'Moderation is unavailable, so nothing was posted. Send it again later with the same Idempotency-Key.';
-    await relay.db
-      .prepare("UPDATE relay_messages SET status = 'failed', policy_code = 'outage', status_reason = ?, updated_at = ? WHERE id = ? AND status = 'moderating'")
-      .bind(reason, at, row.id)
-      .run();
-    await log('block', reason);
+    await relay.db.batch([
+      relay.db
+        .prepare(
+          "UPDATE relay_messages SET status = 'failed', policy_code = 'outage', status_reason = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
+        )
+        .bind(reason, at, row.id),
+      logStmt(relay, agentId, row.id, entry('block', reason)),
+    ]);
     throw new PolicyError(503, 'moderation_unavailable', 'outage', reason, { retryAfterSeconds: 30 });
   }
   const reason =
     'Moderation is temporarily unavailable, so this message is held. It is checked again automatically and sent if it passes; you don’t need to do anything.';
   const next = iso(new Date(relay.now().getTime() + OUTAGE_BACKOFF_MINUTES[0] * 60_000));
-  const r = await relay.db
-    .prepare(
-      "UPDATE relay_messages SET status = 'held', verdict = 'hold', policy_code = 'outage', status_reason = ?, held_kind = 'outage', review_attempts = 0, next_review_at = ?, updated_at = ? WHERE id = ? AND status = 'moderating'",
-    )
-    .bind(reason, next, at, row.id)
-    .run();
-  if (r.meta.changes > 0) await log('hold', reason);
+  // The log goes first, guarded as the update is, so it is written exactly when the update applies.
+  const [, [held]] = await readAll<[never, MessageRow]>(
+    relay.db,
+    logStmtWhere(relay, agentId, row.id, entry('hold', reason), "id = ? AND status = 'moderating'", row.id),
+    relay.db
+      .prepare(
+        "UPDATE relay_messages SET status = 'held', verdict = 'hold', policy_code = 'outage', status_reason = ?, held_kind = 'outage', review_attempts = 0, next_review_at = ?, updated_at = ? WHERE id = ? AND status = 'moderating' RETURNING *",
+      )
+      .bind(reason, next, at, row.id),
+  );
+  return held ?? null;
 }
 
 /** The agent's own message, or 404. */

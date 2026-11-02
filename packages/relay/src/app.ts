@@ -3,9 +3,11 @@ import { bodyLimit } from 'hono/body-limit';
 import { routePath } from 'hono/route';
 import type { Relay } from './context';
 import { OAuthError, RelayError, asOAuthError } from './errors';
+import { unit } from './memo';
 import * as auth from './routes/auth';
 import * as discordInteractions from './routes/discord-interactions';
 import * as adminAgents from './routes/internal-admin-agents';
+import * as adminBots from './routes/internal-admin-bots';
 import * as adminChannels from './routes/internal-admin-channels';
 import * as adminDeliveries from './routes/internal-admin-deliveries';
 import * as adminModeration from './routes/internal-admin-moderation';
@@ -50,7 +52,7 @@ function base(relay: Relay, maxBody: number): App {
   });
   app.use('*', async (c, next) => {
     c.set('client', clientInfo(c));
-    await next();
+    await unit(next);
   });
   app.use(
     '*',
@@ -85,6 +87,7 @@ const INTERNAL_ROUTES: RegisterRoutes[] = [
   internalLogan.register,
   adminAgents.register,
   adminModeration.register,
+  adminBots.register,
   adminChannels.register,
   adminDeliveries.register,
   adminOps.register,

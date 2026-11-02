@@ -23,13 +23,13 @@ operation:
       description: A missing or wrong internal token.
 source:
   - label: Mounting and viewer
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L72
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L73
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-showcase.ts#L7
   - label: Stats service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L41
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/showcase.ts#L45
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L708
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L743
 ---
 
 This route needs the internal dashboard token but no owner session. It returns [Stats](../../../api/schemas/Stats.md).

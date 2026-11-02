@@ -49,6 +49,11 @@ export class RateLimitedError extends DiscordError {
   constructor(
     readonly retryAfterSeconds: number,
     rateLimit: RateLimit,
+    /** The 429 wasn't Discord's JSON (Cloudflare's IP-level block answers HTML), so its retry_after may be guessed. */
+    readonly cloudflare = false,
+    /** The 429's body (cut to 2,000 characters) and Cloudflare's ray ID, for asking Discord about it. */
+    readonly body: string | null = null,
+    readonly ray: string | null = null,
   ) {
     super(`Rate limited for ${retryAfterSeconds}s (${rateLimit.scope ?? 'unknown'} scope)`, 429, null, rateLimit);
     this.name = 'RateLimitedError';
@@ -181,6 +186,8 @@ export interface CurrentApplication {
   flags?: number;
   /** Whether anyone, not only its owner, may add the bot to a server. */
   bot_public?: boolean;
+  /** Whether adding the bot takes the full OAuth2 code grant, which a plain authorize link can't finish. */
+  bot_require_code_grant?: boolean;
   interactions_endpoint_url?: string | null;
   /** The person who owns the application; for a team-owned one, a stand-in user for the team. */
   owner?: DiscordUser;
@@ -236,18 +243,78 @@ export interface CreateMessageBody {
   flags?: number;
 }
 
+/** A response Discord refused, with its request's retry count: every header and the whole body, tokens redacted. */
+export interface DiscordErrorResponse {
+  method: string;
+  route: string;
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  retry: number;
+}
+
 export interface RestOptions {
   botToken?: string;
   fetch?: typeof fetch;
   base?: string;
   timeoutMs?: number;
   userAgent?: string;
+  /** Called for every non-2xx response, retried 429s included, before it is thrown or waited out. */
+  onErrorResponse?: (info: DiscordErrorResponse) => void;
+  /** How pacing and 429 retries wait; real time by default. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A 429 under this wait is slept off and retried; a longer one is thrown at once. */
+const RETRY_UNDER_SECONDS = 5;
+const RETRY_LIMIT = 2;
+/** Small slack over Discord's reset-after, which is rounded down. */
+const RESET_SLACK_MS = 50;
+
+/** The path's major parameter, when it has one — Discord's bucket hash doesn't include it, so two channels can't share quota. */
+function majorOf(path: string): string {
+  return /^\/(?:channels|guilds|webhooks)\/\d{15,25}/.exec(path.split('?')[0]!)?.[0] ?? '';
+}
+
+/**
+ * Discord keys rate-limit buckets by the route with its major parameters (the id after /channels/, /guilds/ or /webhooks/
+ * at the start of the path) kept and every other snowflake made :id. Webhook and interaction tokens are secrets, so they
+ * become :token.
+ */
+function routeKey(method: string, path: string): string {
+  const p = path.split('?')[0]!;
+  const major = majorOf(path);
+  let rest = p.slice(major.length).replace(/\d{15,25}/g, ':id');
+  if (major.startsWith('/webhooks/')) rest = rest.replace(/^\/[\w.-]+/, '/:token');
+  else rest = rest.replace(/^\/interactions\/:id\/[\w.-]+/, '/interactions/:id/:token');
+  return `${method} ${major}${rest}`;
+}
+
+/** The route for logs: snowflakes kept, webhook and interaction tokens redacted. */
+function safeRoute(path: string): string {
+  return path.split('?')[0]!.replace(/(\/(?:webhooks|interactions)\/\d{15,25})\/[\w.-]+/, '$1/:token');
+}
+
+/** A response's JSON, or null when it isn't (Cloudflare's 429 page, a bare 204). */
+function parseJson<T>(text: string): T | null {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
 }
 
 export class DiscordRest {
   private readonly f: typeof fetch;
+  /** Per token: which bucket a route answered under, and when that bucket next allows a request. */
+  private readonly routeBuckets = new Map<string, string>();
+  private readonly buckets = new Map<string, { remaining: number; resetAt: number }>();
+  private readonly sleep: (ms: number) => Promise<void>;
   constructor(private readonly opts: RestOptions = {}) {
     this.f = opts.fetch ?? fetch.bind(globalThis);
+    this.sleep = opts.sleep ?? defaultSleep;
   }
 
   /** The API root calls go to: Discord's, or a development fake. */
@@ -294,6 +361,11 @@ export class DiscordRest {
   /** The servers the bot is in (up to 200, more than any agent's bot may be in). */
   getCurrentUserGuilds(): Promise<PartialGuild[]> {
     return this.send<PartialGuild[]>('GET', '/users/@me/guilds', undefined, true);
+  }
+
+  /** Takes the bot out of a server. */
+  leaveGuild(guildId: string): Promise<void> {
+    return this.send<void>('DELETE', `/users/@me/guilds/${guildId}`, undefined, true);
   }
 
   /** Changes the bot's name or avatar (a data URI). Discord allows only a few changes an hour. */
@@ -500,27 +572,53 @@ export class DiscordRest {
       throw new UncertainSendError(err);
     }
     const rateLimit = readRateLimit(res.headers);
-    if (res.status === 429) throw await this.rateLimited(res, rateLimit);
+    const text = await res.text().catch(() => '');
+    if (!res.ok) this.opts.onErrorResponse?.({ method: 'POST', route: safeRoute(path), status: res.status, headers: Object.fromEntries(res.headers), body: text, retry: 0 });
+    if (res.status === 429) throw this.rateLimited(res, rateLimit, text);
     if (res.status >= 500 || res.status === 408) {
-      await res.body?.cancel().catch(() => {});
       throw new UncertainSendError(new DiscordError(`Discord returned ${res.status}`, res.status, null, rateLimit));
     }
     if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { message?: string; code?: number };
+      const data = parseJson<{ message?: string; code?: number }>(text) ?? {};
       throw new DiscordError(data.message ?? `Discord returned ${res.status}`, res.status, data.code ?? null, rateLimit);
     }
     try {
-      return { message: (await res.json()) as T, rateLimit };
+      return { message: JSON.parse(text) as T, rateLimit };
     } catch (err) {
       throw new UncertainSendError(err);
     }
   }
 
-  private async rateLimited(res: Response, rl: RateLimit): Promise<RateLimitedError> {
-    const data = (await res.json().catch(() => ({}))) as { retry_after?: number; global?: boolean };
+  private rateLimited(res: Response, rl: RateLimit, text: string): RateLimitedError {
+    const data = parseJson<{ retry_after?: number; global?: boolean }>(text);
     const header = Number(res.headers.get('retry-after'));
-    const retry = Number.isFinite(header) && header > 0 ? header : (data.retry_after ?? 1);
-    return new RateLimitedError(retry, { ...rl, global: rl.global || Boolean(data.global) });
+    const retry = Number.isFinite(header) && header > 0 ? header : (data?.retry_after ?? 1);
+    return new RateLimitedError(retry, { ...rl, global: rl.global || Boolean(data?.global) }, data === null, text.slice(0, 2000), res.headers.get('cf-ray'));
+  }
+
+  /** Where Discord's headers put this route's bucket, and how full it is, for the next call's pacing. */
+  private readBucket(key: string, major: string, rl: RateLimit): void {
+    if (!rl.bucket) return;
+    // The hash doesn't name the major resource, so two channels under it keep separate quotas.
+    const bucket = `${rl.bucket}|${major}`;
+    this.routeBuckets.set(key, bucket);
+    this.buckets.set(bucket, { remaining: rl.remaining ?? 1, resetAt: Date.now() + (rl.resetAfterSeconds ?? 0) * 1000 });
+  }
+
+  /** Waits out a known empty bucket, or throws when the wait would be long: no point asking Discord. */
+  private async pace(key: string): Promise<void> {
+    const bucket = this.routeBuckets.has(key) ? this.buckets.get(this.routeBuckets.get(key)!) : undefined;
+    const wait = bucket?.remaining === 0 ? bucket.resetAt - Date.now() : 0;
+    if (wait <= 0) return;
+    if (wait <= RETRY_UNDER_SECONDS * 1000) return this.sleep(wait + RESET_SLACK_MS);
+    throw new RateLimitedError(wait / 1000, {
+      limit: null,
+      remaining: 0,
+      resetAfterSeconds: wait / 1000,
+      bucket: this.routeBuckets.get(key)!,
+      scope: null,
+      global: false,
+    });
   }
 
   private async send<T>(method: string, path: string, body: unknown, bot: boolean, uncertainOnTimeout = false, auditReason?: string): Promise<T> {
@@ -531,25 +629,42 @@ export class DiscordRest {
       if (!this.opts.botToken) throw new Error('A bot token is required for this call');
       headers.authorization = `Bot ${this.opts.botToken}`;
     }
-    let res: Response;
-    try {
-      res = await this.f(`${this.opts.base ?? DISCORD_API}${path}`, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(this.opts.timeoutMs ?? 10_000),
-      });
-    } catch (err) {
-      if (uncertainOnTimeout) throw new UncertainSendError(err);
-      throw err;
+    const key = routeKey(method, path);
+    const major = majorOf(path);
+    for (let retry = 0; ; retry++) {
+      await this.pace(key);
+      let res: Response;
+      try {
+        res = await this.f(`${this.opts.base ?? DISCORD_API}${path}`, {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(this.opts.timeoutMs ?? 10_000),
+        });
+      } catch (err) {
+        if (uncertainOnTimeout) throw new UncertainSendError(err);
+        throw err;
+      }
+      const rl = readRateLimit(res.headers);
+      this.readBucket(key, major, rl);
+      const text = await res.text().catch(() => '');
+      if (!res.ok)
+        this.opts.onErrorResponse?.({ method, route: safeRoute(path), status: res.status, headers: Object.fromEntries(res.headers), body: text, retry });
+      // A 429 did nothing on Discord's side, so even a POST is safe to send again.
+      if (res.status === 429) {
+        const err = this.rateLimited(res, rl, text);
+        if (err.retryAfterSeconds <= RETRY_UNDER_SECONDS && retry < RETRY_LIMIT) {
+          await this.sleep(Math.ceil(err.retryAfterSeconds * 1000) + RESET_SLACK_MS);
+          continue;
+        }
+        throw err;
+      }
+      if (!res.ok) {
+        const data = parseJson<{ message?: string; code?: number }>(text) ?? {};
+        throw new DiscordError(data.message ?? `Discord returned ${res.status}`, res.status, data.code ?? null, rl);
+      }
+      if (res.status === 204) return undefined as T;
+      return JSON.parse(text) as T;
     }
-    const rl = readRateLimit(res.headers);
-    if (res.status === 429) throw await this.rateLimited(res, rl);
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { message?: string; code?: number };
-      throw new DiscordError(data.message ?? `Discord returned ${res.status}`, res.status, data.code ?? null, rl);
-    }
-    if (res.status === 204) return undefined as T;
-    return (await res.json()) as T;
   }
 }

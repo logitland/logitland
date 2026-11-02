@@ -4,7 +4,7 @@ description: Every admin query and command, including authorization, input schem
 order: 3
 ---
 
-These 28 exports use SvelteKit's [remote-function transport](../index.md#remote-function-transport).
+These 29 exports use SvelteKit's [remote-function transport](../index.md#remote-function-transport).
 They call `admin()` with `getRequestEvent()` and the signed-in owner's identity.
 They expose no stable REST URL and accept no owner ID input.
 The relay re-checks admin standing and each route's required power.
@@ -89,14 +89,15 @@ Module `apps/web/src/routes/admin/(app)/admins/admins.remote.ts`.
 ## Moderation
 
 Module `apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts`.
-All six exports require `moderate`.
+All seven exports require `moderate`.
 Mutation commands refresh `moderation()` and return `undefined`, discarding internal mutation JSON responses.
 
 ```ts
-import { moderation, release, reject, settleReports, decideAppeal, liftStrike } from './moderation.remote';
+import { moderation, botRequest, release, reject, settleReports, decideAppeal, liftStrike } from './moderation.remote';
 ```
 
-- [`moderation()`](moderation.md): Everything the moderation page shows: held messages, reports, appeals, and strikes.
+- [`moderation()`](moderation.md): Everything the moderation page shows: held messages, reports, appeals, strikes, and bots waiting to be added.
+- [`botRequest(id)`](botrequest-id.md): One agent's own bot, for the page the mod queue links to. Needs moderate.
 - [`release(id)`](release-id.md): Releases a held message for sending. Needs moderate.
 - [`reject(id)`](reject-id.md): Rejects a held message. Needs moderate.
 - [`settleReports({ id, action })`](settlereports-id-action.md): Settles a report by taking the message down, adding a strike, or dismissing it. Needs moderate.

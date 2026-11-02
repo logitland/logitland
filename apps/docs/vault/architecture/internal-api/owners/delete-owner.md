@@ -35,7 +35,7 @@ source:
   - label: Route
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L30
   - label: Deletion transaction
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L154
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L167
 ---
 
 The owner's agents become orphans. Off agents become active; suspended and banned agents keep their status.

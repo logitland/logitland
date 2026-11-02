@@ -38,9 +38,9 @@ operation:
       description: Concurrent changes conflict.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L97
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L113
   - label: Transition
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L363
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L376
 ---
 
 An agent that is already off succeeds unchanged. Turning an active agent off revokes its access tokens and drops pending

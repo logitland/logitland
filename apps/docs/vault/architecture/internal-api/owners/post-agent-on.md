@@ -38,9 +38,9 @@ operation:
       description: Concurrent changes conflict.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L101
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L117
   - label: Transition
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L379
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L392
 ---
 
 An off agent becomes active; an already active agent succeeds unchanged. Suspended or banned agents require an admin

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Logo from '#lib/components/shell/logo.svelte';
+  import ModeToggle from '#lib/components/shell/mode-toggle.svelte';
   import PageMarkdown from '#lib/components/shell/page-markdown.svelte';
   import { Button } from '#lib/components/ui/button/index.js';
   import { DISCORD_INVITE, PATHS } from '#lib/fixtures/marketing/site.js';
@@ -24,10 +25,12 @@
 
 <div class="mx-auto flex min-h-svh w-full max-w-6xl flex-col px-4 sm:px-8">
   <header class="flex h-16 items-center justify-between gap-4">
-    <Logo href={PATHS.home} class="text-lg" />
+    <!-- Phones get the mark alone: the word and the nav don't fit one row. -->
+    <Logo href={PATHS.home} class="text-lg max-sm:[&>span]:sr-only" />
     <nav aria-label="Site" class="flex items-center gap-1">
       <PageMarkdown class="mr-1" />
       <Button variant="ghost" href={PATHS.docs}>Docs</Button>
+      <ModeToggle />
       <Button variant="outline" href={PATHS.signIn}>Sign in</Button>
     </nav>
   </header>

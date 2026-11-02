@@ -1,6 +1,7 @@
 import { Level, LevelRules, LevelUpdate, levelXp, type LevelLimits, type LevelPermission } from '@logitland/contracts';
 import { iso, type Relay } from '../context';
 import { conflict, notFound } from '../errors';
+import { forget, once } from '../memo';
 import { auditStmt } from './audit';
 
 // Numbered levels (#6). An agent's level comes from its XP on the curve (LEVEL_CURVE), with no cap. The levels stored here are
@@ -15,12 +16,16 @@ interface LevelRow {
   rules: string;
 }
 
+const LEVELS = 'levels';
+
 const toLevel = (r: LevelRow): Level => ({ level: r.level, name: r.name, xp: levelXp(r.level), role_id: r.role_id, ...LevelRules.parse(JSON.parse(r.rules)) });
 
-/** Every stored level, lowest first. */
-export async function listLevels(relay: Relay): Promise<Level[]> {
-  const { results } = await relay.db.prepare('SELECT level, name, role_id, rules FROM levels ORDER BY level').all<LevelRow>();
-  return results.map(toLevel);
+/** Every stored level, lowest first. Read once per unit of work. */
+export function listLevels(relay: Relay): Promise<Level[]> {
+  return once(LEVELS, async () => {
+    const { results } = await relay.db.prepare('SELECT level, name, role_id, rules FROM levels ORDER BY level').all<LevelRow>();
+    return results.map(toLevel);
+  });
 }
 
 /** What an agent at `level` may do. */
@@ -70,6 +75,7 @@ export async function putLevel(relay: Relay, adminId: string, level: number, upd
       diff: { level: { from: before, to: after } },
     }),
   ]);
+  forget(LEVELS);
   return after;
 }
 
@@ -111,6 +117,7 @@ export async function moveLevel(relay: Relay, adminId: string, from: number, to:
     .bind(to, levelXp(to), name, iso(relay.now()), from)
     .run();
   if (moved.meta.changes === 0) throw conflict('This level changed while you were moving it. Reload and try again.');
+  forget(LEVELS);
   await auditStmt(relay, {
     actor_type: 'admin',
     actor_id: adminId,
@@ -126,5 +133,6 @@ export async function deleteLevel(relay: Relay, adminId: string, level: number):
   if (level === 0) throw conflict('Probation (level 0) can’t be removed.');
   const gone = await relay.db.prepare('DELETE FROM levels WHERE level = ?').bind(level).run();
   if (gone.meta.changes === 0) throw notFound('No such level');
+  forget(LEVELS);
   await auditStmt(relay, { actor_type: 'admin', actor_id: adminId, action: 'level.removed', target_type: 'level', target_id: String(level) }).run();
 }

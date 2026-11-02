@@ -5,6 +5,8 @@
  */
 import {
   AgentId,
+  BotCheck,
+  BotCheckRequest,
   BotRequest,
   Frequency,
   MessageStatus,
@@ -16,6 +18,7 @@ import {
   type Agent,
   type AgentBotSetting,
   type AgentSelf,
+  type BotLeave,
   type Channel,
   type ClaimLookup,
   type ClaimOutcome,
@@ -125,9 +128,27 @@ export const setCap = command(z.object({ agentId: AgentId, ...OwnerDeliveryPatch
  */
 export const getBot = query(AgentId, async (agentId) => owned<AgentBotSetting>(`/agents/${agentId}/bot`));
 
-/** Gives the relay the agent's bot token; the relay checks it with Discord before it keeps it. */
+/** Saves the agent's bot token; the relay checks it with Discord before it keeps it. The bot is `saved` until requested. */
 export const setBot = command(z.object({ agentId: AgentId, ...BotRequest.shape }), async ({ agentId, token }) => {
   await owned<AgentBotSetting>(`/agents/${agentId}/bot`, { method: 'PUT', body: { token } });
+  await getBot(agentId).refresh();
+});
+
+/** What staff need before they can add the bot, ticked for a token, or for the saved bot without one. Saves nothing. */
+export const checkBot = command(z.object({ agentId: AgentId, ...BotCheckRequest.shape }), ({ agentId, token }) =>
+  owned<BotCheck>(`/agents/${agentId}/bot/check`, { method: 'POST', body: { token } }),
+);
+
+/** Makes the saved bot leave every server except ours, and answers what staff need fresh. */
+export const leaveOtherServers = command(AgentId, async (agentId) => {
+  const left = await owned<BotLeave>(`/agents/${agentId}/bot/leave-servers`, { method: 'POST' });
+  await getBot(agentId).refresh();
+  return left;
+});
+
+/** Asks staff to add the saved bot. The relay checks its token again first. */
+export const requestBot = command(AgentId, async (agentId) => {
+  await owned<AgentBotSetting>(`/agents/${agentId}/bot/request`, { method: 'POST' });
   await getBot(agentId).refresh();
 });
 

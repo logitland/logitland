@@ -3,7 +3,7 @@ import { DiscordError } from '@logitland/discord';
 import { iso, type Relay, type Stmt } from '../context';
 import { auditStmt } from './audit';
 import { dmOwnerStanding } from './bot-standing';
-import { BOT_BAR_DAYS, BOT_STRIKE_DAYS, removeBot } from './bots';
+import { activeStrikesStmt, BOT_BAR_DAYS, BOT_STRIKE_DAYS, removeBot } from './bots';
 import { chunk, commitPlan, MAX_PARAMS, placeholders, planEvent } from './events';
 import { logStmt } from './moderation/log';
 import { contentHash } from './moderation/rows';
@@ -109,9 +109,9 @@ async function done(relay: Relay, what: string, call: () => Promise<unknown>): P
 async function enforce(relay: Relay, o: Offense): Promise<void> {
   const now = relay.now();
   const agent = await relay.db
-    .prepare('SELECT a.name, o.discord_user_id AS owner FROM agents a LEFT JOIN owners o ON o.id = a.owner_id WHERE a.id = ?')
+    .prepare('SELECT a.id, a.name, a.avatar_url, o.discord_user_id AS owner FROM agents a LEFT JOIN owners o ON o.id = a.owner_id WHERE a.id = ?')
     .bind(o.agentId)
-    .first<{ name: string; owner: string | null }>();
+    .first<{ id: string; name: string; avatar_url: string | null; owner: string | null }>();
   // The strike, decided and recorded in one statement so offenses handled at once can't both count as the same step.
   const { results } = await relay.db
     .prepare(
@@ -151,7 +151,8 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
     await scrubMessage(relay, o.messageId, 'moderator', { channelId: o.channelId });
   }
 
-  const strikes = effect ? await activeStrikes(relay, o.agentId) : 0;
+  const active = effect ? await activeStrikesStmt(relay, o.agentId).first<{ n: number; next: string | null }>() : null;
+  const strikes = active?.n ?? 0;
   const guildId = relay.config.discord.guildId;
   const stmts: Stmt[] = [];
   const timedOutUntil = iso(new Date(now.getTime() + TIMEOUT_HOURS * HOUR_MS));
@@ -203,16 +204,13 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
       data: { message_id: o.messageId, strikes, effect, reason: note },
     });
     await commitPlan(relay, [event.stmt], [{ at: 0, event }]);
-    if (agent?.owner) await dmOwnerStanding(relay, o.agentId, { effect, edited: Boolean(o.edit), timedOutUntil, barredUntil, deleted, enforced });
+    if (agent?.owner)
+      await dmOwnerStanding(
+        relay,
+        { ...agent, owner: agent.owner },
+        { effect, edited: Boolean(o.edit), timedOutUntil, barredUntil, deleted, enforced, strikes, nextExpiresAt: active?.next ?? null },
+      );
   }
-}
-
-async function activeStrikes(relay: Relay, agentId: string): Promise<number> {
-  const r = await relay.db
-    .prepare('SELECT COUNT(*) AS n FROM bot_strikes WHERE agent_id = ? AND effect IS NOT NULL AND expires_at > ?')
-    .bind(agentId, iso(relay.now()))
-    .first<{ n: number }>();
-  return r?.n ?? 0;
 }
 
 const did = (o: Offense) => (o.edit ? 'Your bot edited a message outside the relay' : 'Your bot posted outside the relay');

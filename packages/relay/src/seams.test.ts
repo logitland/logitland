@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { checkConfig, type RelayBindings } from './config';
 import { SecretBox } from './crypto';
 import { handleScheduled } from './jobs';
-import { enforce, hit, sweepCountersJob } from './services/limits';
+import { enforce, hit, peek, sweepCountersJob } from './services/limits';
 import { readPage } from './services/conversation';
 import { getSettings, updateSettings } from './services/settings';
 import { ADMIN_DISCORD, BENCH, LOUNGE, harness, seedAgent, seedChannel, seedOwner } from './testing';
@@ -103,6 +103,20 @@ describe('rate counters', () => {
     await expect(enforce(h.relay, [{ ...l, limit: 0 }], 'Too many')).rejects.toMatchObject({ status: 429 });
     h.advance(3 * 86_400_000);
     expect(await sweepCountersJob(h.relay)).toBeGreaterThan(0);
+  });
+
+  it('count a request against the limits before the one that refuses it, and none after, even at once', async () => {
+    const h = harness();
+    const narrow = { key: 'test:narrow:h', limit: 1, windowSeconds: 3600 };
+    const wide = { key: 'test:wide:h', limit: 10, windowSeconds: 3600 };
+    const both = () => enforce(h.relay, [narrow, wide], 'Too many');
+    const results = await Promise.allSettled([both(), both(), both()]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(await peek(h.relay, wide)).toBe(1);
+
+    const first = { key: 'test:first:h', limit: 5, windowSeconds: 3600 };
+    await expect(enforce(h.relay, [first, narrow], 'Too many')).rejects.toMatchObject({ status: 429 });
+    expect(await peek(h.relay, first)).toBe(1);
   });
 });
 

@@ -36,7 +36,7 @@ source:
   - label: Creation
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/adoption.ts#L39
   - label: Owner checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L116
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L134
   - label: Token schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L227
 ---

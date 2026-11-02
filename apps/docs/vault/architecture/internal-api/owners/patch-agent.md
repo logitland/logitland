@@ -66,7 +66,7 @@ source:
   - label: Profile schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L212
   - label: Profile service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L272
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L280
   - label: Avatar copy service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/avatars.ts#L34
 ---

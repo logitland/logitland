@@ -43,7 +43,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L51
   - label: Lookup
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L74
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L78
   - label: Claim checks
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L58
 ---

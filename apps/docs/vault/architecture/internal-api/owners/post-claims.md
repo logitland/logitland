@@ -58,11 +58,11 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L53
   - label: Decision
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L85
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L89
   - label: Claim checks
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/claims.ts#L58
   - label: Owner checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L116
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L134
 ---
 
 `user_code` must pass the exact uppercase `7QFM-KX2D` schema before the service runs. Approval links the owner, grants adoption XP, and revokes the agent's existing access tokens.

@@ -12,4 +12,4 @@ Missing messages return `404`; wrong status or reports holds return `409`.
 await release('msg_0000000001');
 ```
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L99>)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L120>)

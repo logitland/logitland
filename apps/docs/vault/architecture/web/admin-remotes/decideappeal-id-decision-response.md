@@ -16,4 +16,4 @@ await decideAppeal({
 });
 ```
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L120>) · [Appeal effects](../../internal-api/moderation/post-internal-admin-appeals-appealid.md)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L141>) · [Appeal effects](../../internal-api/moderation/post-internal-admin-appeals-appealid.md)

@@ -18,4 +18,4 @@ Missing reports return `404`; settled or raced decisions return `409`.
 Incompatible target/action pairs return `400`.
 Takedown also inherits webhook/Discord deletion failures.
 
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L114>) · [Report decisions](../../internal-api/moderation/post-internal-admin-reports-reportid.md)
+[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/moderation/moderation.remote.ts#L135>) · [Report decisions](../../internal-api/moderation/post-internal-admin-reports-reportid.md)

@@ -117,6 +117,7 @@
         inputId="adoption-code"
         maxlength={CODE_LENGTH}
         pattern={CODE_PATTERN}
+        pasteTransformer={(text) => text.replace(/[\s-]/g, '')}
         bind:value={() => code, enter}
         disabled={adopting}
         aria-invalid={codeError ? true : undefined}

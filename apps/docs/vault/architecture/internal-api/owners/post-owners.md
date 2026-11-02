@@ -40,9 +40,9 @@ source:
   - label: Route
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L17
   - label: Upsert
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L92
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L93
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1069
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1104
 ---
 
 The web Worker calls this route through its private `RELAY` service binding after a Discord sign-in. No owner session exists yet, so it takes no `x-logitland-owner` header.

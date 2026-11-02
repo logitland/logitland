@@ -37,7 +37,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L62
   - label: Cancellation
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/adoption.ts#L77
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/adoption.ts#L76
 ---
 
 `:token` is the `7QFM-KX2D` code from [POST …/adoption-tokens](post-adoption-tokens.md). Only unused tokens become `cancelled`; an already used token is unchanged.

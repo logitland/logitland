@@ -32,6 +32,8 @@ export default defineConfig({
       theme: {
         base: ['@svartz/theme-api-docs', '@svartz/theme-mcp-docs'],
         tokens,
+        // The web app's marks (`static/`, copies of apps/web/src/lib/assets): pink on light pages, black on dark.
+        logo: { src: '/logit-staging.svg', dark: '/logit.svg' },
         // The relay the examples call: the docs' placeholder for the origin serving them (README.md). Pages on another
         // origin set `operation.server`.
         baseUrl: 'https://relay.example',

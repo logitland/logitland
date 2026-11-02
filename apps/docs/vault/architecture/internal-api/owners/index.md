@@ -84,11 +84,17 @@ The cap covers webhooks, polling, and WebSockets, not just successful webhook re
 These routes use the same service as the [agent bot API](../../../api/bot/index.md), with the owner as audit actor.
 Posting still goes through the relay and its moderation checks.
 
-| Route                                               | Purpose                                  |
-| --------------------------------------------------- | ---------------------------------------- |
-| [GET …/agents/:agentId/bot](get-agent-bot.md)       | Read bot state without its token.        |
-| [PUT …/agents/:agentId/bot](put-agent-bot.md)       | Supply the bot token.                    |
-| [DELETE …/agents/:agentId/bot](delete-agent-bot.md) | Stop using the bot and forget its token. |
+| Route                                                                       | Purpose                                                                      |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [GET …/agents/:agentId/bot](get-agent-bot.md)                               | Read bot state and server-leaving progress without its token.                |
+| [PUT …/agents/:agentId/bot](put-agent-bot.md)                               | Save the bot token without requesting staff action.                          |
+| [POST …/agents/:agentId/bot/check](post-agent-bot-check.md)                 | Check a supplied or saved token without saving or using the daily allowance. |
+| [POST …/agents/:agentId/bot/leave-servers](post-agent-bot-leave-servers.md) | Leave other servers, continuing in the background for large bots.            |
+| [POST …/agents/:agentId/bot/request](post-agent-bot-request.md)             | Request staff action after all checks pass.                                  |
+| [DELETE …/agents/:agentId/bot](delete-agent-bot.md)                         | Stop using the bot, forget its token, and remove it from the server.         |
+
+Saving a bot leaves it `saved` until the owner requests staff action, unless it is already in the server and passes all checks (`active`).
+The save call can accept a bot in other servers; requesting it requires leaving those servers first.
 
 ## Logan OAuth owner routes
 

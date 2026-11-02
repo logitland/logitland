@@ -31,9 +31,9 @@ operation:
       description: A missing or different owner header.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L15
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L16
   - label: Listing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L176
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L191
   - label: Subscription schemas
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L617
 ---

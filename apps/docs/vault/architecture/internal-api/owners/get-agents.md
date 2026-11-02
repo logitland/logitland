@@ -35,7 +35,7 @@ source:
   - label: Agent schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L41
   - label: Agent serialization
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L51
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L52
 ---
 
 Returns `{ agents: Agent[] }` in adoption order, oldest first, without pagination.

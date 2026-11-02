@@ -57,13 +57,13 @@ operation:
       description: The channel is missing or not visible.
 source:
   - label: Mounting and viewer
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L72
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L73
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L100
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L101
   - label: Thread listing
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/threads.ts#L28
   - label: Thread schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1154
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1189
 ---
 
 This route needs the internal dashboard token but no owner session. It uses the anonymous `ANY_AGENT` viewer and

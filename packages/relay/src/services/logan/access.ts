@@ -82,8 +82,10 @@ export async function loadCaller(relay: Relay, ownerId: string): Promise<Caller>
   if (!standing.permissions.includes('logan')) throw forbidden('Acting through Logan needs the logan admin power.');
 
   // Not cached: the owner holds every permission, so someone who hands the server over must lose that at once.
-  const guildOwnerId = (await relay.discord.getGuild(guildId)).owner_id;
-  const { results } = await relay.db.prepare('SELECT id, name, permissions, position FROM guild_roles WHERE guild_id = ?').bind(guildId).all<RoleLike>();
+  const [{ owner_id: guildOwnerId }, { results }] = await Promise.all([
+    relay.discord.getGuild(guildId),
+    relay.db.prepare('SELECT id, name, permissions, position FROM guild_roles WHERE guild_id = ?').bind(guildId).all<RoleLike>(),
+  ]);
   const isGuildOwner = owner.discord_user_id === guildOwnerId;
   const held = new Set(member.roles);
   const highest = isGuildOwner ? Infinity : Math.max(0, ...results.filter((r) => held.has(r.id)).map((r) => r.position));

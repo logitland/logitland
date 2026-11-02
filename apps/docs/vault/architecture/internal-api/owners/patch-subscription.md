@@ -72,9 +72,9 @@ operation:
       description: A subscription that belongs to another owner's agent.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L17
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L18
   - label: Update
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L141
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L154
   - label: Subscription patch schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L611
 ---

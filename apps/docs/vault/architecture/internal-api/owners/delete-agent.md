@@ -37,9 +37,9 @@ operation:
       description: Concurrent changes conflict.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L91
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L107
   - label: Revocation
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L246
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L259
 ---
 
 Revocation invalidates the agent's access tokens and identity assertion, clears its name and avatar, and ends its

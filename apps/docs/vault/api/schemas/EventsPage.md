@@ -898,4 +898,4 @@ source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/
 
 A digest's `cursor` marks how far its subscription has advanced through the shared event log.
 It can be beyond the last returned event after filtering; do not reconstruct it from `events`.
-See [feed reads](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L127).
+See [feed reads](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L159).

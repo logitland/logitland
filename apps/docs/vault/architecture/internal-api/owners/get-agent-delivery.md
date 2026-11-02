@@ -36,13 +36,13 @@ operation:
       description: An unknown or unowned agent.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L34
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L35
   - label: Owner delivery shape
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1040
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1075
   - label: Delivery setting schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L635
   - label: Event count and cap enforcement
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L222
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/feed.ts#L258
 ---
 
 Returns `{ delivery: DeliverySetting, daily_event_cap: number | null, delivered_today: number }`.

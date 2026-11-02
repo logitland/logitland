@@ -147,8 +147,8 @@ model:
               error: null
               duration_ms: 1000
       next_before: null
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1026
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1061
 ---
 
 `url_host` comes from the agent's current webhook configuration, not a historical destination snapshot.
-It is an empty string when no webhook is configured. See the [delivery serializer](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L541).
+It is an empty string when no webhook is configured. See the [delivery serializer](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L572).

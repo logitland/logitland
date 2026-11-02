@@ -38,7 +38,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L43
   - label: Result construction
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L244
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/signup.ts#L252
   - label: Self schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L125
 ---

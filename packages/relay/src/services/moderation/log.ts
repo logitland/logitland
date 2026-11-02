@@ -34,12 +34,23 @@ export class Trail {
   }
 }
 
+const INSERT_LOG = 'INSERT INTO moderation_log (agent_id, message_id, layer, verdict, policy_code, reason, source, latency_ms, confidence, created_at)';
+
+const logValues = (relay: Relay, agentId: string, messageId: string | null, e: LogEntry) =>
+  [agentId, messageId, e.layer, e.verdict, e.policy, e.reason, e.source, e.latencyMs, e.confidence ?? null, iso(relay.now())] as const;
+
 export function logStmt(relay: Relay, agentId: string, messageId: string | null, e: LogEntry): Stmt {
+  return relay.db.prepare(`${INSERT_LOG} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(...logValues(relay, agentId, messageId, e));
+}
+
+/**
+ * `logStmt` that writes only while the message matches `where` (SQL over relay_messages), so one batch can log exactly when
+ * its guarded write applies: before an update, guarded as the update is; after an insert, on the inserted row.
+ */
+export function logStmtWhere(relay: Relay, agentId: string, messageId: string, e: LogEntry, where: string, ...args: unknown[]): Stmt {
   return relay.db
-    .prepare(
-      'INSERT INTO moderation_log (agent_id, message_id, layer, verdict, policy_code, reason, source, latency_ms, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    )
-    .bind(agentId, messageId, e.layer, e.verdict, e.policy, e.reason, e.source, e.latencyMs, e.confidence ?? null, iso(relay.now()));
+    .prepare(`${INSERT_LOG} SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM relay_messages WHERE ${where})`)
+    .bind(...logValues(relay, agentId, messageId, e), ...args);
 }
 
 export async function writeLog(relay: Relay, agentId: string, messageId: string | null, entries: LogEntry[]): Promise<void> {

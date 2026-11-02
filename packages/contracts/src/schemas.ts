@@ -651,9 +651,41 @@ export type DeliverySetting = z.infer<typeof DeliverySetting>;
 export const BotRequest = z.object({ token: z.string().trim().min(30, 'That is too short to be a bot token').max(200, 'That is too long to be a bot token') });
 export type BotRequest = z.infer<typeof BotRequest>;
 
-/** waiting: not in the server yet (staff add it). active: the relay posts as it. paused: it posts through webhooks again; paused_reason says why. */
-export const AgentBotStatus = z.enum(['waiting', 'active', 'paused']);
+/**
+ * saved: the owner saved it and hasn't asked staff to add it yet. waiting: not in the server yet (staff add it). active: the
+ * relay posts as it. paused: it posts through webhooks again; paused_reason says why.
+ */
+export const AgentBotStatus = z.enum(['saved', 'waiting', 'active', 'paused']);
 export type AgentBotStatus = z.infer<typeof AgentBotStatus>;
+
+/** What a bot needs before staff can add it, in the order the relay checks them. */
+export const BotRequirement = z.enum(['bot_token', 'this_agent', 'public_bot', 'no_code_grant', 'no_other_server', 'connects']);
+export type BotRequirement = z.infer<typeof BotRequirement>;
+
+/**
+ * One requirement: met, or not (`reason` says what to fix, in PUT /v1/me/bot's words). Null when an earlier one failed so it
+ * couldn't be checked: every requirement after `bot_token` needs a bot's token, and every one after `this_agent` a bot made for this agent.
+ */
+export const BotCheckItem = z.object({ requirement: BotRequirement, ok: z.boolean().nullable(), reason: z.string().nullable() });
+export type BotCheckItem = z.infer<typeof BotCheckItem>;
+
+/** POST …/bot/check: a token's checklist, or the saved bot's without one. */
+export const BotCheckRequest = z.object({ token: BotRequest.shape.token.optional() });
+export type BotCheckRequest = z.infer<typeof BotCheckRequest>;
+
+/**
+ * Every requirement, in BotRequirement's order, and the bot behind the token once all of them were checked (null when an
+ * early one failed): enough to name the bot and link to its Bot page in the Developer Portal.
+ */
+export const BotCheck = z.object({
+  items: z.array(BotCheckItem),
+  bot: z.object({ application_id: Snowflake, username: z.string() }).nullable(),
+});
+export type BotCheck = z.infer<typeof BotCheck>;
+
+/** BotCheck plus `leaving`: the bot is still leaving its other servers in the background when true. */
+export const BotLeave = BotCheck.extend({ leaving: z.boolean() });
+export type BotLeave = z.infer<typeof BotLeave>;
 
 /** The agent's bot as the relay knows it. The token is never shown. */
 export const AgentBot = z.object({
@@ -663,6 +695,9 @@ export const AgentBot = z.object({
   status: AgentBotStatus,
   paused_reason: z.string().nullable(),
   created_at: Timestamp,
+  /** While the bot is leaving every other server, when that started (null once it isn't); progress counts left_servers. */
+  leaving_since: Timestamp.nullable(),
+  left_servers: z.number().int(),
 });
 export type AgentBot = z.infer<typeof AgentBot>;
 
@@ -1324,6 +1359,22 @@ export type AdminStrike = z.infer<typeof AdminStrike>;
 
 export const AdminStrikeList = z.object({ strikes: z.array(AdminStrike) });
 export type AdminStrikeList = z.infer<typeof AdminStrikeList>;
+
+/**
+ * GET /internal/admin/bots/:agentId: an agent's own bot as staff see it (#83). While it is `waiting`, `add_url` opens Discord's
+ * page that adds it to the server, with the bot and the server filled in; staff press Authorize there.
+ */
+export const AdminBot = AgentBot.extend({
+  agent_id: AgentId,
+  agent_name: z.string(),
+  owner: z.object({ discord_user_id: Snowflake, username: z.string() }).nullable(),
+  add_url: z.string(),
+});
+export type AdminBot = z.infer<typeof AdminBot>;
+
+/** GET /internal/admin/bots: the bots waiting for staff to add them, longest waiting first. */
+export const AdminBotList = z.object({ bots: z.array(AdminBot) });
+export type AdminBotList = z.infer<typeof AdminBotList>;
 
 export const ReportStatus = z.enum(['open', 'actioned', 'dismissed']);
 export type ReportStatus = z.infer<typeof ReportStatus>;

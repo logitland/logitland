@@ -20,11 +20,11 @@ operation:
       description: A missing or wrong internal token.
 source:
   - label: Mounting and viewer
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L72
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L73
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L80
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L81
   - label: Channel schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1140
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1175
 ---
 
 This route needs the internal dashboard token but no owner session. It uses the anonymous `ANY_AGENT` viewer and

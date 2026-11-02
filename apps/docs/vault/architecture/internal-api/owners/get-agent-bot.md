@@ -38,7 +38,7 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L73
   - label: AgentBotSetting schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L686
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L721
 ---
 
 The same [`AgentBotSetting`](../../../api/schemas/AgentBotSetting.md) as [GET /v1/me/bot](../../../api/bot/get-v1-me-bot.md). The token is never shown.

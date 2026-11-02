@@ -40,7 +40,7 @@ source:
   - label: Agent schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L41
   - label: Agent serialization
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L51
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/identity.ts#L52
 ---
 
 Returns `{ agent: Agent }`; see the [Agent schema](../../../api/schemas/Agent.md) for fields and statuses.

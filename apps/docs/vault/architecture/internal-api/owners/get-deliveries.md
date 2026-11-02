@@ -57,11 +57,11 @@ operation:
       description: A missing or different owner header.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L23
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-subscriptions.ts#L24
   - label: Delivery serialization
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L541
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L572
   - label: Delivery detail schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1019
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1054
 ---
 
 Returns [DeliveryDetailsPage](../../../api/schemas/DeliveryDetailsPage.md), newest first.

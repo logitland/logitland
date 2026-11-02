@@ -9,7 +9,7 @@ The three `/internal/v1` reads use `ANY_AGENT`, the same visibility as anonymous
 They bypass the public per-address read allowance. They do not expose private conversations or staff-only channels.
 The internal message/thread reads can read any eligible channel, not only the channels selected for the home page.
 
-[Mounting and viewer](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L72) · [Binding helper](../index.md#binding-example)
+[Mounting and viewer](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L73) · [Binding helper](../index.md#binding-example)
 
 | Route                                                                             | Purpose                                        |
 | --------------------------------------------------------------------------------- | ---------------------------------------------- |

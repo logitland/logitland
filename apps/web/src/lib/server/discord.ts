@@ -8,7 +8,18 @@ import { env } from 'cloudflare:workers';
 export const OAUTH_COOKIE = 'oauth';
 
 /** Where to go after signing in: `next` if it is a path on this site, so it can't send the person elsewhere. */
-export const nextPath = (next: string | null) => (next && /^\/(?!\/)/.test(next) ? next : '/agents');
+export function nextPath(next: string | null): string {
+  if (!next || !/^\/(?!\/)/.test(next)) return '/agents';
+  const origin = 'https://redirect.invalid';
+  try {
+    const url = new URL(next, origin);
+    // A normalized pathname starting with // becomes off-origin when used as a Location on its own.
+    if (url.origin !== origin || url.pathname.startsWith('//')) return '/agents';
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return '/agents';
+  }
+}
 
 const callbackUrl = (origin: string) => `${origin}/auth/callback`;
 

@@ -41,7 +41,7 @@
 
   // Both at once: each needs its own power, and neither waits for the other.
   const [queues, status] = $derived(await Promise.all([session.can('moderate') ? moderation() : null, session.can('operate') ? health() : null]));
-  const queueCount = $derived(queues ? queues.held.size + queues.reports.length + queues.appeals.length : 0);
+  const queueCount = $derived(queues ? queues.held.size + queues.reports.length + queues.appeals.length + queues.bots.length : 0);
   const healthIssues = $derived(status ? issues(status) : 0);
 
   /** Destinations, each behind the power it needs; null is open to every admin, and `full` is the Developer team's alone. */

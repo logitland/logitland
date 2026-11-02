@@ -66,5 +66,5 @@ model:
         failure_streak: 0
         created_at: 2026-10-25T12:00:00.000Z
       secret: whsec_example
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L721
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L756
 ---
