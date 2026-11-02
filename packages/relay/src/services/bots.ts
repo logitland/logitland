@@ -415,16 +415,8 @@ async function drainLeaves(
       .run();
     return r.meta.changes > 0;
   };
-  const pause401 = async () => {
-    // A re-save replaced the token mid-drain: its 401 belongs to the old token and pauses nothing.
-    const stale = await relay.db
-      .prepare('UPDATE agent_bots SET leaving_since = NULL WHERE agent_id = ? AND leaving_since = ? AND token_ciphertext = ? RETURNING agent_id')
-      .bind(bot.agent_id, since, bot.token_ciphertext)
-      .first();
-    if (!stale) return { outcome: 'waiting' as const, left };
-    await pause(relay, bot, TOKEN_REFUSED);
-    return { outcome: 'paused' as const, left };
-  };
+  // A re-save replaced the token mid-drain: its 401 belongs to the old token and pauses nothing (pause checks the token).
+  const pause401 = async () => ({ outcome: (await pause(relay, bot, TOKEN_REFUSED)) ? ('paused' as const) : ('waiting' as const), left });
   // Discord lists 200 servers a page and lets a bot leave about one a second: the page's others leave, then the next page.
   while (Date.now() < deadline) {
     let guilds: PartialGuild[];
@@ -858,15 +850,16 @@ async function takeBack(relay: Relay, grants: Grant[]): Promise<number> {
   return grants.length;
 }
 
-async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
+async function pause(relay: Relay, bot: BotRow, reason: string): Promise<boolean> {
   const now = iso(relay.now());
+  // Only the token that was judged: one saved since then is left alone.
   const r = await relay.db
     .prepare(
-      "UPDATE agent_bots SET status = 'paused', paused_reason = ?, checked_at = ?, updated_at = ?, leaving_since = NULL WHERE agent_id = ? AND bot_user_id = ? AND status != 'paused'",
+      "UPDATE agent_bots SET status = 'paused', paused_reason = ?, checked_at = ?, updated_at = ?, leaving_since = NULL WHERE agent_id = ? AND bot_user_id = ? AND token_ciphertext = ? AND status != 'paused'",
     )
-    .bind(reason, now, now, bot.agent_id, bot.bot_user_id)
+    .bind(reason, now, now, bot.agent_id, bot.bot_user_id, bot.token_ciphertext)
     .run();
-  if (r.meta.changes === 0) return;
+  if (r.meta.changes === 0) return false;
   relay.log.warn('bots.paused', { agent_id: bot.agent_id });
   await auditStmt(relay, {
     actor_type: 'system',
@@ -879,6 +872,7 @@ async function pause(relay: Relay, bot: BotRow, reason: string): Promise<void> {
   }).run();
   await syncQueue(relay, bot.agent_id);
   await revokeGrants(relay, bot.bot_user_id);
+  return true;
 }
 
 /** Pauses the agent's bot after Discord refused its token mid-send; the message goes out through the webhook instead. */
@@ -898,12 +892,12 @@ async function check(relay: Relay, bot: BotRow): Promise<void> {
   try {
     guilds = await rest.getCurrentUserGuilds();
   } catch (error) {
-    if (error instanceof DiscordError && error.status === 401) return pause(relay, bot, TOKEN_REFUSED);
+    if (error instanceof DiscordError && error.status === 401) return void (await pause(relay, bot, TOKEN_REFUSED));
     relay.log.warn('bots.check_failed', { agent_id: bot.agent_id, error });
     await relay.db.prepare('UPDATE agent_bots SET checked_at = ? WHERE agent_id = ?').bind(iso(relay.now()), bot.agent_id).run();
     return;
   }
-  if (guilds.some((g) => g.id !== guildId)) return pause(relay, bot, OTHER_SERVER);
+  if (guilds.some((g) => g.id !== guildId)) return void (await pause(relay, bot, OTHER_SERVER));
   const status: AgentBotStatus = guilds.some((g) => g.id === guildId) ? 'active' : 'waiting';
   const now = iso(relay.now());
   // Status still what was read: an owner re-saving (to saved) or a pause mid-check wins over whatever this writes.
