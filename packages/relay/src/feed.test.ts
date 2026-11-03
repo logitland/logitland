@@ -158,7 +158,10 @@ describe('hints', () => {
 });
 
 describe('replies to the agent', () => {
-  const digestsFor = async (s: Setup, id: string) => (await poll(s)).digests.find((d) => (d as { subscription?: string; subscription_id?: string }).subscription === id || (d as { subscription_id?: string }).subscription_id === id);
+  const digestsFor = async (s: Setup, id: string) =>
+    (await poll(s)).digests.find(
+      (d) => (d as { subscription?: string; subscription_id?: string }).subscription === id || (d as { subscription_id?: string }).subscription_id === id,
+    );
 
   it('arrive on the replies subscription only when the agent has one', async () => {
     const s = await setup();
@@ -198,7 +201,12 @@ describe('replies to the agent', () => {
     const channel = await subscribe(s, { include_own: true });
     await subscribe(s, { kind: 'replies' });
     const mine = await post(s, 'a question', 'reply-route-004');
-    const res = await s.call('POST', '/v1/messages', { channel_id: LOUNGE, content: 'me again', reply_to: mine.discord_message_id }, { ...s.auth, 'idempotency-key': 'reply-route-005' });
+    const res = await s.call(
+      'POST',
+      '/v1/messages',
+      { channel_id: LOUNGE, content: 'me again', reply_to: mine.discord_message_id },
+      { ...s.auth, 'idempotency-key': 'reply-route-005' },
+    );
     expect(res.status).toBe(201);
     expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).not.toBeNull();
     const digests = (await poll(s)).digests;
@@ -216,6 +224,61 @@ describe('replies to the agent', () => {
     await say(s, 'an answer', { replyTo: mine.discord_message_id });
     const onChannel = await digestsFor(s, channel.id);
     expect(contents(onChannel!)).toContain('an answer');
+  });
+
+  it('pushes an unread reply through the channel after the replies subscription is deleted', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s);
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'reply-fallback-001');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).toBeNull();
+
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    const replay = await (await s.call('GET', `/v1/subscriptions/${channel.id}/events`, undefined, s.auth)).json();
+    expect(replay.events).toMatchObject([{ type: 'message.created', data: { content: 'an answer' } }]);
+    await useWebhook(s);
+    await drainDue(s.relay);
+    expect(s.received.map(contents)).toEqual([['an answer']]);
+    expect(s.received[0]!.subscription_id).toBe(channel.id);
+    await drainDue(s.relay);
+    expect(s.received).toHaveLength(1);
+  });
+
+  it('keeps the channel frequency when an unread reply falls back', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s, { frequency: '60s' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    await say(s, 'first');
+    expect((await poll(s)).digests.map(contents)).toEqual([['first']]);
+
+    const mine = await post(s, 'a question', 'reply-fallback-002');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).toBe(s.now().getTime() + 60_000);
+    await useWebhook(s);
+    await drainDue(s.relay);
+    expect(s.received).toHaveLength(0);
+    s.advance(60_000);
+    await drainDue(s.relay);
+    expect(s.received.map(contents)).toEqual([['an answer']]);
+  });
+
+  it('does not rearm a channel for a reply already delivered on replies', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s);
+    const replies = await subscribe(s, { kind: 'replies' });
+    await useWebhook(s);
+    const mine = await post(s, 'a question', 'reply-fallback-003');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    expect(s.received.map(contents)).toEqual([['an answer']]);
+    expect(s.received[0]!.subscription_id).toBe(replies.id);
+
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).toBeNull();
   });
 });
 

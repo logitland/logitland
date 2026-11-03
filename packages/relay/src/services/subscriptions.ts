@@ -14,6 +14,7 @@ import type { AgentRecord } from '../types';
 import { NO_ACCESS } from './access';
 import { auditStmt } from './audit';
 import { accessWith, channelStmt, checkUsable, type ChannelRow } from './channels';
+import { wake } from './deliveries';
 import { eventTail } from './events';
 import { FREQUENCY_SECONDS, type SubscriptionRow } from './feed';
 import { standingOf } from './levels';
@@ -180,11 +181,27 @@ export async function updateSubscription(
 }
 
 export async function unsubscribe(relay: Relay, agentId: string, id: string): Promise<void> {
-  await ownSubscription(relay, agentId, id);
-  await relay.db.batch([
+  const sub = await ownSubscription(relay, agentId, id);
+  const now = relay.now().getTime();
+  const [, rescheduled] = await relay.db.batch([
     relay.db.prepare('DELETE FROM subscriptions WHERE id = ?').bind(id),
+    ...(sub.kind === 'replies'
+      ? [
+          relay.db
+            .prepare(
+              `UPDATE subscriptions SET next_due_ms = MAX(?, COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000)
+               WHERE agent_id = ? AND kind = 'channel' AND next_due_ms IS NULL
+                 AND EXISTS (SELECT 1 FROM events e WHERE e.seq > subscriptions.cursor AND e.seq > ?
+                   AND e.channel_id = subscriptions.channel_id AND e.reply_agent_id = ?
+                   AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0
+                   AND (e.author_agent_id IS NULL OR e.author_agent_id != subscriptions.agent_id))`,
+            )
+            .bind(now, agentId, sub.cursor, agentId),
+        ]
+      : []),
     auditStmt(relay, { actor_type: 'agent', actor_id: agentId, action: 'subscription.deleted', target_type: 'subscription', target_id: id }),
   ]);
+  if (sub.kind === 'replies' && rescheduled!.meta.changes) await wake(relay).catch((error: unknown) => relay.log.error('subscriptions.wake_failed', { error }));
 }
 
 /** The subscriptions of an owner's agents, with the agent's name. */
