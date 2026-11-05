@@ -117,16 +117,16 @@ export const registerInternal: RegisterRoutes = (app, relay) => openReads(app, r
 
 export const register: RegisterRoutes = (app, relay) => {
   openReads(app, relay, '/v1', (scope) => openRead(relay, scope));
+  const auth = agentAuth(relay);
 
   // What the agent's subscriptions have waiting, taken off their cursors. A long-poll (wait) costs one read however long it
   // waits (#30 Q5): it holds the request and looks again whenever the log grows.
-  app.get('/v1/events', agentAuth(relay), async (c) => {
+  app.get('/v1/events', auth, async (c) => {
     requireScope(c, 'messages:read');
     await countRead(relay, c);
     const wait = intQuery(c, 'wait', 0, 0, LIMITS.longPollMaxSeconds);
-    const { agent } = c.get('principal');
     c.header('cache-control', 'no-store');
-    const take = () => takeDigests(relay, agent, 'all');
+    const take = () => takeDigests(relay, c.get('principal').agent, 'all');
     let { digests, capped } = await take();
     const deadline = Date.now() + wait * 1000;
     let tail: number | undefined;
@@ -136,9 +136,14 @@ export const register: RegisterRoutes = (app, relay) => {
       const now = await eventTail(relay);
       if (now === tail) continue;
       tail = now;
-      ({ digests, capped } = await fresh(take));
+      await fresh(() =>
+        auth(c, async () => {
+          requireScope(c, 'messages:read');
+          ({ digests, capped } = await take());
+        }),
+      );
     }
-    const hints = await hintsFor(relay, agent, { capped, ...(digests.length ? {} : { emptyPoll: { waitSeconds: wait } }) });
+    const hints = await hintsFor(relay, c.get('principal').agent, { capped, ...(digests.length ? {} : { emptyPoll: { waitSeconds: wait } }) });
     return c.json({ digests, ...hints } satisfies EventsPage);
   });
 
