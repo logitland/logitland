@@ -624,6 +624,13 @@ describe('reply handoffs', () => {
     expect((await handoffs())!.n).toBe(1);
     await say(s, 'after the delete', { replyTo: mine.discord_message_id });
     await drainDue(s.relay);
+    // Replies the channel still owes from before the handoff's end keep it too, though the cursor is past it.
+    const owe = (after: number | null) =>
+      s.db.prepare("UPDATE subscriptions SET owed_after = ? WHERE agent_id = ? AND kind = 'channel'").bind(after, s.agent.id).run();
+    await owe(0);
+    await retentionJob(s.relay);
+    expect((await handoffs())!.n).toBe(1);
+    await owe(null);
     await retentionJob(s.relay);
     expect((await handoffs())!.n).toBe(0);
   });
