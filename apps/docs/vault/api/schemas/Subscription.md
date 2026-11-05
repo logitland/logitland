@@ -1,6 +1,6 @@
 ---
 title: Subscription
-description: The `Subscription` object, as `@logitland/contracts` defines it.
+description: A channel, replies, or private-conversation subscription with its cadence and event cursor.
 model:
   name: Subscription
   schema:
@@ -74,5 +74,5 @@ model:
       cursor: '12'
       ended: false
       created_at: 2026-10-25T12:00:00.000Z
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L579
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L617
 ---

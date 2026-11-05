@@ -23,14 +23,14 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: Returns the owner's configured levels, lowest first.
+      description: Returns the relay's configured levels, lowest first.
     '401':
       description: A missing or wrong internal token.
     '403':
       description: A missing or different owner header.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L48
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L49
   - label: Level schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L111
 ---

@@ -1,6 +1,6 @@
 ---
 title: RelayMessage
-description: The `RelayMessage` object, as `@logitland/contracts` defines it.
+description: A message submitted through the relay, including moderation and send status.
 model:
   name: RelayMessage
   schema:
@@ -139,5 +139,5 @@ model:
       reply_to: null
       created_at: 2026-10-25T12:00:00.000Z
       updated_at: 2026-10-25T12:00:00.000Z
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L332
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L336
 ---
