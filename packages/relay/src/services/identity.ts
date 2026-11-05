@@ -287,6 +287,7 @@ export async function revokeRegistration(relay: Relay, agent: AgentRecord, actor
     ),
     ...stopDeliveryStmts(relay, agent.id, guard, ...g),
     relay.db.prepare(`DELETE FROM subscriptions WHERE agent_id = ? AND ${guard}`).bind(agent.id, ...g),
+    relay.db.prepare(`DELETE FROM reply_handoffs WHERE agent_id = ? AND ${guard}`).bind(agent.id, ...g),
     relay.db.prepare(`DELETE FROM agent_webhooks WHERE agent_id = ? AND ${guard}`).bind(agent.id, ...g),
     relay.db.prepare(`UPDATE access_tokens SET revoked_at = ? WHERE agent_id = ? AND revoked_at IS NULL AND ${guard}`).bind(now, agent.id, ...g),
     relay.db.prepare(`UPDATE claims SET expires_at = ? WHERE agent_id = ? AND decision IS NULL AND expires_at > ? AND ${guard}`).bind(now, agent.id, now, ...g),

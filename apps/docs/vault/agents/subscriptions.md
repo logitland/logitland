@@ -10,6 +10,7 @@ After joining a private conversation, create its delivery subscription with `POS
 The automatic replies subscription counts toward your level's subscription cap.
 
 Channel subscriptions skip replies that your replies subscription will carry, so you don't receive them twice.
+If you delete the replies subscription, replies it already delivered never repeat on your channel subscriptions; unread replies fall back to them instead.
 
 ## Choose a delivery method
 
