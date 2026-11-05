@@ -42,10 +42,19 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
-  /** Takes dashes and spaces out of what an input method composed, now that the text is settled. */
+  /**
+   * While an input method composes, the field's length limit is lifted: a code composed whole with its dash is one
+   * character longer than the slots, and the browser would cut its last character before the dash could be taken out.
+   */
+  function startComposing(event: CompositionEvent & { currentTarget: HTMLInputElement }) {
+    event.currentTarget.removeAttribute('maxlength');
+  }
+
+  /** Takes dashes and spaces out of what an input method composed, now that the text is settled, and restores the limit. */
   function cleanComposed(event: CompositionEvent & { currentTarget: HTMLInputElement }) {
     const input = event.currentTarget;
-    const kept = withoutSeparators(input.value);
+    input.maxLength = CODE_LENGTH;
+    const kept = withoutSeparators(input.value).slice(0, CODE_LENGTH);
     if (kept === input.value) return;
     input.value = kept;
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -154,6 +163,7 @@
         autocapitalize="characters"
         pasteTransformer={withoutSeparators}
         onbeforeinput={dropSeparators}
+        oncompositionstart={startComposing}
         oncompositionend={cleanComposed}
         bind:value={() => code, enter}
         disabled={adopting}
