@@ -122,15 +122,15 @@ export async function pushDue(relay: Relay, agentId: string): Promise<number> {
   // Each delivery row commits with its digest's cursor move, so a digest is never taken without one.
   const at = iso(relay.now());
   const made = new Map<string, string>();
-  const { digests } = await takeDigests(relay, agent, 'due', (digest, from) => {
+  const { digests } = await takeDigests(relay, agent, 'due', (digest, unmoved) => {
     const id = newId('delivery');
     made.set(digest.subscription_id, id);
     return relay.db
       .prepare(
         `INSERT INTO deliveries (id, agent_id, subscription_id, event_count, body, status, next_attempt_at, created_at)
-         SELECT ?, ?, ?, ?, ?, 'pending', ?, ? WHERE EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND cursor = ?)`,
+         SELECT ?, ?, ?, ?, ?, 'pending', ?, ? WHERE EXISTS (SELECT 1 FROM subscriptions WHERE ${unmoved.sql})`,
       )
-      .bind(id, agent.id, digest.subscription_id, digest.events.length, JSON.stringify(digest), at, at, digest.subscription_id, from);
+      .bind(id, agent.id, digest.subscription_id, digest.events.length, JSON.stringify(digest), at, at, ...unmoved.args);
   });
   if (!digests.length) return 0;
   const rows = digests.map((d) => ({ id: made.get(d.subscription_id)! }));

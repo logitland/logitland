@@ -222,16 +222,15 @@ export async function unsubscribe(relay: Relay, agentId: string, id: string): Pr
     const stmts = [
       ...handoffs.map(([from, to]) => relay.db.prepare(`INSERT INTO reply_handoffs SELECT ?, ?, ? WHERE ${guard}`).bind(agentId, from, to, id, fresh.cursor)),
       // The replies this subscription owed (after its start, by others, not handed off above) fall back to the agent's
-      // channel subscriptions, which are armed to deliver them. One whose cursor already passed the first steps back
-      // to it rather than getting a second delivery path; delivered_through keeps the ordinary events it already
-      // delivered in between from coming again (feed.ts, belongs).
+      // channel subscriptions, which are armed to deliver them. One whose cursor already passed the first owes them from
+      // there (owed_after): its next digest brings them ahead of its new events, and its cursor never moves back, so
+      // nothing it already sent comes again and a take read before this can't commit (feed.ts, unmoved).
       ...(sub.kind === 'replies'
         ? [
             relay.db
               .prepare(
                 `UPDATE subscriptions SET
-                   delivered_through = CASE WHEN o.first <= cursor THEN MAX(delivered_through, cursor) ELSE delivered_through END,
-                   cursor = MIN(cursor, o.first - 1),
+                   owed_after = CASE WHEN o.first <= cursor THEN MIN(o.first - 1, COALESCE(owed_after, cursor)) ELSE owed_after END,
                    next_due_ms = COALESCE(next_due_ms, MAX(?, COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000))
                  FROM (SELECT e.channel_id, MIN(e.seq) AS first FROM events e
                    WHERE e.reply_agent_id = ? AND e.seq > ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0

@@ -1,7 +1,9 @@
+import type { Digest } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
 import { BOT, HOOK_HOST, contents, poll, say, setup, subscribe, useWebhook, type Setup } from './deliveries.testkit';
 import { fakeDiscord } from './posting-fixtures';
 import { attemptDelivery, drainDue, pushDue } from './services/deliveries';
+import { takeDigests } from './services/feed';
 import { ingest } from './services/intake';
 import { retentionJob } from './services/retention';
 import { handoffRanges, unsubscribe } from './services/subscriptions';
@@ -306,6 +308,102 @@ describe('replies to the agent', () => {
     await say(s, 'later chatter');
     await drainDue(s.relay);
     expect(receivedFor(channel.id)).toEqual(['ordinary chatter', 'unread answer', 'later chatter']);
+  });
+
+  it('pages through more unread replies than one digest holds, each once', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: 'live' });
+    const replies = await subscribe(s, { kind: 'replies', frequency: '24h' });
+    const mine = await post(s, 'a question', 'reply-paged-001');
+    await say(s, 'read answer', { replyTo: mine.discord_message_id });
+    const unread = Array.from({ length: 102 }, (_, i) => `unread ${i}`);
+    for (const content of unread) await say(s, content, { replyTo: mine.discord_message_id });
+    await say(s, 'ordinary chatter');
+
+    await unsubscribe(s.relay, s.agent.id, replies.id);
+    await drainDue(s.relay);
+    await say(s, 'later chatter');
+    await drainDue(s.relay);
+    const onChannel = s.received.filter((d) => d.subscription_id === channel.id);
+    expect(onChannel.flatMap(contents)).toEqual(['ordinary chatter', ...unread, 'later chatter']);
+    expect(onChannel.map((d) => d.events.length)).toEqual([1, 100, 2, 1]);
+  });
+
+  it('keeps every event of a channel delivery queued before the delete, then sends the unread reply once', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: 'live' });
+    const replies = await subscribe(s, { kind: 'replies', frequency: '24h' });
+    const mine = await post(s, 'a question', 'reply-queued-001');
+    await say(s, 'read answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const deliveryOf = async (id: string) =>
+      (await s.db.prepare('SELECT id FROM deliveries WHERE subscription_id = ? ORDER BY created_at DESC, rowid DESC').bind(id).first<{ id: string }>())!.id;
+    expect((await attemptDelivery(s.relay, await deliveryOf(replies.id))).outcome).toBe('delivered');
+    await say(s, 'unread answer', { replyTo: mine.discord_message_id });
+    await say(s, 'ordinary chatter');
+    await pushDue(s.relay, s.agent.id);
+    const queued = await deliveryOf(channel.id);
+
+    await unsubscribe(s.relay, s.agent.id, replies.id);
+    expect((await attemptDelivery(s.relay, queued)).outcome).toBe('delivered');
+    await pushDue(s.relay, s.agent.id);
+    expect((await attemptDelivery(s.relay, await deliveryOf(channel.id))).outcome).toBe('delivered');
+    expect(s.received.filter((d) => d.subscription_id === channel.id).flatMap(contents)).toEqual(['ordinary chatter', 'unread answer']);
+  });
+
+  it('replays every event the channel subscription was sent from a saved cursor after the delete', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: 'live' });
+    const replies = await subscribe(s, { kind: 'replies', frequency: '24h' });
+    const mine = await post(s, 'a question', 'reply-replay-001');
+    await say(s, 'read answer', { replyTo: mine.discord_message_id });
+    await say(s, 'unread answer', { replyTo: mine.discord_message_id });
+    await say(s, 'ordinary chatter');
+    await unsubscribe(s.relay, s.agent.id, replies.id);
+    await drainDue(s.relay);
+
+    const replay = await (await s.call('GET', `/v1/subscriptions/${channel.id}/events?after=${channel.cursor}`, undefined, s.auth)).json();
+    expect(replay.events.map((e: { data: { content?: string } }) => e.data.content).filter(Boolean)).toEqual(['unread answer', 'ordinary chatter']);
+  });
+
+  it('a take read before the delete can’t commit, so the unread reply still arrives once', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s, { frequency: 'live' });
+    const replies = await subscribe(s, { kind: 'replies', frequency: '24h' });
+    const mine = await post(s, 'a question', 'reply-stale-001');
+    await say(s, 'read answer', { replyTo: mine.discord_message_id });
+    const agent = { id: s.agent.id, level: 1, owner_id: null, daily_event_cap: null };
+    await takeDigests(s.relay, agent, 'all');
+    await say(s, 'unread answer', { replyTo: mine.discord_message_id });
+    await say(s, 'ordinary chatter');
+
+    // Between the stale take's read and its cursor move: another take delivers the chatter, then the delete.
+    const orig = s.relay.db.batch.bind(s.relay.db);
+    let concurrent: Digest[] = [];
+    let once = true;
+    s.relay.db.batch = (async (stmts: { sql?: string }[]) => {
+      if (once && stmts.some((st) => st.sql?.startsWith('UPDATE subscriptions SET cursor'))) {
+        once = false;
+        concurrent = (await takeDigests(s.relay, agent, 'due')).digests;
+        await unsubscribe(s.relay, s.agent.id, replies.id);
+      }
+      return orig(stmts as never[]);
+    }) as typeof s.relay.db.batch;
+    const stale = await takeDigests(s.relay, agent, 'due');
+    s.relay.db.batch = orig;
+    const after = await takeDigests(s.relay, agent, 'all');
+
+    expect(once).toBe(false);
+    expect(stale.digests).toEqual([]);
+    const received = [...concurrent, ...after.digests].filter((d) => d.subscription_id === channel.id).flatMap(contents);
+    expect(received).toEqual(['ordinary chatter', 'unread answer']);
   });
 });
 
