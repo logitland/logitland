@@ -23,7 +23,7 @@ import { CONSENT_COMMAND, CONSENT_NOTICE_VERSION, consentNotice, consentStatus, 
 // https://docs.discord.com/developers/interactions/overview (verifying requests)
 
 const InteractionType = { PING: 1, APPLICATION_COMMAND: 2, MESSAGE_COMPONENT: 3, MODAL_SUBMIT: 5 } as const;
-const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, UPDATE_MESSAGE: 7, MODAL: 9 } as const;
+const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, DEFERRED_UPDATE_MESSAGE: 6, UPDATE_MESSAGE: 7, MODAL: 9 } as const;
 const EPHEMERAL = 64;
 
 /**
@@ -137,6 +137,7 @@ const WRONG_PLACE = 'This only works in the Logitland server. Run it there.';
 const NOT_STAFF = 'Only staff with the moderate power can dismiss or reopen this.';
 const NOT_STAFF_DECIDE = 'Only staff with the moderate power can decide this.';
 const CARD_GONE = 'What this card was about is gone.';
+const DECISION_FAILED = 'Something went wrong in the relay. Try again.';
 const UNKNOWN = 'I don’t know that command. Try /consent agree, /consent withdraw or /consent status.';
 const WITHDRAW_NOTE = 'To stop, run `/consent withdraw`: nothing you write after that is relayed.';
 const WITHDRAWN = 'Your agreement has ended: nothing you write from now on is relayed. Messages already relayed stay.';
@@ -214,13 +215,16 @@ function decide(relay: Relay, adminId: string, action: CaseAction, ref: string, 
   }
 }
 
+type CasePress = NonNullable<ReturnType<typeof caseButton>>;
+
 /**
  * A press on a case card's decision, or the submitted modal it opened. A decision that costs someone (anything on a report or
  * an appeal) opens its modal first; the rest act at once. The decision is the staff member's own, audited under their owner
- * account (made on their first press, as signing in to the dashboard makes it). The service brings the card up to date, and
- * the answer shows it as it now reads: also when someone else decided first.
+ * account (made on their first press, as signing in to the dashboard makes it). A decision's Discord calls (deleting a message,
+ * editing cards, waiting out a rate limit) can take longer than the three seconds Discord gives the first answer, so the press is
+ * answered at once with a deferred update and the decision is made after it (`defer`).
  */
-async function decideCase(relay: Relay, i: Interaction, userId: string, press: NonNullable<ReturnType<typeof caseButton>>): Promise<InteractionResponse> {
+async function decideCase(relay: Relay, i: Interaction, userId: string, press: CasePress, defer: (work: Promise<void>) => void): Promise<InteractionResponse> {
   const c = await readCase(relay, press.kind, press.ref);
   if (!c) return say(CARD_GONE);
   if (!c.open) return update(caseMessage(c));
@@ -230,15 +234,30 @@ async function decideCase(relay: Relay, i: Interaction, userId: string, press: N
   if (ask && i.type === InteractionType.MESSAGE_COMPONENT) return modal(i.data!.custom_id!, ask);
   const reason = ask ? fieldValue(i.data?.components, REASON) : undefined;
   const owner = await upsertOwner(relay, userId, i.member?.user.username ?? userId);
+  defer(
+    decideThenShow(relay, i, owner.id, press, reason).catch((error) =>
+      relay.log.error('interaction.decision_failed', { interaction: i.id, kind: press.kind, ref: press.ref, error }),
+    ),
+  );
+  return { type: Callback.DEFERRED_UPDATE_MESSAGE };
+}
+
+/**
+ * Makes a deferred decision, then shows the presser how it went: the card as it now reads (the service has edited it too,
+ * as it does for a dashboard decision; this edit still shows the result if Discord refused that one), also when someone else
+ * decided first. A decision refused while the case is still open is told to the presser alone, and the card stays as it was.
+ */
+async function decideThenShow(relay: Relay, i: Interaction, adminId: string, press: CasePress, reason: string | undefined): Promise<void> {
+  let refusal: string | null = null;
   try {
-    await decide(relay, owner.id, press.action, press.ref, reason);
+    await decide(relay, adminId, press.action, press.ref, reason);
   } catch (error) {
-    if (!(error instanceof RelayError)) throw error;
-    const now = await readCase(relay, press.kind, press.ref);
-    return now && !now.open ? update(caseMessage(now)) : say(error.message);
+    if (!(error instanceof RelayError)) relay.log.error('interaction.decision_failed', { interaction: i.id, kind: press.kind, ref: press.ref, error });
+    refusal = error instanceof RelayError ? error.message : DECISION_FAILED;
   }
-  const decided = await readCase(relay, press.kind, press.ref);
-  return decided ? update(caseMessage(decided)) : say(CARD_GONE);
+  const c = await readCase(relay, press.kind, press.ref);
+  if (c && !(refusal && c.open)) return editOriginal(relay, i, caseMessage(c));
+  return followUp(relay, i, refusal ?? CARD_GONE);
 }
 
 type Action = 'notice' | 'agree' | 'withdraw' | 'status';
@@ -285,7 +304,7 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
   if (decision) {
     if (!guildId || i.guild_id !== guildId || !userId) return say(WRONG_PLACE);
     if (!(await adminStanding(relay, userId, i.member?.roles)).permissions.includes('moderate')) return say(NOT_STAFF_DECIDE);
-    return decideCase(relay, i, userId, decision);
+    return decideCase(relay, i, userId, decision, defer);
   }
   const action = actionOf(i);
   if (!action) return say(UNKNOWN);
@@ -347,18 +366,27 @@ export async function answerFromGateway(relay: Relay, raw: unknown): Promise<voi
   await Promise.all(deferred);
 }
 
+/** Edits the message the interaction answered (a pressed button's card) to `message`. */
+const editOriginal = (relay: Relay, i: Interaction, message: CreateMessageBody) =>
+  answerLater(relay, i, 'PATCH', { ...message, content: null, allowed_mentions: { parse: [] } });
+
+/** Tells the person who pressed `content`, in a reply only they see. */
+const followUp = (relay: Relay, i: Interaction, content: string) =>
+  answerLater(relay, i, 'POST', { content, flags: EPHEMERAL, allowed_mentions: { parse: [] } });
+
 /**
- * Edits the deferred reply through the interaction webhook; the interaction token is the credential, so no bot token.
- * The token and URL never reach a log. A 404 can mean our acknowledgement hasn't landed at Discord yet, so it is retried briefly.
+ * Answers after the first answer, through the interaction webhook: PATCH edits the original message, POST adds a follow-up.
+ * The interaction token is the credential, so no bot token. The token and URL never reach a log. A 404 can mean our
+ * acknowledgement hasn't landed at Discord yet, so it is retried briefly.
  */
-async function editOriginal(relay: Relay, i: Interaction, message: CreateMessageBody): Promise<void> {
-  const url = `${relay.discord.apiBase}/webhooks/${i.application_id}/${i.token}/messages/@original`;
+async function answerLater(relay: Relay, i: Interaction, method: 'PATCH' | 'POST', body: object): Promise<void> {
+  const url = `${relay.discord.apiBase}/webhooks/${i.application_id}/${i.token}${method === 'PATCH' ? '/messages/@original' : ''}`;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await relay.fetch(url, {
-        method: 'PATCH',
+        method,
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...message, content: null, allowed_mentions: { parse: [] } }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) return;

@@ -260,10 +260,25 @@ async function reportCase(relay: Relay, ref: string): Promise<Case | null> {
   };
 }
 
+/** A decision an agent can appeal, as its appeal records it (appeals.decision); the card and modal name it by this noun. */
+export type AppealedDecision = 'block' | 'hold' | 'takedown' | 'strike' | 'suspension' | 'pause';
+
+/** Each appealable decision's badge on the card. */
+const APPEALED: Record<AppealedDecision, string> = {
+  block: 'Blocked',
+  hold: 'Held',
+  takedown: 'Taken down',
+  strike: 'Strike',
+  suspension: 'Suspended',
+  pause: 'Paused',
+};
+
 type AppealRow = {
   id: string;
   target_type: 'message' | 'strike' | 'status';
   target_id: string;
+  /** Only an appeal decided before decisions were recorded has none, and those never get a card (0018_case_cards.sql). */
+  decision: AppealedDecision;
   message: string;
   status: 'open' | 'upheld' | 'overturned';
   response: string | null;
@@ -271,15 +286,10 @@ type AppealRow = {
   decider: string | null;
 };
 
-/** A message's decision an agent can appeal: its badge, and the noun the card and modal name it by. */
-const MESSAGE_DECISIONS: Record<string, [string, string]> = { blocked: ['Blocked', 'block'], held: ['Held', 'hold'], removed: ['Taken down', 'takedown'] };
-/** What an overturn leaves a message as, by what it was: a block becomes failed (to send again), a hold is sent. */
-const OVERTURNED: Record<string, string> = { failed: 'blocked', queued: 'held', sending: 'held', sent: 'held', uncertain: 'held' };
-
 async function appealCase(relay: Relay, id: string): Promise<Case | null> {
   const appeal = await relay.db
     .prepare(
-      `SELECT ap.id, ap.target_type, ap.target_id, ap.message, ap.status, ap.response, a.name AS agent_name, o.discord_user_id AS decider
+      `SELECT ap.id, ap.target_type, ap.target_id, ap.decision, ap.message, ap.status, ap.response, a.name AS agent_name, o.discord_user_id AS decider
        FROM appeals ap JOIN agents a ON a.id = ap.agent_id LEFT JOIN owners o ON o.id = ap.resolved_by WHERE ap.id = ?`,
     )
     .bind(id)
@@ -288,22 +298,18 @@ async function appealCase(relay: Relay, id: string): Promise<Case | null> {
   // What was appealed, as the dashboard's appeals page reads it.
   const subject = await (
     appeal.target_type === 'message'
-      ? relay.db.prepare('SELECT content, status, policy_code, status_reason AS reason FROM relay_messages WHERE id = ?')
+      ? relay.db.prepare('SELECT content, policy_code, status_reason AS reason FROM relay_messages WHERE id = ?')
       : appeal.target_type === 'strike'
-        ? relay.db.prepare('SELECT NULL AS content, NULL AS status, policy_code, reason FROM strikes WHERE id = ?')
-        : relay.db.prepare('SELECT NULL AS content, status, NULL AS policy_code, status_reason AS reason FROM agents WHERE id = ?')
+        ? relay.db.prepare('SELECT NULL AS content, policy_code, reason FROM strikes WHERE id = ?')
+        : relay.db.prepare('SELECT NULL AS content, NULL AS policy_code, status_reason AS reason FROM agents WHERE id = ?')
   )
     .bind(appeal.target_id)
-    .first<{ content: string | null; status: string | null; policy_code: string | null; reason: string | null }>();
-  const suspended = subject?.status === 'suspended';
-  const [kind, undone] =
-    appeal.target_type === 'message'
-      ? (MESSAGE_DECISIONS[subject?.status ?? ''] ?? MESSAGE_DECISIONS[OVERTURNED[subject?.status ?? ''] ?? ''] ?? ['Message', 'decision'])
-      : appeal.target_type === 'strike'
-        ? ['Strike', 'strike']
-        : [suspended ? 'Suspended' : 'Paused', suspended ? 'suspension' : 'pause'];
+    .first<{ content: string | null; policy_code: string | null; reason: string | null }>();
+  const undone = appeal.decision;
   const policy = policyLabel(subject?.policy_code ?? null);
-  const decision = [kind, policy ? POLICY_LABELS[policy] : subject?.reason].filter(Boolean).join(' · ');
+  // Overturning rewrites the target's reason (or deletes the strike), so an overturned decision is named without one.
+  const why = appeal.status === 'overturned' ? null : policy ? POLICY_LABELS[policy] : subject?.reason;
+  const decision = [APPEALED[undone], why].filter(Boolean).join(' · ');
   const name = appeal.agent_name;
   const shown =
     appeal.target_type === 'message'
@@ -428,13 +434,21 @@ async function post(relay: Relay, kind: CaseKind, ref: string, message: CreateMe
   const channelId = await staffChannel(relay, 'mod_queue');
   // No staff channel yet: once there is one, the job posts every open case.
   if (!channelId) return void (await forget(relay, kind, ref));
+  let messageId: string;
   try {
-    const posted = await relay.discord.createMessage(channelId, message);
-    await save(relay, kind, ref, channelId, posted.id, shows);
+    messageId = (await relay.discord.createMessage(channelId, message)).id;
   } catch (error) {
     relay.log.warn('mod_queue.post_failed', { kind, ref, error });
-    await save(relay, kind, ref, null, null, null);
+    return void (await save(relay, kind, ref, null, null, null));
   }
+  if ((await save(relay, kind, ref, channelId, messageId, shows)).meta.changes) return;
+  // The case was decided while this posted, and its row went with it, the card having no message yet. The card is up now
+  // showing the open case: keep it, and bring it up to date.
+  await relay.db
+    .prepare('INSERT OR IGNORE INTO case_cards (kind, ref, channel_id, message_id, shows, checked_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(kind, ref, channelId, messageId, shows, iso(relay.now()))
+    .run();
+  await sync(relay, kind, ref, false);
 }
 
 /**

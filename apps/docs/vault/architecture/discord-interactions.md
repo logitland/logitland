@@ -119,15 +119,15 @@ source:
   - label: command definition
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/consent.ts#L15
   - label: action selection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L244
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L263
   - label: consent handling
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L293
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L312
   - label: Logan button handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/calls.ts#L196
   - label: staff card buttons
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L272
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L291
   - label: case decisions and modals
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L223
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L227
   - label: staff cards
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/staff-cards.ts
   - label: case cards
@@ -292,10 +292,13 @@ same custom ID: a line saying what the decision does, and a required text input 
 for an appeal's reply to the agent). Submitting it (`type: 5`) makes the decision with that text as the report's note or
 the appeal's response, which is also the audit log's reason.
 
-A decision answers `type: 7` with the card collapsed to who decided what; the service has already edited the card by REST,
-as it does for a decision made in the dashboard. A case someone else decided first answers `type: 7` with its card as it
-now reads, and nothing is decided twice. A refusal the relay can explain (Discord wouldn't delete the message, say)
-receives it as an ephemeral reply, and the card stays open.
+A decision's Discord calls can outlast the three seconds Discord gives the first answer, so a decision answers
+`type: 6` (deferred update) at once and is made after the answer. The service edits the card by REST, as it does for a
+decision made in the dashboard, and the relay then edits the pressed card through
+`PATCH /webhooks/:application/:token/messages/@original` to the same collapsed layout, so the presser sees the result
+even if Discord refused the REST edit. A refusal (Discord wouldn't delete the message, say) reaches the presser as an
+ephemeral follow-up (`POST /webhooks/:application/:token`), and the card stays open. A case someone else decided first
+answers `type: 7` with its card as it now reads, at once, and nothing is decided twice.
 
 Example modal for **Take down**, with an illustrative report ID:
 

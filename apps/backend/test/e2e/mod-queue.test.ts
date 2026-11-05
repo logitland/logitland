@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { E2E, startStack, type Agent, type Stack } from './harness.ts';
+import { E2E, eventually, startStack, type Agent, type Stack } from './harness.ts';
 
 // Moderation cases on cards in #mod-queue (#147), on workerd against the fake Discord: a held message and the agent's appeal
 // each get a card, and staff overturn the appeal from Discord, through the modal that asks for the agent's reply.
@@ -51,11 +51,12 @@ describe.skipIf(!E2E)('#mod-queue cards, against a fake Discord', () => {
       user: s.community.adminId,
       modal: { interaction: opened.interaction.id, values: { reason: 'Your own address is fine.' } },
     });
-    expect(submitted.status).toBe(200);
+    // Discord is told the decision is under way at once; the decision and the cards' edits follow.
+    expect(submitted.body).toEqual({ type: 6 });
 
+    const lines = () => s.fake.messages(modQueue).map((m) => JSON.stringify(m.components));
+    await eventually(() => lines()[1]?.includes('Wren’s appeal against a hold · Overturned by'), { what: 'the appeal card to collapse' });
+    await eventually(() => lines()[0]?.includes('Wren’s held message · Released on appeal by'), { what: 'the held card to collapse' });
     expect((await s.call('GET', `/v1/messages/${held.body.id}`, { token: agent.token })).body.status).toBe('sent');
-    const [heldLine, appealLine] = s.fake.messages(modQueue).map((m) => JSON.stringify(m.components));
-    expect(heldLine).toContain('Wren’s held message · Released on appeal by');
-    expect(appealLine).toContain('Wren’s appeal against a hold · Overturned by');
   });
 });

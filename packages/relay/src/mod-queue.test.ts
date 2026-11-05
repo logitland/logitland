@@ -1,6 +1,7 @@
 import type { ModerationResult } from './services/moderation/classifier';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { calls, fakeDiscord, json, mod, post, say, world } from './posting-fixtures';
+import { adminAct } from './services/identity';
 import { modQueueJob } from './services/mod-queue';
 import { reviewHeldJob } from './services/review';
 import { updateSettings } from './services/settings';
@@ -59,8 +60,22 @@ async function setup(moderator: ModerationResult | ((n: number) => ModerationRes
     });
   const cards = async () => (await calls(h, 'POST', new RegExp(`/channels/${MOD_QUEUE}/messages$`))).map((c) => c.body);
   const edits = async () => (await calls(h, 'PATCH', new RegExp(`/channels/${MOD_QUEUE}/messages/\\d+$`))).map((c) => c.body);
-  return { h, wren, admin, press, submit, cards, edits };
+  /** Once the decision a press made is done: the card as the presser's answer last laid it out, and what they were told. */
+  const outcome = async () => {
+    await h.settle();
+    const [card] = (await calls(h, 'PATCH', /\/webhooks\/400000000000000001\/tok\/messages\/@original$/)).map((c) => c.body).reverse();
+    const told = (await calls(h, 'POST', /\/webhooks\/400000000000000001\/tok$/)).map((c) => c.body);
+    return { card, told };
+  };
+  return { h, wren, admin, press, submit, cards, edits, outcome };
 }
+
+/** Discord's deadline for the first answer to an interaction. */
+const DISCORD_DEADLINE_MS = 3_000;
+/** The answer, or `'too late'` once Discord would have shown the presser that the interaction failed. */
+const inTime = <T>(answer: Promise<T>) => Promise.race([answer, new Promise<'too late'>((resolve) => setTimeout(resolve, DISCORD_DEADLINE_MS, 'too late'))]);
+/** Discord's answer to a decision it is still working on: the card stays as it is for now (DEFERRED_UPDATE_MESSAGE). */
+const working = { type: 6 };
 
 const audit = (h: Harness, action: string) =>
   h.db.prepare('SELECT actor_type, actor_id, target_id, reason FROM audit_log WHERE action = ?').bind(action).first<Record<string, string | null>>();
@@ -99,21 +114,51 @@ describe('held messages', () => {
     ['release', 'sent', 'message.released', 'Released'],
     ['reject', 'blocked', 'message.rejected', 'Rejected'],
   ])('%s on the card decides as the dashboard does, for staff only, and collapses the card', async (action, status, audited, verb) => {
-    const { h, wren, admin, press, edits } = await setup();
+    const { h, wren, admin, press, edits, outcome } = await setup();
     const held = await hold(h, wren);
     const button = `case:held:${action}:${held.id}`;
 
     expect(await press(button, PERSON)).toEqual(refusal);
     expect((await message(h, held.id))!.status).toBe('held');
 
-    const answer = await press(button);
+    expect(await press(button)).toEqual(working);
+    const { card } = await outcome();
     expect(await message(h, held.id)).toEqual({ status, reviewed_by: admin.id });
     expect(await audit(h, audited)).toMatchObject({ actor_type: 'admin', actor_id: admin.id, target_id: held.id });
-    expect(answer.type).toBe(7);
-    expect(cardText(answer.data)).toBe(`Wren’s held message · ${verb} by <@${ADMIN_DISCORD}>`);
-    expect(cardButtons(answer.data)).toEqual([{ label: 'Reopen', custom_id: `staff_reopen:held:${held.id}` }]);
+    expect(cardText(card)).toBe(`Wren’s held message · ${verb} by <@${ADMIN_DISCORD}>`);
+    expect(cardButtons(card)).toEqual([{ label: 'Reopen', custom_id: `staff_reopen:held:${held.id}` }]);
     // The service edited the card itself, as it does for a dashboard decision.
-    expect((await edits()).map((e) => e.components)).toEqual([answer.data.components]);
+    expect((await edits()).map((e) => e.components)).toEqual([card.components]);
+  });
+
+  it('answers a press before Discord takes the decision’s edits, then shows the decided card', async () => {
+    const { h, wren, press, outcome } = await setup();
+    const held = await hold(h, wren);
+    // Discord holds every edit, as a rate limit that asks the relay to wait does.
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    fakeDiscord(h, { slow: (req) => (req.method === 'PATCH' ? answered : undefined) });
+
+    expect(await inTime(press(`case:held:release:${held.id}`))).toEqual(working);
+    answer();
+    expect(cardText((await outcome()).card)).toBe(`Wren’s held message · Released by <@${ADMIN_DISCORD}>`);
+  });
+
+  it('a decision made while the card is still being posted collapses the card once it is up', async () => {
+    const { h, wren, admin, cards, edits } = await setup();
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    fakeDiscord(h, { slow: (req) => (req.method === 'POST' && new URL(req.url).pathname.endsWith(`/channels/${MOD_QUEUE}/messages`) ? answered : undefined) });
+    const holding = post(h, wren, say('write to wren@example.com about it'));
+    await vi.waitFor(async () => expect(await cards()).toHaveLength(1));
+
+    const { id } = (await h.db.prepare("SELECT id FROM relay_messages WHERE status = 'held'").first<{ id: string }>())!;
+    expect((await h.internal('POST', `/internal/admin/messages/${id}/release`, {}, asOwner(admin.id))).status).toBe(200);
+    answer();
+    await holding;
+
+    expect((await edits()).map(cardText)).toEqual([`Wren’s held message · Released by <@${ADMIN_DISCORD}>`]);
+    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM case_cards').first()).toEqual({ n: 0 });
   });
 
   it('collapses the card when the dashboard decides, and a stale press shows the decision instead of making another', async () => {
@@ -131,9 +176,10 @@ describe('held messages', () => {
   });
 
   it('reopens a decided card in full, with who decided it, and collapses it again', async () => {
-    const { h, wren, press } = await setup();
+    const { h, wren, press, outcome } = await setup();
     const held = await hold(h, wren);
     await press(`case:held:release:${held.id}`);
+    await outcome();
     const reopened = await press(`staff_reopen:held:${held.id}`);
     expect(cardText(reopened.data)).toBe(
       `### Wren’s held message\nPersonal data · in <#${LOUNGE}>\nReleased by <@${ADMIN_DISCORD}>.\n> write to wren@example.com about it`,
@@ -209,7 +255,7 @@ describe('reports', () => {
   });
 
   it('takes the message down from the card only after a modal that says so and takes the reason', async () => {
-    const { h, wren, admin, posted, reporters, report, press, submit } = await reported();
+    const { h, wren, admin, posted, reporters, report, press, submit, outcome } = await reported();
     const { id } = await report(reporters[0]!, 'mocks a person');
     const button = `case:report:takedown:${id}`;
 
@@ -228,7 +274,8 @@ describe('reports', () => {
     // Opening the modal decides nothing.
     expect((await message(h, posted.id))!.status).toBe('sent');
 
-    const answer = await submit(button, 'Mocks a person by name.');
+    expect(await submit(button, 'Mocks a person by name.')).toEqual(working);
+    const { card } = await outcome();
     expect((await message(h, posted.id))!.status).toBe('removed');
     expect(await activeStrikeCount(h.relay, wren.id)).toBe(1);
     expect(await h.db.prepare('SELECT status, note FROM reports WHERE id = ?').bind(id).first()).toEqual({
@@ -236,14 +283,35 @@ describe('reports', () => {
       note: 'Mocks a person by name.',
     });
     expect(await audit(h, 'report.actioned')).toMatchObject({ actor_id: admin.id, target_id: id, reason: 'Mocks a person by name.' });
-    expect(cardText(answer.data)).toBe(`Reports on Wren’s message · Taken down by <@${ADMIN_DISCORD}>`);
+    expect(cardText(card)).toBe(`Reports on Wren’s message · Taken down by <@${ADMIN_DISCORD}>`);
+  });
+
+  it('tells the presser privately when Discord refuses the takedown, and the case stays open', async () => {
+    const { h, posted, reporters, report, press, submit, outcome } = await reported();
+    const { id } = await report(reporters[0]!, 'mocks a person');
+    fakeDiscord(h, {
+      change: async (req) => (req.method === 'DELETE' ? Response.json({ message: 'Missing Access', code: 50001 }, { status: 403 }) : Response.json({})),
+    });
+    const button = `case:report:takedown:${id}`;
+    await press(button);
+
+    expect(await submit(button, 'Mocks a person by name.')).toEqual(working);
+    expect((await outcome()).told).toEqual([
+      {
+        content: 'Discord refused to delete the message through the channel’s webhook. Delete it in Discord yourself, then try again.',
+        flags: 64,
+        allowed_mentions: { parse: [] },
+      },
+    ]);
+    expect((await message(h, posted.id))!.status).toBe('sent');
+    expect(await h.db.prepare('SELECT status FROM reports WHERE id = ?').bind(id).first()).toEqual({ status: 'open' });
   });
 
   it.each([
     ['dismiss', 'message', 'Dismiss the reports?', 'The reporter loses 25 XP.', 'report.dismissed', 'Reports on Wren’s message · Dismissed'],
     ['strike', 'agent', 'Strike the agent?', 'Wren gets a strike.', 'report.actioned', 'Reports on Wren · Struck'],
   ])('%s on a %s report confirms in a modal, then does what the dashboard does', async (action, target, title, consequence, audited, line) => {
-    const { h, wren, posted, reporters, report, press, submit } = await reported();
+    const { h, wren, posted, reporters, report, press, submit, outcome } = await reported();
     const xp = async () => (await h.db.prepare('SELECT xp FROM agents WHERE id = ?').bind(reporters[0]!.id).first<{ xp: number }>())!.xp;
     const { id } = await report(
       reporters[0]!,
@@ -254,9 +322,10 @@ describe('reports', () => {
     const asked = await press(button);
     expect(asked.data).toMatchObject({ title, components: [{ type: 10, content: consequence }, expect.anything()] });
 
-    const answer = await submit(button, 'Looked at it closely.');
+    await submit(button, 'Looked at it closely.');
+    const { card } = await outcome();
     expect(await audit(h, audited)).toMatchObject({ target_id: id, reason: 'Looked at it closely.' });
-    expect(cardText(answer.data)).toBe(`${line} by <@${ADMIN_DISCORD}>`);
+    expect(cardText(card)).toBe(`${line} by <@${ADMIN_DISCORD}>`);
     if (action === 'dismiss') expect(await xp()).toBe(475);
     else expect(await activeStrikeCount(h.relay, wren.id)).toBe(1);
   });
@@ -289,7 +358,7 @@ describe('appeals', () => {
     ['uphold', 'Uphold the block?', 'The block on Wren stands.', 'upheld', 'blocked', 'Upheld'],
     ['overturn', 'Overturn the block?', 'The block on Wren is undone.', 'overturned', 'failed', 'Overturned'],
   ])('%s asks for the reply the agent is sent, then decides as the dashboard does', async (action, title, consequence, status, after, verb) => {
-    const { h, admin, blocked, appeal, press, submit, edits } = await appealed();
+    const { h, admin, blocked, appeal, press, submit, edits, outcome } = await appealed();
     const button = `case:appeal:${action}:${appeal.id}`;
     expect(await press(button, PERSON)).toEqual(refusal);
     expect((await press(button)).data).toMatchObject({
@@ -300,7 +369,8 @@ describe('appeals', () => {
       ],
     });
 
-    const answer = await submit(button, 'We read it again.');
+    await submit(button, 'We read it again.');
+    const { card } = await outcome();
     expect(await h.db.prepare('SELECT status, response, resolved_by FROM appeals WHERE id = ?').bind(appeal.id).first()).toEqual({
       status,
       response: 'We read it again.',
@@ -308,7 +378,21 @@ describe('appeals', () => {
     });
     expect(await audit(h, `appeal.${status}`)).toMatchObject({ actor_id: admin.id, target_id: blocked.id, reason: 'We read it again.' });
     expect((await message(h, blocked.id))!.status).toBe(after);
-    expect(cardText(answer.data)).toBe(`Wren’s appeal against a block · ${verb} by <@${ADMIN_DISCORD}>`);
-    expect((await edits()).map((e) => e.components)).toEqual([answer.data.components]);
+    expect(cardText(card)).toBe(`Wren’s appeal against a block · ${verb} by <@${ADMIN_DISCORD}>`);
+    expect((await edits()).map((e) => e.components)).toEqual([card.components]);
+  });
+
+  it('a suspension appeal stays one once overturning it reinstates the agent', async () => {
+    const { h, wren, admin, press, submit, outcome } = await setup();
+    await adminAct(h.relay, admin.id, wren.id, { action: 'suspend', reason: 'Spammed the lounge' });
+    const appeal = await json(await h.call('POST', '/v1/appeals', { target_type: 'status', target_id: wren.id, message: 'I have stopped.' }, h.as(wren.token)));
+    const button = `case:appeal:overturn:${appeal.id}`;
+    await press(button);
+
+    await submit(button, 'Welcome back.');
+    expect(cardText((await outcome()).card)).toBe(`Wren’s appeal against a suspension · Overturned by <@${ADMIN_DISCORD}>`);
+    expect(cardText((await press(`staff_reopen:appeal:${appeal.id}`)).data)).toBe(
+      `### Wren’s appeal against a suspension\nSuspended\nOverturned by <@${ADMIN_DISCORD}>: “Welcome back.”\n> I have stopped.`,
+    );
   });
 });
