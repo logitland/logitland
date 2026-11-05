@@ -19,6 +19,52 @@
   const CODE_LENGTH = 8;
   /** Codes use Crockford's alphabet (no I, L, O or U), as `UserCode` in the contracts. */
   const CODE_PATTERN = '^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]+$';
+  /** Agents give the code as `XXXX-XXXX`; the slots hold only its characters. */
+  const SEPARATORS = /[\s-]/g;
+  const withoutSeparators = (text: string) => text.replace(SEPARATORS, '');
+
+  /**
+   * Leaves dashes and spaces out of typed or dropped-in text, as `pasteTransformer` does for a paste. The field rejects
+   * text that fails `CODE_PATTERN` without clearing it, so a code inserted whole with its dash would sit there unseen. Input
+   * the browser won't let us cancel (an input method composing text) is left as it comes, or it would land twice, and
+   * cleaned once it settles (settle).
+   */
+  function dropSeparators(event: InputEvent & { currentTarget: HTMLInputElement }) {
+    const text = event.data;
+    if (!text || !event.cancelable) return;
+    const kept = withoutSeparators(text);
+    if (kept === text) return;
+    event.preventDefault();
+    if (!kept) return;
+    const input = event.currentTarget;
+    const end = input.value.length;
+    input.setRangeText(kept, input.selectionStart ?? end, input.selectionEnd ?? end, 'end');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /**
+   * While an input method composes, the field's length limit is lifted: a code composed whole with its dash is one
+   * character longer than the slots, and the browser would cut its last character before the dash could be taken out.
+   */
+  function startComposing(event: CompositionEvent & { currentTarget: HTMLInputElement }) {
+    event.currentTarget.removeAttribute('maxlength');
+  }
+
+  /**
+   * Once no input method is composing, brings the field back to what the slots show: the length limit restored, and its
+   * text without separators, cut to the code's length. Runs when a composition ends, after every other input and on blur,
+   * because the slots' component can rewrite the field mid-composition, after which the browser never ends it and commits
+   * the text again as ordinary input.
+   */
+  function settle(event: Event & { currentTarget: HTMLInputElement }) {
+    if (event instanceof InputEvent && event.isComposing) return;
+    const input = event.currentTarget;
+    input.maxLength = CODE_LENGTH;
+    const kept = withoutSeparators(input.value).slice(0, CODE_LENGTH);
+    if (kept === input.value) return;
+    input.value = kept;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
 
   let tab = $state(adoption.token ? 'token' : 'code');
 
@@ -29,13 +75,15 @@
   let adopting = $state(false);
   const orphan = $derived(found?.agent);
 
+  // The field keeps the code as typed and the slots show it in capitals: changing the field's own text would make an input
+  // method that is composing it (a phone keyboard, which composes every word) add each step again.
   async function enter(value: string) {
-    code = value.toUpperCase();
+    code = value;
     found = codeError = undefined;
     if (code.length !== CODE_LENGTH) return;
     const entered = code;
     try {
-      const result = await lookupClaim(formatCode(entered));
+      const result = await lookupClaim(formatCode(entered.toUpperCase()));
       if (code === entered) found = result;
     } catch (error) {
       if (code === entered) codeError = messageOf(error);
@@ -117,7 +165,14 @@
         inputId="adoption-code"
         maxlength={CODE_LENGTH}
         pattern={CODE_PATTERN}
-        pasteTransformer={(text) => text.replace(/[\s-]/g, '')}
+        inputmode="text"
+        autocapitalize="characters"
+        pasteTransformer={withoutSeparators}
+        onbeforeinput={dropSeparators}
+        oncompositionstart={startComposing}
+        oncompositionend={settle}
+        oninput={settle}
+        onblur={settle}
         bind:value={() => code, enter}
         disabled={adopting}
         aria-invalid={codeError ? true : undefined}
@@ -126,13 +181,13 @@
         {#snippet children({ cells })}
           <InputOTP.Group>
             {#each cells.slice(0, 4) as cell, i (i)}
-              <InputOTP.Slot {cell} class="size-10 font-mono text-base sm:size-11" aria-invalid={codeError ? true : undefined} />
+              <InputOTP.Slot {cell} class="size-10 font-mono text-base uppercase sm:size-11" aria-invalid={codeError ? true : undefined} />
             {/each}
           </InputOTP.Group>
           <InputOTP.Separator class="px-1 text-muted-foreground" />
           <InputOTP.Group>
             {#each cells.slice(4) as cell, i (i)}
-              <InputOTP.Slot {cell} class="size-10 font-mono text-base sm:size-11" aria-invalid={codeError ? true : undefined} />
+              <InputOTP.Slot {cell} class="size-10 font-mono text-base uppercase sm:size-11" aria-invalid={codeError ? true : undefined} />
             {/each}
           </InputOTP.Group>
         {/snippet}
