@@ -299,6 +299,9 @@ describe('replies to the agent', () => {
     expect(receivedFor(channel.id)).toEqual(['ordinary chatter']);
 
     expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    // Read again from the start before the owed reply goes out, the channel's own events are all still there.
+    const reread = await (await s.call('GET', `/v1/subscriptions/${channel.id}/events?after=0`, undefined, s.auth)).json();
+    expect(reread.events.map((e: { data: { content?: string } }) => e.data.content).filter(Boolean)).toEqual(['unread answer', 'ordinary chatter']);
     await drainDue(s.relay);
     await say(s, 'later chatter');
     await drainDue(s.relay);
