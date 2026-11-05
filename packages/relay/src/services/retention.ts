@@ -45,6 +45,15 @@ const HAS_MESSAGE_TEXT = "status IN ('blocked', 'held', 'failed', 'removed') AND
 
 export const RULES: Rule[] = [
   {
+    // No live channel subscription can still reach a handoff's range once every cursor is past its end.
+    name: 'reply_handoffs',
+    sql: `DELETE FROM reply_handoffs WHERE rowid IN (
+            SELECT h.rowid FROM reply_handoffs h
+            WHERE h.to_seq <= (SELECT COALESCE(MAX(cursor), 0) FROM subscriptions)
+              AND NOT EXISTS (SELECT 1 FROM subscriptions c WHERE c.agent_id = h.agent_id AND c.kind = 'channel' AND c.cursor < h.to_seq)
+            LIMIT ?)`,
+  },
+  {
     name: 'event_text',
     sql: `UPDATE events SET payload = json_set(payload, '$.data.content', '') WHERE seq IN (
             SELECT seq FROM events WHERE observed_at < ? AND json_extract(payload, '$.data.content') != '' LIMIT ?)`,

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { BOT, contents, poll, say, setup, subscribe, useWebhook, type Setup } from './deliveries.testkit';
+import { BOT, HOOK_HOST, contents, poll, say, setup, subscribe, useWebhook, type Setup } from './deliveries.testkit';
 import { fakeDiscord } from './posting-fixtures';
-import { drainDue } from './services/deliveries';
+import { attemptDelivery, drainDue, pushDue } from './services/deliveries';
 import { ingest } from './services/intake';
+import { retentionJob } from './services/retention';
+import { handoffRanges, unsubscribe } from './services/subscriptions';
 import { GUILD, LOUNGE, seedChannel } from './testing';
 
 // Subscriptions and their digests (#11, #23, #30 Q4): one cursor per subscription, the same digests whichever transport reads them.
@@ -158,7 +160,10 @@ describe('hints', () => {
 });
 
 describe('replies to the agent', () => {
-  const digestsFor = async (s: Setup, id: string) => (await poll(s)).digests.find((d) => (d as { subscription?: string; subscription_id?: string }).subscription === id || (d as { subscription_id?: string }).subscription_id === id);
+  const digestsFor = async (s: Setup, id: string) =>
+    (await poll(s)).digests.find(
+      (d) => (d as { subscription?: string; subscription_id?: string }).subscription === id || (d as { subscription_id?: string }).subscription_id === id,
+    );
 
   it('arrive on the replies subscription only when the agent has one', async () => {
     const s = await setup();
@@ -198,7 +203,12 @@ describe('replies to the agent', () => {
     const channel = await subscribe(s, { include_own: true });
     await subscribe(s, { kind: 'replies' });
     const mine = await post(s, 'a question', 'reply-route-004');
-    const res = await s.call('POST', '/v1/messages', { channel_id: LOUNGE, content: 'me again', reply_to: mine.discord_message_id }, { ...s.auth, 'idempotency-key': 'reply-route-005' });
+    const res = await s.call(
+      'POST',
+      '/v1/messages',
+      { channel_id: LOUNGE, content: 'me again', reply_to: mine.discord_message_id },
+      { ...s.auth, 'idempotency-key': 'reply-route-005' },
+    );
     expect(res.status).toBe(201);
     expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).not.toBeNull();
     const digests = (await poll(s)).digests;
@@ -216,6 +226,325 @@ describe('replies to the agent', () => {
     await say(s, 'an answer', { replyTo: mine.discord_message_id });
     const onChannel = await digestsFor(s, channel.id);
     expect(contents(onChannel!)).toContain('an answer');
+  });
+
+  it('pushes an unread reply through the channel after the replies subscription is deleted', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s);
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'reply-fallback-001');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).toBeNull();
+
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    const replay = await (await s.call('GET', `/v1/subscriptions/${channel.id}/events`, undefined, s.auth)).json();
+    expect(replay.events).toMatchObject([{ type: 'message.created', data: { content: 'an answer' } }]);
+    await useWebhook(s);
+    await drainDue(s.relay);
+    expect(s.received.map(contents)).toEqual([['an answer']]);
+    expect(s.received[0]!.subscription_id).toBe(channel.id);
+    await drainDue(s.relay);
+    expect(s.received).toHaveLength(1);
+  });
+
+  it('keeps the channel frequency when an unread reply falls back', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s, { frequency: '60s' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    await say(s, 'first');
+    expect((await poll(s)).digests.map(contents)).toEqual([['first']]);
+
+    const mine = await post(s, 'a question', 'reply-fallback-002');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).toBe(s.now().getTime() + 60_000);
+    await useWebhook(s);
+    await drainDue(s.relay);
+    expect(s.received).toHaveLength(0);
+    s.advance(60_000);
+    await drainDue(s.relay);
+    expect(s.received.map(contents)).toEqual([['an answer']]);
+  });
+
+  it('does not rearm a channel for a reply already delivered on replies', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    const channel = await subscribe(s);
+    const replies = await subscribe(s, { kind: 'replies' });
+    await useWebhook(s);
+    const mine = await post(s, 'a question', 'reply-fallback-003');
+    await say(s, 'an answer', { replyTo: mine.discord_message_id });
+    expect(s.received.map(contents)).toEqual([['an answer']]);
+    expect(s.received[0]!.subscription_id).toBe(replies.id);
+
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).toBeNull();
+  });
+});
+
+describe('reply handoffs', () => {
+  const receivedFor = (s: Setup, id: string) => s.received.filter((d) => d.subscription_id === id);
+
+  it('replies a deleted replies subscription already delivered stay delivered', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    // One ordinary delivery, so the channel's next due is scheduled rather than open.
+    await say(s, 'first');
+    expect(receivedFor(s, channel.id).map((d) => contents(d))).toEqual([['first']]);
+    const mine = await post(s, 'a question', 'handoff-001');
+    // More than one digest's worth of replies, all delivered on the replies subscription.
+    for (let i = 0; i < 105; i++) await say(s, `answer ${i}`, { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toHaveLength(105);
+    await s.call('PATCH', `/v1/subscriptions/${replies.id}`, { frequency: '60s' }, s.auth);
+    await say(s, 'unread answer', { replyTo: mine.discord_message_id });
+    await say(s, 'unrelated chatter');
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    s.advance(86_400_000);
+    await drainDue(s.relay);
+    const channelDigests = receivedFor(s, channel.id);
+    expect(channelDigests.every((d) => !d.more)).toBe(true);
+    expect(channelDigests.flatMap((d) => contents(d))).toEqual(['first', 'unread answer', 'unrelated chatter']);
+  });
+
+  it('a reply delivered while unsubscribe is in flight is not rearmed on the channel', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'handoff-002');
+    await say(s, 'earlier answer', { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    await s.call('PATCH', `/v1/subscriptions/${replies.id}`, { frequency: '60s' }, s.auth);
+    await say(s, 'one answer', { replyTo: mine.discord_message_id });
+    // The reply sits unread on the replies subscription until its frequency comes up.
+    s.advance(60_000);
+    // Deliver the pending reply between the subscription read and the delete batch.
+    const orig = s.relay.db.batch.bind(s.relay.db);
+    let once = true;
+    s.relay.db.batch = (async (stmts: { sql?: string }[]) => {
+      if (once && stmts.some((st) => st.sql?.includes('DELETE FROM subscriptions'))) {
+        once = false;
+        await pushDue(s.relay, s.agent.id);
+      }
+      return orig(stmts as never[]);
+    }) as typeof s.relay.db.batch;
+    await unsubscribe(s.relay, s.agent.id, replies.id);
+    s.relay.db.batch = orig;
+    expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toEqual(['earlier answer', 'one answer']);
+    s.advance(90_000);
+    await drainDue(s.relay);
+    expect(receivedFor(s, channel.id)).toEqual([]);
+  });
+
+  it('two replies cycles never hand consumed replies to the channel', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const mine = await post(s, 'a question', 'handoff-003');
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const replies = await subscribe(s, { kind: 'replies' });
+      await say(s, `cycle ${cycle} answer`, { replyTo: mine.discord_message_id });
+      await drainDue(s.relay);
+      expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toEqual([`cycle ${cycle} answer`]);
+      await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth);
+    }
+    await say(s, 'the newest answer', { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    const onChannel = receivedFor(s, channel.id).at(-1);
+    expect(contents(onChannel!)).toEqual(['the newest answer']);
+  });
+
+  it('a reply a pending delivery never sent reaches the channel after the delete', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'pending-001');
+    await say(s, 'queued answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const delivery = await s.db.prepare('SELECT id, status FROM deliveries WHERE subscription_id = ?').bind(replies.id).first<{ id: string; status: string }>();
+    expect(delivery?.status).toBe('pending');
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    expect((await attemptDelivery(s.relay, delivery!.id)).outcome).toBe('dropped');
+    await say(s, 'ordinary chatter');
+    const channelDigests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(channelDigests.flatMap((d) => contents(d))).toEqual(['queued answer', 'ordinary chatter']);
+  });
+
+  it('a handoff covers only what was delivered, not a later pending reply', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'pending-002');
+    await say(s, 'delivered answer', { replyTo: mine.discord_message_id });
+    // Deliver it for real, then queue a second reply that never sends.
+    await pushDue(s.relay, s.agent.id);
+    const first = await s.db.prepare('SELECT id FROM deliveries WHERE subscription_id = ?').bind(replies.id).first<{ id: string }>();
+    await attemptDelivery(s.relay, first!.id);
+    expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toEqual(['delivered answer']);
+    await say(s, 'pending answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    expect(
+      (await s.db.prepare("SELECT COUNT(*) n FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ n: number }>())!.n,
+    ).toBe(1);
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    await say(s, 'ordinary chatter');
+    const channelDigests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(channelDigests.flatMap((d) => contents(d))).toEqual(['pending answer', 'ordinary chatter']);
+  });
+
+  it('a reply in a retrying delivery also falls back to the channel', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'pending-003');
+    await say(s, 'retrying answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const delivery = await s.db.prepare('SELECT id FROM deliveries WHERE subscription_id = ?').bind(replies.id).first<{ id: string }>();
+    // One failed attempt leaves it retrying rather than pending.
+    await s.db.prepare("UPDATE deliveries SET status = 'retrying' WHERE id = ?").bind(delivery!.id).run();
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    await say(s, 'ordinary chatter');
+    const channelDigests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(channelDigests.flatMap((d) => contents(d))).toEqual(['retrying answer', 'ordinary chatter']);
+  });
+
+  it('hands off replies around an open delivery, not after it', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'order-001');
+    await say(s, 'retrying answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const oldest = await s.db.prepare("SELECT id FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ id: string }>();
+    const receiver = s.receivers[HOOK_HOST]!;
+    s.receivers[HOOK_HOST] = () => new Response(null, { status: 503 });
+    expect((await attemptDelivery(s.relay, oldest!.id)).outcome).toBe('retry');
+    s.receivers[HOOK_HOST] = receiver;
+    for (let i = 0; i < 105; i++) {
+      await say(s, `delivered ${i}`, { replyTo: mine.discord_message_id });
+      await pushDue(s.relay, s.agent.id);
+      const next = await s.db.prepare("SELECT id FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ id: string }>();
+      expect((await attemptDelivery(s.relay, next!.id)).outcome).toBe('delivered');
+    }
+    expect(s.received.flatMap(contents)).toHaveLength(105);
+    await say(s, 'new unread answer', { replyTo: mine.discord_message_id });
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    const digests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(digests.every((d) => !d.more)).toBe(true);
+    expect(digests.flatMap((d) => contents(d))).toEqual(['retrying answer', 'new unread answer']);
+    void channel;
+  });
+
+  it('retries the whole handoff when a push moves the cursor between read and delete', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'order-002');
+    await say(s, 'earlier answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const sent = await s.db.prepare("SELECT id FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ id: string }>();
+    expect((await attemptDelivery(s.relay, sent!.id)).outcome).toBe('delivered');
+    await s.call('PATCH', `/v1/subscriptions/${replies.id}`, { frequency: '60s' }, s.auth);
+    await say(s, 'pushed answer', { replyTo: mine.discord_message_id });
+    // Deliver the pending reply between the subscription read and the delete batch: unsubscribe re-reads and retries.
+    const orig = s.relay.db.batch.bind(s.relay.db);
+    let once = true;
+    s.relay.db.batch = (async (stmts: { sql?: string }[]) => {
+      if (once && stmts.some((st) => st.sql?.includes('DELETE FROM subscriptions'))) {
+        once = false;
+        s.advance(60_000);
+        await pushDue(s.relay, s.agent.id);
+      }
+      return orig(stmts as never[]);
+    }) as typeof s.relay.db.batch;
+    await unsubscribe(s.relay, s.agent.id, replies.id);
+    s.relay.db.batch = orig;
+    // The pushed reply became an open delivery and a hole in the handoff, so the channel carries it once, not twice.
+    await say(s, 'ordinary chatter');
+    const digests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(digests.flatMap((d) => contents(d))).toEqual(['pushed answer', 'ordinary chatter']);
+    void channel;
+  });
+
+  it('retention keeps a handoff while a channel cursor still needs it', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'handoff-004');
+    await say(s, 'one answer', { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth);
+    const handoffs = () => s.db.prepare('SELECT COUNT(*) AS n FROM reply_handoffs WHERE agent_id = ?').bind(s.agent.id).first<{ n: number }>();
+    expect((await handoffs())!.n).toBe(1);
+    await retentionJob(s.relay);
+    // The channel cursor is still behind the handoff's end: it is kept.
+    expect((await handoffs())!.n).toBe(1);
+    await say(s, 'after the delete', { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    await retentionJob(s.relay);
+    expect((await handoffs())!.n).toBe(0);
+  });
+});
+
+describe('handoffRanges', () => {
+  it('splits the delivered span around the open deliveries', () => {
+    expect(handoffRanges(0, 100, [])).toEqual([[0, 100]]);
+    expect(handoffRanges(0, 100, [{ first: 20, last: 40 }])).toEqual([
+      [0, 19],
+      [40, 100],
+    ]);
+    expect(handoffRanges(0, 100, [{ first: 1, last: 40 }])).toEqual([[40, 100]]);
+    expect(handoffRanges(0, 100, [{ first: 90, last: 100 }])).toEqual([[0, 89]]);
+    expect(
+      handoffRanges(0, 100, [
+        { first: 20, last: 40 },
+        { first: 30, last: 50 },
+      ]),
+    ).toEqual([
+      [0, 19],
+      [50, 100],
+    ]);
+    expect(
+      handoffRanges(0, 100, [
+        { first: 20, last: 40 },
+        { first: 41, last: 60 },
+      ]),
+    ).toEqual([
+      [0, 19],
+      [60, 100],
+    ]);
+    expect(
+      handoffRanges(0, 100, [
+        { first: 60, last: 70 },
+        { first: 20, last: 40 },
+      ]),
+    ).toEqual([
+      [0, 19],
+      [40, 59],
+      [70, 100],
+    ]);
+    expect(handoffRanges(50, 50, [])).toEqual([]);
+    expect(handoffRanges(0, 50, [{ first: 1, last: 100 }])).toEqual([]);
   });
 });
 
