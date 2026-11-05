@@ -180,48 +180,76 @@ export async function updateSubscription(
   return toSubscription(updated);
 }
 
-// What a replies subscription actually delivered: its cursor, unless a delivery still in flight already took part of it —
-// then the event before the earliest one in an open delivery's body (each digest event's cursor is its seq as a string). A
-// delivery claimed mid-HTTP can still land after this batch commits, so a reply near the edge can arrive on both the
-// webhook and the channel; a duplicate beats a loss.
-const DELIVERED_TO = `(
-  SELECT COALESCE(
-    (SELECT MIN(CAST(json_extract(d.body, '$.events[0].cursor') AS INTEGER)) - 1
-     FROM deliveries d WHERE d.subscription_id = subscriptions.id AND d.status IN ('pending', 'retrying')),
-    cursor)
-  FROM subscriptions WHERE id = ?)`;
+/**
+ * The seq ranges a replies subscription already handed to its webhook: everything it read, minus what its open
+ * (pending/retrying) deliveries still owe. A delivery that completed between the read and the delete batch is retried as
+ * a hole the channel may also carry, and one claimed mid-HTTP can land after the delete — either way a reply near the edge
+ * can arrive on both paths; a duplicate beats a loss.
+ */
+export function handoffRanges(startSeq: number, cursor: number, open: { first: number; last: number }[]): [number, number][] {
+  const ranges: [number, number][] = [];
+  let at = startSeq;
+  for (const { first, last } of [...open].sort((a, b) => a.first - b.first)) {
+    const from = first - 1;
+    if (from > at) ranges.push([at, Math.min(from, cursor)]);
+    at = Math.max(at, last);
+  }
+  if (cursor > at) ranges.push([at, cursor]);
+  return ranges.filter(([f, t]) => t > f);
+}
 
 export async function unsubscribe(relay: Relay, agentId: string, id: string): Promise<void> {
   const sub = await ownSubscription(relay, agentId, id);
   const now = relay.now().getTime();
-  const [, rescheduled] = await relay.db.batch([
-    // Remember what the replies subscription actually delivered, so the replies it carried stay delivered once it is gone.
-    ...(sub.kind === 'replies'
-      ? [
-          relay.db
-            .prepare(`INSERT INTO reply_handoffs SELECT agent_id, start_seq, ${DELIVERED_TO} FROM subscriptions WHERE id = ? AND ${DELIVERED_TO} > start_seq`)
-            .bind(id, id, id),
-        ]
-      : []),
-    // The delivered-to seq is read inside the batch: a push that delivered more after our read counts here.
-    ...(sub.kind === 'replies'
-      ? [
-          relay.db
-            .prepare(
-              `UPDATE subscriptions SET next_due_ms = MAX(?, COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000)
-               WHERE agent_id = ? AND kind = 'channel' AND next_due_ms IS NULL
-                 AND EXISTS (SELECT 1 FROM events e WHERE e.seq > subscriptions.cursor AND e.seq > ${DELIVERED_TO}
-                   AND e.channel_id = subscriptions.channel_id AND e.reply_agent_id = ?
-                   AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0
-                   AND (e.author_agent_id IS NULL OR e.author_agent_id != subscriptions.agent_id))`,
-            )
-            .bind(now, agentId, id, agentId),
-        ]
-      : []),
-    relay.db.prepare('DELETE FROM subscriptions WHERE id = ?').bind(id),
-    auditStmt(relay, { actor_type: 'agent', actor_id: agentId, action: 'subscription.deleted', target_type: 'subscription', target_id: id }),
-  ]);
-  if (sub.kind === 'replies' && rescheduled!.meta.changes) await wake(relay).catch((error: unknown) => relay.log.error('subscriptions.wake_failed', { error }));
+  // Optimistic retry: a push that moves the cursor between the read and the batch restarts the whole handoff.
+  for (let round = 0; round < 3; round++) {
+    const fresh = await relay.db.prepare('SELECT cursor, start_seq FROM subscriptions WHERE id = ?').bind(id).first<{ cursor: number; start_seq: number }>();
+    if (!fresh) return;
+    const open =
+      sub.kind === 'replies'
+        ? (
+            await relay.db
+              .prepare("SELECT body FROM deliveries WHERE subscription_id = ? AND status IN ('pending', 'retrying')")
+              .bind(id)
+              .all<{ body: string }>()
+          ).results.map((r) => {
+            const d = JSON.parse(r.body) as { cursor: string; events: { cursor: string }[] };
+            return { first: Number(d.events[0]!.cursor), last: Number(d.cursor) };
+          })
+        : [];
+    const guard = 'EXISTS (SELECT 1 FROM subscriptions WHERE id = ? AND cursor = ?)';
+    const handoffs = sub.kind === 'replies' ? handoffRanges(fresh.start_seq, fresh.cursor, open) : [];
+    const stmts = [
+      ...handoffs.map(([from, to]) => relay.db.prepare(`INSERT INTO reply_handoffs SELECT ?, ?, ? WHERE ${guard}`).bind(agentId, from, to, id, fresh.cursor)),
+      ...(sub.kind === 'replies'
+        ? [
+            relay.db
+              .prepare(
+                `UPDATE subscriptions SET next_due_ms = MAX(?, COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000)
+                 WHERE agent_id = ? AND kind = 'channel' AND next_due_ms IS NULL AND ${guard}
+                   AND EXISTS (SELECT 1 FROM events e WHERE e.seq > subscriptions.cursor AND e.seq > ?
+                     AND e.channel_id = subscriptions.channel_id AND e.reply_agent_id = ?
+                     AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0
+                     AND (e.author_agent_id IS NULL OR e.author_agent_id != subscriptions.agent_id)
+                     AND NOT EXISTS (SELECT 1 FROM reply_handoffs h WHERE h.agent_id = ? AND e.seq > h.from_seq AND e.seq <= h.to_seq))`,
+              )
+              .bind(now, agentId, id, fresh.cursor, fresh.start_seq, agentId, agentId),
+          ]
+        : []),
+      relay.db.prepare(`DELETE FROM subscriptions WHERE id = ? AND ${guard}`).bind(id, id, fresh.cursor),
+      auditStmt(relay, { actor_type: 'agent', actor_id: agentId, action: 'subscription.deleted', target_type: 'subscription', target_id: id }),
+    ];
+    const results = await relay.db.batch(stmts);
+    const rescheduled = sub.kind === 'replies' ? results[handoffs.length] : undefined;
+    const deleted = results[stmts.length - 2];
+    if (deleted!.meta.changes === 0 && (await relay.db.prepare('SELECT 1 x FROM subscriptions WHERE id = ?').bind(id).first())) {
+      if (round === 2) throw conflict('This subscription changed while it was being deleted. Try again.');
+      continue;
+    }
+    if (sub.kind === 'replies' && rescheduled!.meta.changes)
+      await wake(relay).catch((error: unknown) => relay.log.error('subscriptions.wake_failed', { error }));
+    return;
+  }
 }
 
 /** The subscriptions of an owner's agents, with the agent's name. */

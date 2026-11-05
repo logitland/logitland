@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { BOT, contents, poll, say, setup, subscribe, useWebhook, type Setup } from './deliveries.testkit';
+import { BOT, HOOK_HOST, contents, poll, say, setup, subscribe, useWebhook, type Setup } from './deliveries.testkit';
 import { fakeDiscord } from './posting-fixtures';
 import { attemptDelivery, drainDue, pushDue } from './services/deliveries';
 import { ingest } from './services/intake';
 import { retentionJob } from './services/retention';
-import { unsubscribe } from './services/subscriptions';
+import { handoffRanges, unsubscribe } from './services/subscriptions';
 import { GUILD, LOUNGE, seedChannel } from './testing';
 
 // Subscriptions and their digests (#11, #23, #30 Q4): one cursor per subscription, the same digests whichever transport reads them.
@@ -422,6 +422,68 @@ describe('reply handoffs', () => {
     expect(channelDigests.flatMap((d) => contents(d))).toEqual(['retrying answer', 'ordinary chatter']);
   });
 
+  it('hands off replies around an open delivery, not after it', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'order-001');
+    await say(s, 'retrying answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const oldest = await s.db.prepare("SELECT id FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ id: string }>();
+    const receiver = s.receivers[HOOK_HOST]!;
+    s.receivers[HOOK_HOST] = () => new Response(null, { status: 503 });
+    expect((await attemptDelivery(s.relay, oldest!.id)).outcome).toBe('retry');
+    s.receivers[HOOK_HOST] = receiver;
+    for (let i = 0; i < 105; i++) {
+      await say(s, `delivered ${i}`, { replyTo: mine.discord_message_id });
+      await pushDue(s.relay, s.agent.id);
+      const next = await s.db.prepare("SELECT id FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ id: string }>();
+      expect((await attemptDelivery(s.relay, next!.id)).outcome).toBe('delivered');
+    }
+    expect(s.received.flatMap(contents)).toHaveLength(105);
+    await say(s, 'new unread answer', { replyTo: mine.discord_message_id });
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    const digests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(digests.every((d) => !d.more)).toBe(true);
+    expect(digests.flatMap((d) => contents(d))).toEqual(['retrying answer', 'new unread answer']);
+    void channel;
+  });
+
+  it('retries the whole handoff when a push moves the cursor between read and delete', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'order-002');
+    await say(s, 'earlier answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const sent = await s.db.prepare("SELECT id FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ id: string }>();
+    expect((await attemptDelivery(s.relay, sent!.id)).outcome).toBe('delivered');
+    await s.call('PATCH', `/v1/subscriptions/${replies.id}`, { frequency: '60s' }, s.auth);
+    await say(s, 'pushed answer', { replyTo: mine.discord_message_id });
+    // Deliver the pending reply between the subscription read and the delete batch: unsubscribe re-reads and retries.
+    const orig = s.relay.db.batch.bind(s.relay.db);
+    let once = true;
+    s.relay.db.batch = (async (stmts: { sql?: string }[]) => {
+      if (once && stmts.some((st) => st.sql?.includes('DELETE FROM subscriptions'))) {
+        once = false;
+        s.advance(60_000);
+        await pushDue(s.relay, s.agent.id);
+      }
+      return orig(stmts as never[]);
+    }) as typeof s.relay.db.batch;
+    await unsubscribe(s.relay, s.agent.id, replies.id);
+    s.relay.db.batch = orig;
+    // The pushed reply became an open delivery and a hole in the handoff, so the channel carries it once, not twice.
+    await say(s, 'ordinary chatter');
+    const digests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(digests.flatMap((d) => contents(d))).toEqual(['pushed answer', 'ordinary chatter']);
+    void channel;
+  });
+
   it('retention keeps a handoff while a channel cursor still needs it', async () => {
     const s = await setup();
     fakeDiscord(s);
@@ -441,6 +503,48 @@ describe('reply handoffs', () => {
     await drainDue(s.relay);
     await retentionJob(s.relay);
     expect((await handoffs())!.n).toBe(0);
+  });
+});
+
+describe('handoffRanges', () => {
+  it('splits the delivered span around the open deliveries', () => {
+    expect(handoffRanges(0, 100, [])).toEqual([[0, 100]]);
+    expect(handoffRanges(0, 100, [{ first: 20, last: 40 }])).toEqual([
+      [0, 19],
+      [40, 100],
+    ]);
+    expect(handoffRanges(0, 100, [{ first: 1, last: 40 }])).toEqual([[40, 100]]);
+    expect(handoffRanges(0, 100, [{ first: 90, last: 100 }])).toEqual([[0, 89]]);
+    expect(
+      handoffRanges(0, 100, [
+        { first: 20, last: 40 },
+        { first: 30, last: 50 },
+      ]),
+    ).toEqual([
+      [0, 19],
+      [50, 100],
+    ]);
+    expect(
+      handoffRanges(0, 100, [
+        { first: 20, last: 40 },
+        { first: 41, last: 60 },
+      ]),
+    ).toEqual([
+      [0, 19],
+      [60, 100],
+    ]);
+    expect(
+      handoffRanges(0, 100, [
+        { first: 60, last: 70 },
+        { first: 20, last: 40 },
+      ]),
+    ).toEqual([
+      [0, 19],
+      [40, 59],
+      [70, 100],
+    ]);
+    expect(handoffRanges(50, 50, [])).toEqual([]);
+    expect(handoffRanges(0, 50, [{ first: 1, last: 100 }])).toEqual([]);
   });
 });
 
