@@ -166,7 +166,10 @@ interactions endpoint. The relay's follow-ups (`PATCH /webhooks/:app/:token/mess
 interaction was acknowledged, for fifteen minutes, and recorded on the interaction. A button click on a message
 (`button: { customId, messageId }` with its `channelId`) works on that message, as on Discord: an UPDATE_MESSAGE answer
 (`type: 7`) and later edits of `@original` change it in place, checked as a bot's edit. An update Discord would refuse
-throws, where Discord would show "This interaction failed".
+throws, where Discord would show "This interaction failed". A MODAL answer (`type: 9`) is checked as Discord checks it
+and kept as the interaction's `modal`; `fake.interact({ user, modal: { interaction, values } })` submits it once, as the
+person it was shown to, with each text input's value by `custom_id`, in the same channel and about the same message, so
+an UPDATE_MESSAGE answer to the submission edits the card the button was on.
 
 ## Programming it
 
