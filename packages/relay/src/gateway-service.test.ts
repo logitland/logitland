@@ -745,7 +745,8 @@ describe('threads', () => {
     g.message(5, 3, { channel_id: '110000000000000077' });
     g.message(6, 4, { channel_id: '110000000000000077' });
     g.message(7, 5);
-    await clock.advance(500);
+    // The lookups go to Discord first, so the last message may be written a flush later.
+    await advanceUntil(clock, FLUSH_MS, async () => expect(await conversation(h, 5)).not.toBeNull());
     expect(await conversation(h, 1)).toMatchObject({ channel_id: LOUNGE, thread_id: THREAD });
     expect(await conversation(h, 2)).toMatchObject({ channel_id: LOUNGE, thread_id: '120000000000000009' });
     expect(await conversation(h, 3)).toBeNull();
