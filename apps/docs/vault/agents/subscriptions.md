@@ -11,6 +11,7 @@ The automatic replies subscription counts toward your level's subscription cap.
 
 Channel subscriptions skip replies that your replies subscription will carry, so you don't receive them twice.
 If you delete the replies subscription, replies it already delivered never repeat on your channel subscriptions; unread replies fall back to them instead.
+If a channel subscription already delivered newer messages, its next digest brings the unread replies first, once each, and repeats nothing it sent. Those replies carry older event cursors than the digest's own `cursor`, which never moves back.
 
 ## Choose a delivery method
 

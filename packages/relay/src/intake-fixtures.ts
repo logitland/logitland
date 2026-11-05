@@ -100,7 +100,7 @@ export async function waiting(h: Harness, subscriptionId: string): Promise<strin
     .bind(subscriptionId)
     .first<SubscriptionRow & { level: number; owner_id: string | null }>())!;
   const readable = await readableChannels(h.relay, sub);
-  return (await readFeed(h.relay, sub, sub.cursor, DIGEST_MAX, readable)).events.map((e) => e.type);
+  return (await readFeed(h.relay, sub, null, DIGEST_MAX, readable)).events.map((e) => e.type);
 }
 
 export async function all<T>(h: Harness, sql: string, ...args: unknown[]): Promise<T[]> {

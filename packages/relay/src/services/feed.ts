@@ -49,6 +49,8 @@ export interface SubscriptionRow {
   cursor: number;
   next_due_ms: number | null;
   last_delivered_ms: number | null;
+  /** Replies after this seq, up to the cursor, that a deleted replies subscription never delivered (unsubscribe); null for none. */
+  owed_after: number | null;
   ended_at: string | null;
   created_at: string;
   updated_at: string;
@@ -119,6 +121,30 @@ function belongs(sub: SubscriptionRow, readable: string): { sql: string; args: u
   };
 }
 
+/** Where a subscription reads next: after its cursor, plus any owed replies after owed_after (unsubscribe). */
+type Position = Pick<SubscriptionRow, 'cursor' | 'owed_after'>;
+
+/**
+ * The events ahead of a position, as SQL over `events e`, to AND with belongs: those after the cursor, and with replies
+ * owed, the replies to the agent by others after owed_after. Owed replies sit behind the cursor, so they come first.
+ */
+function ahead(sub: SubscriptionRow, at: Position): { sql: string; args: unknown[] } {
+  if (at.owed_after === null) return { sql: 'e.seq > ?', args: [at.cursor] };
+  return {
+    sql: 'e.seq > ? AND (e.seq > ? OR (e.reply_agent_id = ? AND (e.author_agent_id IS NULL OR e.author_agent_id != ?)))',
+    args: [at.owed_after, at.cursor, sub.agent_id, sub.agent_id],
+  };
+}
+
+/**
+ * Matches a subscription's row (`subscriptions`) only while it is where `sub` was read. A take's cursor move and the
+ * statements that commit with it check this, so a take read before another move or an unsubscribe can't commit.
+ */
+const unmoved = (sub: SubscriptionRow): { sql: string; args: unknown[] } => ({
+  sql: 'id = ? AND cursor = ? AND owed_after IS ?',
+  args: [sub.id, sub.cursor, sub.owed_after],
+});
+
 type EventRow = { seq: number; payload: string };
 
 /**
@@ -138,83 +164,93 @@ async function toEvents(relay: Relay, pages: EventRow[][]): Promise<RelayEvent[]
 }
 
 /**
- * A subscription's events after `after`, oldest first, one more than `limit`. Read in one transaction with the log's tail
+ * A subscription's events ahead of `at`, oldest first, one more than `limit`. Read in one transaction with the log's tail
  * (eventTailStmt), so it sees nothing past it.
  */
-function pageStmt(relay: Relay, sub: SubscriptionRow, after: number, limit: number, readable: string): Stmt {
+function pageStmt(relay: Relay, sub: SubscriptionRow, at: Position, limit: number, readable: string): Stmt {
+  const from = ahead(sub, at);
   const where = belongs(sub, readable);
   return relay.db
-    .prepare(`SELECT e.seq, e.payload FROM events e WHERE e.seq > ? AND ${where.sql} ORDER BY e.seq LIMIT ?`)
-    .bind(after, ...where.args, limit + 1);
+    .prepare(`SELECT e.seq, e.payload FROM events e WHERE ${from.sql} AND ${where.sql} ORDER BY e.seq LIMIT ?`)
+    .bind(...from.args, ...where.args, limit + 1);
 }
 
 /**
- * A page's rows and how far it reached: with nothing more, the log's tail when it was read, so events that didn't belong to
- * the subscription are never looked at again.
+ * A page's rows and the position after it. `last` is how far it reached, never behind the cursor: with nothing more, the
+ * log's tail when it was read, so events that didn't belong to the subscription are never looked at again. A page that
+ * ends among owed replies, which sit behind the cursor, leaves the cursor where it was and still owes the rest.
  */
-function paged(results: EventRow[], tail: number, after: number, limit: number): { rows: EventRow[]; last: number; more: boolean } {
+function paged(results: EventRow[], tail: number, at: Position, limit: number): { rows: EventRow[]; last: number; owed_after: number | null; more: boolean } {
   const rows = results.slice(0, limit);
   const more = results.length > limit;
-  return { rows, last: more ? rows[rows.length - 1]!.seq : Math.max(tail, after), more };
+  const reached = more ? rows[rows.length - 1]!.seq : tail;
+  return { rows, last: Math.max(reached, at.cursor), owed_after: more && reached < at.cursor ? reached : null, more };
 }
 
 /**
- * A page of a subscription's events after `after`, oldest first, for an agent that may read `readable` (readableChannels).
- * `last` is how far the page reached (paged).
+ * A page of a subscription's events, oldest first, for an agent that may read `readable` (readableChannels): after
+ * `after`, or with null, what its next digest would carry, owed replies included. `last` is how far the page reached (paged),
+ * or for a page that ends among owed replies, its last one: read with `after`, that leads on to the rest of them.
  */
 export async function readFeed(
   relay: Relay,
   sub: SubscriptionRow,
-  after: number,
+  after: number | null,
   limit: number,
   readable: string,
 ): Promise<{ events: RelayEvent[]; last: number; more: boolean }> {
-  const [[tail], results] = await readAll<[{ n: number }, EventRow]>(relay.db, eventTailStmt(relay), pageStmt(relay, sub, after, limit, readable));
-  const { rows, last, more } = paged(results, tail!.n, after, limit);
-  return { events: (await toEvents(relay, [rows]))[0]!, last, more };
+  const at = after === null ? sub : { cursor: after, owed_after: null };
+  const [[tail], results] = await readAll<[{ n: number }, EventRow]>(relay.db, eventTailStmt(relay), pageStmt(relay, sub, at, limit, readable));
+  const { rows, last, owed_after, more } = paged(results, tail!.n, at, limit);
+  return { events: (await toEvents(relay, [rows]))[0]!, last: owed_after ?? last, more };
 }
 
-/** How many events wait after the subscription's cursor, counted up to DIGEST_MAX: one `{ n }` row. */
+/** How many events wait for the subscription's next digests, counted up to DIGEST_MAX: one `{ n }` row. */
 export function countWaitingStmt(relay: Relay, sub: SubscriptionRow, readable: string): Stmt {
+  const from = ahead(sub, sub);
   const where = belongs(sub, readable);
   return relay.db
-    .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM events e WHERE e.seq > ? AND ${where.sql} LIMIT ?)`)
-    .bind(sub.cursor, ...where.args, DIGEST_MAX);
+    .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM events e WHERE ${from.sql} AND ${where.sql} LIMIT ?)`)
+    .bind(...from.args, ...where.args, DIGEST_MAX);
 }
 
 /**
  * A statement committed in one transaction with a digest's cursor move, ahead of it (a webhook delivery's row). It must
- * check that the subscription's cursor is still `from`, so it takes effect exactly when the move does.
+ * check the subscription is still `unmoved`, so it takes effect exactly when the move does.
  */
-export type Handoff = (digest: Digest, from: number) => Stmt;
+export type Handoff = (digest: Digest, unmoved: { sql: string; args: unknown[] }) => Stmt;
 
 /**
- * Moves a subscription's cursor past a page it took (`digest`, null for an empty page), as one or two statements: a
- * compare-and-set on the cursor, so another taker that got there first wins; with a digest, `handoff`'s statement goes
- * ahead of it. Clearing `next_due_ms` checks the log again in the same statement, so an event recorded since the page was
- * read keeps the subscription due.
+ * Moves a subscription past a page it took (`digest`, null for an empty page) to `to`, as one or two statements: a
+ * compare-and-set on its position (unmoved), so another taker or an unsubscribe that got there first wins; with a digest,
+ * `handoff`'s statement goes ahead of it. Clearing `next_due_ms` checks the log again in the same statement, so an event
+ * recorded since the page was read keeps the subscription due.
  */
-function moveStmts(relay: Relay, sub: SubscriptionRow, readable: string, last: number, digest: Digest | null, handoff?: Handoff): Stmt[] {
+function moveStmts(relay: Relay, sub: SubscriptionRow, readable: string, to: Position, digest: Digest | null, handoff?: Handoff): Stmt[] {
   const now = relay.now();
   const nowMs = now.getTime();
+  const guard = unmoved(sub);
+  const from = ahead(sub, to);
   const rest = belongs(sub, readable);
-  const pending = `EXISTS (SELECT 1 FROM events e WHERE e.seq > ? AND ${rest.sql})`;
+  const pending = `EXISTS (SELECT 1 FROM events e WHERE ${from.sql} AND ${rest.sql})`;
   if (!digest)
     return [
       sub.ended_at
-        ? relay.db.prepare('DELETE FROM subscriptions WHERE id = ? AND cursor = ?').bind(sub.id, sub.cursor)
+        ? relay.db.prepare(`DELETE FROM subscriptions WHERE ${guard.sql}`).bind(...guard.args)
         : relay.db
-            .prepare(`UPDATE subscriptions SET cursor = ?, next_due_ms = CASE WHEN ${pending} THEN next_due_ms ELSE NULL END WHERE id = ? AND cursor = ?`)
-            .bind(last, last, ...rest.args, sub.id, sub.cursor),
+            .prepare(
+              `UPDATE subscriptions SET cursor = ?, owed_after = ?, next_due_ms = CASE WHEN ${pending} THEN next_due_ms ELSE NULL END WHERE ${guard.sql}`,
+            )
+            .bind(to.cursor, to.owed_after, ...from.args, ...rest.args, ...guard.args),
     ];
   const move = relay.db
     .prepare(
-      `UPDATE subscriptions SET cursor = ?, last_delivered_ms = ?, updated_at = ?,
+      `UPDATE subscriptions SET cursor = ?, owed_after = ?, last_delivered_ms = ?, updated_at = ?,
          next_due_ms = CASE WHEN ${pending} THEN MAX(?, ? + frequency_seconds * 1000) ELSE NULL END
-       WHERE id = ? AND cursor = ?`,
+       WHERE ${guard.sql}`,
     )
-    .bind(last, nowMs, iso(now), last, ...rest.args, nowMs, nowMs, sub.id, sub.cursor);
-  return handoff ? [handoff(digest, sub.cursor), move] : [move];
+    .bind(to.cursor, to.owed_after, nowMs, iso(now), ...from.args, ...rest.args, nowMs, nowMs, ...guard.args);
+  return handoff ? [handoff(digest, guard), move] : [move];
 }
 
 /**
@@ -225,20 +261,20 @@ async function take(relay: Relay, subs: SubscriptionRow[], readable: string, han
   const [[tail], ...results] = await readAll<[{ n: number }, ...EventRow[]]>(
     relay.db,
     eventTailStmt(relay),
-    ...subs.map((sub) => pageStmt(relay, sub, sub.cursor, DIGEST_MAX, readable)),
+    ...subs.map((sub) => pageStmt(relay, sub, sub, DIGEST_MAX, readable)),
   );
-  const pages = subs.map((sub, i) => ({ sub, ...paged(results[i]!, tail!.n, sub.cursor, DIGEST_MAX) }));
+  const pages = subs.map((sub, i) => ({ sub, ...paged(results[i]!, tail!.n, sub, DIGEST_MAX) }));
   const events = await toEvents(
     relay,
     pages.map((p) => p.rows),
   );
   const stmts: Stmt[] = [];
   const moves: { at: number; digest: Digest }[] = [];
-  pages.forEach(({ sub, rows, last, more }, i) => {
+  pages.forEach(({ sub, rows, last, owed_after, more }, i) => {
     const digest: Digest | null = rows.length
       ? { type: 'digest', subscription_id: sub.id as Digest['subscription_id'], events: events[i]!, cursor: String(last), more }
       : null;
-    stmts.push(...moveStmts(relay, sub, readable, last, digest, handoff));
+    stmts.push(...moveStmts(relay, sub, readable, { cursor: last, owed_after }, digest, handoff));
     if (digest) moves.push({ at: stmts.length - 1, digest });
   });
   const moved = await relay.db.batch(stmts);

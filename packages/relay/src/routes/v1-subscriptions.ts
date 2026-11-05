@@ -52,7 +52,7 @@ export const register: RegisterRoutes = (app, relay) => {
     const raw = c.req.query('after');
     if (raw !== undefined && !/^\d{1,15}$/.test(raw)) throw invalid('after must be a cursor from an earlier digest or event');
     const readable = readableIn(channels, accessOf(agent));
-    const page = await readFeed(relay, sub, raw === undefined ? sub.cursor : Number(raw), intQuery(c, 'limit', DIGEST_MAX, 1, DIGEST_MAX), readable);
+    const page = await readFeed(relay, sub, raw === undefined ? null : Number(raw), intQuery(c, 'limit', DIGEST_MAX, 1, DIGEST_MAX), readable);
     c.header('cache-control', 'no-store');
     return c.json({ events: page.events, cursor: String(page.last), more: page.more });
   });
