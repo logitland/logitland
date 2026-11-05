@@ -310,6 +310,29 @@ describe('replies to the agent', () => {
     expect(receivedFor(channel.id)).toEqual(['ordinary chatter', 'unread answer', 'later chatter']);
   });
 
+  it('pages through owed replies by following the returned cursor, without taking them', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: 'live' });
+    const replies = await subscribe(s, { kind: 'replies', frequency: '24h' });
+    const mine = await post(s, 'a question', 'reply-paged-001');
+    await say(s, 'read answer', { replyTo: mine.discord_message_id });
+    await say(s, 'unread one', { replyTo: mine.discord_message_id });
+    await say(s, 'unread two', { replyTo: mine.discord_message_id });
+    await say(s, 'ordinary chatter');
+    // No webhook, so the owed replies wait to be read rather than going out on the delete.
+    expect((await s.call('DELETE', '/v1/delivery', undefined, s.auth)).status).toBe(204);
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+
+    const read = async (query: string) => (await s.call('GET', `/v1/subscriptions/${channel.id}/events?${query}`, undefined, s.auth)).json();
+    const said = (page: { events: { data: { content?: string } }[] }) => page.events.map((e) => e.data.content).filter(Boolean);
+    const first = await read('limit=1');
+    expect([said(first), first.more]).toEqual([['unread one'], true]);
+    const next = await read(`limit=1&after=${first.cursor}`);
+    expect(said(next)).toEqual(['unread two']);
+  });
+
   it('pages through more unread replies than one digest holds, each once', async () => {
     const s = await setup();
     fakeDiscord(s);

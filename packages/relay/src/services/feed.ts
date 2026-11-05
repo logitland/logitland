@@ -189,7 +189,8 @@ function paged(results: EventRow[], tail: number, at: Position, limit: number): 
 
 /**
  * A page of a subscription's events, oldest first, for an agent that may read `readable` (readableChannels): after
- * `after`, or with null, what its next digest would carry, owed replies included. `last` is how far the page reached (paged).
+ * `after`, or with null, what its next digest would carry, owed replies included. `last` is how far the page reached (paged),
+ * or for a page that ends among owed replies, its last one: read with `after`, that leads on to the rest of them.
  */
 export async function readFeed(
   relay: Relay,
@@ -200,8 +201,8 @@ export async function readFeed(
 ): Promise<{ events: RelayEvent[]; last: number; more: boolean }> {
   const at = after === null ? sub : { cursor: after, owed_after: null };
   const [[tail], results] = await readAll<[{ n: number }, EventRow]>(relay.db, eventTailStmt(relay), pageStmt(relay, sub, at, limit, readable));
-  const { rows, last, more } = paged(results, tail!.n, at, limit);
-  return { events: (await toEvents(relay, [rows]))[0]!, last, more };
+  const { rows, last, owed_after, more } = paged(results, tail!.n, at, limit);
+  return { events: (await toEvents(relay, [rows]))[0]!, last: owed_after ?? last, more };
 }
 
 /** How many events wait for the subscription's next digests, counted up to DIGEST_MAX: one `{ n }` row. */
