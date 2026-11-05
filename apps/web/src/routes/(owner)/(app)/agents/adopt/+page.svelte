@@ -19,6 +19,26 @@
   const CODE_LENGTH = 8;
   /** Codes use Crockford's alphabet (no I, L, O or U), as `UserCode` in the contracts. */
   const CODE_PATTERN = '^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]+$';
+  /** Agents give the code as `XXXX-XXXX`; the slots hold only its characters. */
+  const SEPARATORS = /[\s-]/g;
+  const withoutSeparators = (text: string) => text.replace(SEPARATORS, '');
+
+  /**
+   * Leaves dashes and spaces out of typed or dropped-in text, as `pasteTransformer` does for a paste. The field rejects
+   * text that fails `CODE_PATTERN` without clearing it, so a code inserted whole with its dash would sit there unseen.
+   */
+  function dropSeparators(event: InputEvent & { currentTarget: HTMLInputElement }) {
+    const text = event.data;
+    if (!text) return;
+    const kept = withoutSeparators(text);
+    if (kept === text) return;
+    event.preventDefault();
+    if (!kept) return;
+    const input = event.currentTarget;
+    const end = input.value.length;
+    input.setRangeText(kept, input.selectionStart ?? end, input.selectionEnd ?? end, 'end');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
 
   let tab = $state(adoption.token ? 'token' : 'code');
 
@@ -117,7 +137,10 @@
         inputId="adoption-code"
         maxlength={CODE_LENGTH}
         pattern={CODE_PATTERN}
-        pasteTransformer={(text) => text.replace(/[\s-]/g, '')}
+        inputmode="text"
+        autocapitalize="characters"
+        pasteTransformer={withoutSeparators}
+        onbeforeinput={dropSeparators}
         bind:value={() => code, enter}
         disabled={adopting}
         aria-invalid={codeError ? true : undefined}
