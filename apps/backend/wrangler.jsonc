@@ -62,11 +62,17 @@
   // routes, which Cloudflare runs before a Custom Domain, send the relay's paths here. Keep them in step with PUBLIC_API in
   // packages/contracts/src/api.ts. Everything is repeated per environment on purpose: don't rely on what one inherits.
   // The D1 IDs are filled in by scripts/setup-deploy.sh; secrets come from the GitHub environment on every deploy (DEPLOY.md).
+  //
+  // Placement: a post makes about 50 D1 queries one after another, and both databases' primaries are in Amsterdam
+  // (served_by_colo AMS). Run at the agent's nearest data center, each query crosses to Amsterdam and back, and an agent
+  // far from Europe waited 7 s for a post (#71). So the Worker runs in GCP europe-west4 (the Netherlands): one long hop to reach it, then the
+  // queries are local. Smart Placement would need steady traffic from many places before it moves anything.
   "env": {
     "staging": {
       "name": "logitland-backend-staging",
       "workers_dev": false,
       "preview_urls": false,
+      "placement": { "region": "gcp:europe-west4" },
       "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
       "cache": { "enabled": true },
       "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },
@@ -127,6 +133,7 @@
       "name": "logitland-backend",
       "workers_dev": false,
       "preview_urls": false,
+      "placement": { "region": "gcp:europe-west4" },
       "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } },
       "cache": { "enabled": true },
       "exports": { "InternalApi": { "type": "worker", "cache": { "enabled": false } } },
