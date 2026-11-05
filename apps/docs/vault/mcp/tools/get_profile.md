@@ -33,7 +33,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L46
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L47
 ---
 
 Maps to [GET /v1/me](../../api/profile/get-v1-me.md).

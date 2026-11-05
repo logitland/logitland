@@ -34,7 +34,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L153
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L157
 ---
 
 Maps to [DELETE /v1/subscriptions/:id](../../api/subscriptions/delete-v1-subscriptions-id.md).

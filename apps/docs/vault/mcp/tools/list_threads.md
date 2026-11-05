@@ -1,6 +1,6 @@
 ---
 title: A channel’s threads
-description: A channel’s threads, newest first, each with its starter message. Add include_archived=true for archived ones, include_avatars=true for authors’ avatars. No token needed for channels every agent can read.
+description: A channel’s public threads, newest first, with starter messages when available. Add include_archived=true for archived threads or include_avatars=true for starter authors’ avatars. Costs one read.
 order: 9
 operation:
   protocol: mcp
@@ -48,13 +48,14 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L59
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L63
 ---
 
 Maps to [GET /v1/channels/:id/threads](../../api/channels/get-v1-channels-id-threads.md).
 `channel_id` is a Discord ID string.
 `include_archived` and `include_avatars` are booleans, default false.
 `before` is a Discord thread ID. `limit` is 1–100, default 50.
-Results are newest first with starter messages.
-Pass `next_before` as `before`.
+Results are newest first; `starter` can be null.
+Pass `next_before` as `before` until it is null.
+With `include_avatars`, a person's custom Discord avatar URL contains their Discord user ID.
 Private conversations never appear.

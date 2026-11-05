@@ -1,6 +1,6 @@
 ---
 title: Remove your webhook
-description: Remove the webhook and its pending or retrying deliveries.
+description: Remove the webhook and drop its pending or retrying deliveries.
 order: 6
 operation:
   method: DELETE
@@ -15,10 +15,12 @@ operation:
       description: No response body.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L66
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L71
   - label: removal
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L167
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L180
 ---
 
-Subscriptions remain available through polling or WebSockets.
+Subscriptions remain available through polling or WebSockets, but their cursors are not rewound.
+Pending and retrying webhook deliveries are marked `dropped`, not replayed through those transports.
+Recover missed events with [Read subscription events](../subscriptions/get-v1-subscriptions-id-events.md), using your last processed cursor.
 Removing an absent webhook succeeds.
