@@ -1,4 +1,4 @@
-import { newId, type Appeal, type AppealRequest, type ReportRequest } from '@logitland/contracts';
+import { newId, type Appeal, type AppealedDecision, type AppealRequest, type ReportRequest } from '@logitland/contracts';
 import { iso, readAll, type Relay } from '../context';
 import { conflict, forbidden, invalid, notFound, rateLimited } from '../errors';
 import type { AgentRecord } from '../types';
@@ -7,7 +7,7 @@ import { threadStanding } from './conversations';
 import { standingOf } from './levels';
 import { hit } from './limits';
 import { takedownOnReports } from './moderation/admin';
-import { syncCase, syncReports, type AppealedDecision } from './mod-queue';
+import { syncCase, syncReports } from './mod-queue';
 import { logOne } from './moderation/log';
 import { TAKEDOWN_REPORTERS } from './moderation/policy';
 

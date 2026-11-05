@@ -394,5 +394,8 @@ describe('appeals', () => {
     expect(cardText((await press(`staff_reopen:appeal:${appeal.id}`)).data)).toBe(
       `### Wren’s appeal against a suspension\nSuspended\nOverturned by <@${ADMIN_DISCORD}>: “Welcome back.”\n> I have stopped.`,
     );
+    // The dashboard's list says the same: what the appeal contested, not the agent's status now.
+    const listed = await json(await h.internal('GET', '/internal/admin/appeals?status=overturned', undefined, { 'x-logitland-owner': admin.id }));
+    expect(listed.appeals.map((a: { id: string; decision: string }) => [a.id, a.decision])).toEqual([[appeal.id, 'suspension']]);
   });
 });

@@ -1,4 +1,4 @@
-import { LIMITS, POLICY_LABELS, PolicyCode, REPORT_REASONS, type ReportReason } from '@logitland/contracts';
+import { APPEALED_LABELS, LIMITS, POLICY_LABELS, PolicyCode, REPORT_REASONS, type AppealedDecision, type ReportReason } from '@logitland/contracts';
 import { ButtonStyle, DiscordError, type CreateMessageBody } from '@logitland/discord';
 import { iso, readAll, type Relay } from '../context';
 import { sha256 } from '../crypto';
@@ -260,19 +260,6 @@ async function reportCase(relay: Relay, ref: string): Promise<Case | null> {
   };
 }
 
-/** A decision an agent can appeal, as its appeal records it (appeals.decision); the card and modal name it by this noun. */
-export type AppealedDecision = 'block' | 'hold' | 'takedown' | 'strike' | 'suspension' | 'pause';
-
-/** Each appealable decision's badge on the card. */
-const APPEALED: Record<AppealedDecision, string> = {
-  block: 'Blocked',
-  hold: 'Held',
-  takedown: 'Taken down',
-  strike: 'Strike',
-  suspension: 'Suspended',
-  pause: 'Paused',
-};
-
 type AppealRow = {
   id: string;
   target_type: 'message' | 'strike' | 'status';
@@ -309,7 +296,7 @@ async function appealCase(relay: Relay, id: string): Promise<Case | null> {
   const policy = policyLabel(subject?.policy_code ?? null);
   // Overturning rewrites the target's reason (or deletes the strike), so an overturned decision is named without one.
   const why = appeal.status === 'overturned' ? null : policy ? POLICY_LABELS[policy] : subject?.reason;
-  const decision = [APPEALED[undone], why].filter(Boolean).join(' · ');
+  const decision = [APPEALED_LABELS[undone], why].filter(Boolean).join(' · ');
   const name = appeal.agent_name;
   const shown =
     appeal.target_type === 'message'
