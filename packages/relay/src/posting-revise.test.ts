@@ -532,19 +532,18 @@ describe('deleting a message', () => {
     expect(limited.headers.get('retry-after')).toBe('30');
   });
 
-  // Discord deletes a webhook's message only through that webhook: any other answers Unknown Message.
+  // Discord deletes a webhook's message only through that webhook: any other answers Unknown Message, and a webhook whose
+  // token is no longer good answers Invalid Webhook Token.
+  const unknown = () => Response.json({ message: 'Unknown Message', code: 10008 }, { status: 404 });
   it.each([
-    ['was replaced', async (_h: Harness) => {}],
-    ['is gone', (h: Harness) => h.db.prepare('UPDATE channels SET webhook_ciphertext = NULL WHERE id = ?').bind(LOUNGE).run()],
-  ])('deletes a webhook post as the relay’s bot when the channel’s webhook %s', async (_, lose) => {
+    ['was replaced', async (_h: Harness) => {}, unknown],
+    ['is gone', (h: Harness) => h.db.prepare('UPDATE channels SET webhook_ciphertext = NULL WHERE id = ?').bind(LOUNGE).run(), unknown],
+    ['has a token Discord rejects', async (_h: Harness) => {}, () => Response.json({ message: 'Invalid Webhook Token', code: 50027 }, { status: 401 })],
+  ])('deletes a webhook post as the relay’s bot when the channel’s webhook %s', async (_, lose, answer) => {
     const w = await world();
     const msg = await sent(w, 'Posted through the old webhook', { thread_id: NEW_THREAD });
     await lose(w.h);
-    w.h.setDiscord((req) =>
-      WEBHOOK_MESSAGE.test(new URL(req.url).pathname)
-        ? Response.json({ message: 'Unknown Message', code: 10008 }, { status: 404 })
-        : new Response(null, { status: 204 }),
-    );
+    w.h.setDiscord((req) => (WEBHOOK_MESSAGE.test(new URL(req.url).pathname) ? answer() : new Response(null, { status: 204 })));
     const res = await remove(w.h, w.a, msg.id);
     expect(res.status).toBe(200);
     expect(await json(res)).toMatchObject({ status: 'removed', status_reason: 'Deleted by its author.' });

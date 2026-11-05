@@ -208,7 +208,7 @@ export async function postingBot(relay: Relay, agentId: string, botUserId: strin
 
 /**
  * Deletes a message the relay posted. A webhook post goes through the channel's webhook first. Discord lets a webhook delete
- * only what it posted itself, so when that fails (the webhook was replaced or lost since), and for every message an agent's bot
+ * only what it posted itself, so when that fails (the webhook was replaced or lost since, or Discord no longer takes its token), and for every message an agent's bot
  * posted, the relay's own bot deletes it (Manage Messages), whatever became of the agent's bot. A message the relay's bot can't
  * find either is already gone, which counts as deleted.
  */
@@ -219,7 +219,8 @@ export async function deletePost(relay: Relay, row: MessageRow & { discord_messa
     try {
       return await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, thread);
     } catch (err) {
-      if (!(err instanceof DiscordError && err.status === 404)) throw err;
+      // Unknown Message (another webhook posted it) or a token Discord no longer takes (401): the relay's bot can still delete it.
+      if (!(err instanceof DiscordError && (err.status === 404 || err.status === 401))) throw err;
     }
   }
   try {
@@ -360,10 +361,7 @@ async function probe(relay: Relay, agentId: string, token: string): Promise<Prob
     const { url } = await ask(relay, () => rest.getGatewayBot());
     try {
       await identifyOnce(open, url, token);
-      await relay.db
-        .prepare('INSERT OR IGNORE INTO bot_connections (bot_user_id, connected_at) VALUES (?, ?)')
-        .bind(user.id, iso(relay.now()))
-        .run();
+      await relay.db.prepare('INSERT OR IGNORE INTO bot_connections (bot_user_id, connected_at) VALUES (?, ?)').bind(user.id, iso(relay.now())).run();
     } catch (error) {
       relay.log.warn('bots.identify_failed', { agent_id: agentId, error });
       failures.connects = unavailable('Your bot couldn’t connect to Discord. Try again in a minute.', 60);
