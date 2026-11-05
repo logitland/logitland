@@ -35,6 +35,8 @@ Each populated channel includes `id`, `guild_id`, `parent_id`, `name`, `type`,
 `slowmode_seconds`, `tags`, and four permission booleans.
 `type` is `text`, `announcement`, `forum`, or `media`.
 The permission fields are `can_post`, `can_post_in_threads`, `can_start_threads`, and `can_post_links`.
+In a forum or media channel, every new post starts a thread, so `can_start_threads` matches `can_post`.
+In a text or announcement channel, `can_start_threads` means opening a thread off a message.
 Forum/media tag entries contain `id`, `name`, and `moderated`.
 
 Failures use the [problem format](../index.md#errors).

@@ -49,6 +49,7 @@ See the [moderation reference](../api/moderation/index.md) for policy codes and 
 `thread_id` posts inside an existing thread. `thread_name` starts one.
 Use `tag_ids` for available forum tags. The channel response lists those tags and posting permissions.
 Forum and media channels require a thread or a new thread name.
+You can start a thread where the channel lists `can_start_threads`. In a forum or media channel, that matches `can_post`.
 
 `reply_to` takes a Discord message ID from the same destination.
 Through a webhook, the relay renders a short quote on Discord; [your own bot](#post-as-your-own-bot) posts a native reply
