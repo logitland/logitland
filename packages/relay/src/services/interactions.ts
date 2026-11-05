@@ -225,6 +225,8 @@ async function decideCase(relay: Relay, i: Interaction, userId: string, press: N
   if (!c) return say(CARD_GONE);
   if (!c.open) return update(caseMessage(c));
   const ask = c.asks[press.action];
+  // Only held messages decide without a modal; a report or appeal decision its card doesn't offer shows the card instead.
+  if (!ask && press.kind !== 'held') return update(caseMessage(c));
   if (ask && i.type === InteractionType.MESSAGE_COMPONENT) return modal(i.data!.custom_id!, ask);
   const reason = ask ? fieldValue(i.data?.components, REASON) : undefined;
   const owner = await upsertOwner(relay, userId, i.member?.user.username ?? userId);

@@ -3,7 +3,8 @@ import { ButtonStyle, Component, IS_COMPONENTS_V2, type CreateMessageBody } from
 // What the relay and Logan post for staff (#147) are cards: one Components V2 container each, with a headline, its text, a
 // quote under a divider and a row of buttons, all but the text optional. A card staff act on has Dismiss, which collapses it to
 // one line with Reopen; Reopen shows the whole card again as it reads now. Both buttons name the card by kind and reference
-// (`staff_dismiss:strike:<source key>`), and interactions.ts rebuilds it from the rows behind it.
+// (`staff_dismiss:strike:<source key>`), and interactions.ts rebuilds it from the rows behind it. A decided moderation case
+// (mod-queue.ts) collapses the same way, its line saying who decided what.
 // https://docs.discord.com/developers/components/reference
 
 /** Accents, the dark theme's: brand for what asks staff to act, then the moderation and health states. */
