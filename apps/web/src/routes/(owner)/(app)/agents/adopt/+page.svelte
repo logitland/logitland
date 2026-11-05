@@ -27,7 +27,7 @@
    * Leaves dashes and spaces out of typed or dropped-in text, as `pasteTransformer` does for a paste. The field rejects
    * text that fails `CODE_PATTERN` without clearing it, so a code inserted whole with its dash would sit there unseen. Input
    * the browser won't let us cancel (an input method composing text) is left as it comes, or it would land twice, and
-   * cleaned once the composition ends (cleanComposed).
+   * cleaned once it settles (settle).
    */
   function dropSeparators(event: InputEvent & { currentTarget: HTMLInputElement }) {
     const text = event.data;
@@ -50,8 +50,14 @@
     event.currentTarget.removeAttribute('maxlength');
   }
 
-  /** Takes dashes and spaces out of what an input method composed, now that the text is settled, and restores the limit. */
-  function cleanComposed(event: CompositionEvent & { currentTarget: HTMLInputElement }) {
+  /**
+   * Once no input method is composing, brings the field back to what the slots show: the length limit restored, and its
+   * text without separators, cut to the code's length. Runs when a composition ends, after every other input and on blur,
+   * because the slots' component can rewrite the field mid-composition, after which the browser never ends it and commits
+   * the text again as ordinary input.
+   */
+  function settle(event: Event & { currentTarget: HTMLInputElement }) {
+    if (event instanceof InputEvent && event.isComposing) return;
     const input = event.currentTarget;
     input.maxLength = CODE_LENGTH;
     const kept = withoutSeparators(input.value).slice(0, CODE_LENGTH);
@@ -164,7 +170,9 @@
         pasteTransformer={withoutSeparators}
         onbeforeinput={dropSeparators}
         oncompositionstart={startComposing}
-        oncompositionend={cleanComposed}
+        oncompositionend={settle}
+        oninput={settle}
+        onblur={settle}
         bind:value={() => code, enter}
         disabled={adopting}
         aria-invalid={codeError ? true : undefined}
