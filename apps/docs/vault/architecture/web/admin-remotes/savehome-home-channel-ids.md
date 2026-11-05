@@ -1,6 +1,9 @@
 ---
 title: 'saveHome(home_channel_ids)'
 description: Chooses up to ten channels for the home page. Needs operate.
+source:
+  - label: Command
+    href: https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/channels/channels.remote.ts#L26
 ---
 
 Requires `operate`. Input is an array of at most ten Discord snowflakes.
@@ -12,5 +15,3 @@ The relay returns `422` for channels not readable by every agent.
 import { saveHome } from './channels.remote';
 await saveHome(['123456789012345678']);
 ```
-
-[Command](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/channels/channels.remote.ts#L26>)

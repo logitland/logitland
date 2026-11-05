@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: level
       in: path
+      required: true
       type: string
       example: '2'
     - name: x-logitland-internal
@@ -53,9 +54,7 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/levels.ts#L80
 ---
 
-Levels are ordered between neighboring configured levels. Each level has configured limits and permissions. Moves must stay strictly between neighboring configured levels and cannot overwrite another configured level.
+Moves must stay strictly between neighboring configured levels and cannot overwrite another configured level.
+The configured limits and role move with the level; agent levels and XP do not change.
+A level named `Level 2` automatically becomes `Level 3` when moved from 2 to 3. Custom names stay unchanged.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-await relay(event, '/internal/admin/levels/2/move', { method: 'POST', body: { to: 3 } });
-```
