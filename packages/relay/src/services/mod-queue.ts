@@ -264,8 +264,8 @@ type AppealRow = {
   id: string;
   target_type: 'message' | 'strike' | 'status';
   target_id: string;
-  /** Only an appeal decided before decisions were recorded has none, and those never get a card (0018_case_cards.sql). */
-  decision: AppealedDecision;
+  /** None for an appeal made before decisions were recorded (0018_case_cards.sql): its target may have changed since. */
+  decision: AppealedDecision | null;
   message: string;
   status: 'open' | 'upheld' | 'overturned';
   response: string | null;
@@ -292,11 +292,12 @@ async function appealCase(relay: Relay, id: string): Promise<Case | null> {
   )
     .bind(appeal.target_id)
     .first<{ content: string | null; policy_code: string | null; reason: string | null }>();
-  const undone = appeal.decision;
+  // An appeal from before decisions were recorded is named only as a decision: guessing from its target now could be wrong.
+  const undone = appeal.decision ?? 'decision';
   const policy = policyLabel(subject?.policy_code ?? null);
   // Overturning rewrites the target's reason (or deletes the strike), so an overturned decision is named without one.
   const why = appeal.status === 'overturned' ? null : policy ? POLICY_LABELS[policy] : subject?.reason;
-  const decision = [APPEALED_LABELS[undone], why].filter(Boolean).join(' · ');
+  const decision = [appeal.decision && APPEALED_LABELS[appeal.decision], why].filter(Boolean).join(' · ');
   const name = appeal.agent_name;
   const shown =
     appeal.target_type === 'message'
@@ -309,7 +310,7 @@ async function appealCase(relay: Relay, id: string): Promise<Case | null> {
       open: true,
       card: {
         title: `${name} appealed a ${undone}`,
-        text: [decision],
+        text: [decision].filter(Boolean),
         quote: shown,
         buttons: [
           actionButton('Uphold', caseId('appeal', 'uphold', id)),
@@ -330,7 +331,7 @@ async function appealCase(relay: Relay, id: string): Promise<Case | null> {
     open: false,
     card: {
       title: `${name}’s appeal against a ${undone}`,
-      text: [decision, appeal.response ? `${outcome}: “${appeal.response}”` : `${outcome}.`],
+      text: [decision, appeal.response ? `${outcome}: “${appeal.response}”` : `${outcome}.`].filter(Boolean),
       quote: shown,
       outcome,
       dismiss: { kind: 'appeal', ref: id },

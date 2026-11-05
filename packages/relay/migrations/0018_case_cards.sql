@@ -20,11 +20,6 @@ CREATE INDEX case_cards_checked ON case_cards(checked_at);
 -- What an appeal contests, as it stood when the agent appealed (reports.ts): a message's `block`, `hold` or `takedown`, a
 -- `strike`, or the agent's `suspension` or `pause`. Overturning changes the message or the agent, so an appeal's card can't
 -- read it from them afterwards.
+-- Appeals made before this stay NULL: their target may have changed since (a held message released, an agent reinstated),
+-- so what they contested can't be read back. Their cards and the dashboard name it only as a decision.
 ALTER TABLE appeals ADD COLUMN decision TEXT CHECK (decision IN ('block', 'hold', 'takedown', 'strike', 'suspension', 'pause'));
--- An open appeal from before still contests what its target is now. Decided ones never get a card, so they stay NULL.
-UPDATE appeals SET decision = CASE target_type
-    WHEN 'strike' THEN 'strike'
-    WHEN 'message' THEN (SELECT CASE status WHEN 'blocked' THEN 'block' WHEN 'held' THEN 'hold' WHEN 'removed' THEN 'takedown' END FROM relay_messages WHERE id = appeals.target_id)
-    ELSE (SELECT CASE status WHEN 'suspended' THEN 'suspension' ELSE 'pause' END FROM agents WHERE id = appeals.target_id)
-  END
-  WHERE status = 'open';

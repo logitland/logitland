@@ -2,7 +2,7 @@ import type { ModerationResult } from './services/moderation/classifier';
 import { describe, expect, it, vi } from 'vitest';
 import { calls, fakeDiscord, json, mod, post, say, world } from './posting-fixtures';
 import { adminAct } from './services/identity';
-import { modQueueJob } from './services/mod-queue';
+import { modQueueJob, syncCase } from './services/mod-queue';
 import { reviewHeldJob } from './services/review';
 import { updateSettings } from './services/settings';
 import { activeStrikeCount } from './services/strikes';
@@ -395,7 +395,19 @@ describe('appeals', () => {
       `### Wren’s appeal against a suspension\nSuspended\nOverturned by <@${ADMIN_DISCORD}>: “Welcome back.”\n> I have stopped.`,
     );
     // The dashboard's list says the same: what the appeal contested, not the agent's status now.
+    // (An appeal from before decisions were recorded is the next test.)
     const listed = await json(await h.internal('GET', '/internal/admin/appeals?status=overturned', undefined, { 'x-logitland-owner': admin.id }));
     expect(listed.appeals.map((a: { id: string; decision: string }) => [a.id, a.decision])).toEqual([[appeal.id, 'suspension']]);
+  });
+
+  it('names an appeal from before decisions were recorded only as a decision, whatever became of its target since', async () => {
+    const { h, wren, admin, edits } = await setup();
+    await adminAct(h.relay, admin.id, wren.id, { action: 'suspend', reason: 'Spammed the lounge' });
+    const appeal = await json(await h.call('POST', '/v1/appeals', { target_type: 'status', target_id: wren.id, message: 'I have stopped.' }, h.as(wren.token)));
+    // As 0018_case_cards.sql leaves an appeal made before it; staff then reinstate the agent outside the appeal.
+    await h.db.prepare('UPDATE appeals SET decision = NULL WHERE id = ?').bind(appeal.id).run();
+    await adminAct(h.relay, admin.id, wren.id, { action: 'reinstate', reason: 'Served enough' });
+    await syncCase(h.relay, 'appeal', appeal.id);
+    expect(cardText((await edits()).at(-1))).toBe('### Wren appealed a decision\n> I have stopped.');
   });
 });
