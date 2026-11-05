@@ -25,11 +25,13 @@
 
   /**
    * Leaves dashes and spaces out of typed or dropped-in text, as `pasteTransformer` does for a paste. The field rejects
-   * text that fails `CODE_PATTERN` without clearing it, so a code inserted whole with its dash would sit there unseen.
+   * text that fails `CODE_PATTERN` without clearing it, so a code inserted whole with its dash would sit there unseen. Input
+   * the browser won't let us cancel (an input method composing text) is left as it comes, or it would land twice, and
+   * cleaned once the composition ends (cleanComposed).
    */
   function dropSeparators(event: InputEvent & { currentTarget: HTMLInputElement }) {
     const text = event.data;
-    if (!text) return;
+    if (!text || !event.cancelable) return;
     const kept = withoutSeparators(text);
     if (kept === text) return;
     event.preventDefault();
@@ -37,6 +39,15 @@
     const input = event.currentTarget;
     const end = input.value.length;
     input.setRangeText(kept, input.selectionStart ?? end, input.selectionEnd ?? end, 'end');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /** Takes dashes and spaces out of what an input method composed, now that the text is settled. */
+  function cleanComposed(event: CompositionEvent & { currentTarget: HTMLInputElement }) {
+    const input = event.currentTarget;
+    const kept = withoutSeparators(input.value);
+    if (kept === input.value) return;
+    input.value = kept;
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
@@ -49,13 +60,15 @@
   let adopting = $state(false);
   const orphan = $derived(found?.agent);
 
+  // The field keeps the code as typed and the slots show it in capitals: changing the field's own text would make an input
+  // method that is composing it (a phone keyboard, which composes every word) add each step again.
   async function enter(value: string) {
-    code = value.toUpperCase();
+    code = value;
     found = codeError = undefined;
     if (code.length !== CODE_LENGTH) return;
     const entered = code;
     try {
-      const result = await lookupClaim(formatCode(entered));
+      const result = await lookupClaim(formatCode(entered.toUpperCase()));
       if (code === entered) found = result;
     } catch (error) {
       if (code === entered) codeError = messageOf(error);
@@ -141,6 +154,7 @@
         autocapitalize="characters"
         pasteTransformer={withoutSeparators}
         onbeforeinput={dropSeparators}
+        oncompositionend={cleanComposed}
         bind:value={() => code, enter}
         disabled={adopting}
         aria-invalid={codeError ? true : undefined}
@@ -149,13 +163,13 @@
         {#snippet children({ cells })}
           <InputOTP.Group>
             {#each cells.slice(0, 4) as cell, i (i)}
-              <InputOTP.Slot {cell} class="size-10 font-mono text-base sm:size-11" aria-invalid={codeError ? true : undefined} />
+              <InputOTP.Slot {cell} class="size-10 font-mono text-base uppercase sm:size-11" aria-invalid={codeError ? true : undefined} />
             {/each}
           </InputOTP.Group>
           <InputOTP.Separator class="px-1 text-muted-foreground" />
           <InputOTP.Group>
             {#each cells.slice(4) as cell, i (i)}
-              <InputOTP.Slot {cell} class="size-10 font-mono text-base sm:size-11" aria-invalid={codeError ? true : undefined} />
+              <InputOTP.Slot {cell} class="size-10 font-mono text-base uppercase sm:size-11" aria-invalid={codeError ? true : undefined} />
             {/each}
           </InputOTP.Group>
         {/snippet}
