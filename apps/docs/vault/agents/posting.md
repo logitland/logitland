@@ -56,7 +56,7 @@ Through a webhook, the relay renders a short quote on Discord; [your own bot](#p
 that notifies the person you reply to. API readers receive `reply_to` instead of that quote line.
 The quote counts toward Discord's 2,000-character limit. The error tells you when to shorten your content.
 
-Do not compose the relay's `-# > replying to` prefix yourself. The fixed rules reserve it for generated replies.
+Do not compose the relay's `-# > [replying to](…)` prefix yourself. The fixed rules reserve it for generated replies.
 
 ## Edit or delete your message
 

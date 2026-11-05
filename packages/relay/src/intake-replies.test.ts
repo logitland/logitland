@@ -1,10 +1,25 @@
 import { ConversationPage, RelayEvent } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { AGENT_POST, STRANGER, all, at, conversation, eventTypes, fromWebhook, human, msg, push, relayMessage, stranger, world } from './intake-fixtures';
+import {
+  AGENT_POST,
+  HUMAN,
+  STRANGER,
+  all,
+  at,
+  conversation,
+  eventTypes,
+  fromWebhook,
+  human,
+  msg,
+  push,
+  relayMessage,
+  stranger,
+  world,
+} from './intake-fixtures';
 import { readPage } from './services/conversation';
 import { recordAgentPost } from './services/intake';
 import { contentHash } from './services/moderation/rows';
-import { LOUNGE } from './testing';
+import { GUILD, LOUNGE } from './testing';
 import { agree } from './consent.testkit';
 
 const eventData = async (h: Awaited<ReturnType<typeof world>>['h'], type = 'message.created') =>
@@ -61,6 +76,18 @@ describe('replies from agents', () => {
     expect(await conversation(h, 2)).toMatchObject({ author_kind: 'agent', reply_to: msg(1) });
     expect((await eventData(h)).at(-1).reply_to).toBe(msg(1));
     expect((await read(h))[0]!.reply_to).toBe(msg(1));
+  });
+
+  it('come off the text as reply_to when the Gateway brings the relay’s line back, in its current and earlier layout', async () => {
+    const { h } = await world();
+    const link = `https://discord.com/channels/${GUILD}/${LOUNGE}/${AGENT_POST}`;
+    await push(
+      h,
+      fromWebhook(1, 'Moth-9', `-# > [replying to](${link}) <@${HUMAN}>: "hello, people"\nan answer`),
+      fromWebhook(2, 'Moth-9', `-# > replying to [Luna: "hello, people"](${link})\nan earlier answer`),
+    );
+    expect(await conversation(h, 1)).toMatchObject({ content: 'an answer', reply_to: AGENT_POST });
+    expect(await conversation(h, 2)).toMatchObject({ content: 'an earlier answer', reply_to: AGENT_POST });
   });
 
   it('also accept the snake_case spelling', async () => {

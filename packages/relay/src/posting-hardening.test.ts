@@ -159,8 +159,11 @@ describe('starting threads', () => {
 
 describe('fixed rules', () => {
   it('refuse a line that imitates the relay’s reply line', () => {
+    expect(rules('-# > [replying to](https://example.org/x) <@123456789012345678>: "hi"\nhello there')).toContain('impersonation');
+    expect(rules('hello there\n -#> [ replying to](https://example.org/x) Alice')).toContain('impersonation');
     expect(rules('-# > replying to [Alice: "hi"](https://example.org/x)\nhello there')).toContain('impersonation');
     expect(rules('I am replying to Alice here')).toEqual([]);
+    expect(rules('-# > [the docs](https://example.org/x) are replying to that')).toEqual([]);
   });
   it('hold stacks of combining marks and floods of headings', () => {
     expect(rules(`z${'́'.repeat(8)}algo`)).toContain('spam');

@@ -10,7 +10,7 @@ vi.mock('./services/intake', async (original) => ({ ...(await original<typeof im
 
 /** The reply line for a target whose text is converse()'s default. */
 const line = (who: string, channel: string, message: string, quote = 'hello everyone') =>
-  `-# > replying to [${who}: "${quote}"](https://discord.com/channels/${GUILD}/${channel}/${message})`;
+  `-# > [replying to](https://discord.com/channels/${GUILD}/${channel}/${message}) ${who}: "${quote}"`;
 const sentContent = async (h: Parameters<typeof calls>[0]) => (await calls(h, 'POST', WEBHOOK_POST)).at(-1)!.body.content as string;
 
 describe('replying to a message', () => {
@@ -62,11 +62,11 @@ describe('replying to a message', () => {
     expect(await sentContent(h)).toBe(`${line('Orrery', NEW_THREAD, target)}\nA reply in the post.`);
   });
 
-  it('replies to a bot or webhook message by its name', async () => {
+  it.each(['bot', 'webhook'] as const)('replies to a %s message by its name', async (author) => {
     const { h, a } = await world();
-    const target = await converse(h, { author: 'bot', name: 'Helper Bot' });
+    const target = await converse(h, { author, name: 'Helper Bot' });
     await post(h, a, say('Thanks, bot.', { reply_to: target }));
-    expect(await sentContent(h)).toContain('-# > replying to [Helper Bot: "hello everyone"]');
+    expect(await sentContent(h)).toBe(`${line('Helper Bot', LOUNGE, target)}\nThanks, bot.`);
   });
 });
 
@@ -84,7 +84,7 @@ describe('the reply line', () => {
     const { h, a } = await world();
     const target = await converse(h, { author: 'agent', name: 'Orrery', content: 'one two three four five six seven eight nine ten eleven' });
     await post(h, a, say('Long one.', { reply_to: target }));
-    expect(await sentContent(h)).toContain('[Orrery: "one two three four five six seven eight nine ten…"]');
+    expect(await sentContent(h)).toBe(`${line('Orrery', LOUNGE, target, 'one two three four five six seven eight nine ten…')}\nLong one.`);
   });
 
   it('keeps names and quotes from breaking out of the line', async () => {
@@ -92,18 +92,21 @@ describe('the reply line', () => {
     const target = await converse(h, { author: 'agent', name: '**evil** [click](x)', content: 'a "quote"] (and) <@1234567890123456789>\nsecond line' });
     await post(h, a, say('Replying to a creative name.', { reply_to: target }));
     const [first, ...rest] = (await sentContent(h)).split('\n');
-    expect(first).toBe(`-# > replying to [evil clickx: "a quote and second line"](https://discord.com/channels/${GUILD}/${LOUNGE}/${target})`);
+    expect(first).toBe(line('evil clickx', LOUNGE, target, 'a quote and second line'));
     expect(rest).toEqual(['Replying to a creative name.']);
   });
 
-  it('leaves out a quote the fixed rules would refuse in the agent’s own text', async () => {
-    const { h, a } = await world();
-    for (const content of ['free nitro discord.gg/xyz', 'mail me me@example.com', 'call +1 415 555 0100']) {
+  it.each(['free nitro discord.gg/xyz', 'mail me me@example.com', 'call +1 415 555 0100'])(
+    'leaves out a quote the fixed rules would refuse in the agent’s own text: %s',
+    async (content) => {
+      const { h, a } = await world();
       const target = await converse(h, { author: 'bot', name: 'Helper Bot', content });
       await post(h, a, say('Replying to a hostile message.', { reply_to: target }));
-      expect(await sentContent(h), content).toContain(`-# > replying to [Helper Bot](https://discord.com/`);
-    }
-  });
+      expect(await sentContent(h)).toBe(
+        `-# > [replying to](https://discord.com/channels/${GUILD}/${LOUNGE}/${target}) Helper Bot\nReplying to a hostile message.`,
+      );
+    },
+  );
 });
 
 describe('what reply_to may point at', () => {
