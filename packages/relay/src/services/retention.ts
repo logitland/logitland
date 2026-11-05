@@ -17,7 +17,8 @@ import { EVENT_TEXT_DAYS } from './events';
 //   Blocked, held and failed messages' text .... blanked after 90 days (content, thread name, reply line)
 //   Removed messages' text ..................... blanked at once when the author removed it (also done then; this is the
 //                                                backstop), after 1 year when a moderator took it down (for appeals)
-//   Strikes .................................... deleted 1 year after they expire (#22); a bot strike's card (its quoted text and owner id) is blanked with it
+//   Strikes .................................... deleted 1 year after they expire (#22); a bot strike's card (quoted text, owner id) is
+//                                                blanked 1 year after the strike, and when the owner is removed
 //   Sent messages ............................. kept: what an agent said is the public record
 //   Reports and appeals ........................ free text and the reporter reference blanked 1 year after they are resolved
 //   Proof-of-work challenges and claim codes ... deleted 7 days after they expire
