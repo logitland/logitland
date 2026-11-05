@@ -16,6 +16,7 @@ import { audit, auditStmt, auditStmtIf } from '../audit';
 import { deleteBotPost } from '../bots';
 import { getChannel, openWebhook } from '../channels';
 import { adminAct, getAgent } from '../identity';
+import { syncCase, syncReports } from '../mod-queue';
 import { scrubMessage } from '../scrub';
 import { dispatch } from '../sending';
 import { addStrike, removeStrike } from '../strikes';
@@ -24,8 +25,9 @@ import { logStmt, logStmtWhere, type LogEntry } from './log';
 import { FALSE_REPORT_XP, TAKEDOWN_REPORTERS, explain } from './policy';
 import { getRow, webhookThread, type MessageRow } from './rows';
 
-// What an admin does about messages, reports and appeals. Every change is a compare-and-set on the row's status,
-// logged in moderation_log and audited, so two admins clicking at once act once.
+// What an admin does about messages, reports and appeals, from the dashboard or a card in #mod-queue. Every change is a
+// compare-and-set on the row's status, logged in moderation_log and audited, so two admins clicking at once act once. Each
+// decision then brings the case's card up to date (mod-queue.ts), wherever it was made.
 
 const admin = (id: string) => ({ actor_type: 'admin' as const, actor_id: id });
 const age = (relay: Relay, createdAt: string) => Math.max(0, Math.floor((relay.now().getTime() - Date.parse(createdAt)) / 1000));
@@ -114,6 +116,7 @@ export async function release(relay: Relay, adminId: string, messageId: string, 
     }),
   ]);
   await dispatch(relay, row);
+  await syncCase(relay, 'held', row.id);
   return (await getRow(relay, row.id))!;
 }
 
@@ -140,7 +143,9 @@ export async function reject(relay: Relay, adminId: string, messageId: string, b
       diff: { status: { from: 'held', to: 'blocked' }, policy_code: { from: row.policy_code, to: body.policy_code } },
     }),
   ]);
-  return body.strike ? strikeFor(relay, adminId, row, body.policy_code, reason) : rejected;
+  const answer = body.strike ? await strikeFor(relay, adminId, row, body.policy_code, reason) : rejected;
+  await syncCase(relay, 'held', row.id);
+  return answer;
 }
 
 /** Strikes the message's agent and tells it so in the message's reason; answers the message as it now is. */
@@ -419,6 +424,7 @@ export async function actOnReport(relay: Relay, adminId: string, reportId: strin
     }),
     reportStmt(relay, reportId),
   ]);
+  await syncReports(relay, report.target_type, report.target_id);
   return toReport(done.at(-1)!.results[0]!);
 }
 
@@ -607,6 +613,9 @@ export async function decideAppeal(relay: Relay, adminId: string, appealId: stri
         ]
       : []),
   );
+  await syncCase(relay, 'appeal', appealId);
+  // Overturning a hold releases the message, which decides its own case.
+  if (appeal.target_type === 'message') await syncCase(relay, 'held', appeal.target_id);
   return { ...done!, subject: subject ?? null };
 }
 

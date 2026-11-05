@@ -1,24 +1,29 @@
-import { LIMITS } from '@logitland/contracts';
-import type { CreateMessageBody } from '@logitland/discord';
+import { AppealDecision, LIMITS, ModerationAction, ReportAction } from '@logitland/contracts';
+import { Component, TextInputStyle, type CreateMessageBody } from '@logitland/discord';
 import { z } from 'zod';
 import { RelayError, parse, unauthorized } from '../errors';
 import type { Relay } from '../context';
 import { adminStanding } from './admins';
 import { requestCard } from './bot-queue';
 import { strikeCard } from './bot-strikes';
+import { upsertOwner } from './identity';
 import { hit } from './limits';
+import { caseButton, caseCard, caseMessage, readCase, type Ask, type CaseAction } from './mod-queue';
+import { actOnReport, decideAppeal, reject, release } from './moderation/admin';
 import { setPersonRole } from './people-roles';
 import { answerButton, isLoganButton } from './logan/calls';
-import { cardButton, cardMessage, dismissedMessage, type Card, type CardKind } from './staff-cards';
-import { CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, revokeConsent, type ConsentActor } from './consent';
+import { cardButton, cardMessage, collapsedMessage, type Card, type CardKind } from './staff-cards';
+import { NOTICE_BUTTON } from './turn-away';
+import { CONSENT_COMMAND, CONSENT_NOTICE_VERSION, consentNotice, consentStatus, grantConsent, revokeConsent, type ConsentActor } from './consent';
 
 // Discord interactions: the /consent command and its agree button (only the button agrees: /consent agree shows the notice
-// with it), the Confirm and Cancel buttons on the Logan admin MCP's requests, and Dismiss and Reopen on staff cards.
+// with it), the Confirm and Cancel buttons on the Logan admin MCP's requests, Dismiss and Reopen on staff cards, and the
+// decisions on #mod-queue's case cards, with the modals that confirm them.
 // https://docs.discord.com/developers/interactions/receiving-and-responding
 // https://docs.discord.com/developers/interactions/overview (verifying requests)
 
-const InteractionType = { PING: 1, APPLICATION_COMMAND: 2, MESSAGE_COMPONENT: 3 } as const;
-const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, UPDATE_MESSAGE: 7 } as const;
+const InteractionType = { PING: 1, APPLICATION_COMMAND: 2, MESSAGE_COMPONENT: 3, MODAL_SUBMIT: 5 } as const;
+const Callback = { PONG: 1, CHANNEL_MESSAGE_WITH_SOURCE: 4, UPDATE_MESSAGE: 7, MODAL: 9 } as const;
 const EPHEMERAL = 64;
 
 /**
@@ -31,21 +36,6 @@ export const AGREE_BUTTON = `consent_agree:${CONSENT_NOTICE_VERSION}`;
 /** An action row (type 1) holding a primary (style 1) button (type 2) whose custom_id the handler below answers. */
 export const agreeButton = (customId: string) => [{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: relay my messages', custom_id: customId }] }];
 
-/** Shows the consent notice, as /consent agree does, from a button on an ordinary message (turn-away.ts). */
-export const NOTICE_BUTTON = 'consent_notice';
-export const noticeButton = () => [{ type: 1, components: [{ type: 2, style: 1, label: 'Read and agree', custom_id: NOTICE_BUTTON }] }];
-
-/** The one definition of the /consent command, registered by POST /internal/admin/discord/commands. */
-export const CONSENT_COMMAND = {
-  name: 'consent',
-  type: 1,
-  description: 'Let agents read your messages, or stop it',
-  options: [
-    { type: 1, name: 'agree', description: 'See what is shared and with whom, then agree to have your messages relayed to agents' },
-    { type: 1, name: 'withdraw', description: 'Stop relaying your messages from now on' },
-    { type: 1, name: 'status', description: 'See whether you have agreed and how many of your messages Logitland holds' },
-  ],
-} as const;
 
 const Snow = z.string().regex(/^\d{17,20}$/);
 
@@ -55,15 +45,31 @@ const Interaction = z.object({
   type: z.number().int(),
   token: z.string().min(1).max(512),
   guild_id: Snow.optional(),
-  member: z.object({ user: z.object({ id: Snow }), roles: z.array(z.string()).optional() }).optional(),
+  member: z.object({ user: z.object({ id: Snow, username: z.string().optional() }), roles: z.array(z.string()).optional() }).optional(),
   user: z.object({ id: Snow }).optional(),
-  data: z.object({ name: z.string().optional(), custom_id: z.string().optional(), options: z.array(z.object({ name: z.string() })).optional() }).optional(),
+  data: z
+    .object({
+      name: z.string().optional(),
+      custom_id: z.string().optional(),
+      options: z.array(z.object({ name: z.string() })).optional(),
+      /** A modal's fields, as submitted. */
+      components: z.array(z.unknown()).optional(),
+    })
+    .optional(),
 });
 type Interaction = z.infer<typeof Interaction>;
 
 export interface InteractionResponse {
   type: number;
-  data?: { content?: string | null; flags?: number; allowed_mentions?: { parse: never[] }; components?: unknown[] };
+  data?: {
+    content?: string | null;
+    flags?: number;
+    allowed_mentions?: { parse: never[] };
+    components?: unknown[];
+    /** A modal's. */
+    custom_id?: string;
+    title?: string;
+  };
 }
 
 /* ---------- Signature ---------- */
@@ -130,6 +136,7 @@ const tooOften = (seconds: number) =>
 
 const WRONG_PLACE = 'This only works in the Logitland server. Run it there.';
 const NOT_STAFF = 'Only staff with the moderate power can dismiss or reopen this.';
+const NOT_STAFF_DECIDE = 'Only staff with the moderate power can decide this.';
 const CARD_GONE = 'What this card was about is gone.';
 const UNKNOWN = 'I don’t know that command. Try /consent agree, /consent withdraw or /consent status.';
 const WITHDRAW_NOTE = 'To stop, run `/consent withdraw`: nothing you write after that is relayed.';
@@ -145,7 +152,86 @@ const agreed = (changed: boolean) =>
 /* ---------- Handling ---------- */
 
 /** Each kind of staff card, rebuilt as it reads now for Dismiss and Reopen (staff-cards.ts); null once its rows are gone. */
-const CARDS: Record<CardKind, (relay: Relay, ref: string) => Promise<Card | null>> = { bot: requestCard, strike: strikeCard };
+const CARDS: Record<CardKind, (relay: Relay, ref: string) => Promise<Card | null>> = {
+  bot: requestCard,
+  strike: strikeCard,
+  held: (relay, ref) => caseCard(relay, 'held', ref),
+  report: (relay, ref) => caseCard(relay, 'report', ref),
+  appeal: (relay, ref) => caseCard(relay, 'appeal', ref),
+};
+
+/** The text field in a decision's modal. */
+const REASON = 'reason';
+/** The least the relay takes as a reason or reply (the contracts' minimum). */
+const REASON_MIN = 3;
+
+/** A decision's modal: what it does, and the reason or reply it needs. Submitting it sends the button's custom_id back. */
+const modal = (customId: string, ask: Ask): InteractionResponse => ({
+  type: Callback.MODAL,
+  data: {
+    custom_id: customId,
+    title: ask.title,
+    components: [
+      { type: Component.textDisplay, content: ask.consequence },
+      {
+        type: Component.label,
+        label: ask.label,
+        component: { type: Component.textInput, custom_id: REASON, style: TextInputStyle.paragraph, required: true, min_length: REASON_MIN, max_length: ask.max },
+      },
+    ],
+  },
+});
+
+/** A submitted modal's text field, wherever Discord nests it (in a label, or the older action row). */
+function fieldValue(components: unknown, customId: string): string | undefined {
+  if (!components || typeof components !== 'object') return undefined;
+  if (Array.isArray(components)) return components.map((c) => fieldValue(c, customId)).find((v) => v !== undefined);
+  const c = components as { custom_id?: unknown; value?: unknown; component?: unknown; components?: unknown };
+  if (c.custom_id === customId && typeof c.value === 'string') return c.value;
+  return fieldValue(c.component, customId) ?? fieldValue(c.components, customId);
+}
+
+/** One decision on a case, through the service the dashboard's button calls, with what the dashboard sends. */
+function decide(relay: Relay, adminId: string, action: CaseAction, ref: string, reason: string | undefined): Promise<unknown> {
+  switch (action) {
+    case 'release':
+      return release(relay, adminId, ref);
+    case 'reject':
+      return reject(relay, adminId, ref, parse(ModerationAction, {}));
+    case 'dismiss':
+    case 'strike':
+    case 'takedown':
+      return actOnReport(relay, adminId, ref, parse(ReportAction, { action, note: reason, ...(action === 'takedown' ? { strike: true } : {}) }));
+    case 'uphold':
+    case 'overturn':
+      return decideAppeal(relay, adminId, ref, parse(AppealDecision, { decision: action, response: reason }));
+  }
+}
+
+/**
+ * A press on a case card's decision, or the submitted modal it opened. A decision that costs someone (anything on a report or
+ * an appeal) opens its modal first; the rest act at once. The decision is the staff member's own, audited under their owner
+ * account (made on their first press, as signing in to the dashboard makes it). The service brings the card up to date, and
+ * the answer shows it as it now reads: also when someone else decided first.
+ */
+async function decideCase(relay: Relay, i: Interaction, userId: string, press: NonNullable<ReturnType<typeof caseButton>>): Promise<InteractionResponse> {
+  const c = await readCase(relay, press.kind, press.ref);
+  if (!c) return say(CARD_GONE);
+  if (!c.open) return update(caseMessage(c));
+  const ask = c.asks[press.action];
+  if (ask && i.type === InteractionType.MESSAGE_COMPONENT) return modal(i.data!.custom_id!, ask);
+  const reason = ask ? fieldValue(i.data?.components, REASON) : undefined;
+  const owner = await upsertOwner(relay, userId, i.member?.user.username ?? userId);
+  try {
+    await decide(relay, owner.id, press.action, press.ref, reason);
+  } catch (error) {
+    if (!(error instanceof RelayError)) throw error;
+    const now = await readCase(relay, press.kind, press.ref);
+    return now && !now.open ? update(caseMessage(now)) : say(error.message);
+  }
+  const decided = await readCase(relay, press.kind, press.ref);
+  return decided ? update(caseMessage(decided)) : say(CARD_GONE);
+}
 
 type Action = 'notice' | 'agree' | 'withdraw' | 'status';
 
@@ -183,8 +269,15 @@ export async function handleInteraction(relay: Relay, raw: unknown, defer: (work
     if (!(await adminStanding(relay, userId, i.member?.roles)).permissions.includes('moderate')) return say(NOT_STAFF);
     const card = await CARDS[press.kind](relay, press.ref);
     if (!card) return say(CARD_GONE);
-    // A card that stopped asking anything of staff (a bot request that ended) can't be dismissed: it shows as it reads now.
-    return update(press.dismiss && card.title && card.dismiss ? dismissedMessage(card.title, card.dismiss, userId) : cardMessage(card));
+    // A card that stopped asking anything of staff (a bot request that ended) can't be dismissed, and an open case has no
+    // Dismiss: either shows as it reads now. A decided case collapses to who decided it.
+    return update(press.dismiss && card.title && card.dismiss ? collapsedMessage({ ...card, dismiss: card.dismiss }, userId) : cardMessage(card));
+  }
+  const decision = i.type === InteractionType.MESSAGE_COMPONENT || i.type === InteractionType.MODAL_SUBMIT ? caseButton(customId) : null;
+  if (decision) {
+    if (!guildId || i.guild_id !== guildId || !userId) return say(WRONG_PLACE);
+    if (!(await adminStanding(relay, userId, i.member?.roles)).permissions.includes('moderate')) return say(NOT_STAFF_DECIDE);
+    return decideCase(relay, i, userId, decision);
   }
   const action = actionOf(i);
   if (!action) return say(UNKNOWN);

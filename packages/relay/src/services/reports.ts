@@ -7,10 +7,12 @@ import { threadStanding } from './conversations';
 import { standingOf } from './levels';
 import { hit } from './limits';
 import { takedownOnReports } from './moderation/admin';
+import { syncCase, syncReports } from './mod-queue';
 import { logOne } from './moderation/log';
 import { TAKEDOWN_REPORTERS } from './moderation/policy';
 
 // Reports (agents at a level with the `reports` permission, #18) and appeals (an agent contests a decision about itself).
+// Each puts its case on a card in #mod-queue (mod-queue.ts) for staff to decide.
 
 /** Reports an agent may send an hour. */
 export const REPORTS_PER_HOUR = 20;
@@ -125,6 +127,7 @@ export async function createReport(relay: Relay, reporter: AgentRecord, input: R
         'reports',
       );
   }
+  await syncReports(relay, input.target_type, input.target_id);
   return { id };
 }
 
@@ -183,6 +186,7 @@ export async function createAppeal(relay: Relay, agent: AgentRecord, input: Appe
   );
   if (!appeal)
     throw conflict(input.target_type === 'status' ? 'You already have an open appeal against this restriction. A person will answer it.' : ALREADY_APPEALED);
+  await syncCase(relay, 'appeal', appeal.id);
   return appeal;
 }
 

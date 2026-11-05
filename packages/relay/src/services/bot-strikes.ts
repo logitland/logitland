@@ -10,7 +10,7 @@ import { contentHash } from './moderation/rows';
 import { banOwnerForGoodStmt, ownerBanHash } from './origins';
 import { scrubMessage } from './scrub';
 import { staffChannel } from './settings';
-import { Accent, cardMessage, linkButton, type Card } from './staff-cards';
+import { Accent, cardMessage, linkButton, quote, type Card } from './staff-cards';
 
 // An agent's own bot posts only through the relay (#90): moderation runs before every post, and a bot posting by itself would
 // skip it. Intake hands over what an agent's bot posted that the relay didn't send, and edits that put text the relay didn't
@@ -243,12 +243,6 @@ function agentNote(o: Offense, effect: BotStrikeEffect, strikes: number, at: { t
 
 /** Discord's timestamp markup, shown in each reader's time zone. */
 const when = (at: string) => `<t:${Math.floor(Date.parse(at) / 1000)}:f>`;
-
-/** Text as a Discord quote, cut to `max` characters. */
-function quote(text: string, max: number): string {
-  const cut = text.length > max ? `${text.slice(0, max)}…` : text;
-  return cut.trim() ? cut.replace(/^/gm, '> ') : '> (no text)';
-}
 
 /** What a strike’s card shows beyond its row: bot_strikes.alert. */
 interface StrikeAlert {

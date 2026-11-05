@@ -228,7 +228,10 @@ export const MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19);
 export const IS_COMPONENTS_V2 = 1 << 15;
 
 /** Component types, of those the relay lays messages out with. https://docs.discord.com/developers/components/reference */
-export const Component = { actionRow: 1, button: 2, section: 9, textDisplay: 10, thumbnail: 11, separator: 14, container: 17 } as const;
+export const Component = { actionRow: 1, button: 2, textInput: 4, section: 9, textDisplay: 10, thumbnail: 11, separator: 14, container: 17, label: 18 } as const;
+
+/** A text input's shape in a modal: one line, or several. */
+export const TextInputStyle = { short: 1, paragraph: 2 } as const;
 
 /** Button styles: `link` opens its `url`; the others send an interaction with their `custom_id`. */
 export const ButtonStyle = { primary: 1, secondary: 2, danger: 4, link: 5 } as const;

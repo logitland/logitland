@@ -9,8 +9,9 @@ import { ButtonStyle, Component, IS_COMPONENTS_V2, type CreateMessageBody } from
 /** Accents, the dark theme's: brand for what asks staff to act, then the moderation and health states. */
 export const Accent = { brand: 0xff55ff, destructive: 0xf66d67, warning: 0xeeb154, success: 0x6fd087 } as const;
 
-/** The kinds of card staff can dismiss, each rebuilt from its own rows. */
-export type CardKind = 'bot' | 'strike';
+/** The kinds of card staff can dismiss, each rebuilt from its own rows: bot requests, bot strikes and mod-queue cases (mod-queue.ts). */
+export const CARD_KINDS = ['bot', 'strike', 'held', 'report', 'appeal'] as const;
+export type CardKind = (typeof CARD_KINDS)[number];
 
 export interface Button {
   type: typeof Component.button;
@@ -29,6 +30,8 @@ export interface Card {
   buttons?: Button[];
   /** A card staff act on: what Dismiss and Reopen rebuild it from. */
   dismiss?: { kind: CardKind; ref: string };
+  /** A decided case's: who decided what. Its one line says this instead of who dismissed it. */
+  outcome?: string;
   accent?: number;
 }
 
@@ -36,6 +39,18 @@ const DISMISS = 'staff_dismiss:';
 const REOPEN = 'staff_reopen:';
 
 export const linkButton = (label: string, url: string): Button => ({ type: Component.button, style: ButtonStyle.link, label, url });
+export const actionButton = (label: string, customId: string, style: number = ButtonStyle.secondary): Button => ({
+  type: Component.button,
+  style,
+  label,
+  custom_id: customId,
+});
+
+/** Text as a Discord quote, cut to `max` characters. */
+export function quote(text: string | null, max: number): string {
+  const cut = text && text.length > max ? `${text.slice(0, max)}…` : (text ?? '');
+  return cut.trim() ? cut.replace(/^/gm, '> ') : '> (no text)';
+}
 
 const text = (content: string) => ({ type: Component.textDisplay, content });
 const container = (card: Pick<Card, 'accent'>, components: unknown[]): CreateMessageBody => ({
@@ -46,8 +61,7 @@ const container = (card: Pick<Card, 'accent'>, components: unknown[]): CreateMes
 /** The whole card. */
 export function cardMessage(card: Card): CreateMessageBody {
   const buttons = [...(card.buttons ?? [])];
-  if (card.dismiss)
-    buttons.push({ type: Component.button, style: ButtonStyle.secondary, label: 'Dismiss', custom_id: `${DISMISS}${card.dismiss.kind}:${card.dismiss.ref}` });
+  if (card.dismiss) buttons.push(actionButton('Dismiss', `${DISMISS}${card.dismiss.kind}:${card.dismiss.ref}`));
   return container(card, [
     ...(card.title ? [text(`### ${card.title}`)] : []),
     ...card.text.map(text),
@@ -56,10 +70,11 @@ export function cardMessage(card: Card): CreateMessageBody {
   ]);
 }
 
-/** A dismissed card: its headline, who dismissed it, and Reopen. */
-export function dismissedMessage(title: string, dismiss: NonNullable<Card['dismiss']>, by: string): CreateMessageBody {
-  const reopen = { type: Component.button, style: ButtonStyle.secondary, label: 'Reopen', custom_id: `${REOPEN}${dismiss.kind}:${dismiss.ref}` };
-  return container({}, [{ type: Component.section, components: [text(`${title} · Dismissed by <@${by}>`)], accessory: reopen }]);
+/** A collapsed card: its headline, then who decided what (a decided case) or who dismissed it, and Reopen. */
+export function collapsedMessage(card: Pick<Card, 'title' | 'outcome'> & { dismiss: NonNullable<Card['dismiss']> }, by?: string): CreateMessageBody {
+  const { kind, ref } = card.dismiss;
+  const line = [card.title, card.outcome ?? `Dismissed by <@${by}>`].filter(Boolean).join(' · ');
+  return container({}, [{ type: Component.section, components: [text(line)], accessory: actionButton('Reopen', `${REOPEN}${kind}:${ref}`) }]);
 }
 
 /** A press on Dismiss or Reopen, read from its custom_id; null for any other button. */
@@ -67,6 +82,6 @@ export function cardButton(customId: string | undefined): { dismiss: boolean; ki
   const dismiss = customId?.startsWith(DISMISS);
   if (!customId || (!dismiss && !customId.startsWith(REOPEN))) return null;
   const [kind, ...ref] = customId.slice((dismiss ? DISMISS : REOPEN).length).split(':');
-  if ((kind !== 'bot' && kind !== 'strike') || !ref.length) return null;
-  return { dismiss: Boolean(dismiss), kind, ref: ref.join(':') };
+  if (!CARD_KINDS.includes(kind as CardKind) || !ref.length) return null;
+  return { dismiss: Boolean(dismiss), kind: kind as CardKind, ref: ref.join(':') };
 }

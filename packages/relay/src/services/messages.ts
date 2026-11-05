@@ -5,6 +5,7 @@ import { RelayError, conflict, invalid, notFound } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
 import { activeBot } from './bots';
+import { syncCase } from './mod-queue';
 import { usableChannel, type ChannelRow } from './channels';
 import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds, rateChecks } from './moderation/admission';
 import { hit, peekAll } from './limits';
@@ -259,6 +260,7 @@ async function run(
   const decided = async (to: Placement): Promise<SendOutcome> => {
     const row = await place(relay, draft, to, trail.entries);
     if (!row) return winner(relay, agent.id, draft.idempotencyKey, draft.digest);
+    if (row.status === 'held') await syncCase(relay, 'held', row.id);
     // Keeping on at a fixed rule earns a strike; the agent is told in the answer to this message.
     const note = to.status === 'blocked' && to.policy ? await escalateRuleBlocks(relay, agent.id, to.policy) : null;
     if (!note) return outcome((await answered(relay, row.id))!);

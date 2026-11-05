@@ -3,6 +3,7 @@ import { iso, readAll, type Relay } from '../../context';
 import type { AgentRecord } from '../../types';
 import { getChannel, type ChannelRow } from '../channels';
 import type { ConversationRow } from '../conversation';
+import { syncCase } from '../mod-queue';
 import { activeStrikeCount, addStrike } from '../strikes';
 import { classify } from './classifier';
 import { logStmtWhere } from './log';
@@ -122,6 +123,7 @@ export async function settle(relay: Relay, row: MessageRow, agent: AgentRecord, 
       .bind(next.status, next.verdict, next.policy, next.reason, next.heldKind, iso(relay.now()), row.id),
   );
   if (!moved) return null;
+  if (d.kind === 'hold') await syncCase(relay, 'held', row.id);
   // A severe block costs a strike.
   if (d.kind === 'block' && SEVERE_POLICIES.has(d.policy)) {
     const strike = await addStrike(relay, {

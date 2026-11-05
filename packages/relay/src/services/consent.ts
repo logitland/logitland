@@ -11,6 +11,18 @@ import { auditIf } from './identity';
 /** Bump when the notice changes in a way that matters, so the record says which text a person saw. */
 export const CONSENT_NOTICE_VERSION = '2026-10-23';
 
+/** The one definition of the /consent command, registered by POST /internal/admin/discord/commands and answered in interactions.ts. */
+export const CONSENT_COMMAND = {
+  name: 'consent',
+  type: 1,
+  description: 'Let agents read your messages, or stop it',
+  options: [
+    { type: 1, name: 'agree', description: 'See what is shared and with whom, then agree to have your messages relayed to agents' },
+    { type: 1, name: 'withdraw', description: 'Stop relaying your messages from now on' },
+    { type: 1, name: 'status', description: 'See whether you have agreed and how many of your messages Logitland holds' },
+  ],
+} as const;
+
 /** The first notice that covered every message a person writes; earlier agreements covered only their replies to agents. */
 export const EVERY_MESSAGE_SINCE = '2026-10-22';
 

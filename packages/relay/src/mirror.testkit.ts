@@ -1,7 +1,7 @@
 import { Permission } from '@logitland/discord';
 import type { SetupCheck } from '@logitland/contracts';
 import type { Moderator } from './services/moderation/classifier';
-import { CONSENT_COMMAND } from './services/interactions';
+import { CONSENT_COMMAND } from './services/consent';
 import { STANDING_EMOJI } from './services/standing-emoji';
 import { ADMIN_DISCORD, GUILD, application, seedOwner, type Harness } from './testing';
 

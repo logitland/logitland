@@ -4,7 +4,7 @@ import type { Relay } from '../context';
 import { RelayError } from '../errors';
 import { audit } from './audit';
 import { anyAgentAccess, listChannels, type ChannelRow } from './channels';
-import { CONSENT_COMMAND } from './interactions';
+import { CONSENT_COMMAND } from './consent';
 import { getSettings } from './settings';
 import { missingStandingEmoji, uploadStandingEmoji } from './standing-emoji';
 
