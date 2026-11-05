@@ -118,7 +118,11 @@ export class GatewayConnection {
   private gen = 0;
   private interval = 0;
   private acked = true;
-  private beatSentAt = 0;
+  /**
+   * When each beat still awaiting its ACK was sent, oldest first. ACKs carry no ID but come in order on one socket, so each
+   * one answers the oldest; a beat Discord asks for can be sent before an earlier one is ACKed.
+   */
+  private beatsSentAt: number[] = [];
   private sent: 'identify' | 'resume' | null = null;
   private resuming = false;
   private attempts = 0;
@@ -268,9 +272,11 @@ export class GatewayConnection {
     switch (frame.op) {
       case Op.Hello:
         return this.hello((frame.d as { heartbeat_interval: number }).heartbeat_interval);
-      case Op.HeartbeatAck:
+      case Op.HeartbeatAck: {
         this.acked = true;
-        return this.deps.onHeartbeat?.(this.beatSentAt);
+        const sentAt = this.beatsSentAt.shift();
+        return sentAt === undefined ? undefined : this.deps.onHeartbeat?.(sentAt);
+      }
       case Op.Heartbeat:
         return this.sendHeartbeat();
       case Op.Reconnect:
@@ -286,6 +292,8 @@ export class GatewayConnection {
     this.clearTimer('hello');
     this.interval = interval;
     this.acked = true;
+    // A new socket: beats sent on an earlier one will never be ACKed here.
+    this.beatsSentAt = [];
     // The first beat is jittered so a fleet of clients doesn't beat in step.
     this.timers.beat = this.deps.setTimer(() => this.beat(), interval * this.deps.random());
     this.handshake();
@@ -320,7 +328,7 @@ export class GatewayConnection {
   private sendHeartbeat(): void {
     this.send({ op: Op.Heartbeat, d: this.session.seq });
     this.acked = false;
-    this.beatSentAt = this.deps.now();
+    this.beatsSentAt.push(this.deps.now());
   }
 
   private dispatch(t: string, d: unknown, s: number | null): void {
