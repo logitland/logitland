@@ -210,6 +210,9 @@ function legacyFieldsWithLayout(o: Record<string, unknown>): void {
  */
 export function messageEdit(message: Message, o: Record<string, unknown>): Parameters<World['editMessage']>[2] {
   if (((typeof o.flags === 'number' ? o.flags : 0) | message.flags) & IS_COMPONENTS_V2) {
+    // Converting a message that had text takes `content: null`; Discord 400s the edit otherwise.
+    if (!(message.flags & IS_COMPONENTS_V2) && message.content && o.content !== null)
+      throw formBody(['content'], 'BASE_TYPE_REQUIRED', 'This field is required');
     const v2 = { ...o, flags: IS_COMPONENTS_V2 };
     legacyFieldsWithLayout(v2);
     const comps = components(v2);

@@ -63,7 +63,7 @@ type Interaction = z.infer<typeof Interaction>;
 
 export interface InteractionResponse {
   type: number;
-  data?: { content?: string; flags?: number; allowed_mentions?: { parse: never[] }; components?: unknown[] };
+  data?: { content?: string | null; flags?: number; allowed_mentions?: { parse: never[] }; components?: unknown[] };
 }
 
 /* ---------- Signature ---------- */
@@ -118,7 +118,10 @@ const edit = (content: string): InteractionResponse => ({
 });
 
 /** Lays out the card the pressed button is on afresh. */
-const update = (message: CreateMessageBody): InteractionResponse => ({ type: Callback.UPDATE_MESSAGE, data: { ...message, allowed_mentions: { parse: [] } } });
+const update = (message: CreateMessageBody): InteractionResponse => ({
+  type: Callback.UPDATE_MESSAGE,
+  data: { ...message, content: null, allowed_mentions: { parse: [] } },
+});
 
 /** Agreeing and withdrawing write history that is kept for good, so one person can only do so much of it. */
 const TOGGLES_PER_10_MIN = 6;
@@ -254,7 +257,7 @@ async function editOriginal(relay: Relay, i: Interaction, message: CreateMessage
       const res = await relay.fetch(url, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...message, allowed_mentions: { parse: [] } }),
+        body: JSON.stringify({ ...message, content: null, allowed_mentions: { parse: [] } }),
         signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) return;

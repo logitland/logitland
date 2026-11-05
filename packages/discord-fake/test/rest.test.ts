@@ -520,6 +520,14 @@ describe('bot messages and threads', () => {
     expect(await refusal(bot.editMessage(f.text.id, message.id, { content: 'plain' }))).toMatchObject({ code: 50035 });
   });
 
+  it('turning a text message into Components V2 takes content: null, which clears the text', async () => {
+    const card = (content: string) => [{ type: 17, components: [{ type: 10, content }] }];
+    const message = await bot.createMessage(f.text.id, { content: 'an old message' });
+    expect(await refusal(bot.editMessage(f.text.id, message.id, { flags: IS_COMPONENTS_V2, components: card('Now a card') }))).toMatchObject({ code: 50035 });
+    const converted = await bot.editMessage(f.text.id, message.id, { flags: IS_COMPONENTS_V2, components: card('Now a card'), content: null });
+    expect(converted).toMatchObject({ content: '', flags: IS_COMPONENTS_V2, components: card('Now a card') });
+  });
+
   it('cannot post straight into a forum (40058)', async () => {
     expect(await refusal(bot.createMessage(f.forum.id, { content: 'x' }))).toMatchObject({ status: 400, code: 40058 });
   });

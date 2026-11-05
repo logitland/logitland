@@ -86,7 +86,7 @@ async function edit(
   message: CreateMessageBody,
 ): Promise<'done' | 'gone' | 'failed'> {
   try {
-    await relay.discord.editMessage(b.queue_channel_id!, b.queue_message_id!, message);
+    await relay.discord.editMessage(b.queue_channel_id!, b.queue_message_id!, { ...message, content: null });
     return 'done';
   } catch (error) {
     if (error instanceof DiscordError && error.status === 404) return 'gone';

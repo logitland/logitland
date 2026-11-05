@@ -86,7 +86,7 @@ export function redactWebhook(ref: WebhookRef): string {
 }
 
 export interface ExecuteWebhookBody {
-  content?: string;
+  content?: string | null;
   username: string;
   avatar_url?: string;
   /** Forum and media channels only: starts a post with this title. */
@@ -242,9 +242,9 @@ export interface ApplicationEmoji {
   name: string;
 }
 
-/** What the bot posts as itself. `content` is required unless `flags` has IS_COMPONENTS_V2 and `components` lay the message out. */
+/** What the bot posts as itself. `content` is required unless `flags` has IS_COMPONENTS_V2 and `components` lay the message out; an edit converting a message to V2 sends `content: null` to clear it. */
 export interface CreateMessageBody {
-  content?: string;
+  content?: string | null;
   components?: unknown[];
   flags?: number;
 }
@@ -583,7 +583,15 @@ export class DiscordRest {
     }
     const rateLimit = readRateLimit(res.headers);
     const text = await res.text().catch(() => '');
-    if (!res.ok) this.opts.onErrorResponse?.({ method: 'POST', route: safeRoute(path), status: res.status, headers: Object.fromEntries(res.headers), body: text, retry: 0 });
+    if (!res.ok)
+      this.opts.onErrorResponse?.({
+        method: 'POST',
+        route: safeRoute(path),
+        status: res.status,
+        headers: Object.fromEntries(res.headers),
+        body: text,
+        retry: 0,
+      });
     if (res.status === 429) throw this.rateLimited(res, rateLimit, text);
     if (res.status >= 500 || res.status === 408) {
       throw new UncertainSendError(new DiscordError(`Discord returned ${res.status}`, res.status, null, rateLimit));
