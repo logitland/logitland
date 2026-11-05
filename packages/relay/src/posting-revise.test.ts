@@ -388,6 +388,31 @@ describe('editing a message', () => {
   });
 });
 
+describe('naming a message by the Discord ID it was posted under', () => {
+  it('reads, edits and deletes the agent’s own message', async () => {
+    const w = await world();
+    const msg = await sent(w);
+    const did = msg.discord_message_id as string;
+    expect(await json(await w.h.call('GET', `/v1/messages/${did}`, undefined, w.h.as(w.a.token)))).toMatchObject({ id: msg.id, status: 'sent' });
+    expect(await json(await patch(w.h, w.a, did, { content: 'The second version of this message' }))).toMatchObject({
+      id: msg.id,
+      content: 'The second version of this message',
+    });
+    expect(await json(await remove(w.h, w.a, did))).toMatchObject({ id: msg.id, status: 'removed' });
+  });
+
+  it('answers another agent’s Discord ID as it answers an unknown ID', async () => {
+    const w = await world();
+    const msg = await sent(w);
+    const other = await seedAgent(w.h.relay);
+    const did = msg.discord_message_id as string;
+    expect((await w.h.call('GET', `/v1/messages/${did}`, undefined, w.h.as(other.token))).status).toBe(404);
+    expect((await patch(w.h, other, did, { content: 'Not yours to edit' })).status).toBe(404);
+    expect((await remove(w.h, other, did)).status).toBe(404);
+    expect(await row(w.h, msg.id)).toMatchObject({ status: 'sent', content: 'The first version of this message' });
+  });
+});
+
 describe('deleting a message', () => {
   it('removes a posted message from Discord through the webhook and scrubs every copy', async () => {
     const w = await world();
@@ -420,12 +445,13 @@ describe('deleting a message', () => {
     expect(await calls(w.h, 'DELETE', WEBHOOK_MESSAGE)).toHaveLength(1);
   });
 
-  it('counts a message Discord has already lost as deleted', async () => {
+  it('counts a message Discord has already lost as deleted, once the relay’s bot can’t find it either', async () => {
     const w = await world();
     const msg = await sent(w);
     w.h.setDiscord(() => Response.json({ message: 'Unknown Message', code: 10008 }, { status: 404 }));
     expect((await remove(w.h, w.a, msg.id)).status).toBe(200);
     expect((await row(w.h, msg.id))!.status).toBe('removed');
+    expect(await calls(w.h, 'DELETE', /^\/api\/v10\/channels\//)).toHaveLength(1);
   });
 
   it('cancels a queued message without calling Discord, and it is never sent', async () => {
@@ -495,7 +521,7 @@ describe('deleting a message', () => {
     expect(scrubMessage).not.toHaveBeenCalled();
   });
 
-  it('passes Discord’s rate limit on, and explains a missing webhook', async () => {
+  it('passes Discord’s rate limit on', async () => {
     const w = await world();
     const msg = await sent(w);
     w.h.setDiscord(
@@ -504,8 +530,26 @@ describe('deleting a message', () => {
     const limited = await remove(w.h, w.a, msg.id);
     expect(limited.status).toBe(429);
     expect(limited.headers.get('retry-after')).toBe('30');
-    await w.h.db.prepare('UPDATE channels SET webhook_ciphertext = NULL WHERE id = ?').bind(LOUNGE).run();
-    expect((await remove(w.h, w.a, msg.id)).status).toBe(409);
+  });
+
+  // Discord deletes a webhook's message only through that webhook: any other answers Unknown Message, and a webhook whose
+  // token is no longer good answers Invalid Webhook Token.
+  const unknown = () => Response.json({ message: 'Unknown Message', code: 10008 }, { status: 404 });
+  it.each([
+    ['was replaced', async (_h: Harness) => {}, unknown],
+    ['is gone', (h: Harness) => h.db.prepare('UPDATE channels SET webhook_ciphertext = NULL WHERE id = ?').bind(LOUNGE).run(), unknown],
+    ['has a token Discord rejects', async (_h: Harness) => {}, () => Response.json({ message: 'Invalid Webhook Token', code: 50027 }, { status: 401 })],
+  ])('deletes a webhook post as the relay’s bot when the channel’s webhook %s', async (_, lose, answer) => {
+    const w = await world();
+    const msg = await sent(w, 'Posted through the old webhook', { thread_id: NEW_THREAD });
+    await lose(w.h);
+    w.h.setDiscord((req) => (WEBHOOK_MESSAGE.test(new URL(req.url).pathname) ? answer() : new Response(null, { status: 204 })));
+    const res = await remove(w.h, w.a, msg.id);
+    expect(res.status).toBe(200);
+    expect(await json(res)).toMatchObject({ status: 'removed', status_reason: 'Deleted by its author.' });
+    expect((await calls(w.h, 'DELETE', /^\/api\/v10\/channels\//)).map((d) => d.url.pathname)).toEqual([
+      `/api/v10/channels/${NEW_THREAD}/messages/${msg.discord_message_id}`,
+    ]);
   });
 
   it('is only for the agent’s own messages', async () => {

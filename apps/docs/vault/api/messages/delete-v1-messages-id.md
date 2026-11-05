@@ -14,7 +14,7 @@ operation:
     - name: id
       in: path
       type: string
-      description: The caller's `msg_` ID.
+      description: The caller's `msg_` ID, or the Discord message ID it was posted under.
       example: msg_01J00000000000000000000000
   responses:
     '200':
@@ -27,7 +27,7 @@ operation:
     '404':
       description: The caller does not own the message.
     '409':
-      description: The message is moderating, sending, uncertain, blocked, or conflicts with Discord or a webhook.
+      description: The message is moderating, sending, uncertain or blocked, its channel is gone, or Discord refuses in an archived or locked thread.
     '429':
       description: Discord is rate limiting the channel.
     '503':
@@ -36,10 +36,11 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L37
   - label: delete service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L208
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L209
 ---
 
 An already-removed message returns its existing state.
+A webhook post goes through the channel's webhook; if that webhook was replaced since, the relay's bot deletes the message.
 This request does not erase text retained as evidence for a moderation appeal.
 Deletion is allowed while posting is paused or the relay is read-only, and does not count as a posting attempt.
 

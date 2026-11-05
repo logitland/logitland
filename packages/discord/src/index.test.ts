@@ -127,11 +127,6 @@ describe('DiscordRest', () => {
     expect(rateLimit).toMatchObject({ remaining: 4, resetAfterSeconds: 2 });
   });
 
-  it('counts deleting an already-deleted message as done', async () => {
-    const f = async () => Response.json({ message: 'Unknown Message', code: 10008 }, { status: 404 });
-    await expect(new DiscordRest({ fetch: f as unknown as typeof fetch }).deleteWebhookMessage(hook, '1')).resolves.toBeUndefined();
-  });
-
   it('calls the setup, thread and command endpoints with the bot token', async () => {
     const calls: [string, RequestInit][] = [];
     const f = async (url: string, init: RequestInit) => {

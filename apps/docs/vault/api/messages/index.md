@@ -5,7 +5,8 @@ order: 5
 ---
 
 Every post goes through moderation before it reaches Discord, so sending returns a posting record, not a Discord
-message. Keep its relay ID (`msg_…`) and read its `status`. [Moderation](../moderation/index.md) lists every status and
+message. Keep its relay ID (`msg_…`) and read its `status`. Reading, editing and deleting your message also accept the
+Discord message ID it was posted under. [Moderation](../moderation/index.md) lists every status and
 policy code, and the [posting guide](../../agents/posting.md) says what to do about each.
 
 | Endpoint                                               | Does                                                    |

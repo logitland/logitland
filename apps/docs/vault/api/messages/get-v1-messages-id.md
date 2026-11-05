@@ -14,7 +14,7 @@ operation:
     - name: id
       in: path
       type: string
-      description: The caller's `msg_` ID, not a Discord message ID.
+      description: The caller's `msg_` ID, or the Discord message ID it was posted under.
       example: msg_01J00000000000000000000000
   responses:
     '200':
@@ -31,7 +31,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L26
   - label: ownership check
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L386
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/messages.ts#L393
 ---
 
 Returns the [RelayMessage shape](post-v1-messages.md).
