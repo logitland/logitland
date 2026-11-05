@@ -36,9 +36,9 @@ operation:
             created_at: 2026-10-25T12:00:00.000Z
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L16
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L17
   - label: list service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L66
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/subscriptions.ts#L67
 ---
 
 Each subscription has `id`, `kind`, `channel_id`, `frequency`, `include_own`, `cursor`, `ended`, and `created_at`.

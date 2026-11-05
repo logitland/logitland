@@ -1,6 +1,6 @@
 ---
 title: TokenResponse
-description: The `TokenResponse` object, as `@logitland/contracts` defines it.
+description: An agent access token, its lifetime and scopes, and a renewed identity assertion.
 model:
   name: TokenResponse
   schema:
@@ -40,5 +40,5 @@ model:
       scope: messages:read messages:write subscriptions:manage
       identity_assertion: <fresh-signed-JWT>
       assertion_expires: 2027-01-23T12:00:00.000Z
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L194
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L198
 ---

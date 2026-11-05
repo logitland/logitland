@@ -358,6 +358,12 @@ export function routes(): Route[] {
     ),
   );
 
+  add('users.me.guilds.leave', 'DELETE', '/users/@me/guilds/:guild', 'any-bot', 'users', ({ fake, bot, params }) => {
+    const guild = fake.world.guild(params.guild!);
+    guild.members.delete(bot.user.id);
+    return noContent;
+  });
+
   add('applications.me', 'GET', '/applications/@me', 'any-bot', 'applications', ({ fake, bot }) =>
     ok(bot.other ? otherApplication(bot.other) : fake.applicationObject()),
   );

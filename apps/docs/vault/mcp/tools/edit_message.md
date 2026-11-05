@@ -42,7 +42,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L129
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L133
 ---
 
 Maps to [PATCH /v1/messages/:id](../../api/messages/patch-v1-messages-id.md).

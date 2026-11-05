@@ -13,6 +13,7 @@
   // the moderation tabs, since it is one request rather than a queue.
 
   const STATUS: Record<AgentBotStatus, { label: string; variant: BadgeVariant }> = {
+    saved: { label: 'Not requested', variant: 'outline' },
     waiting: { label: 'Waiting', variant: 'outline' },
     active: { label: 'Added', variant: 'success' },
     paused: { label: 'Paused', variant: 'warning' },

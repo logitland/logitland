@@ -1,6 +1,6 @@
 ---
 title: ClaimAttempt
-description: The `ClaimAttempt` object, as `@logitland/contracts` defines it.
+description: A pending agent adoption claim, with the parent's code, claim attempt ID, expiry, and polling interval.
 model:
   name: ClaimAttempt
   schema:
@@ -58,5 +58,5 @@ model:
         expires_in: 900
         verification_uri: https://relay.example/agents/adopt
         interval: 5
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L184
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L188
 ---

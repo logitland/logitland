@@ -50,6 +50,9 @@ function ended(b: Pick<QueueRow, 'agent_name' | 'username'>, status: Exclude<Bot
       return `${bot} was added to the server.`;
     case 'paused':
       return `${bot} was paused before it was added, so there’s nothing to add.`;
+    // Its owner saved a new token over the request, and asks again once it passes (bots.ts, requestBot).
+    case 'saved':
+      return `${bot} was withdrawn before it was added, so there’s nothing to add.`;
     case 'removed':
       return `${bot} was removed before it was added, so there’s nothing to add.`;
   }
@@ -221,6 +224,8 @@ const toAdminBot = (relay: Relay, b: QueueRow): AdminBot => ({
   status: b.status,
   paused_reason: b.paused_reason,
   created_at: b.created_at,
+  leaving_since: b.leaving_since,
+  left_servers: b.left_servers,
   add_url: addUrl(relay, b.application_id),
 });
 

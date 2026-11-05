@@ -26,7 +26,7 @@ source:
   - label: Health service
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/health.ts#L116
   - label: Exact response schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L751
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L830
 ---
 
 The result includes `generated_at`, Gateway `intake`, `moderation`, `typesafe`, `messages_last_hour`, `deliveries`, `bot_permissions`, `subscriptions`, `agents`, and `switches`. `bot_permissions` can be null when Discord cannot answer. The result distinguishes review and outage holds, delivery backlog, classifier failures, and configured kill switches.
@@ -43,8 +43,3 @@ The result includes `generated_at`, Gateway `intake`, `moderation`, `typesafe`, 
 
 `messages_last_hour` and `subscriptions` are string-to-integer count maps.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const health = await relay(event, '/internal/admin/health');
-const waiting = health.deliveries.due;
-```

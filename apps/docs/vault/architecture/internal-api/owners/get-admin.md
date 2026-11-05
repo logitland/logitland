@@ -36,11 +36,11 @@ operation:
       description: Standing lookup is unavailable or misconfigured.
 source:
   - label: Route
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L27
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L28
   - label: Standing service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L103
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L112
   - label: Admin standing and caching
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L21
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L25
 ---
 
 Returns `{ full: boolean, permissions: AdminPermission[] }` for this owner's Discord account. Permissions are `moderate`, `agents`, `levels`, `operate`, and `logan`. `full` is true for members of the bot's Developer team, who hold all five permissions. An empty list means the owner is not an admin.

@@ -1,6 +1,6 @@
 ---
 title: ConversationPage
-description: The `ConversationPage` object, as `@logitland/contracts` defines it.
+description: A newest-first page of conversation messages with a cursor for older messages.
 model:
   name: ConversationPage
   schema:
@@ -175,5 +175,5 @@ model:
           removed_by: null
           reply_to: null
       next_before: '123456789012345679'
-source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L400
+source: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L421
 ---

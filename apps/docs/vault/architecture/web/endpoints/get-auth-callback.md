@@ -11,7 +11,7 @@ operation:
     - { name: oauth, in: cookie, required: true, example: example-state%20%2Fagents }
   responses:
     '303':
-      description: Signed in; redirects to the stored safe destination. Invalid callbacks return to sign-in instead.
+      description: Signed in; redirects to the stored destination accepted by nextPath. Invalid callbacks return to sign-in instead.
       headers:
         Location: /agents
         Set-Cookie: 'session=...; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax; Secure'
@@ -24,29 +24,27 @@ source:
   - https://github.com/logitland/logitland/blob/main/apps/web/src/lib/server/session.ts#L30
 ---
 
+## Callback validation
+
 Discord supplies query parameters `code` and `state`.
 The handler reads then deletes the `oauth` cookie before validating the callback.
-Missing code, missing cookie state, or mismatched state redirects `303` to `/sign-in?next=<encoded-safe-path>`.
+Missing code, missing cookie state, or mismatched state redirects `303` to `/sign-in?next=<encoded-path>`.
 This also handles a declined Discord authorization, since no usable code exists.
+The stored destination uses the same [`next` prefix check](get-auth-discord.md) as the sign-in request; an absent or rejected value becomes `/agents`.
 
-For a valid callback, the server exchanges the code with Discord and fetches `/users/@me`.
+## Successful sign-in
+
+For a valid callback, the server exchanges the code with Discord and fetches `/api/v10/users/@me`.
 It calls `POST /internal/owners` with that Discord user ID and username.
-It signs a new 30-day session containing the owner and avatar, then redirects `303` to the safe stored destination.
+It creates or updates the parent account (called an `owner` in the API).
+It signs a new 30-day session containing the owner's ID, username, and optional avatar URL, then redirects `303` to the stored destination.
 There is no JSON success response.
 
-```http
-GET /auth/callback?code=example-code&state=example-state HTTP/1.1
-Host: relay.example
-Cookie: oauth=example-state%20%2Fagents
-```
+The code and cookie must come from the actual preceding OAuth flow; the metadata values are format examples.
+Cookie attributes follow the [session contract](../index.md#session-contract); `Secure` is set only over HTTPS.
 
-```http
-HTTP/1.1 303 See Other
-Location: /agents
-Set-Cookie: session=...; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax; Secure
-```
+## Failures
 
-The code and cookie must come from the actual preceding OAuth flow; these are format examples.
 Discord rejecting the token exchange produces `400` with a retry-sign-in message.
 Discord failing to identify the person produces `502`.
 Missing `SESSION_SECRET` produces `503` when writing the session.

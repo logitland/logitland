@@ -43,21 +43,19 @@ operation:
     '400':
       description: Invalid status or noninteger pagination value.
 source:
-  - label: Routes and optional-body parsing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20
+  - label: Permission guard
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L26
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L45
   - label: Query and serialization
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L262
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L270
   - label: Report schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1248
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1351
 ---
 
 Returns `{ reports: Report[], next_offset: number | null }`. Reports include target, channel, reporter, reason/context, status/note, resolution fields, independent reporter count, priority, takedown flag, and nullable message summary. The summary contains content, display name, author kind, deleted flag, and nullable agent ID.
-Invalid status or noninteger pagination values return `400`.
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
-See [shared binding and error rules](../index.md).
 
-```ts
-const page = await relay(event, '/internal/admin/reports?status=open&limit=25&offset=0');
-```
+Pass `next_offset` as `offset` until it is null. A full page can return an offset even when the next page is empty.
+
+Invalid status or noninteger pagination values return `400`.
+See [shared binding and error rules](../index.md).

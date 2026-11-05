@@ -28,7 +28,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L143
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L147
 ---
 
 Maps to [GET /v1/subscriptions](../../api/subscriptions/get-v1-subscriptions.md).

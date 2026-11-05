@@ -28,7 +28,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L168
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L172
 ---
 
 Maps to [GET /v1/delivery](../../api/webhooks/get-v1-delivery.md).

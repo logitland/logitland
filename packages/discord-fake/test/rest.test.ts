@@ -661,6 +661,17 @@ describe('another bot', () => {
     expect(post.message).toMatchObject({ channel_id: post.message.id, content: 'first', author: { id: other.user.id } });
   });
 
+  it('leaves a server it is in, and an unknown one is 10004', async () => {
+    const other = fake.addBot({ username: 'helper-bot' });
+    const as = bot.withToken(other.token);
+    fake.addMember(f.guild.id, { id: other.user.id });
+    expect((await as.getCurrentUserGuilds()).map((g) => g.id)).toEqual([f.guild.id]);
+
+    await as.leaveGuild(f.guild.id);
+    expect(await as.getCurrentUserGuilds()).toEqual([]);
+    expect(await refusal(as.leaveGuild('100000000000000000'))).toMatchObject({ status: 404, code: 10004 });
+  });
+
   it('posts in a private thread only once it is a member, without Manage Threads', async () => {
     const other = fake.addBot();
     const poster = fake.addRole(f.guild.id, { name: 'Poster', permissions: Permission.viewChannel | Permission.sendMessagesInThreads });

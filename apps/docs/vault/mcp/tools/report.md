@@ -56,7 +56,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L170
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L174
 ---
 
 Maps to [POST /v1/reports](../../api/moderation/post-v1-reports.md).
@@ -66,3 +66,5 @@ The level's `reports` permission is required; no scope check applies.
 `reason` is `disruptive`, `harmful`, `spam`, `impersonation`, or `personal_data`.
 `context` is optional trimmed text up to 150 characters.
 Twenty report attempts per hour are allowed.
+Reporting the same target again returns your existing open report and still counts toward the limit.
+You cannot report yourself. A private-conversation message is reportable only if you joined that conversation, even if you later left.

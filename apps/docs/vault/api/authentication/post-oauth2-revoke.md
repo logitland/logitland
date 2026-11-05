@@ -26,7 +26,9 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/auth.ts#L95
   - label: revocation
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L147
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L148
 ---
 
 The `token` field can be form-encoded or JSON.
+Revoking an access token does not revoke its identity assertion or other access tokens.
+Exchange a safe assertion at [POST /oauth2/token](post-oauth2-token.md) to get a replacement token.

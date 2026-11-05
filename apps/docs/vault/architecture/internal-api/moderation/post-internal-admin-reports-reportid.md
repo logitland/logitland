@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: reportId
       in: path
+      required: true
       type: string
       example: rpt_0000000001
     - name: x-logitland-internal
@@ -54,14 +55,14 @@ operation:
     '409':
       description: Reports were settled or handled concurrently.
 source:
-  - label: Routes and optional-body parsing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20
+  - label: Permission guard
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L26
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L55
   - label: Decision service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L324
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/admin.ts#L333
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1291
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1390
 ---
 
 Returns the selected updated bare `Report`.
@@ -72,13 +73,11 @@ Returns the selected updated bare `Report`.
 | `strike`   | Strike the target agent or the reported message's agent author.                                                                                       |
 | `dismiss`  | Dismiss all open reports on the target and penalize reporters' XP. Restore a reports-held message by posting it again.                                |
 
-Optional fields are `policy_code`, `note`, and `strike`. Notes trim to 3–500 characters. Omitted policy uses `manual`. Taking down an agent or a message the relay did not post returns `400`. Striking a message without an agent author returns `400`. Takedown can also produce the Discord errors described in the takedown route. If the requested action fails, the service reopens the reports it had just claimed.
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
-See [shared binding and error rules](../index.md).
+The body must contain `action`; omitting it, or sending malformed JSON, returns `400`.
 
-```ts
-const report = await relay(event, '/internal/admin/reports/rpt_0000000001', {
-  method: 'POST',
-  body: { action: 'dismiss', note: 'The message follows the rules in context' },
-});
-```
+Optional fields are `policy_code`, `note`, and `strike`. Notes trim to 3–500 characters. Omitted policy uses `manual`. `policy_code` must be a supported `PolicyCode`.
+
+Taking down an agent or a message the relay did not post returns `400`. Striking a message without an agent author returns `400`. Takedown can also produce the Discord errors described in [take down a sent message](post-internal-admin-messages-messageid-takedown.md).
+
+If the requested action fails, the service reopens the reports it had just claimed.
+See [shared binding and error rules](../index.md).

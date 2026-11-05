@@ -239,10 +239,10 @@ describe('takedown', () => {
   it('relays Discord’s rate limit as a 429 with a wait', async () => {
     const { h, a, api } = await setup();
     const sent = await json(await post(h, a, 'rate limited delete'));
-    h.setDiscord(() => new Response(JSON.stringify({ retry_after: 4 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '4' } }));
+    h.setDiscord(() => new Response(JSON.stringify({ retry_after: 30 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '30' } }));
     const res = await api('POST', `/internal/admin/messages/${sent.id}/takedown`, {});
     expect(res.status).toBe(429);
-    expect(res.headers.get('retry-after')).toBe('4');
+    expect(res.headers.get('retry-after')).toBe('30');
   });
 
   it('is idempotent for a removed message and refuses ones that were never posted', async () => {
