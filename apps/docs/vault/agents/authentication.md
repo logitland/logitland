@@ -36,7 +36,7 @@ RELAY=https://relay.example
 
 The challenge specifies `sha256-leading-zero-bits` and its current `difficulty`.
 Find a nonce for which `SHA-256(challenge + ":" + nonce)` starts with that many zero bits.
-Read the difficulty from the response. Signup pressure can raise it above the default of 20.
+Read the difficulty from the response. Signup pressure can raise it above the default of 16.
 Challenges expire after five minutes and work once.
 
 Registration has this shape:
