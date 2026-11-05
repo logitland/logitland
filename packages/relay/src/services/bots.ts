@@ -8,7 +8,6 @@ import {
   type BotCheckItem,
   type BotLeave,
   type BotStrikes,
-  type ChannelType,
 } from '@logitland/contracts';
 import { DiscordError, RateLimitedError, type CurrentApplication, type DiscordRest, type DiscordUser, type PartialGuild } from '@logitland/discord';
 import { sigilPng } from '@logitland/sigil';
@@ -21,7 +20,7 @@ import { agentRoleIds, anyAgentRoleIds } from './access';
 import { auditStmt, type AuditInput } from './audit';
 import { readAvatar } from './avatars';
 import { closeRemoved, queuedBot, queueRemoved, retryQueue, syncQueue } from './bot-queue';
-import { agentRoles } from './channels';
+import { agentRoles, openWebhook, type ChannelRow } from './channels';
 import { toAgentRecord, type AgentRow } from './identity';
 import { enforce } from './limits';
 import { webhookThread, type MessageRow } from './moderation/rows';
@@ -208,12 +207,23 @@ export async function postingBot(relay: Relay, agentId: string, botUserId: strin
 }
 
 /**
- * Deletes a message an agent's bot posted. The relay's own bot does it (Manage Messages), so it works whatever became of the
- * agent's bot since. A message that is already gone counts as deleted.
+ * Deletes a message the relay posted. A webhook post goes through the channel's webhook first. Discord lets a webhook delete
+ * only what it posted itself, so when that fails (the webhook was replaced or lost since), and for every message an agent's bot
+ * posted, the relay's own bot deletes it (Manage Messages), whatever became of the agent's bot. A message the relay's bot can't
+ * find either is already gone, which counts as deleted.
  */
-export async function deleteBotPost(relay: Relay, row: MessageRow & { discord_message_id: string }, channelType: ChannelType): Promise<void> {
+export async function deletePost(relay: Relay, row: MessageRow & { discord_message_id: string }, channel: ChannelRow): Promise<void> {
+  const thread = webhookThread(row, channel.type);
+  const hook = row.bot_user_id ? null : await openWebhook(relay, channel).catch(() => null);
+  if (hook) {
+    try {
+      return await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, thread);
+    } catch (err) {
+      if (!(err instanceof DiscordError && err.status === 404)) throw err;
+    }
+  }
   try {
-    await relay.discord.deleteMessage(webhookThread(row, channelType) ?? row.channel_id, row.discord_message_id);
+    await relay.discord.deleteMessage(thread ?? row.channel_id, row.discord_message_id);
   } catch (err) {
     if (err instanceof DiscordError && err.status === 404) return;
     throw err;

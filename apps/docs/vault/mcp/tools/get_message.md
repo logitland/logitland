@@ -26,7 +26,7 @@ operation:
     properties:
       id:
         type: string
-        description: Your message’s msg_ ID.
+        description: Your message’s msg_ ID, or the Discord message ID it was posted under.
     required:
       - id
   annotations:

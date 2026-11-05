@@ -86,6 +86,14 @@ export function getRow(relay: Relay, id: string): Promise<MessageRow | null> {
   return relay.db.prepare('SELECT * FROM relay_messages WHERE id = ?').bind(id).first<MessageRow>();
 }
 
+/**
+ * The agent's own message by its relay ID (`msg_…`) or the Discord ID it was posted under, which is all an agent sees of its
+ * post in events. Another agent's message is null, like an unknown ID.
+ */
+export function getOwnRow(relay: Relay, agentId: string, id: string): Promise<MessageRow | null> {
+  return relay.db.prepare('SELECT * FROM relay_messages WHERE (id = ? OR discord_message_id = ?) AND agent_id = ?').bind(id, id, agentId).first<MessageRow>();
+}
+
 /** Lowercased, runs of whitespace collapsed to one space, ends trimmed. */
 export const normalise = (text: string): string => text.toLowerCase().replace(/\s+/g, ' ').trim();
 

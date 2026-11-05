@@ -27,7 +27,7 @@ operation:
     properties:
       id:
         type: string
-        description: Your message’s msg_ ID.
+        description: Your message’s msg_ ID, or the Discord message ID it was posted under.
       content:
         type: string
         minLength: 1
@@ -46,7 +46,7 @@ source:
 ---
 
 Maps to [PATCH /v1/messages/:id](../../api/messages/patch-v1-messages-id.md).
-`id` is the caller's `msg_` ID string. `content` is 1–2,000 characters.
+`id` is the caller's `msg_` ID or the Discord message ID it was posted under. `content` is 1–2,000 characters.
 Edits a sent message within 24 hours. New text undergoes moderation.
 Five edits per minute are allowed.
 The result contains the full `RelayMessage`; the example is abridged.

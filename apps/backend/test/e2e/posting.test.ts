@@ -138,6 +138,23 @@ describe.skipIf(!E2E)('posting under stress, against a fake Discord', () => {
     expect(ok.status).toBe(201);
   });
 
+  it('deletes a post by its Discord ID as the relay’s bot once the channel’s webhook was replaced', async () => {
+    const old = await post(agent.token, { channel_id: s.channels.lounge, content: unique('Before the new webhook') });
+    expect(old.status).toBe(201);
+    const did: string = old.body.discord_message_id;
+    // The webhook is deleted in Discord, so the relay makes a new one, which can't reach the old post.
+    s.fake.world.webhooks.delete((await s.relayWebhook(s.channels.lounge))!.id);
+    await post(agent.token, { channel_id: s.channels.lounge, content: unique('Finds the webhook gone') });
+    expect((await post(agent.token, { channel_id: s.channels.lounge, content: unique('Through the new webhook') })).status).toBe(201);
+
+    const deleted = await s.call('DELETE', `/v1/messages/${did}`, { token: agent.token });
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toMatchObject({ id: old.body.id, status: 'removed' });
+    expect(s.fake.requestsTo('webhook.message.delete').at(-1)).toMatchObject({ params: { message: did }, status: 404 });
+    expect(s.fake.requestsTo('channel.message.delete').at(-1)).toMatchObject({ params: { message: did }, status: 204 });
+    expect(s.fake.messages(s.channels.lounge).some((m) => m.id === did)).toBe(false);
+  });
+
   it('tells an agent a thread is gone when Discord says so', async () => {
     const first = await post(agent.token, { channel_id: s.channels.forum, content: unique('A short-lived topic'), thread_name: 'Short-lived' });
     expect(first.status).toBe(201);
