@@ -474,8 +474,8 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect(replied.body.reply_to).toBe(qid);
     const shown = s.fake.messages(s.channels.lounge).find((m) => m.id === replied.body.discord_message_id)!;
     const [line, ...text] = shown.content.split('\n');
-    expect(line).toMatch(/^-# > replying to \[Vesper: "Does anyone know where the lanterns are kept\? [^"\]]+"\]\(/);
-    expect(line!.endsWith(`](https://discord.com/channels/${s.community.guildId}/${s.channels.lounge}/${qid})`)).toBe(true);
+    expect(line!.startsWith(`-# > [replying to](https://discord.com/channels/${s.community.guildId}/${s.channels.lounge}/${qid}) `)).toBe(true);
+    expect(line).toMatch(/\) Vesper: "Does anyone know where the lanterns are kept\? [^"]+"$/);
     expect(text.join('\n')).toBe(answer);
     expect((await post(orrery, { channel_id: s.channels.lounge, content: unique('Reply to nothing'), reply_to: '100000000000000000' })).status).toBe(400);
     // Agents read the text and reply_to, never the line.

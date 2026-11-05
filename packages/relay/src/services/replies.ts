@@ -1,16 +1,18 @@
 // Replies through webhooks (#10). Discord's webhooks can't make native replies, so the relay puts a line above an agent's
 // reply, which Discord renders as a small quote:
 //
-//   -# > replying to [<@348589994438295553>: "waow"](https://discord.com/channels/<guild>/<channel>/<message>)
+//   -# > [replying to](https://discord.com/channels/<guild>/<channel>/<message>) <@348589994438295553>: "waow"
 //
 // The target is a mention for a person or a bot (posts are sent with mentions disabled, so nobody is pinged) and the
-// agent's name for an agent; the quote is the original's first 10 words. Coming back through the Gateway the line is
+// agent's name for an agent; the quote is the original's first 10 words. Only "replying to" is the link: Discord won't
+// render a masked link whose text holds a mention (discord-api-docs#6088). Coming back through the Gateway the line is
 // taken off again and becomes `reply_to`, so agents see one reply model whichever way a reply was made.
 
 const QUOTE_WORDS = 10;
-const OPEN = '-# > replying to [';
-/** The link at the end of the line; the quote can't contain it, since brackets are taken out of quotes. */
-const LINE = /^-# > replying to \[[^\n]*\]\(https:\/\/discord\.com\/channels\/\d{17,20}\/\d{17,20}\/(\d{17,20})\)$/;
+const LINK = String.raw`\(https:\/\/discord\.com\/channels\/\d{17,20}\/\d{17,20}\/(\d{17,20})\)`;
+const LINE = new RegExp(String.raw`^-# > \[replying to\]${LINK} [^\n]+$`);
+/** The layout before #101, with the target and quote inside the link; still read for the lines already posted. */
+const OLD_LINE = new RegExp(String.raw`^-# > replying to \[[^\n]*\]${LINK}$`);
 
 export interface ReplyTarget {
   author_kind: 'agent' | 'human' | 'webhook' | 'bot';
@@ -19,7 +21,7 @@ export interface ReplyTarget {
   content: string | null;
 }
 
-/** Brackets, parentheses and quotes would end the link text early; mentions and markdown would render. */
+/** Brackets and parentheses would make links of their own, quotes would end the quote early; mentions and markdown would render. */
 const plain = (text: string) =>
   text
     .replace(/<[@#][!&]?\d+>/g, '')
@@ -43,14 +45,15 @@ export function quoteOf(content: string | null): string {
 export function renderReplyLine(target: ReplyTarget, link: string, safe: (quote: string) => boolean): string {
   const who = target.discord_user_id && target.author_kind !== 'agent' ? `<@${target.discord_user_id}>` : plain(target.display_name) || 'a message';
   const quote = quoteOf(target.content);
-  return `${OPEN}${who}${quote && safe(quote) ? `: "${quote}"` : ''}](${link})`;
+  return `-# > [replying to](${link}) ${who}${quote && safe(quote) ? `: "${quote}"` : ''}`;
 }
 
-/** Takes a reply line off the top of a message: the text under it, and the message it points at. */
+/** Takes a reply line, in either layout, off the top of a message: the text under it, and the message it points at. */
 export function parseReplyLine(content: string): { replyTo: string; content: string } | null {
-  if (!content.startsWith(OPEN)) return null;
+  if (!content.startsWith('-# > ')) return null;
   const end = content.indexOf('\n');
-  const match = LINE.exec(end === -1 ? content : content.slice(0, end));
+  const first = end === -1 ? content : content.slice(0, end);
+  const match = LINE.exec(first) ?? OLD_LINE.exec(first);
   if (!match) return null;
   return { replyTo: match[1]!, content: end === -1 ? '' : content.slice(end + 1) };
 }
