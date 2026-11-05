@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { BOT, contents, poll, say, setup, subscribe, useWebhook, type Setup } from './deliveries.testkit';
 import { fakeDiscord } from './posting-fixtures';
-import { drainDue } from './services/deliveries';
+import { drainDue, pushDue } from './services/deliveries';
 import { ingest } from './services/intake';
+import { retentionJob } from './services/retention';
+import { unsubscribe } from './services/subscriptions';
 import { GUILD, LOUNGE, seedChannel } from './testing';
 
 // Subscriptions and their digests (#11, #23, #30 Q4): one cursor per subscription, the same digests whichever transport reads them.
@@ -279,6 +281,106 @@ describe('replies to the agent', () => {
 
     expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
     expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).toBeNull();
+  });
+});
+
+describe('reply handoffs', () => {
+  const receivedFor = (s: Setup, id: string) => s.received.filter((d) => d.subscription_id === id);
+
+  it('replies a deleted replies subscription already delivered stay delivered', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    // One ordinary delivery, so the channel's next due is scheduled rather than open.
+    await say(s, 'first');
+    expect(receivedFor(s, channel.id).map((d) => contents(d))).toEqual([['first']]);
+    const mine = await post(s, 'a question', 'handoff-001');
+    // More than one digest's worth of replies, all delivered on the replies subscription.
+    for (let i = 0; i < 105; i++) await say(s, `answer ${i}`, { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toHaveLength(105);
+    await s.call('PATCH', `/v1/subscriptions/${replies.id}`, { frequency: '60s' }, s.auth);
+    await say(s, 'unread answer', { replyTo: mine.discord_message_id });
+    await say(s, 'unrelated chatter');
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    s.advance(86_400_000);
+    await drainDue(s.relay);
+    const channelDigests = receivedFor(s, channel.id);
+    expect(channelDigests.every((d) => !d.more)).toBe(true);
+    expect(channelDigests.flatMap((d) => contents(d))).toEqual(['first', 'unread answer', 'unrelated chatter']);
+  });
+
+  it('a reply delivered while unsubscribe is in flight is not rearmed on the channel', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'handoff-002');
+    await say(s, 'earlier answer', { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    await s.call('PATCH', `/v1/subscriptions/${replies.id}`, { frequency: '60s' }, s.auth);
+    await say(s, 'one answer', { replyTo: mine.discord_message_id });
+    // The reply sits unread on the replies subscription until its frequency comes up.
+    s.advance(60_000);
+    // Deliver the pending reply between the subscription read and the delete batch.
+    const orig = s.relay.db.batch.bind(s.relay.db);
+    let once = true;
+    s.relay.db.batch = (async (stmts: { sql?: string }[]) => {
+      if (once && stmts.some((st) => st.sql?.includes('DELETE FROM subscriptions'))) {
+        once = false;
+        await pushDue(s.relay, s.agent.id);
+      }
+      return orig(stmts as never[]);
+    }) as typeof s.relay.db.batch;
+    await unsubscribe(s.relay, s.agent.id, replies.id);
+    s.relay.db.batch = orig;
+    expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toEqual(['earlier answer', 'one answer']);
+    s.advance(90_000);
+    await drainDue(s.relay);
+    expect(receivedFor(s, channel.id)).toEqual([]);
+  });
+
+  it('two replies cycles never hand consumed replies to the channel', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const mine = await post(s, 'a question', 'handoff-003');
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const replies = await subscribe(s, { kind: 'replies' });
+      await say(s, `cycle ${cycle} answer`, { replyTo: mine.discord_message_id });
+      await drainDue(s.relay);
+      expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toEqual([`cycle ${cycle} answer`]);
+      await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth);
+    }
+    await say(s, 'the newest answer', { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    const onChannel = receivedFor(s, channel.id).at(-1);
+    expect(contents(onChannel!)).toEqual(['the newest answer']);
+  });
+
+  it('retention keeps a handoff while a channel cursor still needs it', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'handoff-004');
+    await say(s, 'one answer', { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth);
+    const handoffs = () => s.db.prepare('SELECT COUNT(*) AS n FROM reply_handoffs WHERE agent_id = ?').bind(s.agent.id).first<{ n: number }>();
+    expect((await handoffs())!.n).toBe(1);
+    await retentionJob(s.relay);
+    // The channel cursor is still behind the handoff's end: it is kept.
+    expect((await handoffs())!.n).toBe(1);
+    await say(s, 'after the delete', { replyTo: mine.discord_message_id });
+    await drainDue(s.relay);
+    await retentionJob(s.relay);
+    expect((await handoffs())!.n).toBe(0);
   });
 });
 

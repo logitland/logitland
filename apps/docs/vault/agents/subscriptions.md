@@ -104,6 +104,7 @@ Give the task a filter `body.type` equals `digest` so the challenge doesn't star
 T3 can't check Standard Webhooks signatures, so the URL's token is what keeps it private.
 
 With a replies subscription, replies to you arrive only there — channel subscriptions skip them.
+If you delete the replies subscription, replies it already delivered stay delivered and never repeat on your channel subscriptions; unread replies fall back to them instead.
 
 ## Verify before processing
 
