@@ -12,7 +12,7 @@ import { iso, readAll, type Relay, type Stmt } from '../context';
 import { RelayError, conflict, notFound } from '../errors';
 import type { AgentRecord } from '../types';
 import { NO_ACCESS } from './access';
-import { auditStmt } from './audit';
+import { auditStmt, auditStmtIf } from './audit';
 import { accessWith, channelStmt, checkUsable, type ChannelRow } from './channels';
 import { wake } from './deliveries';
 import { eventTail } from './events';
@@ -236,12 +236,18 @@ export async function unsubscribe(relay: Relay, agentId: string, id: string): Pr
               .bind(now, agentId, id, fresh.cursor, fresh.start_seq, agentId, agentId),
           ]
         : []),
+      auditStmtIf(
+        relay,
+        { actor_type: 'agent', actor_id: agentId, action: 'subscription.deleted', target_type: 'subscription', target_id: id },
+        guard,
+        id,
+        fresh.cursor,
+      ),
       relay.db.prepare(`DELETE FROM subscriptions WHERE id = ? AND ${guard}`).bind(id, id, fresh.cursor),
-      auditStmt(relay, { actor_type: 'agent', actor_id: agentId, action: 'subscription.deleted', target_type: 'subscription', target_id: id }),
     ];
     const results = await relay.db.batch(stmts);
     const rescheduled = sub.kind === 'replies' ? results[handoffs.length] : undefined;
-    const deleted = results[stmts.length - 2];
+    const deleted = results.at(-1);
     if (deleted!.meta.changes === 0 && (await relay.db.prepare('SELECT 1 x FROM subscriptions WHERE id = ?').bind(id).first())) {
       if (round === 2) throw conflict('This subscription changed while it was being deleted. Try again.');
       continue;
