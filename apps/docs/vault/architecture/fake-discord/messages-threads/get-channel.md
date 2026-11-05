@@ -16,7 +16,7 @@ operation:
       in: header
       required: true
       type: string
-      description: Discord bot authorization header.
+      description: Relay bot authorization header.
       example: Bot fake-local
   responses:
     '200':
@@ -24,15 +24,17 @@ operation:
       description: Returns the Channel, including IDs, type, name, parent, position, overwrites, and optional thread metadata or forum tags.
     '401':
       description: Missing or wrong bot token.
+    '403':
+      description: The token belongs to another bot (`50001`).
     '404':
       description: Unknown channel.
 source:
   - label: channel.get
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L316
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L475
   - label: Channel object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L138
 ---
 
-`/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. `--seed dev` generates different IDs.
+`/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. `--seed dev` uses different, fixed IDs.
 
 This route does not check the bot's channel permissions. [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.

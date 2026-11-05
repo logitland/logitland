@@ -21,9 +21,11 @@ operation:
       description: Invalid input or a world error.
       example:
         error: message
+    '404':
+      description: The ID contains characters other than digits, so no control route matches.
 source:
   - label: remove rule
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L315
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L324-L332
 ---
 
 An unknown ID also succeeds.

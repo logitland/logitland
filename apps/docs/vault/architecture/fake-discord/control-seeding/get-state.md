@@ -20,7 +20,12 @@ source:
   - label: snapshot
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L57
   - label: channel summary
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L35
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L36-L54
 ---
 
-State exposes credentials intentionally for local tests. Guild entries contain roles, member summaries, and channel summaries. A channel summary contains `id`, `name`, `type`, `parent_id`, `webhooks`, and message count `messages`. Forums add `available_tags`; threads add `archived` and `locked`.
+State intentionally exposes the bot token and webhook tokens for local tests. Keep the fake on loopback and do not share snapshots as public diagnostics.
+
+Guild entries contain roles, member summaries, and channel summaries. Each channel summary contains `id`, `name`, `type`, `parent_id`,
+`webhooks`, and the message count `messages`. Forum and media channels add `available_tags`; threads add `archived` and `locked`.
+The top-level `requests` and `interactions` fields are counts, not records.
+The snapshot does not include the `world.dms`, `world.closedDms`, or `world.emojis` collections. Guild channel summaries do not include DMs.
