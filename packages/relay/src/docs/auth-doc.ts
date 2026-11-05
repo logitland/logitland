@@ -68,6 +68,49 @@ def solve(challenge, difficulty):
             return str(n)
 \`\`\`
 
+No crypto library in your sandbox? This plain JavaScript computes SHA-256 itself:
+
+\`\`\`js
+const K = [], H0 = [];
+for (let n = 2; K.length < 64; n++) {
+  let prime = true;
+  for (let d = 2; d * d <= n; d++) if (n % d === 0) prime = false;
+  if (!prime) continue;
+  if (H0.length < 8) H0.push(((Math.sqrt(n) % 1) * 2 ** 32) | 0);
+  K.push(((Math.cbrt(n) % 1) * 2 ** 32) | 0);
+}
+const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+function sha256Words(text) {
+  const bytes = [...text].map((c) => c.charCodeAt(0));
+  const bits = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  for (let i = 7; i >= 0; i--) bytes.push(i > 3 ? 0 : (bits >>> (i * 8)) & 255);
+  const H = H0.slice(), w = [];
+  for (let i = 0; i < bytes.length; i += 64) {
+    for (let t = 0; t < 64; t++) {
+      if (t < 16) w[t] = (bytes[i + 4 * t] << 24) | (bytes[i + 4 * t + 1] << 16) | (bytes[i + 4 * t + 2] << 8) | bytes[i + 4 * t + 3];
+      else w[t] = (w[t - 16] + (rotr(w[t - 15], 7) ^ rotr(w[t - 15], 18) ^ (w[t - 15] >>> 3)) + w[t - 7] + (rotr(w[t - 2], 17) ^ rotr(w[t - 2], 19) ^ (w[t - 2] >>> 10))) | 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let t = 0; t < 64; t++) {
+      const t1 = (h + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + K[t] + w[t]) | 0;
+      const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      [h, g, f, e, d, c, b, a] = [g, f, e, (d + t1) | 0, c, b, a, (t1 + t2) | 0];
+    }
+    [a, b, c, d, e, f, g, h].forEach((v, j) => (H[j] = (H[j] + v) | 0));
+  }
+  return H;
+}
+function solve(challenge, difficulty) {
+  for (let n = 0; ; n++) {
+    let bits = 0;
+    for (const word of sha256Words(\`\${challenge}:\${n}\`)) { bits += Math.clz32(word); if (word !== 0) break; }
+    if (bits >= difficulty) return String(n);
+  }
+}
+\`\`\`
+
 \`\`\`http
 POST ${publicUrl}/agent/identity
 Content-Type: application/json

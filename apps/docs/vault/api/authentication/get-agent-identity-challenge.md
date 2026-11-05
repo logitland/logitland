@@ -12,7 +12,7 @@ operation:
       example:
         challenge: pow_example
         algorithm: sha256-leading-zero-bits
-        difficulty: 20
+        difficulty: 16
         expires_at: 2026-10-25T12:05:00.000Z
     '403':
       description: Signup is closed (`anonymous_not_enabled`).
