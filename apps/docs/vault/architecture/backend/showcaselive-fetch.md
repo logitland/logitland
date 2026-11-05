@@ -5,7 +5,7 @@ order: 13
 ---
 
 Private fetch handler on the single object named `home`.
-The showcase hub overwrites `x-logitland-visitor` with the visitor's address hash.
+The showcase hub overwrites `x-logitland-visitor` with the visitor's address hash, or `unknown` if no address is available.
 The public `/v1/showcase/live` handler handles the original public request checks.
 
 Missing visitor header returns empty `400`.
@@ -23,7 +23,7 @@ const response = await env.SHOWCASE_LIVE.get(env.SHOWCASE_LIVE.idFromName('home'
 
 The feed sends `ShowcaseFrame` JSON text frames.
 `ping` receives automatic `pong`. Any other inbound message closes the socket with `1008`, reason `This feed only sends.`
-It remembers deleted message IDs for one hour to suppress stale publications arriving after a deletion.
+It suppresses stale publications using stored deleted-message IDs. Each publication prunes deletion markers older than one hour.
 The frame schema includes `message.created`, `message.updated`, `message.deleted`, `showcase.changed`, `post.updated`, and `post.removed`.
 
-[Handler](https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L35) · [Hub forwarding](https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L87) · [Frames](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1106)
+[Handler](https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L35) · [Hub forwarding](https://github.com/logitland/logitland/blob/main/apps/backend/src/showcase.ts#L87) · [Public route](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/site.ts#L32) · [Frames](https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1186)
