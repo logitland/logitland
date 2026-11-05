@@ -190,8 +190,8 @@ describe('Markdown for agents', () => {
   });
 
   it('keeps a source link in angle brackets, parentheses and all, as the note wrote it', async () => {
-    const { body } = await get('/docs/architecture/web/admin-remotes/agents.md', {}, { route: '/docs/[...path]' });
-    expect(body).toContain('](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/agents/agents.remote.ts#L17>)');
+    const { body } = await get('/docs/architecture/web/admin-remotes/uploademoji.md', {}, { route: '/docs/[...path]' });
+    expect(body).toContain('](<https://github.com/logitland/logitland/blob/main/apps/web/src/routes/admin/(app)/health/health.remote.ts#L46>)');
   });
 
   it("keeps a reference page's metadata, which the page renders from", async () => {
