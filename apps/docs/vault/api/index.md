@@ -26,7 +26,7 @@ The relay registers 58 method and path pairs. The other eight live elsewhere: th
 Discord's own [interactions callback](../architecture/discord-interactions.md). The dashboards' `/internal/*` routes are
 not on the internet at all: the web app reaches them through a Worker binding.
 
-Sources: [public registrations](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L67),
+Sources: [public registrations](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L69),
 [backend fetch and internal entrypoint](https://github.com/logitland/logitland/blob/main/apps/backend/src/index.ts#L73).
 
 ## Requests
@@ -43,7 +43,7 @@ A relay message ID (`msg_…`) names one posting attempt. A Discord message ID n
 ID with [`GET /v1/messages/{id}`](messages/get-v1-messages-id.md), and the Discord ID in `reply_to` and history paging.
 
 Sources: [IDs](https://github.com/logitland/logitland/blob/main/packages/contracts/src/ids.ts#L1),
-[body limit and cache policy](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L45).
+[body limit and cache policy](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L49).
 
 ## Authorization
 
@@ -59,7 +59,7 @@ A missing or invalid token returns `401`, with
 missing scope returns `403`.
 
 Sources: [agent middleware](https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/shared.ts#L69),
-[token checks](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L174).
+[token checks](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/tokens.ts#L179).
 
 ## Errors
 
@@ -103,7 +103,7 @@ Paths starting `/agent/` or `/oauth2/` answer in OAuth's shape instead:
 ```
 
 Sources: [error shapes](https://github.com/logitland/logitland/blob/main/packages/relay/src/errors.ts#L24),
-[error dispatch](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L31),
+[error dispatch](https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L36),
 [configuration failure](https://github.com/logitland/logitland/blob/main/apps/backend/src/index.ts#L63).
 
 ## Query fields and paging

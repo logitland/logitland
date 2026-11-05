@@ -48,4 +48,8 @@ source:
 
 The `/api/v9` and `/api` prefixes also work. Client ID and secret fields have no effect.
 
-Codes and tokens live in memory. Token responses advertise a week, but the fake does not enforce token expiry.
+A successful exchange consumes the code. A failed exchange leaves it available, so a wrong redirect URI can be corrected without authorizing again.
+Use the returned token for [OAuth user lookup](get-users-me.md), not as a bot token.
+
+Codes and tokens live in memory. `expires_in: 604800` advertises a week in seconds, but the fake does not enforce token expiry.
+The response has no refresh token, and the fake has no refresh-token or revocation endpoint.

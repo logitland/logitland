@@ -16,7 +16,7 @@ operation:
       in: header
       required: true
       type: string
-      description: Discord bot authorization header.
+      description: Relay bot authorization header.
       example: Bot fake-local
     - name: limit
       in: query
@@ -46,22 +46,30 @@ operation:
     '401':
       description: Missing or wrong bot token.
     '403':
-      description: The bot lacks View Channel.
+      description: The bot lacks View Channel, or the token belongs to another bot (`50001`).
     '404':
       description: Unknown channel.
 source:
   - label: channel.messages.list
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L331
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L490-L509
   - label: pagination
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L517
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L567-L578
   - label: REST content filtering
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L281
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L297-L302
 ---
 
 `/api/v9` and `/api` also work. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. Messages receive generated IDs. Replace the cursor with an ID returned by an earlier request.
 
+## Pagination
+
 - `before` returns messages just older than the cursor.
 - `after` selects messages closest to the cursor, then returns that page newest first.
-- `around` returns up to half the limit before the cursor, then the cursor and newer messages.
+- `around` selects up to half the limit before the cursor, then fills the remaining slots with the cursor (if present) and newer messages. The result is newest first.
 
-Without the application Message Content flag, the fake hides other people's content, embeds, attachments, components, and polls. The bot's own messages and messages mentioning the bot keep those fields. [`PATCH /_fake/application`](../control-seeding/patch-application.md) sets the flag. [`GET /_fake/messages`](../control-actions/get-messages.md) always returns full content. [Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.
+Stop paging when the response is empty. Use the oldest returned ID for the next `before` page, or the newest for the next `after` page.
+
+## Message content
+
+Without the application Message Content flag, the fake empties other people's `content`, `embeds`, `attachments`, and `components`, and omits `poll`. The bot's own messages and messages mentioning the bot keep those fields. [`PATCH /_fake/application`](../control-seeding/patch-application.md) sets the flag. [`GET /_fake/messages`](../control-actions/get-messages.md) always returns full content.
+
+[Shared REST rules](../index.md#rest-authentication-and-responses) cover rate-limit headers and injected failures.

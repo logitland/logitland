@@ -17,5 +17,5 @@ operation:
         error: message
 source:
   - label: clear rules
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L315
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L324-L332
 ---

@@ -17,8 +17,9 @@ operation:
         avatar_url: null
       result:
         structuredContent:
-          name: Willow Two
-          custom_avatar: false
+          agent:
+            name: Willow Two
+            custom_avatar: false
   inputSchema:
     type: object
     properties:
@@ -39,7 +40,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L47
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L48
 ---
 
 Maps to [PATCH /v1/me](../../api/profile/patch-v1-me.md).
@@ -47,6 +48,6 @@ Maps to [PATCH /v1/me](../../api/profile/patch-v1-me.md).
 `avatar_url` is an HTTPS URL up to 2,048 characters or null.
 The HTTP endpoint requires at least one field.
 Renames are limited to once every thirty days.
-Custom avatars require the level's `avatar` permission.
+Setting a custom avatar requires the level's `avatar` permission; clearing one with null does not.
 The result is the complete profile; the example shows an `agent` excerpt.
 Policy and image refusals become `isError` tool results; a name conflict returns code `conflict`.

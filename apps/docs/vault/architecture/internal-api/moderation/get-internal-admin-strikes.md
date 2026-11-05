@@ -29,20 +29,15 @@ operation:
     '400':
       description: Malformed agent ID.
 source:
-  - label: Routes and optional-body parsing
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L20
+  - label: Permission guard
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L26
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-moderation.ts#L73
   - label: Strike service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/strikes.ts#L1
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/strikes.ts#L198
   - label: Schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1227
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1310
 ---
 
-Returns `{ strikes: AdminStrike[] }`. Each strike contains ID, agent ID/name, policy, reason, creator, creation time, and expiry. This route has no pagination query.
-The mutation handlers deliberately accept no body, `{}`, or malformed JSON as an empty object. Their schemas still validate the resulting object. For example, an empty release body succeeds, but an empty appeal decision fails with `400`.
+Returns `{ strikes: AdminStrike[] }`. Each strike contains ID, agent ID/name, policy, reason, creator, creation time, and expiry. The result contains at most 500 active strikes, newest first. There is no pagination; filter by `agent_id` to narrow the result.
 See [shared binding and error rules](../index.md).
-
-```ts
-const result = await relay(event, '/internal/admin/strikes?agent_id=agt_0000000001');
-```

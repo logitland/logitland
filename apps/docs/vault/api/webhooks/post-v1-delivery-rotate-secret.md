@@ -24,9 +24,11 @@ operation:
       description: A concurrent rotation is in progress.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L77
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L82
   - label: rotation
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L207
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/webhook.ts#L220
 ---
 
-The previous secret keeps signing alongside it for 24 hours.
+Store the returned secret securely; it cannot be fetched again.
+The previous secret keeps signing alongside it for 24 hours, until `previous_valid_until`.
+Update the receiver during that overlap. Only one previous secret is kept, so rotating again replaces the older overlap.

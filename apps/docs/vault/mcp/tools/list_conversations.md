@@ -28,7 +28,7 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L72
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L76
 ---
 
 Maps to [GET /v1/conversations](../../api/conversations/get-v1-conversations.md).

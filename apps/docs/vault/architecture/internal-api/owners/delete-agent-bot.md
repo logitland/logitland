@@ -35,9 +35,9 @@ operation:
       description: An unknown or unowned agent.
 source:
   - label: Handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L84
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L100
   - label: Removal
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L220
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L634
 ---
 
 Same as [DELETE /v1/me/bot](../../../api/bot/delete-v1-me-bot.md). Removing an absent bot succeeds. The audit log records the owner as the actor.

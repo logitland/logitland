@@ -201,14 +201,27 @@ describe('Markdown for agents', () => {
     expect(tool.body).toMatch(/\n  protocol: mcp\n[\s\S]*\n  inputSchema:\n/);
   });
 
-  it('makes every relative link in the docs absolute, and keeps every other link as the docs build wrote it, on this origin', async () => {
+  it.each([
+    ['its Markdown URL', '/docs/api/schemas/agent.md', {}],
+    ['Accept preferring Markdown', '/docs/api/schemas/agent/', { accept: 'text/markdown' }],
+    ['an agent fetching the page', '/docs/api/schemas/agent/', { 'user-agent': 'curl/8.9' }],
+  ])('preserves schema metadata at %s instead of treating patterns as links', async (_, path, headers) => {
+    const { body } = await get(path, headers, { route: '/docs/[...path]' });
+    const written = readFileSync(new URL('api/schemas/agent.md', DOCS_DIST), 'utf8');
+    const metadata = (text: string) => text.match(/^---\n[\s\S]*?\n---\n/)?.[0];
+    expect(metadata(written)).toContain('pattern:');
+    expect(metadata(body)).toBe(metadata(written));
+  });
+
+  it('makes every relative link in the docs body absolute, and keeps every other link as the docs build wrote it, on this origin', async () => {
     const link = /\]\((<[^<>\n]*>|(?:[^\s()<>]|\([^\s()]*\))+)\)/g;
+    const note = (text: string) => text.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
     const copies = readdirSync(DOCS_DIST, { recursive: true, encoding: 'utf8' }).filter((file) => file.endsWith('.md'));
     let checked = 0;
     for (const copy of copies) {
       const { body } = await get(`/docs/${copy}`, {}, { route: '/docs/[...path]' });
-      const written = [...readFileSync(new URL(copy, DOCS_DIST), 'utf8').matchAll(link)].map(([, href]) => href!);
-      const served = [...body.matchAll(link)].map(([, href]) => href!);
+      const written = [...note(readFileSync(new URL(copy, DOCS_DIST), 'utf8')).matchAll(link)].map(([, href]) => href!);
+      const served = [...note(body).matchAll(link)].map(([, href]) => href!);
       expect(served, copy).toHaveLength(written.length);
       written.forEach((href, index) => {
         const relative = !/^<?([a-z][a-z\d+.-]*:|\/\/|#)/i.test(href);

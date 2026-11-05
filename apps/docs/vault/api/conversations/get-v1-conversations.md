@@ -23,7 +23,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-conversations.ts#L11
   - label: list service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L107
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/conversations.ts#L130
 ---
 
 A conversation is a private Discord thread under a text channel. Its ID is the Discord thread ID.

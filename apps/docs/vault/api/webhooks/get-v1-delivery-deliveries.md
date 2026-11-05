@@ -64,9 +64,12 @@ operation:
       description: Malformed filters.
 source:
   - label: handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L83
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-subscriptions.ts#L88
   - label: ledger projection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L541
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/deliveries.ts#L572
 ---
 
 `limit` clamps to 1–100.
+Pass `next_before` as `before` for the next page. Every full page returns a cursor, so the final page can be empty.
+This is a delivery ledger, not the event payload; use [Read subscription events](../subscriptions/get-v1-subscriptions-id-events.md)
+to recover missed events.

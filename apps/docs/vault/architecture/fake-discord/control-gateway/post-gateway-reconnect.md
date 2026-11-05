@@ -14,10 +14,12 @@ operation:
       example:
         ok: true
     '400':
-      description: Invalid input or world error.
+      description: Malformed JSON request body.
 source:
   - label: reconnect
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L335
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L344-L351
+  - label: RECONNECT control
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L218
 ---
 
-It sends opcode `7` to authenticated clients without closing their sockets.
+RECONNECT has `d: null`. The control does not create a replacement connection or expire sessions; clients must handle the reconnect request.

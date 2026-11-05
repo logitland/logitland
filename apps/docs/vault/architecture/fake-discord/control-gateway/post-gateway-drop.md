@@ -14,12 +14,12 @@ operation:
       example:
         ok: true
     '400':
-      description: Invalid input or world error.
+      description: Malformed JSON request body.
 source:
   - label: drop
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L351
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L360-L367
   - label: Gateway control methods
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L216
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/gateway.ts#L239
 ---
 
-Dropping sockets preserves sessions until their resume window expires.
+Dropping sockets does not expire sessions. Resuming still requires a valid session within its resume window and enough buffered dispatches to replay.

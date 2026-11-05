@@ -58,7 +58,7 @@ operation:
       code_verifier: <pkce-verifier>
   responses:
     '200':
-      description: A bearer access token and a rotated refresh token.
+      description: A new bearer access token and refresh token, with Cache-Control no-store.
       example:
         access_token: lla_example
         token_type: Bearer
@@ -72,38 +72,36 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/logan.ts#L86
   - label: exchange
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/oauth.ts#L188
+  - label: form and JSON fields
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/shared.ts#L34
 ---
 
 No bearer token or client secret is needed.
-Send form-encoded fields, or JSON whose values are strings.
+Send form-encoded fields, or a JSON object whose field values are strings. Non-string fields are ignored.
 
 | `grant_type`         | Required fields                                      |
 | -------------------- | ---------------------------------------------------- |
 | `authorization_code` | `code`, `client_id`, `redirect_uri`, `code_verifier` |
 | `refresh_token`      | `refresh_token`, `client_id`                         |
 
-```sh
-curl https://relay.example/oauth2/admin/token \
-  --data-urlencode 'grant_type=authorization_code' \
-  --data-urlencode 'client_id=lgc_01J00000000000000000000000' \
-  --data-urlencode "code=$AUTHORIZATION_CODE" \
-  --data-urlencode 'redirect_uri=http://127.0.0.1:8765/callback' \
-  --data-urlencode "code_verifier=$PKCE_VERIFIER"
-```
+The code is single-use and expires five minutes after consent. Use the exact `redirect_uri` from authorization,
+even if its loopback port differs from registration. The verifier must match that authorization's PKCE challenge.
 
-Success is `200` with `Cache-Control: no-store`.
-Access tokens last one hour. Refresh tokens last thirty days and rotate on use.
-A refresh request returns the same response shape with new tokens:
+## Lifetime and rotation
 
-```sh
-curl https://relay.example/oauth2/admin/token \
-  --data-urlencode 'grant_type=refresh_token' \
-  --data-urlencode 'client_id=lgc_01J00000000000000000000000' \
-  --data-urlencode "refresh_token=$LOGAN_REFRESH_TOKEN"
-```
+Access tokens last one hour. Refresh tokens last thirty days from issuance and rotate on use.
+Replace the stored refresh token with the new one after each successful refresh. Rotation invalidates the old refresh
+token but does not invalidate earlier access tokens; those remain usable until expiry or revocation.
+The returned scope is always `logan`, regardless of the scope string sent during authorization.
 
-Missing fields return `400 invalid_request`.
-Unknown grants return `400 unsupported_grant_type`.
-Expired codes or tokens, mismatched clients, redirects, or PKCE verifiers return `400 invalid_grant`.
-Reusing a code or a revoked refresh token revokes its entire grant.
+## Errors
+
+Exchange errors use HTTP `400` with `{ error, error_description }`:
+
+- `invalid_request`: a required field is missing or empty, or the JSON is malformed.
+- `unsupported_grant_type`: the grant type is not supported.
+- `invalid_grant`: the code or refresh token is unknown, expired, used or revoked, or its client, redirect, or PKCE verifier does not match.
+
+Do not retry a used code or an old refresh token: replay detection revokes the grant. Start authorization again instead.
+
 The exchange does not itself grant Discord permissions; MCP requests recheck them.
