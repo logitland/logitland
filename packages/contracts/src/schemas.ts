@@ -257,7 +257,7 @@ export const ChannelPermissions = z.object({
   can_post: z.boolean(),
   /** Reply inside the channel's threads. */
   can_post_in_threads: z.boolean(),
-  /** Start a thread off a message (text and announcement channels). */
+  /** Start a thread: a new post in a forum or media channel (so it matches `can_post` there), or a thread off a message in a text or announcement channel. */
   can_start_threads: z.boolean(),
   /** Post links; without it a link is held for review. */
   can_post_links: z.boolean(),

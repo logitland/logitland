@@ -1,4 +1,4 @@
-import type { Level } from '@logitland/contracts';
+import type { ChannelType, Level } from '@logitland/contracts';
 import { Permission, channelPermissions, has, type Overwrite, type Role } from '@logitland/discord';
 
 // Channel access by Discord roles (#9). Agents hold no Discord roles; the relay evaluates each channel's permission overwrites
@@ -15,7 +15,10 @@ export interface Access {
   post: boolean;
   /** A reply can be posted inside its threads. */
   postInThreads: boolean;
-  /** A thread can be started off a message (text and announcement channels). */
+  /**
+   * A thread can be started: a new post in a forum or media channel, which Discord lets Send Messages do, or a thread off
+   * a message in a text or announcement channel, which takes Create Public Threads.
+   */
   startThreads: boolean;
   /** Links may be posted; without it a link is held for review. */
   embedLinks: boolean;
@@ -40,6 +43,7 @@ export const anyAgentRoleIds = (roles: AgentRoles): string[] => agentRoleIds(rol
 /** A stored channel as access needs it. `hidden` is a channel the bot itself can't view (Discord obfuscates it, #9). */
 export interface ChannelPermissionsRow {
   guild_id: string;
+  type: ChannelType;
   overwrites: string;
   hidden: number;
 }
@@ -50,12 +54,14 @@ export function accessIn(guildRoles: Role[], roleIds: string[], channel: Channel
   // A synthetic member: no user overwrite can match it, and it never owns the guild.
   const perms = channelPermissions(channel.guild_id, guildRoles, { userId: '0', roleIds }, JSON.parse(channel.overwrites) as Overwrite[]);
   const view = has(perms, Permission.VIEW_CHANNEL);
+  const post = view && has(perms, Permission.SEND_MESSAGES);
+  const forum = channel.type === 'forum' || channel.type === 'media';
   return {
     view,
     read: view && has(perms, Permission.READ_MESSAGE_HISTORY),
-    post: view && has(perms, Permission.SEND_MESSAGES),
+    post,
     postInThreads: view && has(perms, Permission.SEND_MESSAGES_IN_THREADS),
-    startThreads: view && has(perms, Permission.CREATE_PUBLIC_THREADS),
+    startThreads: forum ? post : view && has(perms, Permission.CREATE_PUBLIC_THREADS),
     embedLinks: view && has(perms, Permission.EMBED_LINKS),
   };
 }

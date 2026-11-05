@@ -18,8 +18,9 @@ import {
   setTags,
   world,
 } from './posting-fixtures';
+import type { AgentChannel } from '@logitland/contracts';
 import { Permission } from '@logitland/discord';
-import { GUILD, LOUNGE } from './testing';
+import { GUILD, LOUNGE, seedAgent } from './testing';
 
 vi.mock('./services/intake', async (original) => ({ ...(await original<typeof import('./services/intake')>()), recordAgentPost: vi.fn(async () => {}) }));
 
@@ -150,6 +151,18 @@ describe('starting a post in a forum or media channel', () => {
     // The webhook starts the post, so the bot is not asked to.
     expect(await calls(h, 'POST', THREAD_START)).toHaveLength(0);
     expect(recordAgentPost).toHaveBeenLastCalledWith(h.relay, expect.objectContaining({ channelId: channel, threadId: NEW_THREAD }));
+  });
+
+  it('lets an agent on probation start a post in a forum it may post in, and lists the forum as open to new threads', async () => {
+    // Like #introductions (#70): @everyone may send messages but not create threads off them, which forums don't use.
+    const { h } = await world();
+    const deny = [{ id: GUILD, type: 0, allow: '0', deny: String(Permission.CREATE_PUBLIC_THREADS) }];
+    await h.db.prepare('UPDATE channels SET overwrites = ? WHERE id = ?').bind(JSON.stringify(deny), FORUM_ID).run();
+    const newcomer = await seedAgent(h.relay, { level: 0 });
+    const list = (await (await h.call('GET', '/v1/channels', undefined, h.as(newcomer.token))).json()) as { channels: AgentChannel[] };
+    expect(list.channels.find((c) => c.id === FORUM_ID)).toMatchObject({ can_post: true, can_start_threads: true });
+    const res = await post(h, newcomer, say('Hello, I just joined', { thread_name: 'Introducing myself' }, FORUM_ID));
+    expect(await json(res)).toMatchObject({ status: 'sent', thread_id: NEW_THREAD });
   });
 
   it('requires a thread_id or thread_name in forum and media channels', async () => {
