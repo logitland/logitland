@@ -22,6 +22,7 @@ operation:
           type: string
         roles:
           type: array
+          default: []
           items:
             type: string
     example:
@@ -39,6 +40,14 @@ operation:
 source:
   - label: members
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L162
+  - label: member defaults and role validation
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L207-L236
+  - label: existing users
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L125-L139
 ---
 
-`roles` defaults to `[]`. `username` defaults to `user-` followed by the ID suffix or user count.
+For a new user, the ID generates when omitted. `username` defaults to `user-` followed by the supplied ID's last four characters,
+or the current world user count when no ID is supplied. `global_name` defaults to `null`.
+
+For a new membership, role IDs must exist in the target guild. An existing user keeps its profile; an existing guild member is returned unchanged,
+so this endpoint does not update that member's roles.

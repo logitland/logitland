@@ -19,14 +19,16 @@ operation:
       example: '100000000000000060'
   responses:
     '200':
-      description: The message was deleted.
+      description: The message was deleted and MESSAGE_DELETE was emitted.
       example:
         ok: true
     '400':
-      description: Invalid input or a missing message.
+      description: Invalid input, an unknown channel, or a missing message.
       example:
         error: Unknown Message
 source:
   - label: message delete
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L205
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L214-L221
+  - label: World.deleteMessage
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/world.ts#L544-L551
 ---

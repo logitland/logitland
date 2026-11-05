@@ -1,6 +1,6 @@
 ---
 title: Create a channel webhook
-description: Create a webhook on a text-like channel.
+description: Create a webhook on a channel other than a category or thread.
 operation:
   method: POST
   path: /api/v10/channels/{channel}/webhooks
@@ -16,7 +16,7 @@ operation:
       in: header
       required: true
       type: string
-      description: Discord bot authorization header.
+      description: Relay bot authorization header.
       example: Bot fake-local
   requestBody:
     schema:
@@ -26,6 +26,8 @@ operation:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 80
     example:
       name: Mirror
   responses:
@@ -37,14 +39,18 @@ operation:
     '401':
       description: Missing or wrong bot token.
     '403':
-      description: The bot lacks Manage Webhooks in the channel.
+      description: The bot lacks Manage Webhooks in the channel (`50013`), or the token belongs to another bot (`50001`).
     '404':
       description: Unknown channel.
 source:
   - label: channel.webhooks.create
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L318
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/rest.ts#L477-L488
   - label: Webhook object
     href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/model.ts#L161
 ---
 
-`/api/v9` and `/api` also work. `name` is required and 1–80 characters; names containing `clyde` or `discord` in any case are rejected. The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. Use the ID and token with the [webhook routes](../webhooks/index.md). [Shared REST rules](../index.md#rest-authentication-and-responses) cover JSON bodies, rate-limit headers, and injected failures.
+`/api/v9` and `/api` also work. Names containing `clyde` or `discord` in any case are rejected, regardless of the `strictUsernames` execution setting.
+
+The example channel comes from [`POST /_fake/channels`](../control-seeding/post-channels.md) with an explicit ID. Use the returned ID and token with the [webhook routes](../webhooks/index.md).
+
+[Shared REST rules](../index.md#rest-authentication-and-responses) cover JSON bodies, rate-limit headers, and injected failures.

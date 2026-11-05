@@ -43,8 +43,8 @@ operation:
   close:
     '4003': The agent is missing, inactive, or lacks messages:read.
 source:
-  - https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L144
-  - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/streams.ts#L20
+  - https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-read.ts#L146
+  - https://github.com/logitland/logitland/blob/main/packages/relay/src/services/streams.ts#L21
   - https://github.com/logitland/logitland/blob/main/apps/backend/src/stream.ts#L1
 ---
 
@@ -60,6 +60,8 @@ Pushes follow each subscription's frequency and advance its cursor, which pollin
 The server ignores client messages other than `ping`.
 
 Frames are delivered at most once.
-After a lost connection, reread with [GET /v1/subscriptions/:id/events](get-v1-subscriptions-id-events.md).
+After a lost connection, reread with [GET /v1/subscriptions/{id}/events](get-v1-subscriptions-id-events.md),
+passing your last processed cursor as `after`. Omitting `after` uses the server's cursor, which may already have
+advanced past a lost frame. Deduplicate recovered events by event ID.
 
 Handshake failures use the [problem format](../index.md#errors).

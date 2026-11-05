@@ -1,10 +1,11 @@
 ---
 title: Receive Discord interactions
-description: Verify and answer Discord pings, consent commands and button callbacks.
+description: How the relay verifies and answers Discord pings, consent commands, and consent or Logan button callbacks.
 order: 2
 operation:
   method: POST
   path: /v1/discord/interactions
+  auth: none
   parameters:
     - name: x-signature-ed25519
       in: header
@@ -15,7 +16,7 @@ operation:
       in: header
       required: true
       type: string
-      description: A decimal Unix timestamp.
+      description: A Unix timestamp in seconds, written as 1–12 decimal digits.
   requestBody:
     schema:
       type: object
@@ -28,10 +29,7 @@ operation:
           pattern: ^\d{17,20}$
         type:
           type: integer
-          enum:
-            - 1
-            - 2
-            - 3
+          description: 1 for ping, 2 for an application command, or 3 for a message component. Other integers receive an unknown-command reply.
         token:
           type: string
           minLength: 1
@@ -47,15 +45,23 @@ operation:
               properties:
                 id:
                   type: string
+                  pattern: ^\d{17,20}$
+              required:
+                - id
             roles:
               type: array
               items:
                 type: string
+          required:
+            - user
         user:
           type: object
           properties:
             id:
               type: string
+              pattern: ^\d{17,20}$
+          required:
+            - id
         data:
           type: object
           properties:
@@ -70,6 +76,8 @@ operation:
                 properties:
                   name:
                     type: string
+                required:
+                  - name
       required:
         - id
         - application_id
@@ -89,6 +97,8 @@ operation:
       description: Signed malformed JSON or invalid payload fields.
     '401':
       description: A missing, malformed, stale, or invalid signature.
+    '413':
+      description: The body exceeds the public relay's 64 KiB limit.
     '503':
       description: The configured public key is missing or malformed (misconfigured).
 source:
@@ -106,17 +116,24 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L152
   - label: Logan button handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/calls.ts#L200
+  - label: public body limit and error handling
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L32
+  - label: Discord interaction protocol
+    href: https://docs.discord.com/developers/interactions/receiving-and-responding
 ---
+
+Discord calls this endpoint; agents do not. The schema above lists the fields the relay consumes, not Discord's complete interaction payload.
+Requests use Discord's signature headers, not an agent bearer token.
 
 The signature covers the timestamp text immediately followed by the exact raw request body.
 Timestamps must be within 300 seconds of the relay clock.
 The relay verifies the signature before parsing JSON.
-Only interaction types 1, 2, and 3 are handled.
-Other replies use 200 and Cache-Control: no-store.
+Type `1` receives a pong (`type: 1`). Types `2` and `3` select commands or buttons; other integer types receive an explanatory ephemeral reply.
+Successful replies use HTTP `200` and `Cache-Control: no-store`; validation failures use the HTTP errors listed above.
 
 ## Consent commands and buttons
 
-A type 2 application command uses data.name: "consent" and one subcommand.
+A type `2` application command uses `data.name: "consent"`; the first entry in `data.options` selects the subcommand.
 It must identify a user in the configured guild.
 
 ```json
@@ -148,26 +165,26 @@ Example response before consent:
 `/consent status` reports current consent and retained message count.
 `/consent withdraw` stops future relaying. Existing messages remain.
 
-A type 3 button with data.custom_id: "consent_notice" displays the notice.
+A type `3` button with `data.custom_id: "consent_notice"` displays the notice.
 An old `consent_agree:<version>` button displays the new notice instead of agreeing.
 Only the current version's button records consent.
 Agreement buttons update the original message with `type: 7` and `components: []`.
 Command replies use `type: 4` and ephemeral `flags: 64`.
-All replies suppress mentions.
+All message replies suppress mentions.
 
 Agreement/withdrawal history has a six-toggles-per-ten-minute allowance.
 Withdrawal always proceeds, even after the allowance runs out.
-Role synchronization runs after the interaction response.
+Role synchronization runs in the background when consent changes; the interaction response does not wait for it.
 Wrong-guild and unknown-command payloads receive explanatory ephemeral messages rather than HTTP errors.
 
 ## Logan confirmation buttons
 
-Type 3 messages also handle logan_confirm:<lgr_request_id> and logan_cancel:<lgr_request_id>.
+Type `3` messages also handle `logan_confirm:<lgr_request_id>` and `logan_cancel:<lgr_request_id>`.
 The click must come from the person who made the request, in the configured guild.
 Requests expire after ten minutes.
-A successful confirmation changes pending to running, then executes after the HTTP reply.
+A successful confirmation changes `pending` to `running` and starts background execution; the HTTP reply does not mean the operation has finished.
 The service reloads the person's permissions before execution.
-Cancel changes pending to cancelled.
+Cancel changes `pending` to `cancelled`.
 
 Example button data within the signed interaction payload:
 

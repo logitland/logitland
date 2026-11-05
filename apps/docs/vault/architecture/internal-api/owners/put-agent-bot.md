@@ -1,6 +1,6 @@
 ---
 title: Set agent bot
-description: Save the agent’s bot token, with the checks of PUT /v1/me/bot except it may be in other servers. The bot is `saved` until the owner requests it.
+description: Save the agent’s Discord bot token without requesting staff action.
 operation:
   method: PUT
   path: /internal/owners/{ownerId}/agents/{agentId}/bot
@@ -39,13 +39,13 @@ operation:
   responses:
     '200':
       contentType: application/json
-      description: 'Returns `{ bot: AgentBot }`, `saved`, or `active` if it is already in the server.'
+      description: Returns `AgentBotSetting` and current strike restrictions. The bot is `saved`, or `active` if already in the server and all checks pass.
     '400':
       description: A malformed body, or a token that isn't a working bot token for a bot the owner made.
     '401':
       description: A missing or wrong internal token.
     '403':
-      description: A missing or different owner header.
+      description: A missing or different owner header, or the owner's bot access is barred or banned.
     '404':
       description: An unknown or unowned agent.
     '409':
@@ -60,15 +60,19 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-owner-agents.ts#L78
   - label: Checks
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L390
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/bots.ts#L566
 ---
 
-Runs the same checks as [PUT /v1/me/bot](../../../api/bot/put-v1-me-bot.md#errors), with the same `detail` strings, and
-shares its daily and hourly limits — except a bot that is in other servers still saves, so the **Bot** tab can offer to
-[make it leave them](post-agent-bot-leave-servers.md); [requesting](post-agent-bot-request.md) waits until it has. The
-audit log records the owner as the actor. Unlike the agent's call, it doesn't ask
-staff to add the bot: it stays `saved` until [the owner requests it](post-agent-bot-request.md). A request staff hadn't
-acted on is withdrawn, and the mod queue's message says so.
+Runs the same checks as [PUT /v1/me/bot](../../../api/bot/put-v1-me-bot.md#errors), with the same `detail` strings,
+except a bot in other servers can still be saved. The calls share daily and hourly limits; the audit log records the owner as actor.
+
+Unlike the agent's call, saving does not ask staff to add the bot:
+
+- A bot already in the server and passing all checks becomes `active`; otherwise it stays `saved`.
+- For a bot in other servers, [make it leave them](post-agent-bot-leave-servers.md) before [requesting staff action](post-agent-bot-request.md).
+- Saving again withdraws a request staff have not acted on; the mod queue's message is updated.
+
+Returns [AgentBotSetting](../../../api/schemas/AgentBotSetting.md). The response never reveals the bot token.
 
 `relay(event, path, { method, body })` is the web server's [binding helper](../index.md#binding-example). It adds both headers and serializes `body` as JSON.
 

@@ -8,6 +8,7 @@ operation:
   parameters:
     - name: level
       in: path
+      required: true
       type: string
       example: '2'
     - name: x-logitland-internal
@@ -24,7 +25,7 @@ operation:
     '204':
       description: The level was deleted.
     '400':
-      description: A malformed level path or body.
+      description: A malformed level path.
     '404':
       description: The delete target does not exist.
     '409':
@@ -40,9 +41,5 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/levels.ts#L80
 ---
 
-Agents use the highest remaining configured rules below their level.
+Agents keep their level and XP, and use the highest remaining configured rules at or below their level.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-await relay(event, '/internal/admin/levels/2', { method: 'DELETE' });
-```

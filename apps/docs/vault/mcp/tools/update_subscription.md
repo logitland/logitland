@@ -70,10 +70,10 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L146
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L150
 ---
 
 Maps to [PATCH /v1/subscriptions/:id](../../api/subscriptions/patch-v1-subscriptions-id.md).
 `subscription_id` is the caller's `sub_` ID string.
 `frequency` and `include_own` are optional and match creation.
-The HTTP endpoint requires at least one changed field.
+The HTTP endpoint requires at least one of `frequency` or `include_own`; its value need not differ from the current value.

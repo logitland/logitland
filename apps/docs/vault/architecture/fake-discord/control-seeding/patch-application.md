@@ -39,7 +39,16 @@ operation:
         error: message
 source:
   - label: application patch
-    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L426
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/control.ts#L435-L448
+  - label: expanded REST application
+    href: https://github.com/logitland/logitland/blob/main/packages/discord-fake/src/fake.ts#L267-L294
 ---
 
-`interactions_endpoint_url` sets the endpoint receiving simulated interactions; `null` or an empty value clears it. `team` is an array of developer user IDs; `null` clears the team. `messageContent` accepts `limited`, `full`, or `off`, setting flags to `524288`, `262144`, or `0`. The returned application fields differ from the expanded object at `GET /api/v10/applications/@me`.
+Omitted fields retain their current values.
+
+- `interactions_endpoint_url` sets the endpoint receiving simulated interactions; `null` or an empty string clears it. Use a local test receiver.
+- `team` is an array of developer user IDs; `null` clears the team. An empty array is still a team, not the same as `null`.
+- `messageContent` accepts `limited`, `full`, or `off`, replacing flags with `524288`, `262144`, or `0` respectively.
+
+The returned stored application fields differ from the expanded object at `GET /api/v10/applications/@me`.
+The patch is not atomic: an invalid `team` or `messageContent` can return `400` after earlier fields have already changed.

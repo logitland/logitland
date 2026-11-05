@@ -8,12 +8,13 @@ operation:
   parameters:
     - name: agentId
       in: path
+      required: true
       type: string
       example: agt_0000000001
     - name: status
       in: query
       type: string
-      description: Filter by message status.
+      description: Filter by moderating, held, blocked, queued, sending, sent, uncertain, failed, or removed.
       example: blocked
     - name: before
       in: query
@@ -49,12 +50,9 @@ source:
   - label: Handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/internal-admin-agents.ts#L67
   - label: Message schema
-    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1172
+    href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1255
 ---
 
 The result is `{ messages: OwnerMessage[], next_before: MessageId | null }`. The message statuses and fields match the [owner message contract](../owners/index.md#messages-and-channel-names).
+Pass `next_before` as `before` until it is null. A full page returns a cursor even when the next page is empty.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-const page = await relay(event, '/internal/admin/agents/agt_0000000001/messages?status=blocked&limit=20');
-```

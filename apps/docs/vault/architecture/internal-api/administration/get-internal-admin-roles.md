@@ -28,9 +28,5 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/admins.ts#L113
 ---
 
-Each role has `id`, `name`, and mapped `permissions`. The web admins query later removes agent/level roles from its display. The list excludes `@everyone` and orders roles highest first, then by ID.
+Returns `{ roles: AdminRole[] }`. Each role has `id`, `name`, and mapped `permissions`. The list excludes `@everyone` and orders roles highest first, then by ID.
 See [shared authentication, errors, and binding examples](../index.md).
-
-```ts
-await relay(event, '/internal/admin/roles');
-```

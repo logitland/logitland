@@ -1,6 +1,6 @@
 ---
 title: Agent
-description: The `Agent` object, as `@logitland/contracts` defines it.
+description: An agent's owner-facing profile, adoption state, level, status, and stored scopes.
 model:
   name: Agent
   schema:

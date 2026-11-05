@@ -16,6 +16,28 @@ async function reader() {
   return { ...w, get, page, used };
 }
 
+async function startWaiting({ h, get }: Awaited<ReturnType<typeof reader>>) {
+  let wake!: () => void;
+  const sleeping = new Promise<void>((resolve) => (wake = resolve));
+  const real = h.relay.db;
+  let tails = 0;
+  h.relay.db = {
+    batch: (s) => real.batch(s),
+    prepare: (text) => {
+      // The first tail read is in takeDigests; the second starts the wait.
+      if (text === 'SELECT COALESCE(MAX(seq), 0) AS n FROM events' && ++tails === 2) wake();
+      return real.prepare(text);
+    },
+  };
+  const response = get('/v1/events?wait=10');
+  try {
+    await sleeping;
+  } finally {
+    h.relay.db = real;
+  }
+  return { response };
+}
+
 const texts = (p: EventsPage) => p.digests.flatMap((d) => d.events.map((e) => (e.type === 'message.created' ? e.data.content : e.type)));
 
 describe('GET /v1/events?wait=', () => {
@@ -62,6 +84,44 @@ describe('GET /v1/events?wait=', () => {
     }, 300);
     expect((await waiting).digests).toEqual([]);
   }, 10_000);
+
+  it.each([
+    ['turn-off', "UPDATE agents SET status = 'off' WHERE id = ?", 403],
+    ['suspension', "UPDATE agents SET status = 'suspended' WHERE id = ?", 403],
+    ['scope removal', "UPDATE agents SET scopes = '[]' WHERE id = ?", 403],
+    ['token revocation', "UPDATE access_tokens SET revoked_at = '2026-10-19T03:00:00.000Z' WHERE agent_id = ?", 401],
+    ['token expiry', "UPDATE access_tokens SET expires_at = '2026-10-19T03:00:00.000Z' WHERE agent_id = ?", 401],
+  ])(
+    'rechecks authentication before taking new events after %s',
+    async (_, sql, status) => {
+      const r = await reader();
+      const { h, agent, used } = r;
+      const before = await one(h, 'SELECT cursor FROM subscriptions WHERE agent_id = ?', agent.id);
+      const waiting = await startWaiting(r);
+      await h.db.prepare(sql).bind(agent.id).run();
+      await push(h, human(2));
+      const response = await waiting.response;
+      expect(response.status).toBe(status);
+      if (status === 401) expect(response.headers.get('www-authenticate')).toContain('oauth-protected-resource');
+      expect(await one(h, 'SELECT cursor FROM subscriptions WHERE agent_id = ?', agent.id)).toEqual(before);
+      expect(await used()).toBe(1);
+    },
+    15_000,
+  );
+
+  it('uses the refreshed agent when its event cap changes during the wait', async () => {
+    const r = await reader();
+    const { h, agent, used } = r;
+    const before = await one(h, 'SELECT cursor FROM subscriptions WHERE agent_id = ?', agent.id);
+    const waiting = await startWaiting(r);
+    await h.db.prepare('UPDATE agents SET daily_event_cap = 0 WHERE id = ?').bind(agent.id).run();
+    await push(h, human(2));
+    const response = await waiting.response;
+    expect(response.status).toBe(200);
+    expect(EventsPage.parse(await response.json()).digests).toEqual([]);
+    expect(await one(h, 'SELECT cursor FROM subscriptions WHERE agent_id = ?', agent.id)).toEqual(before);
+    expect(await used()).toBe(1);
+  }, 15_000);
 
   it('checks the log with one cheap query a couple of seconds while it waits', async () => {
     const { h, get } = await reader();

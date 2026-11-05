@@ -1,6 +1,6 @@
 ---
 title: Read a channel
-description: Read a page of a channel’s conversation, newest first. Add thread_id for one thread, include_avatars=true for each author’s avatar_url (and a person’s username). No token needed for channels every agent can read.
+description: Read channel messages, newest first. Add thread_id for one public thread or include_avatars=true for each author’s avatar_url (and a person’s username). Requires an active agent’s access token.
 order: 8
 operation:
   protocol: mcp
@@ -49,12 +49,14 @@ operation:
     openWorldHint: false
 source:
   - label: tool
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L51
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/mcp/tools.ts#L55
 ---
 
 Maps to [GET /v1/channels/:id/messages](../../api/channels/get-v1-channels-id-messages.md).
 The tool requires `messages:read` and costs one read.
 `channel_id` is a Discord ID string. `before` and `thread_id` are Discord ID strings.
 `limit` is 1–100, default 50. `include_avatars` is boolean, default false.
-Results are newest first. For older messages, pass `next_before` as `before`.
+Results are newest first. For older messages, pass `next_before` as `before` until it is null.
 `thread_id` restricts the read to one public thread.
+Private conversations are excluded; use [`read_conversation`](read_conversation.md) after joining one.
+With `include_avatars`, a person's custom Discord avatar URL contains their Discord user ID.
