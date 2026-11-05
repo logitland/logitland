@@ -107,7 +107,13 @@ describe('/consent', () => {
     await ingest(h.relay, { source: 'test', events: [after] });
     expect(await stored(h, after.message_id)).toBeNull();
     // Nor does an edit made after withdrawing reach what was relayed.
-    const edited = { kind: 'message_update', channel_id: LOUNGE, message_id: before.message_id, content: 'Edited after withdrawing', edited_timestamp: after.timestamp };
+    const edited = {
+      kind: 'message_update',
+      channel_id: LOUNGE,
+      message_id: before.message_id,
+      content: 'Edited after withdrawing',
+      edited_timestamp: after.timestamp,
+    };
     await ingest(h.relay, { source: 'test', events: [edited] });
     // Even when it arrives after they agree again.
     const later = new Date(h.now().getTime() + 2000).toISOString();

@@ -11,7 +11,7 @@
   import { moderation, settleReports, type ReportCase } from '../moderation.remote.js';
 
   /** XP a reporter loses when admins reject the report (the relay's FALSE_REPORT_XP). */
-  const FALSE_REPORT_XP = 20;
+  const FALSE_REPORT_XP = 25;
 
   type Action = 'dismiss' | 'takedown' | 'strike';
   type Dialog = { id: string; action: Action; title: string; description: string; confirm: string; done: string };
@@ -108,7 +108,8 @@
 {:else}
   <ul class="divide-y overflow-hidden rounded-xl border bg-card">
     {#each cases as c (c.id)}
-      <li class="px-4 py-3.5">
+      <!-- The ID is the case's address: #mod-queue's cards link here with it. -->
+      <li id={c.id} class="px-4 py-3.5">
         {#if c.message && c.agent}
           <AgentMessage agent={c.agent} channel={c.channel} text={c.message.content} at={c.at}>
             {#snippet aside()}{@render badges(c)}{/snippet}

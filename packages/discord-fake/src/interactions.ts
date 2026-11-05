@@ -1,7 +1,10 @@
-// Discord calling the relay's interactions endpoint: signed requests for slash commands and button clicks, and the
-// follow-up webhook calls (`PATCH /webhooks/:application/:token/messages/@original`) the relay makes in answer. A click
-// answered with UPDATE_MESSAGE (type 7) changes the message the button is on, and so does a later edit of `@original`.
+// Discord calling the relay's interactions endpoint: signed requests for slash commands, button clicks and submitted
+// modals, and the follow-up webhook calls (`PATCH /webhooks/:application/:token/messages/@original`) the relay makes in
+// answer. A click (or a modal opened from one) answered with UPDATE_MESSAGE (type 7) changes the message the button is on,
+// and so does a later edit of `@original`. A MODAL answer (type 9) is checked as Discord checks it and kept on the
+// interaction, so a test can fill it in and submit it.
 // https://docs.discord.com/developers/interactions/receiving-and-responding
+// https://docs.discord.com/developers/components/reference (modal components)
 
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { DiscordHttpError, errors, formBody, type Member, type Message } from './model.ts';
@@ -9,6 +12,30 @@ import type { DiscordFake } from './fake.ts';
 import { messageEdit, type Reply } from './rest.ts';
 
 const UPDATE_MESSAGE = 7;
+const MODAL = 9;
+const MODAL_SUBMIT = 5;
+/** Modal components: an action row or label holding a text input, and text shown above them. */
+const ModalComponent = { actionRow: 1, textInput: 4, textDisplay: 10, label: 18 } as const;
+/** Discord's limits on a modal. */
+const MODAL_LIMITS = { title: 45, customId: 100, components: 5, label: 45, inputMax: 4000 } as const;
+
+/** A text input as a modal lays it out. */
+interface TextInput {
+  type: 4;
+  custom_id: string;
+  style: number;
+  label?: string;
+  required?: boolean;
+  min_length?: number;
+  max_length?: number;
+}
+
+/** A modal the relay answered with: what the person sees, and fills in. */
+export interface Modal {
+  custom_id: string;
+  title: string;
+  components: Record<string, unknown>[];
+}
 
 const TOKEN_LIFETIME_MS = 15 * 60_000;
 const EPHEMERAL = 64;
@@ -22,6 +49,12 @@ export interface InteractionSpec {
   command?: { name: string; subcommand?: string };
   /** A click on a message button; `messageId` is a message in `channelId`, which an UPDATE_MESSAGE answer changes. */
   button?: { customId: string; messageId?: string };
+  /**
+   * The modal an earlier interaction (by its ID) was answered with, submitted with these values by text input custom_id. It
+   * comes from the same person, in the same channel and about the same message; values must fit the inputs, as Discord's
+   * client won't submit them otherwise.
+   */
+  modal?: { interaction: string; values: Record<string, string> };
   ping?: boolean;
   /** Where to send it. Defaults to the application's interactions endpoint URL. */
   endpoint?: string;
@@ -49,6 +82,8 @@ export interface InteractionRecord {
   /** The relay answered with a 2xx, so follow-ups for this token are accepted. */
   acknowledged: boolean;
   response: { status: number; body: unknown } | null;
+  /** The modal the relay answered with (type 9), until it is submitted. */
+  modal: Modal | null;
   /** What the relay said through follow-up calls, oldest first. */
   followUps: FollowUp[];
 }
@@ -57,6 +92,65 @@ export interface InteractionResult {
   status: number;
   body: unknown;
   interaction: InteractionRecord;
+}
+
+/** The text inputs a modal component holds: one in a label or an action row, none in text. */
+function inputsOf(c: Record<string, unknown>): TextInput[] {
+  if (c.type === ModalComponent.label) return [c.component as TextInput];
+  if (c.type === ModalComponent.actionRow) return (c.components as TextInput[] | undefined) ?? [];
+  return [];
+}
+
+/** A MODAL answer's data as Discord checks it; throws what Discord would refuse. */
+function checkModal(data: Record<string, unknown>): Modal {
+  const refuse = (why: string): never => {
+    throw new Error(`Discord would refuse this MODAL: ${why}`);
+  };
+  const { custom_id, title, components } = data as Partial<Modal>;
+  if (typeof custom_id !== 'string' || !custom_id || custom_id.length > MODAL_LIMITS.customId) refuse('custom_id must be 1–100 characters');
+  if (typeof title !== 'string' || !title || title.length > MODAL_LIMITS.title) refuse(`title must be 1–${MODAL_LIMITS.title} characters`);
+  if (!Array.isArray(components) || !components.length || components.length > MODAL_LIMITS.components) refuse('it must have 1–5 components');
+  const ids = new Set<string>();
+  for (const c of components!) {
+    if (c.type === ModalComponent.textDisplay) {
+      if (typeof c.content !== 'string' || !c.content) refuse('a text display needs content');
+      continue;
+    }
+    if (c.type === ModalComponent.label) {
+      if (typeof c.label !== 'string' || !c.label || c.label.length > MODAL_LIMITS.label) refuse(`a label must be 1–${MODAL_LIMITS.label} characters`);
+      if ((c.component as TextInput | undefined)?.label !== undefined) refuse('a text input in a label takes its label from the label');
+    } else if (c.type !== ModalComponent.actionRow) refuse(`component type ${String(c.type)} can’t go in a modal`);
+    const inputs = inputsOf(c);
+    if (inputs.length !== 1) refuse('each label or action row holds one text input');
+    for (const input of inputs) {
+      if (input?.type !== ModalComponent.textInput || typeof input.custom_id !== 'string' || !input.custom_id) refuse('a text input needs a custom_id');
+      if (ids.has(input.custom_id)) refuse(`custom_id ${input.custom_id} is used twice`);
+      ids.add(input.custom_id);
+      if (c.type === ModalComponent.actionRow && !input.label) refuse('a text input in an action row needs a label');
+      const min = input.min_length ?? 0;
+      const max = input.max_length ?? MODAL_LIMITS.inputMax;
+      if (min < 0 || max < 1 || max > MODAL_LIMITS.inputMax || min > max) refuse('min_length and max_length must fit 0–4000, min no more than max');
+    }
+  }
+  return { custom_id: custom_id!, title: title!, components: components! };
+}
+
+/** What Discord sends back when the modal is submitted: its layout, each text input with its value. */
+function submitted(modal: Modal, values: Record<string, string>): Record<string, unknown>[] {
+  let id = 0;
+  const filled = (input: TextInput) => {
+    const value = values[input.custom_id] ?? '';
+    const required = input.required ?? true;
+    if (required && !value) throw new Error(`${input.custom_id} is required`);
+    if (value && (value.length < (input.min_length ?? 0) || value.length > (input.max_length ?? MODAL_LIMITS.inputMax)))
+      throw new Error(`${input.custom_id} must be ${input.min_length ?? 0}–${input.max_length ?? MODAL_LIMITS.inputMax} characters`);
+    return { type: ModalComponent.textInput, id: ++id, custom_id: input.custom_id, value };
+  };
+  return modal.components.map((c) => {
+    if (c.type === ModalComponent.label) return { type: ModalComponent.label, id: ++id, component: filled(c.component as TextInput) };
+    if (c.type === ModalComponent.actionRow) return { type: ModalComponent.actionRow, id: ++id, components: inputsOf(c).map(filled) };
+    return { type: c.type, id: ++id };
+  });
 }
 
 /** Raw Ed25519 public keys are the last 32 bytes of the SubjectPublicKeyInfo encoding. */
@@ -94,7 +188,9 @@ export class Interactions {
     if (!member && !spec.ping) throw new Error(`User ${spec.user} is not a member of guild ${guild.id}`);
     const endpoint = spec.endpoint ?? fake.application.interactions_endpoint_url;
     if (!endpoint) throw new Error('Set application.interactions_endpoint_url, or pass endpoint');
-    const channelId = spec.channelId ?? world.guildChannels(guild.id).find((c) => c.type === 0)?.id ?? null;
+    const opener = spec.modal ? this.opener(spec.modal.interaction, spec.user) : undefined;
+    const channelId =
+      (opener?.payload.channel_id as string | undefined) ?? spec.channelId ?? world.guildChannels(guild.id).find((c) => c.type === 0)?.id ?? null;
 
     const id = world.newId();
     const token = Buffer.from(crypto.getRandomValues(new Uint8Array(48))).toString('base64url');
@@ -133,7 +229,19 @@ export class Interactions {
       } else if (spec.button) {
         const message = spec.button.messageId && channelId ? world.findMessage(channelId, spec.button.messageId) : undefined;
         payload = { ...common, type: 3, data: { custom_id: spec.button.customId, component_type: 2 }, ...(message ? { message: { ...message } } : {}) };
-      } else throw new Error('Pass command, button or ping');
+      } else if (opener) {
+        const modal = opener.modal!;
+        // A modal opened from a button is about that button's message, as it now reads.
+        const about = opener.payload.message as Message | undefined;
+        const message = about && channelId ? world.findMessage(channelId, about.id) : undefined;
+        payload = {
+          ...common,
+          type: MODAL_SUBMIT,
+          data: { custom_id: modal.custom_id, components: submitted(modal, spec.modal!.values) },
+          ...(message ? { message: { ...message } } : {}),
+        };
+        opener.modal = null;
+      } else throw new Error('Pass command, button, modal or ping');
     }
 
     const record: InteractionRecord = {
@@ -145,6 +253,7 @@ export class Interactions {
       createdAt: fake.now(),
       acknowledged: false,
       response: null,
+      modal: null,
       followUps: [],
     };
     this.records.set(token, record);
@@ -169,6 +278,11 @@ export class Interactions {
     record.response = { status: res.status, body: parsed };
     record.acknowledged = res.ok;
     const answer = parsed as { type?: number; data?: Record<string, unknown> };
+    if (res.ok && answer.type === MODAL) {
+      // Discord shows "This interaction failed" for a modal it refuses, and for one answering a ping or another modal.
+      if (payload.type === 1 || payload.type === MODAL_SUBMIT) throw new Error('Discord would refuse this MODAL: only a command or a button can open one');
+      record.modal = checkModal(answer.data ?? {});
+    }
     if (res.ok && answer.type === UPDATE_MESSAGE && payload.message) {
       try {
         this.editButtonMessage(record, answer.data ?? {});
@@ -179,6 +293,14 @@ export class Interactions {
       }
     }
     return { status: res.status, body: parsed, interaction: record };
+  }
+
+  /** The interaction whose modal is being submitted: by the person it was shown to, once. */
+  private opener(interactionId: string, user: string): InteractionRecord {
+    const record = this.all().find((r) => r.id === interactionId);
+    if (!record?.modal) throw new Error(`Interaction ${interactionId} has no modal open to submit`);
+    if (record.user !== user) throw new Error('Only the person a modal was shown to can submit it');
+    return record;
   }
 
   /** Changes the message a clicked button is on, as UPDATE_MESSAGE and edits of `@original` do. */

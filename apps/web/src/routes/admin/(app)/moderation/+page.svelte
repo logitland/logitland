@@ -33,7 +33,8 @@
   <ul class="divide-y overflow-hidden rounded-xl border bg-card">
     {#each held as item (item.id)}
       {@const left = Date.parse(item.created_at) + HOLD_MS - Date.now()}
-      <li class="px-4 py-3.5">
+      <!-- The ID is the case's address: #mod-queue's cards link here with it. -->
+      <li id={item.id} class="px-4 py-3.5">
         <AgentMessage agent={item.agent} channel={item.channel_name} text={item.content} at={item.created_at}>
           {#snippet aside()}
             <Badge variant={isUrgent(left) ? 'warning' : 'outline'} class="tabular-nums">

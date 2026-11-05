@@ -115,6 +115,51 @@ describe('sending interactions', () => {
     respond = () => ({ status: 200, body: { type: 4, data: { content: 'ok', flags: 64 } } });
   });
 
+  it('keeps a modal the answer opens, and submits it once, filled in, about the clicked message', async () => {
+    const card = (content: string) => [{ type: 17, components: [{ type: 10, content }] }];
+    const message = fake.world.postMessage(f.text.id, { author: fake.world.botUser, flags: 1 << 15, components: card('Held') });
+    const input = { type: 4, custom_id: 'reason', style: 2, min_length: 3, max_length: 20 };
+    const modal = {
+      custom_id: 'case:x',
+      title: 'Reject it?',
+      components: [
+        { type: 10, content: 'It stays blocked.' },
+        { type: 18, label: 'Reason', component: input },
+      ],
+    };
+    respond = () => ({ status: 200, body: { type: 9, data: modal } });
+    const { interaction } = await fake.interact({ user: f.alice.id, button: { customId: 'case:x', messageId: message.id }, channelId: f.text.id });
+    expect(interaction.modal).toEqual(modal);
+
+    await expect(fake.interact({ user: f.bob.id, modal: { interaction: interaction.id, values: { reason: 'Spam' } } })).rejects.toThrow(/shown to/);
+    await expect(fake.interact({ user: f.alice.id, modal: { interaction: interaction.id, values: { reason: 'no' } } })).rejects.toThrow(/3–20 characters/);
+    received.length = 0;
+    respond = () => ({ status: 200, body: { type: 7, data: { flags: 1 << 15, components: card('Rejected') } } });
+    await fake.interact({ user: f.alice.id, modal: { interaction: interaction.id, values: { reason: 'Spam, plainly' } } });
+    expect(JSON.parse(received[0]!.raw)).toMatchObject({
+      type: 5,
+      channel_id: f.text.id,
+      message: { id: message.id },
+      data: {
+        custom_id: 'case:x',
+        components: [
+          { type: 10, id: 1 },
+          { type: 18, id: 2, component: { type: 4, id: 3, custom_id: 'reason', value: 'Spam, plainly' } },
+        ],
+      },
+    });
+    expect(fake.messages(f.text.id).find((m) => m.id === message.id)?.components).toEqual(card('Rejected'));
+    await expect(fake.interact({ user: f.alice.id, modal: { interaction: interaction.id, values: { reason: 'Spam, plainly' } } })).rejects.toThrow(
+      /no modal open/,
+    );
+
+    respond = () => ({ status: 200, body: { type: 9, data: { ...modal, title: 'x'.repeat(46) } } });
+    await expect(fake.interact({ user: f.alice.id, button: { customId: 'case:x', messageId: message.id }, channelId: f.text.id })).rejects.toThrow(
+      /refuse this MODAL: title/,
+    );
+    respond = () => ({ status: 200, body: { type: 4, data: { content: 'ok', flags: 64 } } });
+  });
+
   it('sends a bad or missing signature, and a stale timestamp, when asked', async () => {
     received.length = 0;
     const bad = await fake.interact({ user: f.alice.id, command: { name: 'mirror', subcommand: 'status' }, signature: 'invalid' });

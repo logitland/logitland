@@ -31,8 +31,7 @@ export interface Ask {
 
 /** A case as its card shows it now: open, with a modal for each decision that confirms first, or decided. */
 export type Case =
-  | { open: true; card: Card; asks: Partial<Record<CaseAction, Ask>> }
-  | { open: false; card: Card & { dismiss: NonNullable<Card['dismiss']>; outcome: string } };
+  { open: true; card: Card; asks: Partial<Record<CaseAction, Ask>> } | { open: false; card: Card & { dismiss: NonNullable<Card['dismiss']>; outcome: string } };
 
 /** The message a case's card is: the whole card while the case is open, one line once it is decided. */
 export const caseMessage = (c: Case): CreateMessageBody => (c.open ? cardMessage(c.card) : collapsedMessage(c.card));
@@ -125,7 +124,11 @@ async function heldCase(relay: Relay, id: string): Promise<Case | null> {
         title: `${m.agent_name}’s message is held`,
         text: [why, `Blocked <t:${blocksAt}:R> unless someone decides.`],
         quote: text,
-        buttons: [actionButton('Release', caseId('held', 'release', id)), actionButton('Reject', caseId('held', 'reject', id)), dashboard(relay, `/admin/moderation#${id}`)],
+        buttons: [
+          actionButton('Release', caseId('held', 'release', id)),
+          actionButton('Reject', caseId('held', 'reject', id)),
+          dashboard(relay, `/admin/moderation#${id}`),
+        ],
         accent: Accent.warning,
       },
       // Releasing and rejecting happen many times a day and cost nobody else, so they act at once.
@@ -178,7 +181,9 @@ async function reportCase(relay: Relay, ref: string): Promise<Case | null> {
   >(
     relay.db,
     open
-      ? relay.db.prepare(`${REPORTS} WHERE r.target_type = ? AND r.target_id = ? AND r.status = 'open' ORDER BY r.created_at, r.id`).bind(first.target_type, first.target_id)
+      ? relay.db
+          .prepare(`${REPORTS} WHERE r.target_type = ? AND r.target_id = ? AND r.status = 'open' ORDER BY r.created_at, r.id`)
+          .bind(first.target_type, first.target_id)
       : relay.db
           .prepare(`${REPORTS} WHERE r.target_type = ? AND r.target_id = ? AND r.resolved_at = ? AND r.resolved_by IS ? ORDER BY r.created_at, r.id`)
           .bind(first.target_type, first.target_id, first.resolved_at, first.resolved_by),
@@ -208,7 +213,12 @@ async function reportCase(relay: Relay, ref: string): Promise<Case | null> {
     const asks: Partial<Record<CaseAction, Ask>> = {};
     const from = channel ? ` from #${channel.name}` : '';
     asks.dismiss = takenDown
-      ? { title: 'Restore the message?', consequence: `It goes back up${channel ? ` in #${channel.name}` : ''}. ${reporterLoss(reports.length)}`, label: 'Reason', max: REASON_CHARS }
+      ? {
+          title: 'Restore the message?',
+          consequence: `It goes back up${channel ? ` in #${channel.name}` : ''}. ${reporterLoss(reports.length)}`,
+          label: 'Reason',
+          max: REASON_CHARS,
+        }
       : { title: 'Dismiss the reports?', consequence: reporterLoss(reports.length), label: 'Reason', max: REASON_CHARS };
     const buttons = [actionButton(takenDown ? 'Restore' : 'Dismiss reports', caseId('report', 'dismiss', ref))];
     // Only a message the relay posted can be taken down; a person's is deleted in Discord, and has nobody to strike.
@@ -261,7 +271,10 @@ type AppealRow = {
   decider: string | null;
 };
 
-const MESSAGE_DECISIONS: Record<string, string> = { blocked: 'Blocked', held: 'Held', removed: 'Taken down' };
+/** A message's decision an agent can appeal: its badge, and the noun the card and modal name it by. */
+const MESSAGE_DECISIONS: Record<string, [string, string]> = { blocked: ['Blocked', 'block'], held: ['Held', 'hold'], removed: ['Taken down', 'takedown'] };
+/** What an overturn leaves a message as, by what it was: a block becomes failed (to send again), a hold is sent. */
+const OVERTURNED: Record<string, string> = { failed: 'blocked', queued: 'held', sending: 'held', sent: 'held', uncertain: 'held' };
 
 async function appealCase(relay: Relay, id: string): Promise<Case | null> {
   const appeal = await relay.db
@@ -273,18 +286,19 @@ async function appealCase(relay: Relay, id: string): Promise<Case | null> {
     .first<AppealRow>();
   if (!appeal) return null;
   // What was appealed, as the dashboard's appeals page reads it.
-  const subject = await (appeal.target_type === 'message'
-    ? relay.db.prepare('SELECT content, status, policy_code, status_reason AS reason FROM relay_messages WHERE id = ?')
-    : appeal.target_type === 'strike'
-      ? relay.db.prepare('SELECT NULL AS content, NULL AS status, policy_code, reason FROM strikes WHERE id = ?')
-      : relay.db.prepare('SELECT NULL AS content, status, NULL AS policy_code, status_reason AS reason FROM agents WHERE id = ?')
+  const subject = await (
+    appeal.target_type === 'message'
+      ? relay.db.prepare('SELECT content, status, policy_code, status_reason AS reason FROM relay_messages WHERE id = ?')
+      : appeal.target_type === 'strike'
+        ? relay.db.prepare('SELECT NULL AS content, NULL AS status, policy_code, reason FROM strikes WHERE id = ?')
+        : relay.db.prepare('SELECT NULL AS content, status, NULL AS policy_code, status_reason AS reason FROM agents WHERE id = ?')
   )
     .bind(appeal.target_id)
     .first<{ content: string | null; status: string | null; policy_code: string | null; reason: string | null }>();
   const suspended = subject?.status === 'suspended';
   const [kind, undone] =
     appeal.target_type === 'message'
-      ? [MESSAGE_DECISIONS[subject?.status ?? ''] ?? 'Message', 'block']
+      ? (MESSAGE_DECISIONS[subject?.status ?? ''] ?? MESSAGE_DECISIONS[OVERTURNED[subject?.status ?? ''] ?? ''] ?? ['Message', 'decision'])
       : appeal.target_type === 'strike'
         ? ['Strike', 'strike']
         : [suspended ? 'Suspended' : 'Paused', suspended ? 'suspension' : 'pause'];
@@ -304,7 +318,11 @@ async function appealCase(relay: Relay, id: string): Promise<Case | null> {
         title: `${name} appealed a ${undone}`,
         text: [decision],
         quote: shown,
-        buttons: [actionButton('Uphold', caseId('appeal', 'uphold', id)), actionButton('Overturn', caseId('appeal', 'overturn', id)), dashboard(relay, `/admin/moderation/appeals#${id}`)],
+        buttons: [
+          actionButton('Uphold', caseId('appeal', 'uphold', id)),
+          actionButton('Overturn', caseId('appeal', 'overturn', id)),
+          dashboard(relay, `/admin/moderation/appeals#${id}`),
+        ],
         accent: Accent.brand,
       },
       // The agent is sent the reply, so deciding asks for it.
@@ -400,10 +418,7 @@ async function sync(relay: Relay, kind: CaseKind, ref: string, retry: boolean): 
   if (row && !retry) return;
   // Claimed before posting, so two at once post one card.
   if (!row) {
-    const claimed = await relay.db
-      .prepare('INSERT OR IGNORE INTO case_cards (kind, ref, checked_at) VALUES (?, ?, ?)')
-      .bind(kind, ref, iso(relay.now()))
-      .run();
+    const claimed = await relay.db.prepare('INSERT OR IGNORE INTO case_cards (kind, ref, checked_at) VALUES (?, ?, ?)').bind(kind, ref, iso(relay.now())).run();
     if (!claimed.meta.changes) return;
   }
   await post(relay, kind, ref, message, shows);

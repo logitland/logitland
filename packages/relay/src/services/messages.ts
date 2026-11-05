@@ -46,7 +46,8 @@ const ANSWER_WINDOW_MS = 60_000;
 const outcome = (row: MessageRow): SendOutcome => ({ message: toRelayMessage(row), httpStatus: statusFor(row.status) });
 
 /** The row with the request's receipt window closed, so the answer carries the status the agent already got and every change after emits one. */
-const answered = (relay: Relay, id: string) => relay.db.prepare('UPDATE relay_messages SET answering_until = NULL WHERE id = ? RETURNING *').bind(id).first<MessageRow>();
+const answered = (relay: Relay, id: string) =>
+  relay.db.prepare('UPDATE relay_messages SET answering_until = NULL WHERE id = ? RETURNING *').bind(id).first<MessageRow>();
 
 /** What a message is placed as: still moderating, or already decided by the fixed rules or the duplicate check. */
 interface Placement {

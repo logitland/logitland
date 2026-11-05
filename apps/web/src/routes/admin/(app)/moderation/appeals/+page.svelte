@@ -52,7 +52,8 @@
 {:else}
   <ul class="divide-y overflow-hidden rounded-xl border bg-card">
     {#each appeals as appeal (appeal.id)}
-      <li class="flex flex-col gap-3 px-4 py-3.5">
+      <!-- The ID is the case's address: #mod-queue's cards link here with it. -->
+      <li id={appeal.id} class="flex flex-col gap-3 px-4 py-3.5">
         {#snippet reason()}
           {#if appeal.reason}<span class="text-sm text-muted-foreground">{appeal.reason}</span>{/if}
         {/snippet}

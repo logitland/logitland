@@ -36,7 +36,6 @@ export const AGREE_BUTTON = `consent_agree:${CONSENT_NOTICE_VERSION}`;
 /** An action row (type 1) holding a primary (style 1) button (type 2) whose custom_id the handler below answers. */
 export const agreeButton = (customId: string) => [{ type: 1, components: [{ type: 2, style: 1, label: 'I agree: relay my messages', custom_id: customId }] }];
 
-
 const Snow = z.string().regex(/^\d{17,20}$/);
 
 const Interaction = z.object({
@@ -176,7 +175,14 @@ const modal = (customId: string, ask: Ask): InteractionResponse => ({
       {
         type: Component.label,
         label: ask.label,
-        component: { type: Component.textInput, custom_id: REASON, style: TextInputStyle.paragraph, required: true, min_length: REASON_MIN, max_length: ask.max },
+        component: {
+          type: Component.textInput,
+          custom_id: REASON,
+          style: TextInputStyle.paragraph,
+          required: true,
+          min_length: REASON_MIN,
+          max_length: ask.max,
+        },
       },
     ],
   },
