@@ -93,7 +93,8 @@ export interface GatewayDeps {
   /** READY (session set) or a lost session (session empty). */
   onSession?(session: GatewaySession, why: 'ready' | 'lost'): void;
   onReady?(info: { resumed: boolean }): void;
-  onHeartbeat?(): void;
+  /** A heartbeat ACK for the beat sent at `sentAt` (the deps' clock): every dispatch Discord sent before that beat has arrived. */
+  onHeartbeat?(sentAt: number): void;
   log?(event: string, fields?: Record<string, unknown>): void;
 }
 
@@ -117,6 +118,11 @@ export class GatewayConnection {
   private gen = 0;
   private interval = 0;
   private acked = true;
+  /**
+   * When each beat still awaiting its ACK was sent, oldest first. ACKs carry no ID but come in order on one socket, so each
+   * one answers the oldest; a beat Discord asks for can be sent before an earlier one is ACKed.
+   */
+  private beatsSentAt: number[] = [];
   private sent: 'identify' | 'resume' | null = null;
   private resuming = false;
   private attempts = 0;
@@ -266,9 +272,11 @@ export class GatewayConnection {
     switch (frame.op) {
       case Op.Hello:
         return this.hello((frame.d as { heartbeat_interval: number }).heartbeat_interval);
-      case Op.HeartbeatAck:
+      case Op.HeartbeatAck: {
         this.acked = true;
-        return this.deps.onHeartbeat?.();
+        const sentAt = this.beatsSentAt.shift();
+        return sentAt === undefined ? undefined : this.deps.onHeartbeat?.(sentAt);
+      }
       case Op.Heartbeat:
         return this.sendHeartbeat();
       case Op.Reconnect:
@@ -284,6 +292,8 @@ export class GatewayConnection {
     this.clearTimer('hello');
     this.interval = interval;
     this.acked = true;
+    // A new socket: beats sent on an earlier one will never be ACKed here.
+    this.beatsSentAt = [];
     // The first beat is jittered so a fleet of clients doesn't beat in step.
     this.timers.beat = this.deps.setTimer(() => this.beat(), interval * this.deps.random());
     this.handshake();
@@ -318,6 +328,7 @@ export class GatewayConnection {
   private sendHeartbeat(): void {
     this.send({ op: Op.Heartbeat, d: this.session.seq });
     this.acked = false;
+    this.beatsSentAt.push(this.deps.now());
   }
 
   private dispatch(t: string, d: unknown, s: number | null): void {
@@ -344,6 +355,7 @@ export class GatewayConnection {
   // Opcode 9. The documentation says only that `d` tells whether the session may be resumed. Client libraries
   // wait a random 1 to 5 seconds first, which also keeps a rejected IDENTIFY from being repeated in a tight loop.
   private invalidSession(resumable: boolean): void {
+    this.deps.log?.('gateway.invalid_session', { resumable, sent: this.sent, phase: this.phase });
     const wait = 1000 + this.deps.random() * 4000;
     this.clearTimer('invalid');
     if (resumable && this.sent === 'resume' && this.resumeRejections === 0) {

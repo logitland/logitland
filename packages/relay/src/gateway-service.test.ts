@@ -556,6 +556,88 @@ describe('a lost session', () => {
   });
 });
 
+describe('a resume Discord rejects after the Durable Object restarts', () => {
+  const HEARTBEAT_MS = 41_250;
+  /** random() is 0.5, so the first beat goes half an interval after HELLO. */
+  const FIRST_BEAT_MS = HEARTBEAT_MS / 2;
+
+  /** Tears the first instance down, starts a second on the same storage, has Discord reject its RESUME, and identifies afresh. */
+  async function restartRejected(h: Harness, clock: Clock, first: ReturnType<typeof service>) {
+    first.svc.shutdown();
+    const second = service(h, clock, first.storage);
+    await second.svc.ensure();
+    second.hello();
+    second.send({ op: 9, d: false });
+    await clock.advance(5_000);
+    second.hello();
+    second.ready(1, 'sess-2');
+    await settle();
+    await settle();
+    const gaps = await all<{ payload: string }>(h, "SELECT payload FROM events WHERE type = 'subscription.gap'");
+    expect(gaps).toHaveLength(1);
+    return JSON.parse(gaps[0]!.payload).data as { window_start: string; window_end: string };
+  }
+
+  it('opens the gap at the last heartbeat answered with everything stored, not at a quiet server’s last event', async () => {
+    const { h } = await world();
+    const clock = clockFor(h);
+    discord(h);
+    const first = service(h, clock);
+    await first.svc.ensure();
+    first.hello();
+    const helloAt = clock.now();
+    first.ready(1);
+    first.message(2, 1);
+    await clock.advance(FLUSH_MS);
+    // Quiet from here on, with every heartbeat answered.
+    const beats = 6;
+    for (let i = 0; i < beats; i++) {
+      await clock.advance(HEARTBEAT_MS);
+      first.send({ op: 11 });
+    }
+    const lastBeat = new Date(helloAt + FIRST_BEAT_MS + HEARTBEAT_MS * (beats - 1)).toISOString();
+
+    const gap = await restartRejected(h, clock, first);
+    expect(gap).toEqual({ window_start: lastBeat, window_end: h.now().toISOString(), reason: expect.any(String) });
+    expect(h.log.lines).toContainEqual({
+      level: 'info',
+      event: 'gateway.invalid_session',
+      fields: { resumable: false, sent: 'resume', phase: 'resuming' },
+    });
+  });
+
+  it('keeps an event received but not stored inside the gap, however many heartbeats are answered after it', async () => {
+    const { h } = await world();
+    const clock = clockFor(h);
+    discord(h);
+    const first = service(h, clock);
+    await first.svc.ensure();
+    first.hello();
+    const helloAt = clock.now();
+    first.ready(1);
+    first.message(2, 1);
+    await clock.advance(FLUSH_MS);
+    await clock.advance(HEARTBEAT_MS);
+    first.send({ op: 11 });
+    const safeBeat = new Date(helloAt + FIRST_BEAT_MS).toISOString();
+
+    const batch = h.db.batch.bind(h.db);
+    h.db.batch = async () => {
+      throw new Error('D1 is down');
+    };
+    first.message(3, 2);
+    for (let i = 0; i < 3; i++) {
+      await clock.advance(HEARTBEAT_MS);
+      first.send({ op: 11 });
+    }
+    expect(first.svc.snapshot().buffered).toBe(1);
+    h.db.batch = batch;
+
+    const gap = await restartRejected(h, clock, first);
+    expect(gap.window_start).toBe(safeBeat);
+  });
+});
+
 describe('when the Gateway says no', () => {
   it('stops for good on a disallowed intent, says how to fix it, and tries again after ten minutes', async () => {
     const { h } = await world();
@@ -663,7 +745,8 @@ describe('threads', () => {
     g.message(5, 3, { channel_id: '110000000000000077' });
     g.message(6, 4, { channel_id: '110000000000000077' });
     g.message(7, 5);
-    await clock.advance(500);
+    // The lookups go to Discord first, so the last message may be written a flush later.
+    await advanceUntil(clock, FLUSH_MS, async () => expect(await conversation(h, 5)).not.toBeNull());
     expect(await conversation(h, 1)).toMatchObject({ channel_id: LOUNGE, thread_id: THREAD });
     expect(await conversation(h, 2)).toMatchObject({ channel_id: LOUNGE, thread_id: '120000000000000009' });
     expect(await conversation(h, 3)).toBeNull();

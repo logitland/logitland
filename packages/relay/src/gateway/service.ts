@@ -92,6 +92,16 @@ export class GatewayService {
   private lastError: string | null = null;
   private lastEventAt: string | null = null;
   private lastHeartbeatAt: string | null = null;
+  /**
+   * The last moment the relay had received and stored everything Discord sent: a written dispatch or an answered heartbeat
+   * with nothing received still waiting. Kept in storage, so an instance whose resume Discord rejects opens the gap here,
+   * not at the last event, which on a quiet server can be hours before the session was lost.
+   */
+  private caughtUpAt: string | null = null;
+  /** When the session last became live (the host's clock). A beat sent earlier, during a resume's replay, proves nothing. */
+  private liveSince = Infinity;
+  /** Dispatches (and READY work) queued and not finished. */
+  private queued = 0;
   private stoppedAt: number | null = null;
 
   private buffer: Buffered[] = [];
@@ -141,9 +151,13 @@ export class GatewayService {
       onDispatch: (t, d, s) => this.enqueue(() => this.handle(t, d, s)),
       onStatus: (status, error) => this.onStatus(status, error),
       onSession: (session, why) => this.onSession(session, why),
-      onReady: ({ resumed }) => this.enqueue(() => this.afterReady(resumed)),
-      onHeartbeat: () => {
+      onReady: ({ resumed }) => {
+        this.liveSince = host.now();
+        this.enqueue(() => this.afterReady(resumed));
+      },
+      onHeartbeat: (sentAt) => {
         this.lastHeartbeatAt = iso(this.relay.now());
+        if (sentAt >= this.liveSince) this.caughtUp(iso(new Date(sentAt)));
         void this.mirror(false);
       },
       log: (event, fields) => this.relay.log.info(event, fields),
@@ -223,6 +237,8 @@ export class GatewayService {
       }
       const stored = await this.storedState();
       this.lastEventAt = (await storage.get<string>('lastEventAt')) ?? stored?.last_event_at ?? null;
+      // Storage from before caughtUpAt was kept has only the last event, the older (wider) start.
+      this.caughtUpAt = (await storage.get<string>('caughtUpAt')) ?? this.lastEventAt;
       this.stoppedAt = (await storage.get<number>('stoppedAt')) ?? null;
       // Until this instance connects, the last known state is the best answer.
       if (stored) {
@@ -300,7 +316,19 @@ export class GatewayService {
 
   /** Dispatches are handled one at a time, in order, because looking up an unknown thread is asynchronous. */
   private enqueue(work: () => Promise<void>): void {
-    this.chain = this.chain.then(work).catch((error) => this.relay.log.error('gateway.dispatch_failed', { error }));
+    this.queued++;
+    this.chain = this.chain
+      .then(work)
+      .catch((error) => this.relay.log.error('gateway.dispatch_failed', { error }))
+      .finally(() => this.queued--);
+  }
+
+  /** Moves caughtUpAt to `at` while live with nothing received waiting: no dispatch queued, nothing buffered or dropped. */
+  private caughtUp(at: string): void {
+    if (this.conn.state !== 'ready' || this.queued || this.buffer.length || this.lost) return;
+    if (this.caughtUpAt !== null && this.caughtUpAt >= at) return;
+    this.caughtUpAt = at;
+    this.store('caughtUpAt', at);
   }
 
   private async handle(t: string, d: unknown, s: number): Promise<void> {
@@ -450,7 +478,10 @@ export class GatewayService {
       this.durable = durable;
       await this.host.storage.put('session', { ...session, seq: durable });
     }
-    if (this.lastEventAt) await this.host.storage.put('lastEventAt', this.lastEventAt);
+    if (this.lastEventAt) {
+      await this.host.storage.put('lastEventAt', this.lastEventAt);
+      this.caughtUp(this.lastEventAt);
+    }
     await this.mirror(false);
     // Out of query budget with events still waiting: the next alarm writes the next share.
     if (this.buffer.length) this.continueSoon();
@@ -463,7 +494,8 @@ export class GatewayService {
 
   private async afterReady(resumed: boolean): Promise<void> {
     if (resumed) return;
-    const since = this.lastEventAt;
+    // Nothing moves caughtUpAt while this runs: this work is itself queued.
+    const since = this.caughtUpAt;
     // Anything still buffered belongs to the old session and goes first, so the gap event follows it.
     await this.flush();
     if (!since) return;

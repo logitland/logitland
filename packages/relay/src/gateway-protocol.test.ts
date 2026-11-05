@@ -144,6 +144,22 @@ describe('connecting', () => {
     r.deliver(0, { op: 1, d: null });
     expect(r.last().socket.sent.at(-1)).toEqual({ op: 1, d: 4 });
   });
+
+  it('pairs each ACK with the oldest beat awaiting one, when Discord asks for a beat before the last is ACKed', async () => {
+    const acks: number[] = [];
+    const r = rig({ random: 0, onHeartbeat: (sentAt) => acks.push(sentAt) });
+    await r.conn.start();
+    r.hello();
+    r.readyFrame(0);
+    // The periodic beat goes at 0; Discord asks for one at 1000; the first ACK only arrives after that.
+    await r.advance(0);
+    await r.advance(1_000);
+    r.deliver(0, { op: 1, d: null });
+    r.deliver(0, { op: 11 });
+    expect(acks).toEqual([0]);
+    r.deliver(0, { op: 11 });
+    expect(acks).toEqual([0, 1_000]);
+  });
 });
 
 describe('resuming', () => {
