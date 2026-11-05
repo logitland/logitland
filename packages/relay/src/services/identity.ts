@@ -188,6 +188,8 @@ export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> 
       exists,
       ownerId,
     ),
+    // Strike cards hold message text and the owner's Discord ID: the rows keep the ban, the snapshots go.
+    relay.db.prepare(`UPDATE bot_strikes SET alert = NULL WHERE agent_id IN (SELECT id FROM agents WHERE owner_id = ?) AND ${exists}`).bind(ownerId, ownerId),
     relay.db
       .prepare(
         `UPDATE agents SET owner_id = NULL, adopted_at = NULL, status = CASE WHEN status = 'off' THEN 'active' ELSE status END, updated_at = ? WHERE owner_id = ? AND ${exists}`,
