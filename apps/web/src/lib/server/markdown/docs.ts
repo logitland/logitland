@@ -42,12 +42,15 @@ export async function docsMarkdown(path: string, url: URL) {
   const file = new URL(copyOf(path), url);
   const response = await docsFile(file);
   if (!response.ok) return undefined;
-  return (await response.text()).replace(DESTINATION, (link, _, angled: string | undefined, bare: string | undefined) => {
+  const markdown = await response.text();
+  const frontmatter = markdown.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0] ?? '';
+  const body = markdown.slice(frontmatter.length).replace(DESTINATION, (link, _, angled: string | undefined, bare: string | undefined) => {
     const href = angled ?? bare ?? '';
     if (NOT_RELATIVE.test(href)) return link;
     const target = new URL(href, file).href;
     return angled === undefined ? `](${target}` : `](<${target}>`;
   });
+  return frontmatter + body;
 }
 
 /** A page of the docs build's own llms.txt: `- [Title](relative/path.md): description`. */
