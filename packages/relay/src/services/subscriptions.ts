@@ -180,22 +180,37 @@ export async function updateSubscription(
   return toSubscription(updated);
 }
 
+// What a replies subscription actually delivered: its cursor, unless a delivery still in flight already took part of it —
+// then the event before the earliest one in an open delivery's body (each digest event's cursor is its seq as a string). A
+// delivery claimed mid-HTTP can still land after this batch commits, so a reply near the edge can arrive on both the
+// webhook and the channel; a duplicate beats a loss.
+const DELIVERED_TO = `(
+  SELECT COALESCE(
+    (SELECT MIN(CAST(json_extract(d.body, '$.events[0].cursor') AS INTEGER)) - 1
+     FROM deliveries d WHERE d.subscription_id = subscriptions.id AND d.status IN ('pending', 'retrying')),
+    cursor)
+  FROM subscriptions WHERE id = ?)`;
+
 export async function unsubscribe(relay: Relay, agentId: string, id: string): Promise<void> {
   const sub = await ownSubscription(relay, agentId, id);
   const now = relay.now().getTime();
   const [, rescheduled] = await relay.db.batch([
-    // Remember what the replies subscription already delivered, so the replies it carried stay delivered once it is gone.
+    // Remember what the replies subscription actually delivered, so the replies it carried stay delivered once it is gone.
     ...(sub.kind === 'replies'
-      ? [relay.db.prepare('INSERT INTO reply_handoffs SELECT agent_id, start_seq, cursor FROM subscriptions WHERE id = ? AND cursor > start_seq').bind(id)]
+      ? [
+          relay.db
+            .prepare(`INSERT INTO reply_handoffs SELECT agent_id, start_seq, ${DELIVERED_TO} FROM subscriptions WHERE id = ? AND ${DELIVERED_TO} > start_seq`)
+            .bind(id, id, id),
+        ]
       : []),
-    // The replies cursor is read inside the batch: a push that delivered more after our read counts here.
+    // The delivered-to seq is read inside the batch: a push that delivered more after our read counts here.
     ...(sub.kind === 'replies'
       ? [
           relay.db
             .prepare(
               `UPDATE subscriptions SET next_due_ms = MAX(?, COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000)
                WHERE agent_id = ? AND kind = 'channel' AND next_due_ms IS NULL
-                 AND EXISTS (SELECT 1 FROM events e WHERE e.seq > subscriptions.cursor AND e.seq > (SELECT cursor FROM subscriptions WHERE id = ?)
+                 AND EXISTS (SELECT 1 FROM events e WHERE e.seq > subscriptions.cursor AND e.seq > ${DELIVERED_TO}
                    AND e.channel_id = subscriptions.channel_id AND e.reply_agent_id = ?
                    AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0
                    AND (e.author_agent_id IS NULL OR e.author_agent_id != subscriptions.agent_id))`,

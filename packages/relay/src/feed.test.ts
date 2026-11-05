@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BOT, contents, poll, say, setup, subscribe, useWebhook, type Setup } from './deliveries.testkit';
 import { fakeDiscord } from './posting-fixtures';
-import { drainDue, pushDue } from './services/deliveries';
+import { attemptDelivery, drainDue, pushDue } from './services/deliveries';
 import { ingest } from './services/intake';
 import { retentionJob } from './services/retention';
 import { unsubscribe } from './services/subscriptions';
@@ -360,6 +360,64 @@ describe('reply handoffs', () => {
     await drainDue(s.relay);
     const onChannel = receivedFor(s, channel.id).at(-1);
     expect(contents(onChannel!)).toEqual(['the newest answer']);
+  });
+
+  it('a reply a pending delivery never sent reaches the channel after the delete', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'pending-001');
+    await say(s, 'queued answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const delivery = await s.db.prepare('SELECT id, status FROM deliveries WHERE subscription_id = ?').bind(replies.id).first<{ id: string; status: string }>();
+    expect(delivery?.status).toBe('pending');
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    expect((await attemptDelivery(s.relay, delivery!.id)).outcome).toBe('dropped');
+    await say(s, 'ordinary chatter');
+    const channelDigests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(channelDigests.flatMap((d) => contents(d))).toEqual(['queued answer', 'ordinary chatter']);
+  });
+
+  it('a handoff covers only what was delivered, not a later pending reply', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'pending-002');
+    await say(s, 'delivered answer', { replyTo: mine.discord_message_id });
+    // Deliver it for real, then queue a second reply that never sends.
+    await pushDue(s.relay, s.agent.id);
+    const first = await s.db.prepare('SELECT id FROM deliveries WHERE subscription_id = ?').bind(replies.id).first<{ id: string }>();
+    await attemptDelivery(s.relay, first!.id);
+    expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toEqual(['delivered answer']);
+    await say(s, 'pending answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    expect((await s.db.prepare("SELECT COUNT(*) n FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ n: number }>())!.n).toBe(1);
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    await say(s, 'ordinary chatter');
+    const channelDigests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(channelDigests.flatMap((d) => contents(d))).toEqual(['pending answer', 'ordinary chatter']);
+  });
+
+  it('a reply in a retrying delivery also falls back to the channel', async () => {
+    const s = await setup({ harness: { env: { DELIVERIES: { send: async () => {} } } } });
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: '24h' });
+    const replies = await subscribe(s, { kind: 'replies' });
+    const mine = await post(s, 'a question', 'pending-003');
+    await say(s, 'retrying answer', { replyTo: mine.discord_message_id });
+    await pushDue(s.relay, s.agent.id);
+    const delivery = await s.db.prepare('SELECT id FROM deliveries WHERE subscription_id = ?').bind(replies.id).first<{ id: string }>();
+    // One failed attempt leaves it retrying rather than pending.
+    await s.db.prepare("UPDATE deliveries SET status = 'retrying' WHERE id = ?").bind(delivery!.id).run();
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    await say(s, 'ordinary chatter');
+    const channelDigests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
+    expect(channelDigests.flatMap((d) => contents(d))).toEqual(['retrying answer', 'ordinary chatter']);
   });
 
   it('retention keeps a handoff while a channel cursor still needs it', async () => {
