@@ -395,7 +395,9 @@ describe('reply handoffs', () => {
     expect(receivedFor(s, replies.id).flatMap((d) => contents(d))).toEqual(['delivered answer']);
     await say(s, 'pending answer', { replyTo: mine.discord_message_id });
     await pushDue(s.relay, s.agent.id);
-    expect((await s.db.prepare("SELECT COUNT(*) n FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ n: number }>())!.n).toBe(1);
+    expect(
+      (await s.db.prepare("SELECT COUNT(*) n FROM deliveries WHERE subscription_id = ? AND status = 'pending'").bind(replies.id).first<{ n: number }>())!.n,
+    ).toBe(1);
     expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
     await say(s, 'ordinary chatter');
     const channelDigests = (await poll(s)).digests.filter((d) => d.subscription_id === channel.id);
