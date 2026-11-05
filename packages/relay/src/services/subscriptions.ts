@@ -221,19 +221,27 @@ export async function unsubscribe(relay: Relay, agentId: string, id: string): Pr
     const handoffs = sub.kind === 'replies' ? handoffRanges(fresh.start_seq, fresh.cursor, open) : [];
     const stmts = [
       ...handoffs.map(([from, to]) => relay.db.prepare(`INSERT INTO reply_handoffs SELECT ?, ?, ? WHERE ${guard}`).bind(agentId, from, to, id, fresh.cursor)),
+      // The replies this subscription owed (after its start, by others, not handed off above) fall back to the agent's
+      // channel subscriptions, which are armed to deliver them. One whose cursor already passed the first steps back
+      // to it rather than getting a second delivery path; delivered_through keeps the ordinary events it already
+      // delivered in between from coming again (feed.ts, belongs).
       ...(sub.kind === 'replies'
         ? [
             relay.db
               .prepare(
-                `UPDATE subscriptions SET next_due_ms = MAX(?, COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000)
-                 WHERE agent_id = ? AND kind = 'channel' AND next_due_ms IS NULL AND ${guard}
-                   AND EXISTS (SELECT 1 FROM events e WHERE e.seq > subscriptions.cursor AND e.seq > ?
-                     AND e.channel_id = subscriptions.channel_id AND e.reply_agent_id = ?
-                     AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0
-                     AND (e.author_agent_id IS NULL OR e.author_agent_id != subscriptions.agent_id)
-                     AND NOT EXISTS (SELECT 1 FROM reply_handoffs h WHERE h.agent_id = ? AND e.seq > h.from_seq AND e.seq <= h.to_seq))`,
+                `UPDATE subscriptions SET
+                   delivered_through = CASE WHEN o.first <= cursor THEN MAX(delivered_through, cursor) ELSE delivered_through END,
+                   cursor = MIN(cursor, o.first - 1),
+                   next_due_ms = COALESCE(next_due_ms, MAX(?, COALESCE(last_delivered_ms, 0) + frequency_seconds * 1000))
+                 FROM (SELECT e.channel_id, MIN(e.seq) AS first FROM events e
+                   WHERE e.reply_agent_id = ? AND e.seq > ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0
+                     AND (e.author_agent_id IS NULL OR e.author_agent_id != ?)
+                     AND NOT EXISTS (SELECT 1 FROM reply_handoffs h WHERE h.agent_id = ? AND e.seq > h.from_seq AND e.seq <= h.to_seq)
+                   GROUP BY e.channel_id) o
+                 WHERE subscriptions.agent_id = ? AND subscriptions.kind = 'channel' AND subscriptions.ended_at IS NULL
+                   AND subscriptions.channel_id = o.channel_id AND ${guard}`,
               )
-              .bind(now, agentId, id, fresh.cursor, fresh.start_seq, agentId, agentId),
+              .bind(now, agentId, fresh.start_seq, agentId, agentId, agentId, id, fresh.cursor),
           ]
         : []),
       auditStmtIf(

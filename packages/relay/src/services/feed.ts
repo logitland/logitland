@@ -49,6 +49,8 @@ export interface SubscriptionRow {
   cursor: number;
   next_due_ms: number | null;
   last_delivered_ms: number | null;
+  /** A channel subscription stepped back for owed replies already delivered everything else through this seq (unsubscribe). */
+  delivered_through: number;
   ended_at: string | null;
   created_at: string;
   updated_at: string;
@@ -109,13 +111,27 @@ function belongs(sub: SubscriptionRow, readable: string): { sql: string; args: u
     };
   // A replies subscription brings replies to the agent's messages; channel subscriptions skip only the events a
   // replies subscription carried or would carry — recorded after one started, not written by the agent itself, and not
-  // already delivered by a since-deleted one (reply_handoffs).
+  // already delivered by a since-deleted one (reply_handoffs). Through delivered_through, only the replies such a
+  // subscription owed are still the channel's: it delivered everything else there before it stepped back (unsubscribe).
   const notReplies = `AND (e.reply_agent_id IS NULL OR e.reply_agent_id != ? OR (e.author_agent_id IS NOT NULL AND e.author_agent_id = ?)
     OR (NOT EXISTS (SELECT 1 FROM subscriptions r WHERE r.agent_id = ? AND r.kind = 'replies' AND r.ended_at IS NULL AND e.seq > r.start_seq)
-      AND NOT EXISTS (SELECT 1 FROM reply_handoffs h WHERE h.agent_id = ? AND e.seq > h.from_seq AND e.seq <= h.to_seq)))`;
+      AND NOT EXISTS (SELECT 1 FROM reply_handoffs h WHERE h.agent_id = ? AND e.seq > h.from_seq AND e.seq <= h.to_seq)))
+    AND (e.seq > ? OR (e.reply_agent_id = ? AND (e.author_agent_id IS NULL OR e.author_agent_id != ?)))`;
   return {
     sql: `e.channel_id = ? AND e.agent_id IS NULL AND e.private_thread_id IS NULL AND e.silent = 0 AND ${own} AND ${read} ${notReplies}`,
-    args: [sub.channel_id, sub.include_own, sub.agent_id, readable, sub.agent_id, sub.agent_id, sub.agent_id, sub.agent_id],
+    args: [
+      sub.channel_id,
+      sub.include_own,
+      sub.agent_id,
+      readable,
+      sub.agent_id,
+      sub.agent_id,
+      sub.agent_id,
+      sub.agent_id,
+      sub.delivered_through,
+      sub.agent_id,
+      sub.agent_id,
+    ],
   };
 }
 

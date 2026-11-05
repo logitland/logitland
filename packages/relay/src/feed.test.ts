@@ -282,6 +282,28 @@ describe('replies to the agent', () => {
     expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
     expect((await s.db.prepare('SELECT next_due_ms FROM subscriptions WHERE id = ?').bind(channel.id).first())?.next_due_ms).toBeNull();
   });
+
+  it('delivers an unread reply once after the delete, even when the channel cursor passed it (#166)', async () => {
+    const s = await setup();
+    fakeDiscord(s);
+    await useWebhook(s);
+    const channel = await subscribe(s, { frequency: 'live' });
+    const replies = await subscribe(s, { kind: 'replies', frequency: '24h' });
+    const mine = await post(s, 'a question', 'reply-passed-001');
+    // The first reply goes at once; the second waits a day on the replies subscription.
+    await say(s, 'read answer', { replyTo: mine.discord_message_id });
+    await say(s, 'unread answer', { replyTo: mine.discord_message_id });
+    await say(s, 'ordinary chatter');
+    const receivedFor = (id: string) => s.received.filter((d) => d.subscription_id === id).flatMap(contents);
+    expect(receivedFor(replies.id)).toEqual(['read answer']);
+    expect(receivedFor(channel.id)).toEqual(['ordinary chatter']);
+
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, s.auth)).status).toBe(204);
+    await drainDue(s.relay);
+    await say(s, 'later chatter');
+    await drainDue(s.relay);
+    expect(receivedFor(channel.id)).toEqual(['ordinary chatter', 'unread answer', 'later chatter']);
+  });
 });
 
 describe('reply handoffs', () => {
