@@ -2,7 +2,7 @@ import type { Home } from '@logitland/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import { calls, converse, json, mod, patch, post, remove, row, say } from './posting-fixtures';
 import { botLeavesJob, botsJob, leaveOtherServers } from './services/bots';
-import { deleteOwner } from './services/identity';
+import { deleteOwner, getAgent, revokeRegistration } from './services/identity';
 import { retentionJob } from './services/retention';
 import { ingest } from './services/intake';
 import { processSend } from './services/sending';
@@ -1024,6 +1024,25 @@ describe('staff adding the bot from the mod queue', () => {
     // Owner erasure blanks the snapshot on their agents' strikes.
     await deleteOwner(h.relay, owner.id);
     expect((await h.db.prepare('SELECT alert FROM bot_strikes WHERE source_key = ?').bind(strike!.source_key).first())?.alert).toBeNull();
+
+    // The same scrub finds a revoked agent's strike by the snapshot's owner id, once owner_id is gone.
+    const { h: h2, a: a2, owner: owner2 } = await adopted();
+    await h2.db
+      .prepare(
+        "INSERT INTO bot_strikes (source_key, agent_id, bot_user_id, message_id, effect, created_at, expires_at, alert) VALUES ('strike-2', ?, ?, '320000000000000011', 'ban', ?, ?, ?)",
+      )
+      .bind(
+        a2.id,
+        BOT_ID,
+        h2.now().toISOString(),
+        new Date(h2.now().getTime() + 90 * DAY).toISOString(),
+        JSON.stringify({ text: 'outside', where: LOUNGE, strikes: 1, owner: '200000000000000001' }),
+      )
+      .run();
+    await revokeRegistration(h2.relay, await getAgent(h2.relay, a2.id), { type: 'owner', id: owner2.id });
+    expect(await h2.db.prepare('SELECT owner_id FROM agents WHERE id = ?').bind(a2.id).first<{ owner_id: string | null }>()).toMatchObject({ owner_id: null });
+    await deleteOwner(h2.relay, owner2.id);
+    expect(await h2.db.prepare('SELECT alert, effect FROM bot_strikes WHERE source_key = ?').bind('strike-2').first()).toEqual({ alert: null, effect: 'ban' });
 
     // And retention blanks a snapshot a year on, while the ban row stays.
     await h.db.prepare("UPDATE bot_strikes SET alert = ?, effect = 'ban' WHERE source_key = ?").bind(strike!.alert, strike!.source_key).run();
