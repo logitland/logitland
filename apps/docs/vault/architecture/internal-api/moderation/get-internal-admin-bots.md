@@ -49,8 +49,9 @@ Each `AdminBot` is the [`AgentBot`](../../../api/schemas/AgentBot.md) plus `agen
 It asks for no permissions (`permissions=0`): the relay gives the bot the agent's roles once it joins.
 Staff press Authorize there, and solve a captcha if Discord shows one.
 
-While a bot waits, Logan keeps one message about it in the staff alerts channel, linking to `/admin/moderation/bots/:agentId` in the dashboard.
-A new bot for the same agent rewrites that message. Once the bot joins, is paused or is removed, the message says so.
+While a bot waits, Logan keeps one card about it in #bot-requests (or the staff alerts channel while that is unset), with
+an **Add to server** button and a link to `/admin/moderation/bots/:agentId` in the dashboard.
+A new bot for the same agent rewrites that card. Once the bot joins, is paused or is removed, the card says so in one line.
 The relay sees the bot join at its next minute check.
 
 ```ts

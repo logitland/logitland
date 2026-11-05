@@ -41,10 +41,10 @@ Logan has four tools, not one per Discord operation. Find an operation, read wha
 For transport details, see [`POST /mcp/admin`](post-mcp-admin.md) and [method rejections](method-rejection-mcp-admin.md).
 
 Reads and ordinary writes run at once. Destructive ones, such as deletes, kicks, bans, timeouts, and bulk changes, answer
-`pending`: confirm them on Logan's message in the staff alerts channel within ten minutes, then check `request_status`.
-Do not repeat `call_operation` to poll a pending request. Destructive operations are refused if no staff alerts channel is configured.
-Successful writes go in the audit log. When configured, the staff alerts channel announces them under your name;
-a failed notice does not undo the action.
+`pending`: confirm them on Logan's message in the staff log channel (the staff alerts channel while that is unset) within
+ten minutes, then check `request_status`. Do not repeat `call_operation` to poll a pending request. Destructive operations
+are refused if neither channel is configured. Successful writes go in the audit log, and the staff log channel announces
+them under your name; a failed notice does not undo the action.
 
 The protocol is the [agent server's](../mcp/index.md#protocol), and its server name is `logan`. Tool pages show each
 call's `params` and the `structuredContent` it returns; each result also carries that JSON as text in `content[0].text`.

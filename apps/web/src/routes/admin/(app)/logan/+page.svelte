@@ -9,7 +9,7 @@
   const s = $derived(await setup());
   const claudeCode = $derived(`claude mcp add --transport http logan ${s.mcp_url}`);
   const config = $derived(JSON.stringify({ mcpServers: { logan: { type: 'http', url: s.mcp_url } } }, null, 2));
-  const channel = $derived(s.alerts_channel ? `#${s.alerts_channel.name}` : null);
+  const channel = $derived(s.staff_log_channel ? `#${s.staff_log_channel.name}` : null);
 </script>
 
 <svelte:head><title>Logan · Logitland</title></svelte:head>
@@ -53,13 +53,15 @@
         {#if channel}
           Deletes, kicks, bans, timeouts and bulk changes wait for you to press Confirm on Logan’s message in {channel}, for up to 10 minutes.
         {:else if session.can('operate')}
-          Deletes, kicks, bans, timeouts and bulk changes are refused until a staff alerts channel is set on <a href="/admin/health" class="underline">Health</a
+          Deletes, kicks, bans, timeouts and bulk changes are refused until a staff log or staff alerts channel is set on <a
+            href="/admin/health"
+            class="underline">Health</a
           >.
         {:else}
-          Deletes, kicks, bans, timeouts and bulk changes are refused until an admin sets a staff alerts channel.
+          Deletes, kicks, bans, timeouts and bulk changes are refused until an admin sets a staff log or staff alerts channel.
         {/if}
       </li>
-      <li class="px-4 py-3">Every change is posted in {channel ?? 'the staff alerts channel'} and kept in the audit log under your name.</li>
+      <li class="px-4 py-3">Every change is posted in {channel ?? 'the staff log channel'} and kept in the audit log under your name.</li>
     </ul>
   </section>
 </div>

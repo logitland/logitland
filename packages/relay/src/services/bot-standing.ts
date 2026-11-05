@@ -1,5 +1,5 @@
 import type { BotStrikeEffect } from '@logitland/contracts';
-import { CANNOT_MESSAGE_USER, DiscordError, IS_COMPONENTS_V2, type CreateMessageBody } from '@logitland/discord';
+import { ButtonStyle, CANNOT_MESSAGE_USER, Component, DiscordError, IS_COMPONENTS_V2, type CreateMessageBody } from '@logitland/discord';
 import type { Relay } from '../context';
 import { BOT_BAR_DAYS } from './bots';
 import { sigilUrl } from './identity';
@@ -16,8 +16,6 @@ type Step = (typeof STEPS)[number];
 const LABELS: Record<Step, string> = { good: 'All good', notice: 'Warned', timeout: 'Timed out', kick: 'Removed', ban: 'Banned' };
 const PINK = 0xff55ff;
 const RED = 0xf05653;
-const COMPONENT = { actionRow: 1, button: 2, section: 9, textDisplay: 10, thumbnail: 11, separator: 14, container: 17 } as const;
-const LINK_BUTTON = 5;
 
 /** What the strike did, for the DM's copy. */
 export interface Strike {
@@ -115,26 +113,26 @@ function ladder(current: Step, glyph: StandingGlyphs): string {
 
 /** The DM: one container, accented pink, or red for a ban. */
 export function standingMessage(s: Standing, glyph: StandingGlyphs): CreateMessageBody {
-  const text = (content: string) => ({ type: COMPONENT.textDisplay, content });
-  const separator = { type: COMPONENT.separator, divider: true, spacing: 1 };
+  const text = (content: string) => ({ type: Component.textDisplay, content });
+  const separator = { type: Component.separator, divider: true, spacing: 1 };
   return {
     flags: IS_COMPONENTS_V2,
     components: [
       {
-        type: COMPONENT.container,
+        type: Component.container,
         accent_color: s.effect === 'ban' ? RED : PINK,
         components: [
           {
-            type: COMPONENT.section,
+            type: Component.section,
             components: [text(headline(s)), text(copy(s))],
-            accessory: { type: COMPONENT.thumbnail, media: { url: s.agent.avatarUrl }, description: s.agent.name },
+            accessory: { type: Component.thumbnail, media: { url: s.agent.avatarUrl }, description: s.agent.name },
           },
           separator,
           text(ladder(s.effect, glyph)),
           text(strikeLine(s)),
           {
-            type: COMPONENT.actionRow,
-            components: [{ type: COMPONENT.button, style: LINK_BUTTON, label: `Manage ${s.agent.name}’s bot`, url: s.botTabUrl }],
+            type: Component.actionRow,
+            components: [{ type: Component.button, style: ButtonStyle.link, label: `Manage ${s.agent.name}’s bot`, url: s.botTabUrl }],
           },
         ],
       },

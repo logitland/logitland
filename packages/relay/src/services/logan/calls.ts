@@ -1,24 +1,22 @@
 import { newId } from '@logitland/contracts';
-import { DiscordError, RateLimitedError } from '@logitland/discord';
+import { ButtonStyle, Component, DiscordError, RateLimitedError } from '@logitland/discord';
 import { iso, type Relay } from '../../context';
 import { RelayError, forbidden, notFound, unavailable } from '../../errors';
 import { audit } from '../audit';
 import { getOwner } from '../identity';
-import { getSettings } from '../settings';
+import { staffChannel } from '../settings';
+import { Accent, cardMessage } from '../staff-cards';
 import { checkCall, filterAnswer, loadCaller, type CallInput, type Caller, type Checked } from './access';
 
 // Running a call through Logan. Reads and writes run at once; destructive ones (the catalog's destructive class: deletes, kicks,
-// bans, bulk changes, plus timeouts) wait in the staff alerts channel for the person who asked to press Confirm, and are checked
-// again when they do. Every write that runs is audited and posted in the alerts channel, and carries an audit log reason in
-// Discord naming the person.
+// bans, bulk changes, plus timeouts) wait in #staff-log (the `staff_log_channel_id` setting, or else the staff alerts channel)
+// for the person who asked to press Confirm, and are checked again when they do. Every write that runs is audited and posted
+// in #staff-log as a card, and carries an audit log reason in Discord naming the person.
 
 /** How long a destructive request waits for its Confirm. */
 export const REQUEST_TTL_MS = 10 * 60_000;
 const CONFIRM = 'logan_confirm:';
 const CANCEL = 'logan_cancel:';
-/** Discord's button styles: red for the destructive confirm, grey for cancel. */
-const DANGER = 4;
-const SECONDARY = 2;
 const REASON_MAX = 200;
 const BODY_PREVIEW_MAX = 800;
 
@@ -80,12 +78,12 @@ async function execute(relay: Relay, caller: Caller, checked: Checked, args: Cal
   return filterAnswer(relay, caller, checked.op.operationId, answer ?? null);
 }
 
-/** Posts in the staff alerts channel, if there is one. A failed post is logged: the action already happened and is audited. */
+/** Posts a card in #staff-log, if there is one. A failed post is logged: the action already happened and is audited. */
 async function postAlert(relay: Relay, content: string): Promise<void> {
-  const { alerts_channel_id: channelId } = await getSettings(relay);
+  const channelId = await staffChannel(relay, 'staff_log');
   if (!channelId) return;
   try {
-    await relay.discord.createMessage(channelId, { content });
+    await relay.discord.createMessage(channelId, cardMessage({ text: [content] }));
   } catch (error) {
     relay.log.warn('logan.alert_failed', { channel_id: channelId, error });
   }
@@ -111,8 +109,8 @@ function bodyPreview(body: unknown): string {
 }
 
 async function requestConfirmation(relay: Relay, caller: Caller, checked: Checked, args: CallArgs): Promise<CallOutcome> {
-  const { alerts_channel_id: channelId } = await getSettings(relay);
-  if (!channelId) throw forbidden('This needs a Confirm in the staff alerts channel, and none is set. Ask an admin with the operate power to pick one.');
+  const channelId = await staffChannel(relay, 'staff_log');
+  if (!channelId) throw forbidden('This needs a Confirm in the staff log channel, and none is set. Ask an admin with the operate power to pick one.');
   const id = newId('logan_request');
   const now = relay.now();
   const expiresAt = iso(new Date(now.getTime() + REQUEST_TTL_MS));
@@ -123,21 +121,19 @@ async function requestConfirmation(relay: Relay, caller: Caller, checked: Checke
     )
     .bind(id, caller.owner.id, checked.op.operationId, JSON.stringify(call), channelId, iso(now), expiresAt)
     .run();
-  const content = [
-    `<@${caller.owner.discord_user_id}> asked Logan to run ${describe(checked)} through the admin MCP.${reasonLine(args.reason)}${bodyPreview(args.body)}`,
-    `Only they can confirm it, until <t:${Math.floor(Date.parse(expiresAt) / 1000)}:t>.`,
-  ].join('\n');
-  const components = [
-    {
-      type: 1,
-      components: [
-        { type: 2, style: DANGER, label: 'Confirm', custom_id: `${CONFIRM}${id}` },
-        { type: 2, style: SECONDARY, label: 'Cancel', custom_id: `${CANCEL}${id}` },
-      ],
-    },
-  ];
+  const card = cardMessage({
+    text: [
+      `<@${caller.owner.discord_user_id}> asked Logan to run ${describe(checked)} through the admin MCP.${reasonLine(args.reason)}${bodyPreview(args.body)}`,
+      `Only they can confirm it, until <t:${Math.floor(Date.parse(expiresAt) / 1000)}:t>.`,
+    ],
+    buttons: [
+      { type: Component.button, style: ButtonStyle.danger, label: 'Confirm', custom_id: `${CONFIRM}${id}` },
+      { type: Component.button, style: ButtonStyle.secondary, label: 'Cancel', custom_id: `${CANCEL}${id}` },
+    ],
+    accent: Accent.destructive,
+  });
   try {
-    const message = await relay.discord.createMessage(channelId, { content, components }, caller.owner.discord_user_id);
+    const message = await relay.discord.createMessage(channelId, card, caller.owner.discord_user_id);
     await relay.db.prepare('UPDATE logan_requests SET message_id = ? WHERE id = ?').bind(message.id, id).run();
   } catch (error) {
     relay.log.warn('logan.confirm_post_failed', { channel_id: channelId, error });
@@ -145,14 +141,14 @@ async function requestConfirmation(relay: Relay, caller: Caller, checked: Checke
       .prepare("UPDATE logan_requests SET status = 'failed', result = ? WHERE id = ?")
       .bind(JSON.stringify({ error: 'The confirmation couldn’t be posted.' }), id)
       .run();
-    throw unavailable('Logan couldn’t post the confirmation in the staff alerts channel. Try again in a minute.', 60);
+    throw unavailable('Logan couldn’t post the confirmation in the staff log channel. Try again in a minute.', 60);
   }
   return {
     status: 'pending',
     request_id: id,
     operation_id: checked.op.operationId,
     expires_at: expiresAt,
-    detail: 'Press Confirm on Logan’s message in the staff alerts channel within 10 minutes. Check back with request_status.',
+    detail: 'Press Confirm on Logan’s message in the staff log channel within 10 minutes. Check back with request_status.',
   };
 }
 

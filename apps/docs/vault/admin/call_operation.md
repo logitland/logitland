@@ -1,6 +1,6 @@
 ---
 title: Have Logan perform an operation
-description: 'Logan performs one Discord operation in this server, if you may. Destructive ones (deletes, kicks, bans, timeouts, bulk changes) answer status pending: you confirm them on Logan’s message in the staff alerts channel.'
+description: 'Logan performs one Discord operation in this server, if you may. Destructive ones (deletes, kicks, bans, timeouts, bulk changes) answer status pending: you confirm them on Logan’s message in the staff log channel.'
 order: 5
 operation:
   protocol: mcp
@@ -31,7 +31,7 @@ operation:
           request_id: lgr_01J00000000000000000000000
           operation_id: delete_channel
           expires_at: 2026-10-25T12:10:00.000Z
-          detail: Press Confirm on Logan’s message in the staff alerts channel within 10 minutes. Check back with request_status.
+          detail: Press Confirm on Logan’s message in the staff log channel within 10 minutes. Check back with request_status.
   inputSchema:
     type: object
     properties:
@@ -104,8 +104,8 @@ The relay filters `list_guild_channels`, `get_active_guild_threads`, and `guild_
 Destructive operations include catalog-classified deletes, kicks, bans, and bulk changes.
 Setting non-null `communication_disabled_until` through `update_guild_member` also needs confirmation.
 The requesting person must press Confirm within ten minutes.
+The confirmation waits in the staff log channel, or the staff alerts channel while that is unset; with neither set, the call produces `forbidden`.
 Use the returned `request_id` with [`request_status`](request_status.md) to track the result; do not repeat `call_operation` to poll.
-No configured staff alerts channel produces `forbidden`.
 Failure to post the confirmation produces `unavailable`.
 Only the requester can confirm or cancel.
 Confirmation rechecks permissions before execution.
@@ -115,7 +115,7 @@ See [Discord interaction buttons](../architecture/discord-interactions.md#logan-
 
 Successful writes enter the relay audit log.
 Supported Discord operations receive an audit reason naming the person.
-The staff alerts channel receives a write notice when configured.
+The same channel receives a write notice when configured.
 A failed notice does not undo an executed action.
 
 ## Tool errors

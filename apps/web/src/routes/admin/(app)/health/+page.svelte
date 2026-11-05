@@ -12,6 +12,7 @@
   import { Switch } from '#lib/components/ui/switch/index.js';
   import { HOLD_MS, formatNumber, isUrgent, plural, refusal, timeAgo, timeLeft } from '#lib/admin/format.js';
   import {
+    ALERTS_FALLBACK,
     CHANNEL_KEYS,
     CHANNELS,
     KILL_SWITCH_KEYS,
@@ -59,6 +60,8 @@
 
   const NO_CHANNEL = 'none';
   const NO_ROLE = 'none';
+  /** What an unset channel does: nothing, or for a staff channel, post in the staff alerts channel. */
+  const unset = (key: ChannelKey) => (ALERTS_FALLBACK.has(key) ? 'Same as staff alerts' : 'None');
 
   const h = $derived(await health());
   const ops = $derived(await operations());
@@ -147,7 +150,7 @@
     const channel = ops.channels.find((c) => c.id === value);
     try {
       await setChannel({ key, channelId: channel?.id ?? null });
-      toast.success(`${CHANNELS[key]}: ${channel ? `#${channel.name}` : 'none'}`);
+      toast.success(`${CHANNELS[key]}: ${channel ? `#${channel.name}` : unset(key).toLowerCase()}`);
     } catch (e) {
       toast.error(refusal(e));
     }
@@ -300,10 +303,10 @@
                 <Field.Label for="channel-{key}" class="font-normal">{CHANNELS[key]}</Field.Label>
                 <Select.Root type="single" value={current ?? NO_CHANNEL} onValueChange={(value) => channelFor(key, value)}>
                   <Select.Trigger id="channel-{key}" class="w-48">
-                    {current ? `#${ops.channels.find((c) => c.id === current)?.name ?? current}` : 'None'}
+                    {current ? `#${ops.channels.find((c) => c.id === current)?.name ?? current}` : unset(key)}
                   </Select.Trigger>
                   <Select.Content class="max-h-72">
-                    <Select.Item value={NO_CHANNEL} label="None" />
+                    <Select.Item value={NO_CHANNEL} label={unset(key)} />
                     {#each ops.channels as channel (channel.id)}
                       <Select.Item value={channel.id} label="#{channel.name}" />
                     {/each}

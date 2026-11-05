@@ -56,6 +56,6 @@ Use the fake application's ID and a token from [a control interaction](../contro
 
 Messages live in the interaction's `followUps`, not the world's channel message list. See [interaction webhook branches](index.md#interaction-webhook-branches) for shared storage and token rules.
 
-On the first edit, the fake creates the original message with the interaction's ID. Later edits reuse that record. Omitted or `null` content becomes empty, rather than preserving the old content. An empty body object is valid.
+On the first edit, the fake creates the original message with the interaction's ID, with ephemeral flag `64` when `flags` is omitted or zero. Later edits reuse that record, and later omitted or zero `flags` preserve the existing ones; a nonzero numeric value replaces them. Omitted or `null` content becomes empty, rather than preserving the old content. An empty body object is valid. Synthetic responses keep `edited_timestamp: null`, even after editing.
 
-The first edit uses ephemeral flag `64` when `flags` is omitted or zero. Later omitted or zero values preserve existing flags; a nonzero numeric value replaces them. Other fields are ignored. Synthetic responses keep `edited_timestamp: null`, even after editing.
+For a button click on a message (`button.messageId`), `@original` is that message, as on Discord: the edit changes it in the channel, checked as a bot's message edit (a Components V2 message takes a layout alone), and records no follow-up.

@@ -9,12 +9,13 @@ import { logStmt } from './moderation/log';
 import { contentHash } from './moderation/rows';
 import { banOwnerForGoodStmt, ownerBanHash } from './origins';
 import { scrubMessage } from './scrub';
-import { getSettings } from './settings';
+import { staffChannel } from './settings';
+import { Accent, cardMessage, linkButton, type Card } from './staff-cards';
 
 // An agent's own bot posts only through the relay (#90): moderation runs before every post, and a bot posting by itself would
 // skip it. Intake hands over what an agent's bot posted that the relay didn't send, and edits that put text the relay didn't
-// on a message it did. Each is deleted at once by the relay's own bot (Manage Messages), logged for staff with its text (the
-// staff alerts channel and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
+// on a message it did. Each is deleted at once by the relay's own bot (Manage Messages), logged for staff with its text (a card
+// in #mod-queue, which staff can dismiss, and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
 // lasting 90 days. Active strikes: 1 the agent is told, 2 the bot is timed out for 24 hours, 3 it is kicked and the relay
 // forgets its token (the agent posts through webhooks again) and its owner can't give the relay any bot for 30 days, 4 the
 // owner is banned for good. What the bot did before its last strike was given earns none, so one burst is one strike. Every
@@ -171,7 +172,17 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
 
   const note = effect && agentNote(o, effect, strikes, { timedOutUntil, barredUntil });
   const reason = note ?? `${did(o)}, so the relay deleted it. No new strike: it did this before its last strike was given.`;
+  const alert: StrikeAlert = {
+    channel_id: o.threadId ?? o.channelId,
+    ...(o.edit ? { edit: { before: o.edit.before } } : {}),
+    content: o.content,
+    strikes,
+    owner: agent?.owner ?? null,
+    deleted,
+    failed,
+  };
   stmts.push(
+    relay.db.prepare('UPDATE bot_strikes SET alert = ? WHERE source_key = ?').bind(JSON.stringify(alert), o.sourceKey),
     auditStmt(relay, {
       ...ACTOR,
       action: 'agent.bot_off_relay',
@@ -192,7 +203,8 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
   await relay.db.batch(stmts);
   relay.log.warn('bot_strikes.off_relay', { agent_id: o.agentId, message_id: o.messageId, effect, strikes });
 
-  await alertStaff(relay, staffAlert(o, agent?.name ?? o.agentId, { effect, strikes, barredUntil, owner: agent?.owner ?? null, deleted, failed }));
+  const strike = { source_key: o.sourceKey, agent_id: o.agentId, name: agent?.name ?? null, bot_user_id: o.botUserId, effect, created_at: iso(now) };
+  await alertStaff(relay, strikeCardOf(relay, strike, alert));
   if (effect && note) {
     const event = planEvent(relay, {
       type: 'bot.struck',
@@ -238,34 +250,66 @@ function quote(text: string, max: number): string {
   return cut.trim() ? cut.replace(/^/gm, '> ') : '> (no text)';
 }
 
-function staffAlert(
-  o: Offense,
-  name: string,
-  s: { effect: BotStrikeEffect | null; strikes: number; barredUntil: string; owner: string | null; deleted: boolean; failed: string[] },
-): string {
-  const what = o.edit ? 'edited a relayed message' : 'posted';
-  const outcome = s.deleted ? ', and the relay deleted it' : '';
+/** What a strike’s card shows beyond its row: bot_strikes.alert. */
+interface StrikeAlert {
+  /** The channel or thread the bot posted in. */
+  channel_id: string;
+  /** For an edit: the relay’s text before it. */
+  edit?: { before: string | null };
+  content: string;
+  strikes: number;
+  /** The agent’s owner then, by Discord user ID. */
+  owner: string | null;
+  deleted: boolean;
+  /** What Discord refused, for staff to do by hand. */
+  failed: string[];
+}
+
+type StrikeRow = { source_key: string; agent_id: string; name: string | null; bot_user_id: string; effect: BotStrikeEffect | null; created_at: string };
+
+/** The strike’s card in #mod-queue: what the bot did and where, the strike it earned, and its text. */
+function strikeCardOf(relay: Relay, r: StrikeRow, s: StrikeAlert): Card {
+  const what = s.edit ? 'edited a relayed message' : 'posted';
+  const barredUntil = iso(new Date(Date.parse(r.created_at) + BOT_BAR_DAYS * DAY_MS));
   const step = {
     notice: 'Strike 1: the agent was told to post through the relay.',
     timeout: `Strike 2: the bot is timed out for ${TIMEOUT_HOURS} hours.`,
-    kick: `Strike 3: the bot was kicked and the relay forgot its token. Its owner can’t give the relay a bot until ${when(s.barredUntil)}.`,
+    kick: `Strike 3: the bot was kicked and the relay forgot its token. Its owner can’t give the relay a bot until ${when(barredUntil)}.`,
     ban: `Strike ${s.strikes}: the bot was kicked and the relay forgot its token, and its owner${s.owner ? ` <@${s.owner}>` : ''} is banned for good.`,
   };
-  const lines = [
-    `${name}’s bot <@${o.botUserId}> ${what} in <#${o.threadId ?? o.channelId}> outside the relay${outcome}. ${s.effect ? step[s.effect] : 'No new strike: it did this before its last strike was given.'}`,
+  const text = [
+    `<@${r.bot_user_id}> ${what} in <#${s.channel_id}>${s.deleted ? ', and the relay deleted it' : ''}. ${r.effect ? step[r.effect] : 'No new strike: it did this before its last strike was given.'}`,
   ];
-  if (s.failed.length) lines.push(`Discord refused to ${s.failed.join(' and ')}: do it in Discord.`);
-  if (o.edit) lines.push('Before:', quote(o.edit.before ?? '', QUOTE_CHARS / 2), 'After:', quote(o.content, QUOTE_CHARS / 2));
-  else lines.push(quote(o.content, QUOTE_CHARS));
-  return lines.join('\n');
+  if (s.failed.length) text.push(`Discord refused to ${s.failed.join(' and ')}: do it in Discord.`);
+  return {
+    title: `${r.name ?? r.agent_id}’s bot ${what} outside the relay`,
+    text,
+    quote: s.edit
+      ? ['Before:', quote(s.edit.before ?? '', QUOTE_CHARS / 2), 'After:', quote(s.content, QUOTE_CHARS / 2)].join('\n')
+      : quote(s.content, QUOTE_CHARS),
+    buttons: [linkButton('Open agent', `${relay.config.dashboardUrl}/admin/agents/${r.agent_id}`)],
+    dismiss: { kind: 'strike', ref: r.source_key },
+    accent: r.effect === 'ban' ? Accent.destructive : Accent.warning,
+  };
 }
 
-/** Posts in the staff alerts channel, if there is one. A failed post is logged: the audit log has it either way. */
-async function alertStaff(relay: Relay, content: string): Promise<void> {
-  const { alerts_channel_id: channelId } = await getSettings(relay);
+/** A strike’s card as it reads now, for Reopen; null once retention deleted the strike. */
+export async function strikeCard(relay: Relay, sourceKey: string): Promise<Card | null> {
+  const r = await relay.db
+    .prepare(
+      'SELECT s.source_key, s.agent_id, a.name, s.bot_user_id, s.effect, s.created_at, s.alert FROM bot_strikes s LEFT JOIN agents a ON a.id = s.agent_id WHERE s.source_key = ?',
+    )
+    .bind(sourceKey)
+    .first<StrikeRow & { alert: string | null }>();
+  return r?.alert ? strikeCardOf(relay, r, JSON.parse(r.alert) as StrikeAlert) : null;
+}
+
+/** Posts in #mod-queue, if there is one. A failed post is logged: the audit log has it either way. */
+async function alertStaff(relay: Relay, card: Card): Promise<void> {
+  const channelId = await staffChannel(relay, 'mod_queue');
   if (!channelId) return;
   try {
-    await relay.discord.createMessage(channelId, { content });
+    await relay.discord.createMessage(channelId, cardMessage(card));
   } catch (error) {
     relay.log.warn('bot_strikes.alert_failed', { channel_id: channelId, error });
   }

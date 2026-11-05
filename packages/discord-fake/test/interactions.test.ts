@@ -93,6 +93,28 @@ describe('sending interactions', () => {
     expect(JSON.parse(received[1]!.raw)).toMatchObject({ type: 1 });
   });
 
+  it('changes the clicked button’s message with an UPDATE_MESSAGE answer and later edits of @original', async () => {
+    const card = (content: string) => [{ type: 17, components: [{ type: 10, content }] }];
+    const message = fake.world.postMessage(f.text.id, { author: fake.world.botUser, flags: 1 << 15, components: card('Full card') });
+    respond = () => ({ status: 200, body: { type: 7, data: { flags: 1 << 15, components: card('One line') } } });
+    const { interaction } = await fake.interact({ user: f.alice.id, button: { customId: 'staff_dismiss:x', messageId: message.id }, channelId: f.text.id });
+    expect(fake.messages(f.text.id).find((m) => m.id === message.id)?.components).toEqual(card('One line'));
+
+    const res = await fetch(`${fake.apiBase}/webhooks/${fake.application.id}/${interaction.token}/messages/@original`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ components: card('Done') }),
+    });
+    expect(res.status).toBe(200);
+    expect(fake.messages(f.text.id).find((m) => m.id === message.id)?.components).toEqual(card('Done'));
+
+    respond = () => ({ status: 200, body: { type: 7, data: { content: 'text on a V2 message' } } });
+    await expect(fake.interact({ user: f.alice.id, button: { customId: 'staff_dismiss:x', messageId: message.id }, channelId: f.text.id })).rejects.toThrow(
+      /refuse this UPDATE_MESSAGE/,
+    );
+    respond = () => ({ status: 200, body: { type: 4, data: { content: 'ok', flags: 64 } } });
+  });
+
   it('sends a bad or missing signature, and a stale timestamp, when asked', async () => {
     received.length = 0;
     const bad = await fake.interact({ user: f.alice.id, command: { name: 'mirror', subcommand: 'status' }, signature: 'invalid' });

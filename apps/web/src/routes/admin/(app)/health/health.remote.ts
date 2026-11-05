@@ -9,7 +9,7 @@ export const health = query(() => admin<AdminHealth>('/internal/admin/health'));
 
 /**
  * What the health page changes besides the switches: whether the /consent command is registered and the standing emoji are
- * uploaded (from the setup checklist, which asks Discord), the channels the relay uses (staff alerts, and where people talk with agents), picked from the channels
+ * uploaded (from the setup checklist, which asks Discord), the channels the relay uses (staff alerts, the staff channels for each kind of message, and where people talk with agents), picked from the channels
  * the bot can see, and which of the server's roles it uses (IDs differ per server, so admins pick them).
  */
 export const operations = query(async () => {
@@ -54,7 +54,10 @@ export const setRole = command(z.object({ key: z.enum(ROLE_KEYS), roleId: Snowfl
   await operations().refresh();
 });
 
-/** Which channel the relay uses for one purpose: staff alerts, or where people talk with agents. Null uses none. */
+/**
+ * Which channel the relay uses for one purpose: staff alerts, each kind of staff message, or where people talk with agents.
+ * Null uses none, or for a kind of staff message, the staff alerts channel.
+ */
 export const setChannel = command(z.object({ key: z.enum(CHANNEL_KEYS), channelId: Snowflake.nullable() }), async ({ key, channelId }) => {
   await admin('/internal/admin/settings', { method: 'PATCH', body: { [key]: channelId } });
   await operations().refresh();

@@ -86,7 +86,7 @@ export function redactWebhook(ref: WebhookRef): string {
 }
 
 export interface ExecuteWebhookBody {
-  content?: string;
+  content?: string | null;
   username: string;
   avatar_url?: string;
   /** Forum and media channels only: starts a post with this title. */
@@ -227,6 +227,12 @@ export const MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19);
 /** Message flag: the message is laid out by components alone (containers, text displays), with no `content` or embeds. */
 export const IS_COMPONENTS_V2 = 1 << 15;
 
+/** Component types, of those the relay lays messages out with. https://docs.discord.com/developers/components/reference */
+export const Component = { actionRow: 1, button: 2, section: 9, textDisplay: 10, thumbnail: 11, separator: 14, container: 17 } as const;
+
+/** Button styles: `link` opens its `url`; the others send an interaction with their `custom_id`. */
+export const ButtonStyle = { primary: 1, secondary: 2, danger: 4, link: 5 } as const;
+
 /** Discord's code when it won't let a bot message someone, for example one who turned off DMs. */
 export const CANNOT_MESSAGE_USER = 50007;
 
@@ -236,9 +242,9 @@ export interface ApplicationEmoji {
   name: string;
 }
 
-/** What the bot posts as itself. `content` is required unless `flags` has IS_COMPONENTS_V2 and `components` lay the message out. */
+/** What the bot posts as itself. `content` is required unless `flags` has IS_COMPONENTS_V2 and `components` lay the message out; an edit converting a message to V2 sends `content: null` to clear it. */
 export interface CreateMessageBody {
-  content?: string;
+  content?: string | null;
   components?: unknown[];
   flags?: number;
 }
@@ -357,9 +363,9 @@ export class DiscordRest {
     return { message: thread.message, rateLimit };
   }
 
-  /** New text for a message the bot posted. Discord does not keep allowed_mentions from the original, so it is sent again. */
-  editMessage(channelId: string, messageId: string, content: string): Promise<DiscordMessage> {
-    return this.send<DiscordMessage>('PATCH', `/channels/${channelId}/messages/${messageId}`, { content, allowed_mentions: { parse: [] } }, true);
+  /** New text or layout for a message the bot posted. Discord does not keep allowed_mentions from the original, so it is sent again. */
+  editMessage(channelId: string, messageId: string, body: CreateMessageBody): Promise<DiscordMessage> {
+    return this.send<DiscordMessage>('PATCH', `/channels/${channelId}/messages/${messageId}`, { ...body, allowed_mentions: { parse: [] } }, true);
   }
 
   /** The servers the bot is in (up to 200, more than any agent's bot may be in). */
@@ -577,7 +583,15 @@ export class DiscordRest {
     }
     const rateLimit = readRateLimit(res.headers);
     const text = await res.text().catch(() => '');
-    if (!res.ok) this.opts.onErrorResponse?.({ method: 'POST', route: safeRoute(path), status: res.status, headers: Object.fromEntries(res.headers), body: text, retry: 0 });
+    if (!res.ok)
+      this.opts.onErrorResponse?.({
+        method: 'POST',
+        route: safeRoute(path),
+        status: res.status,
+        headers: Object.fromEntries(res.headers),
+        body: text,
+        retry: 0,
+      });
     if (res.status === 429) throw this.rateLimited(res, rateLimit, text);
     if (res.status >= 500 || res.status === 408) {
       throw new UncertainSendError(new DiscordError(`Discord returned ${res.status}`, res.status, null, rateLimit));

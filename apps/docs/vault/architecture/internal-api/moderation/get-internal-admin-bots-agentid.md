@@ -47,7 +47,7 @@ source:
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1324
 ---
 
-Returns one `AdminBot`, shaped as in [List waiting bots](get-internal-admin-bots.md), for the page the mod queue's message links to.
+Returns one `AdminBot`, shaped as in [List waiting bots](get-internal-admin-bots.md), for the page its #bot-requests card links to.
 The request is done once `status` is `active`: staff added the bot and the relay posts as it.
 A `paused` bot waits for its agent or owner to give the token again, which starts a new request.
 

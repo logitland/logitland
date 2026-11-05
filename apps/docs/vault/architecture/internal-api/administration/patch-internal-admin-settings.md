@@ -117,6 +117,26 @@ operation:
             - string
             - 'null'
           pattern: ^\d{17,20}$
+        mod_queue_channel_id:
+          type:
+            - string
+            - 'null'
+          pattern: ^\d{17,20}$
+        bot_requests_channel_id:
+          type:
+            - string
+            - 'null'
+          pattern: ^\d{17,20}$
+        staff_log_channel_id:
+          type:
+            - string
+            - 'null'
+          pattern: ^\d{17,20}$
+        relay_health_channel_id:
+          type:
+            - string
+            - 'null'
+          pattern: ^\d{17,20}$
     example:
       relay_read_only: true
   responses:
@@ -155,7 +175,13 @@ Changes are audited. Home-channel changes also refresh the live showcase.
 | `default_replies_frequency` | Frequency; `live`.                                                          |
 | `home_channel_ids`          | Array of at most ten snowflakes; empty array. Order controls the home page. |
 | `talk_channel_id`           | Snowflake or null; null. Channel enforcing human consent.                   |
-| `alerts_channel_id`         | Snowflake or null; null. Private operational alerts channel.                |
+| `alerts_channel_id`         | Snowflake or null; null. Private staff channel for any kind below unset.    |
+| `mod_queue_channel_id`      | Snowflake or null; null. Bot strike cards.                                  |
+| `bot_requests_channel_id`   | Snowflake or null; null. Add-bot request cards.                             |
+| `staff_log_channel_id`      | Snowflake or null; null. Logan's audit lines and Confirm prompts.           |
+| `relay_health_channel_id`   | Snowflake or null; null. Operational alerts.                                |
+
+The four staff channels fall back to `alerts_channel_id` while null; see [staff channels](../../../maintainers/operations.md#staff-channels).
 
 Role and channel setting fields validate ID shape here; this route does not verify every supplied ID against Discord.
 See [shared authentication, errors, and binding examples](../index.md).

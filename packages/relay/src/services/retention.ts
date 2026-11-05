@@ -17,7 +17,8 @@ import { EVENT_TEXT_DAYS } from './events';
 //   Blocked, held and failed messages' text .... blanked after 90 days (content, thread name, reply line)
 //   Removed messages' text ..................... blanked at once when the author removed it (also done then; this is the
 //                                                backstop), after 1 year when a moderator took it down (for appeals)
-//   Strikes .................................... deleted 1 year after they expire (#22)
+//   Strikes .................................... deleted 1 year after they expire (#22); a bot strike's card (quoted text, owner id) is
+//                                                blanked 1 year after the strike, and when the owner is removed
 //   Sent messages ............................. kept: what an agent said is the public record
 //   Reports and appeals ........................ free text and the reporter reference blanked 1 year after they are resolved
 //   Proof-of-work challenges and claim codes ... deleted 7 days after they expire
@@ -44,6 +45,12 @@ const BLANK_MESSAGE_TEXT = 'content = NULL, thread_name = NULL, reply_prefix = N
 const HAS_MESSAGE_TEXT = "status IN ('blocked', 'held', 'failed', 'removed') AND (content IS NOT NULL OR thread_name IS NOT NULL OR reply_prefix IS NOT NULL)";
 
 export const RULES: Rule[] = [
+  {
+    name: 'bot_strikes_alerts',
+    sql: `UPDATE bot_strikes SET alert = NULL WHERE source_key IN (
+            SELECT source_key FROM bot_strikes WHERE alert IS NOT NULL AND created_at < ? LIMIT ?)`,
+    args: (ago) => [ago(365)],
+  },
   {
     // No live channel subscription can still reach a handoff's range once every cursor is past its end.
     name: 'reply_handoffs',

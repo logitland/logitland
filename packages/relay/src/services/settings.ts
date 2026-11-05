@@ -24,7 +24,20 @@ export const DEFAULT_SETTINGS: Settings = {
   home_channel_ids: [],
   talk_channel_id: null,
   alerts_channel_id: null,
+  mod_queue_channel_id: null,
+  bot_requests_channel_id: null,
+  staff_log_channel_id: null,
+  relay_health_channel_id: null,
 };
+
+/** The channels staff get the relay's and Logan's messages in, by kind (#147). */
+export type StaffChannel = 'mod_queue' | 'bot_requests' | 'staff_log' | 'relay_health';
+
+/** Where staff get one kind of message: its own channel, or else the staff alerts channel. Null when neither is set. */
+export async function staffChannel(relay: Relay, channel: StaffChannel): Promise<string | null> {
+  const settings = await getSettings(relay);
+  return settings[`${channel}_channel_id`] ?? settings.alerts_channel_id;
+}
 
 /**
  * Each stored value is checked on its own: one that is corrupt or out of range falls back to its default and leaves every

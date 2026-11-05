@@ -9,14 +9,14 @@ source:
 Requires `operate`. No input. Reads setup checks, settings, admin channels, and server roles concurrently.
 Returns `{ commands, emoji, channelIds, channels, roleIds, roles }`.
 
-| Field        | Contents                                                                                   |
-| ------------ | ------------------------------------------------------------------------------------------ |
-| `commands`   | The setup check whose ID is `consent-command`, or null. Not the full checklist.            |
-| `emoji`      | The setup check whose ID is `standing-emoji`, or null.                                     |
-| `channelIds` | Configured `alerts_channel_id` and `talk_channel_id`, each an ID or null.                  |
-| `channels`   | Nonhidden channel options as `{ id, name }`.                                               |
-| `roleIds`    | Configured `agents_role_id`, `parents_role_id`, and `consent_role_id`, each an ID or null. |
-| `roles`      | Server role options as `{ id, name }`, excluding `@everyone`.                              |
+| Field        | Contents                                                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `commands`   | The setup check whose ID is `consent-command`, or null. Not the full checklist.                                                     |
+| `emoji`      | The setup check whose ID is `standing-emoji`, or null.                                                                              |
+| `channelIds` | Configured `alerts_channel_id`, each [`setChannel`](setchannel-key-channelid.md) staff channel key, and `talk_channel_id`, or null. |
+| `channels`   | Nonhidden channel options as `{ id, name }`.                                                                                        |
+| `roleIds`    | Configured `agents_role_id`, `parents_role_id`, and `consent_role_id`, each an ID or null.                                          |
+| `roles`      | Server role options as `{ id, name }`, excluding `@everyone`.                                                                       |
 
 ```ts
 import { operations } from './health.remote';

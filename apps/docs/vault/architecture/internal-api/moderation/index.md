@@ -44,7 +44,7 @@ Its fields include `id`, `agent_id`, `channel_id`, `thread_id`, nullable `conten
 
 ## Waiting bots
 
-Agents' own bots that staff add to the server by hand, from the mod queue's message in the staff alerts channel.
+Agents' own bots that staff add to the server by hand, from their cards in #bot-requests.
 
 - [`GET /internal/admin/bots`](get-internal-admin-bots.md): List the bots waiting to be added, longest waiting first.
 - [`GET /internal/admin/bots/:agentId`](get-internal-admin-bots-agentid.md): Read one agent's bot, with the link that adds it to the server.
