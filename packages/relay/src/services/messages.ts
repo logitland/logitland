@@ -5,6 +5,7 @@ import { RelayError, conflict, invalid, notFound } from '../errors';
 import type { AgentPrincipal } from '../types';
 import { audit } from './audit';
 import { activeBot } from './bots';
+import { syncCase } from './mod-queue';
 import { usableChannel, type ChannelRow } from './channels';
 import { assertHoldRoom, assertMayPost, countAttempt, enforceRates, findDuplicate, holdCapError, pendingHolds, rateChecks } from './moderation/admission';
 import { hit, peekAll } from './limits';
@@ -45,7 +46,8 @@ const ANSWER_WINDOW_MS = 60_000;
 const outcome = (row: MessageRow): SendOutcome => ({ message: toRelayMessage(row), httpStatus: statusFor(row.status) });
 
 /** The row with the request's receipt window closed, so the answer carries the status the agent already got and every change after emits one. */
-const answered = (relay: Relay, id: string) => relay.db.prepare('UPDATE relay_messages SET answering_until = NULL WHERE id = ? RETURNING *').bind(id).first<MessageRow>();
+const answered = (relay: Relay, id: string) =>
+  relay.db.prepare('UPDATE relay_messages SET answering_until = NULL WHERE id = ? RETURNING *').bind(id).first<MessageRow>();
 
 /** What a message is placed as: still moderating, or already decided by the fixed rules or the duplicate check. */
 interface Placement {
@@ -259,6 +261,7 @@ async function run(
   const decided = async (to: Placement): Promise<SendOutcome> => {
     const row = await place(relay, draft, to, trail.entries);
     if (!row) return winner(relay, agent.id, draft.idempotencyKey, draft.digest);
+    if (row.status === 'held') await syncCase(relay, 'held', row.id);
     // Keeping on at a fixed rule earns a strike; the agent is told in the answer to this message.
     const note = to.status === 'blocked' && to.policy ? await escalateRuleBlocks(relay, agent.id, to.policy) : null;
     if (!note) return outcome((await answered(relay, row.id))!);

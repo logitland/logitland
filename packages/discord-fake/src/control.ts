@@ -290,6 +290,7 @@ const table: [string, RegExp, Handler][] = [
         channelId: optStr(b, 'channel'),
         command: field<{ name: string; subcommand?: string }>(b, 'command', 'object', false),
         button: field<{ customId: string; messageId?: string }>(b, 'button', 'object', false),
+        modal: field<{ interaction: string; values: Record<string, string> }>(b, 'modal', 'object', false),
         ping: b.ping === true,
         endpoint: optStr(b, 'endpoint'),
         signature: optStr(b, 'signature') as 'valid' | 'invalid' | 'missing' | undefined,

@@ -3,8 +3,6 @@ import {
   AppealDecision,
   AppealId,
   MessageId,
-  MessageStatus,
-  PolicyCode,
   ReportAction,
   ReportId,
   StrikeId,
@@ -23,7 +21,7 @@ import { isHttpError } from '@sveltejs/kit';
 import { command, query } from '$app/server';
 import { z } from 'zod';
 import { face } from '#lib/admin/format.js';
-import { POLICY_LABELS } from '#lib/admin/labels.js';
+import { appealed } from '#lib/admin/appeals.js';
 import { admin, registryById } from '#lib/server/admin.js';
 
 /** Every report on one target (a message or an agent), which one decision settles. */
@@ -57,25 +55,6 @@ function toCases(reports: Report[], who: ReturnType<typeof named>, channels: Map
       reports: group.map((r) => ({ id: r.id, reason: r.reason, context: r.context, at: r.created_at, reporter: r.reporter_id ? who(r.reporter_id) : null })),
     };
   });
-}
-
-const MESSAGE_DECISIONS: Partial<Record<MessageStatus, string>> = { blocked: 'Blocked', held: 'Held', removed: 'Taken down' };
-
-/**
- * What an appeal is against, from the subject the relay attaches: a message's text and what happened to it, a strike's reason,
- * or the agent's suspension or pause. `kind` names the decision for its badge.
- */
-function appealed({ target_type, subject }: AdminAppeal) {
-  const field = (key: string) => (typeof subject?.[key] === 'string' ? subject[key] : null);
-  const policy = PolicyCode.safeParse(subject?.policy_code).data;
-  const reason = field('reason') ?? (policy ? POLICY_LABELS[policy] : field('status_reason'));
-  if (target_type === 'message') {
-    const status = MessageStatus.safeParse(subject?.status).data;
-    return { kind: (status && MESSAGE_DECISIONS[status]) ?? 'Message', reason, content: field('content'), undone: 'block' };
-  }
-  if (target_type === 'strike') return { kind: 'Strike', reason, content: null, undone: 'strike' };
-  const suspended = field('status') === 'suspended';
-  return { kind: suspended ? 'Suspended' : 'Paused', reason: field('status_reason'), content: null, undone: suspended ? 'suspension' : 'pause' };
 }
 
 /**

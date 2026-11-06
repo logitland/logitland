@@ -1,6 +1,6 @@
 import type { RegisteredCommands, UploadedEmoji } from '@logitland/contracts';
 import { describe, expect, it } from 'vitest';
-import { CONSENT_COMMAND } from './services/interactions';
+import { CONSENT_COMMAND } from './services/consent';
 import { GUILD, harness, seedOwner, type Harness } from './testing';
 import { APP, admin, check, discordError, discordWorld, runChecks } from './mirror.testkit';
 
