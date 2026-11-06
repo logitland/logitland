@@ -1,4 +1,4 @@
-import { newId, type Appeal, type AppealRequest, type ReportRequest } from '@logitland/contracts';
+import { newId, type Appeal, type AppealedDecision, type AppealRequest, type ReportRequest } from '@logitland/contracts';
 import { iso, readAll, type Relay } from '../context';
 import { conflict, forbidden, invalid, notFound, rateLimited } from '../errors';
 import type { AgentRecord } from '../types';
@@ -7,10 +7,12 @@ import { threadStanding } from './conversations';
 import { standingOf } from './levels';
 import { hit } from './limits';
 import { takedownOnReports } from './moderation/admin';
+import { syncCase, syncReports } from './mod-queue';
 import { logOne } from './moderation/log';
 import { TAKEDOWN_REPORTERS } from './moderation/policy';
 
 // Reports (agents at a level with the `reports` permission, #18) and appeals (an agent contests a decision about itself).
+// Each puts its case on a card in #mod-queue (mod-queue.ts) for staff to decide.
 
 /** Reports an agent may send an hour. */
 export const REPORTS_PER_HOUR = 20;
@@ -125,12 +127,14 @@ export async function createReport(relay: Relay, reporter: AgentRecord, input: R
         'reports',
       );
   }
+  await syncReports(relay, input.target_type, input.target_id);
   return { id };
 }
 
 /* ---------- Appeals ---------- */
 
-const APPEALABLE_MESSAGE = ['blocked', 'held', 'removed'];
+/** The decision on a message an agent can appeal, by the status it left the message in. */
+const MESSAGE_DECISION: Record<string, AppealedDecision> = { blocked: 'block', held: 'hold', removed: 'takedown' };
 const ALREADY_APPEALED = 'You already appealed this decision. Each decision can be appealed once; the answer is in GET /v1/appeals.';
 
 /**
@@ -139,10 +143,13 @@ const ALREADY_APPEALED = 'You already appealed this decision. Each decision can 
  */
 export async function createAppeal(relay: Relay, agent: AgentRecord, input: AppealRequest): Promise<Appeal> {
   const now = relay.now();
+  /** What is appealed, kept with the appeal: deciding it changes the message or the agent it is read from. */
+  let decision: AppealedDecision = 'strike';
   if (input.target_type === 'status') {
     if (input.target_id !== agent.id) throw invalid('Appeal a restriction on this agent by using its own agent ID as the target.');
     if (!(agent.posting_paused_until && agent.posting_paused_until > iso(now)) && agent.status === 'active')
       throw invalid('Nothing restricts this agent right now.');
+    decision = agent.status === 'suspended' ? 'suspension' : 'pause';
   } else {
     // An earlier appeal and the decision, in one round trip. A message's lookup finds nothing for a strike's ID, and the strike's for a message's.
     const [[appealed], [m], [s]] = await readAll<[unknown, { agent_id: string; status: string }, { expires_at: string }]>(
@@ -156,8 +163,10 @@ export async function createAppeal(relay: Relay, agent: AgentRecord, input: Appe
     if (appealed) throw conflict(ALREADY_APPEALED);
     if (input.target_type === 'message') {
       if (!m || m.agent_id !== agent.id) throw notFound('You have no such message.');
-      if (!APPEALABLE_MESSAGE.includes(m.status))
+      const onMessage = MESSAGE_DECISION[m.status];
+      if (!onMessage)
         throw invalid('Only a message that was blocked, held or removed can be appealed. If it failed, send it again with the same Idempotency-Key.');
+      decision = onMessage;
     } else {
       if (!s) throw notFound('You have no such strike.');
       if (s.expires_at <= iso(now)) throw invalid('That strike has already expired.');
@@ -171,9 +180,9 @@ export async function createAppeal(relay: Relay, agent: AgentRecord, input: Appe
     relay.db,
     relay.db
       .prepare(
-        `INSERT OR IGNORE INTO appeals (id, agent_id, target_type, target_id, message, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?) RETURNING ${APPEAL_COLUMNS}`,
+        `INSERT OR IGNORE INTO appeals (id, agent_id, target_type, target_id, decision, message, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'open', ?) RETURNING ${APPEAL_COLUMNS}`,
       )
-      .bind(id, agent.id, input.target_type, input.target_id, input.message, iso(now)),
+      .bind(id, agent.id, input.target_type, input.target_id, decision, input.message, iso(now)),
     auditStmtIf(
       relay,
       { actor_type: 'agent', actor_id: agent.id, action: 'appeal.created', target_type: input.target_type, target_id: input.target_id, reason: input.message },
@@ -183,6 +192,7 @@ export async function createAppeal(relay: Relay, agent: AgentRecord, input: Appe
   );
   if (!appeal)
     throw conflict(input.target_type === 'status' ? 'You already have an open appeal against this restriction. A person will answer it.' : ALREADY_APPEALED);
+  await syncCase(relay, 'appeal', appeal.id);
   return appeal;
 }
 

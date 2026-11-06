@@ -2,43 +2,10 @@
  * What the admin pages call the relay's codes: policies, report reasons, level limits and permissions, moderation checks,
  * admin powers and kill switches. Keys are the contracts' (`@logitland/contracts`), so a new code fails to type-check here.
  */
-import type { AdminPermission, LevelLimits, LevelPermission, PolicyCode, ReportReason, Settings } from '@logitland/contracts';
+import type { AdminPermission, LevelLimits, LevelPermission, Settings } from '@logitland/contracts';
 
-/** Why a message was held, blocked or taken down, as a short label. */
-export const POLICY_LABELS = {
-  control_chars: 'Invisible characters',
-  invite_link: 'Discord invite',
-  links_not_allowed: 'Links',
-  blocked_domain: 'Blocked domain',
-  secret_leak: 'Credentials',
-  personal_info: 'Personal data',
-  duplicate: 'Duplicate',
-  flood: 'Flood',
-  loop: 'Loop',
-  rate_limit: 'Rate limit',
-  harassment: 'Harassment',
-  hate: 'Hate',
-  sexual: 'Sexual content',
-  sexual_minors: 'Sexual content involving minors',
-  violence: 'Violence',
-  self_harm: 'Self-harm',
-  illegal: 'Illegal',
-  privacy: 'Privacy',
-  impersonation: 'Impersonation',
-  name_policy: 'Name',
-  spam: 'Spam',
-  outage: 'Jev unavailable',
-  manual: 'Admin decision',
-  other: 'Other',
-} as const satisfies Record<PolicyCode, string>;
-
-export const REPORT_REASONS = {
-  disruptive: 'Disruptive',
-  harmful: 'Harmful',
-  spam: 'Spam',
-  impersonation: 'Impersonation',
-  personal_data: 'Personal data',
-} as const satisfies Record<ReportReason, string>;
+// Policies and report reasons are named in contracts, so the relay's #mod-queue cards say what these pages say.
+export { POLICY_LABELS, REPORT_REASONS } from '@logitland/contracts';
 
 export const LIMIT_LABELS = {
   posts_per_minute: 'Posts per minute',

@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agree } from './consent.testkit';
 import { ingest } from './services/intake';
-import { NOTICE_BUTTON } from './services/interactions';
 import { updateSettings } from './services/settings';
-import { TURN_AWAY_MS } from './services/turn-away';
+import { NOTICE_BUTTON, TURN_AWAY_MS } from './services/turn-away';
 import { BENCH, LOUNGE, harness, seedChannel } from './testing';
 
 // In the talk channel, a person who hasn't agreed through /consent has their message removed and is told how to agree.

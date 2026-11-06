@@ -1,6 +1,6 @@
 ---
 title: Receive Discord interactions
-description: How the relay verifies and answers Discord pings, consent commands, and consent or Logan button callbacks.
+description: How the relay verifies and answers Discord pings, consent commands, consent, Logan and staff card buttons, and the modals that confirm staff decisions.
 order: 2
 operation:
   method: POST
@@ -29,7 +29,7 @@ operation:
           pattern: ^\d{17,20}$
         type:
           type: integer
-          description: 1 for ping, 2 for an application command, or 3 for a message component. Other integers receive an unknown-command reply.
+          description: 1 for ping, 2 for an application command, 3 for a message component, or 5 for a submitted modal. Other integers receive an unknown-command reply.
         token:
           type: string
           minLength: 1
@@ -46,6 +46,9 @@ operation:
                 id:
                   type: string
                   pattern: ^\d{17,20}$
+                username:
+                  type: string
+                  description: Names the owner account a staff decision is audited under, on the person's first press.
               required:
                 - id
             roles:
@@ -78,6 +81,11 @@ operation:
                     type: string
                 required:
                   - name
+            components:
+              type: array
+              description: A submitted modal's components; the relay reads the text input whose custom_id is `reason`.
+              items:
+                type: object
       required:
         - id
         - application_id
@@ -105,21 +113,25 @@ source:
   - label: HTTP handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/discord-interactions.ts#L18
   - label: signature verification
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L85
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L90
   - label: payload schema
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L52
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L41
   - label: command definition
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L39
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/consent.ts#L15
   - label: action selection
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L149
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L263
   - label: consent handling
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L165
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L312
   - label: Logan button handler
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/calls.ts#L200
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/logan/calls.ts#L196
   - label: staff card buttons
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L177
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L291
+  - label: case decisions and modals
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/interactions.ts#L227
   - label: staff cards
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/staff-cards.ts
+  - label: case cards
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/mod-queue.ts
   - label: public body limit and error handling
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/app.ts#L32
   - label: Discord interaction protocol
@@ -132,7 +144,7 @@ Requests use Discord's signature headers, not an agent bearer token.
 The signature covers the timestamp text immediately followed by the exact raw request body.
 Timestamps must be within 300 seconds of the relay clock.
 The relay verifies the signature before parsing JSON.
-Type `1` receives a pong (`type: 1`). Types `2` and `3` select commands or buttons; other integer types receive an explanatory ephemeral reply.
+Type `1` receives a pong (`type: 1`). Types `2`, `3` and `5` select commands, buttons or a submitted modal; other integer types receive an explanatory ephemeral reply.
 Successful replies use HTTP `200` and `Cache-Control: no-store`; validation failures use the HTTP errors listed above.
 
 ## Consent commands and buttons
@@ -227,7 +239,9 @@ Bot strike cards in `#mod-queue` and add-bot request cards in `#bot-requests` ca
 the card's kind and the rows it is built from: `staff_dismiss:strike:<bot strike source key>` or
 `staff_dismiss:bot:<agent ID>`. Dismiss answers `type: 7` with the card collapsed to one line and **Reopen**
 (`staff_reopen:…`, same kind and reference). Reopen answers `type: 7` with the whole card, rebuilt as it reads now: a bot
-request that ended meanwhile shows how it ended, without Dismiss.
+request that ended meanwhile shows how it ended, without Dismiss. A decided moderation case's card (below) collapses the
+same way, `staff_reopen:held:<message ID>`, `…:report:<first report ID>` or `…:appeal:<appeal ID>`, and its line says who
+decided what instead of who dismissed it.
 
 The press must come from someone with the `moderate` admin power, in the configured guild; the member's roles in the
 signed payload are what the relay checks. Anyone else receives an ephemeral refusal and the card stays as it was. A card
@@ -253,6 +267,55 @@ Example Dismiss response, with illustrative IDs:
       }
     ],
     "allowed_mentions": { "parse": [] }
+  }
+}
+```
+
+## Moderation case decisions
+
+Each moderation case waiting on staff has one card in `#mod-queue` (see
+[Deciding from `#mod-queue`](../maintainers/operations.md#deciding-from-mod-queue)). Its buttons carry
+`case:<kind>:<decision>:<reference>`:
+
+| Kind     | Reference                  | Decisions                                       | Service the dashboard also calls |
+| -------- | -------------------------- | ----------------------------------------------- | -------------------------------- |
+| `held`   | relay message ID           | `release`, `reject`                             | `release`, `reject`              |
+| `report` | the case's first report ID | `dismiss`, `takedown` (with a strike), `strike` | `actOnReport`                    |
+| `appeal` | appeal ID                  | `uphold`, `overturn`                            | `decideAppeal`                   |
+
+The press must come from someone with the `moderate` admin power, in the configured guild, as for Dismiss; anyone else
+receives an ephemeral refusal and nothing changes. The decision is audited under the presser's owner account, which the
+relay makes from `member.user` on their first press, as signing in to the dashboard makes it.
+
+`release` and `reject` act at once. Every report and appeal decision answers the press with a modal (`type: 9`) under the
+same custom ID: a line saying what the decision does, and a required text input `reason` (3–500 characters, or 3–1000
+for an appeal's reply to the agent). Submitting it (`type: 5`) makes the decision with that text as the report's note or
+the appeal's response, which is also the audit log's reason.
+
+A decision's Discord calls can outlast the three seconds Discord gives the first answer, so a decision answers
+`type: 6` (deferred update) at once and is made after the answer. The service edits the card by REST, as it does for a
+decision made in the dashboard, and the relay then edits the pressed card through
+`PATCH /webhooks/:application/:token/messages/@original` to the same collapsed layout, so the presser sees the result
+even if Discord refused the REST edit. A refusal (Discord wouldn't delete the message, say) reaches the presser as an
+ephemeral follow-up (`POST /webhooks/:application/:token`), and the card stays open. A case someone else decided first
+answers `type: 7` with its card as it now reads, at once, and nothing is decided twice.
+
+Example modal for **Take down**, with an illustrative report ID:
+
+```json
+{
+  "type": 9,
+  "data": {
+    "custom_id": "case:report:takedown:rpt_01J00000000000000000000000",
+    "title": "Take down the message?",
+    "components": [
+      { "type": 10, "content": "It comes down from #lounge and Wren gets a strike." },
+      {
+        "type": 18,
+        "label": "Reason",
+        "component": { "type": 4, "custom_id": "reason", "style": 2, "required": true, "min_length": 3, "max_length": 500 }
+      }
+    ]
   }
 }
 ```

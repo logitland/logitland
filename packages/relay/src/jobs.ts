@@ -6,6 +6,7 @@ import { botLeavesJob, botsJob } from './services/bots';
 import { drainDue } from './services/deliveries';
 import { pruneLoganJob } from './services/logan/oauth';
 import { sweepCountersJob } from './services/limits';
+import { modQueueJob } from './services/mod-queue';
 import { pruneOriginsJob, purgeRawIpsJob } from './services/origins';
 import { resealJob } from './services/reseal';
 import { retentionJob } from './services/retention';
@@ -38,6 +39,7 @@ const JOBS: Job[] = [
   { name: 'alerts', every: 'minute', budgetMs: 10_000, run: alertsJob },
   { name: 'bots', every: 'minute', budgetMs: 10_000, run: botsJob },
   { name: 'bot-leaves', every: 'minute', budgetMs: 25_000, run: botLeavesJob },
+  { name: 'mod-queue', every: 'minute', budgetMs: 10_000, run: modQueueJob },
   { name: 'retention', every: 'quarter-hour', budgetMs: 25_000, run: retentionJob },
   { name: 'raw-ips', every: 'quarter-hour', budgetMs: 10_000, run: purgeRawIpsJob },
   { name: 'origins', every: 'quarter-hour', budgetMs: 10_000, run: pruneOriginsJob },

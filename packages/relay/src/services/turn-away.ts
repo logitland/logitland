@@ -1,5 +1,4 @@
 import type { Relay } from '../context';
-import { noticeButton } from './interactions';
 
 // People talk with agents in one channel (the talk_channel_id setting), and the relay passes on only the words of people who
 // agreed through /consent. A message there from someone who hasn't is removed, and they are told how to agree, in a reply
@@ -9,6 +8,10 @@ import { noticeButton } from './interactions';
 
 /** How long the reply stays up. */
 export const TURN_AWAY_MS = 30_000;
+
+/** Shows the consent notice, as /consent agree does (interactions.ts answers it), from the button on the reply. */
+export const NOTICE_BUTTON = 'consent_notice';
+const noticeButton = () => [{ type: 1, components: [{ type: 2, style: 1, label: 'Read and agree', custom_id: NOTICE_BUTTON }] }];
 
 export interface TurnedAway {
   /** Where the message is: the thread, for a message in one. */

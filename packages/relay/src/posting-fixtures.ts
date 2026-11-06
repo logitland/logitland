@@ -36,12 +36,15 @@ export interface FakeDiscordOptions {
   change?: (req: Request) => Response | Promise<Response>;
   /** Extra headers on webhook post answers, e.g. rate-limit headers. */
   headers?: Record<string, string>;
+  /** Keeps Discord from answering a request until the promise it returns settles, as a slow or rate-limited Discord does. */
+  slow?: (req: Request) => Promise<void> | undefined;
 }
 
 /** Installs a fake Discord on the harness. Webhook tokens are `token-<channel id>`, which is how it knows the parent channel. */
 export function fakeDiscord(h: Harness, opts: FakeDiscordOptions = {}) {
   let next = 300000000000009000n;
   h.setDiscord(async (req) => {
+    await opts.slow?.(req);
     const url = new URL(req.url);
     const thread = /\/channels\/(\d+)\/messages\/(\d+)\/threads$/.exec(url.pathname);
     if (thread) {

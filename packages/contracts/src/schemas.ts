@@ -1456,8 +1456,23 @@ export const Appeal = z.object({
 });
 export type Appeal = z.infer<typeof Appeal>;
 
-/** An appeal as admins see it, with what it is about. */
+/** The decision an appeal contests, recorded when the appeal is made (appeals.decision). */
+export const AppealedDecision = z.enum(['block', 'hold', 'takedown', 'strike', 'suspension', 'pause']);
+export type AppealedDecision = z.infer<typeof AppealedDecision>;
+
+/** Each appealed decision's badge, on the mod-queue card and in the dashboard. Sentences name it by its noun instead. */
+export const APPEALED_LABELS: Record<AppealedDecision, string> = {
+  block: 'Blocked',
+  hold: 'Held',
+  takedown: 'Taken down',
+  strike: 'Strike',
+  suspension: 'Suspended',
+  pause: 'Paused',
+};
+
+/** An appeal as admins see it, with what it is about. `decision` is null only on appeals decided before it was recorded. */
 export const AdminAppeal = Appeal.extend({
+  decision: AppealedDecision.nullable(),
   resolved_by: z.string().nullable(),
   agent_name: z.string(),
   subject: z.record(z.string(), z.unknown()).nullable(),
