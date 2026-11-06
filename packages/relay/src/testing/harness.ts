@@ -5,7 +5,7 @@ import { ALL_SCOPES, newId, type ChannelType, type LevelLimits, type Scope } fro
 import { Permission, type Overwrite } from '@logitland/discord';
 import { fileURLToPath } from 'node:url';
 import { internalApp, relayApp } from '../app';
-import type { AvatarBucket, ChannelSenderClient, Db, GatewayClient, Relay, SocketOpener } from '../context';
+import type { Bucket, ChannelSenderClient, Db, GatewayClient, Relay, SocketOpener } from '../context';
 import { SecretBox, randomToken, sha256 } from '../crypto';
 import { createRelay } from '../index';
 import type { RelayBindings } from '../config';
@@ -125,6 +125,20 @@ export function testImage(format: TestImageFormat, width = 128, height = 128, ta
   }
 }
 
+type StoredObject = { bytes: Uint8Array<ArrayBuffer>; contentType: string };
+
+/** An R2 bucket kept in `objects`, by key. */
+const memoryBucket = (objects: Map<string, StoredObject>): Bucket => ({
+  get: async (key) => {
+    const object = objects.get(key);
+    return object ? { body: new Blob([object.bytes]).stream(), size: object.bytes.byteLength, httpMetadata: { contentType: object.contentType } } : null;
+  },
+  put: async (key, value, { httpMetadata }) => void objects.set(key, { bytes: value, contentType: httpMetadata.contentType }),
+  delete: async (keys) => {
+    for (const key of [keys].flat()) objects.delete(key);
+  },
+});
+
 export function harness(opts: HarnessOptions = {}) {
   let clock = new Date(opts.start ?? '2026-10-19T03:00:00Z');
   const dns: Record<string, string[]> = {
@@ -136,16 +150,9 @@ export function harness(opts: HarnessOptions = {}) {
   const receivers: Record<string, Handler> = {
     'cdn.example.com': (req) => new Response(testImage('png', 128, 128, new URL(req.url).pathname), { headers: { 'content-type': 'image/png' } }),
   };
-  /** The avatar bucket's objects, by key. */
-  const avatars = new Map<string, { bytes: Uint8Array<ArrayBuffer>; contentType: string }>();
-  const bucket: AvatarBucket = {
-    get: async (key) => {
-      const object = avatars.get(key);
-      return object ? { body: new Blob([object.bytes]).stream(), httpMetadata: { contentType: object.contentType } } : null;
-    },
-    put: async (key, value, { httpMetadata }) => void avatars.set(key, { bytes: value, contentType: httpMetadata.contentType }),
-    delete: async (key) => void avatars.delete(key),
-  };
+  /** The avatar and attachment buckets' objects, by key. */
+  const avatars = new Map<string, StoredObject>();
+  const attachments = new Map<string, StoredObject>();
   const discordCalls: Request[] = [];
   let nextDiscordId = 300000000000000000n;
   /** Replace to script Discord's answers. The default accepts every webhook post, and ADMIN_DISCORD is the bot's Developer team. */
@@ -224,7 +231,8 @@ export function harness(opts: HarnessOptions = {}) {
       DISCORD_APPLICATION_ID: '400000000000000001',
       DISCORD_GUILD_ID: GUILD,
       RELAY_MODE: 'development',
-      AVATARS: bucket,
+      AVATARS: memoryBucket(avatars),
+      ATTACHMENTS: memoryBucket(attachments),
       ...opts.env,
     },
     {
@@ -265,6 +273,7 @@ export function harness(opts: HarnessOptions = {}) {
     receivers,
     dns,
     avatars,
+    attachments,
     discordCalls,
     identified,
     /** Public app: /v1, /agent, /oauth2, the docs. */

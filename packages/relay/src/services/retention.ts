@@ -7,6 +7,8 @@ import { EVENT_TEXT_DAYS } from './events';
 // age or by what is left to blank (see the indexes under "Retention" in the migration).
 //
 //   Event text ................................. blanked after EVENT_TEXT_DAYS (30 days)
+//   Files on messages .......................... served no more after EVENT_TEXT_DAYS, like the events that list them; the
+//                                                attachments job (attachments.ts) then deletes the copies and the rows
 //   Events ..................................... deleted after 30 days, except removal events (type message.deleted: intake
 //                                                finds them to stop a late create bringing a removed message's text back,
 //                                                and they hold no text) and the newest event older than that. A subscription
@@ -66,6 +68,11 @@ export const RULES: Rule[] = [
     sql: `UPDATE events SET payload = json_set(payload, '$.data.content', '') WHERE seq IN (
             SELECT seq FROM events WHERE observed_at < ? AND json_extract(payload, '$.data.content') != '' LIMIT ?)`,
     args: (ago) => [ago(EVENT_TEXT_DAYS)],
+  },
+  {
+    name: 'attachments',
+    sql: 'UPDATE attachments SET removed_at = ? WHERE id IN (SELECT id FROM attachments WHERE removed_at IS NULL AND created_at < ? LIMIT ?)',
+    args: (ago) => [ago(0), ago(EVENT_TEXT_DAYS)],
   },
   // Children first: attempts, then the deliveries without any.
   {

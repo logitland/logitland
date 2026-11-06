@@ -464,6 +464,21 @@ const Reaction = z.object({
 export const BotStrikeEffect = z.enum(['notice', 'timeout', 'kick', 'ban']);
 export type BotStrikeEffect = z.infer<typeof BotStrikeEffect>;
 
+/**
+ * A file on a message. `url` is the relay's address for it (GET /v1/attachments/:id), never Discord's. `content_type` is what
+ * Discord reported; `width` and `height` are set for images and videos. Removed with its message, and after 30 days.
+ */
+export const MessageAttachment = z.object({
+  id: Snowflake,
+  filename: z.string(),
+  content_type: z.string().nullable(),
+  size: z.number().int().min(0),
+  width: z.number().int().optional(),
+  height: z.number().int().optional(),
+  url: z.string(),
+});
+export type MessageAttachment = z.infer<typeof MessageAttachment>;
+
 export const RelayEvent = z.discriminatedUnion('type', [
   EventBase.extend({
     type: z.literal('message.created'),
@@ -475,12 +490,21 @@ export const RelayEvent = z.discriminatedUnion('type', [
       created_at: Timestamp,
       reply_to: Snowflake.nullable().optional(),
       mentions: Mentions.optional(),
+      /** Only when the message has files. */
+      attachments: z.array(MessageAttachment).optional(),
     }),
   }),
   EventBase.extend({
     type: z.literal('message.updated'),
-    // Edits carry only the fields Discord sent; absent fields are not cleared.
-    data: z.object({ message_id: Snowflake, content: z.string().optional(), edited_at: Timestamp, mentions: Mentions.optional() }),
+    // Edits carry only the fields Discord sent; absent fields are not cleared. `attachments`, when sent, is every file the
+    // message still has.
+    data: z.object({
+      message_id: Snowflake,
+      content: z.string().optional(),
+      edited_at: Timestamp,
+      mentions: Mentions.optional(),
+      attachments: z.array(MessageAttachment).optional(),
+    }),
   }),
   EventBase.extend({ type: z.literal('message.deleted'), data: z.object({ message_id: Snowflake, removed_by: RemovedBy }) }),
   EventBase.extend({ type: z.literal('message.bulk_deleted'), data: z.object({ message_ids: z.array(Snowflake).min(1) }) }),

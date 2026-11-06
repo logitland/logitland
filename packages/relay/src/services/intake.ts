@@ -9,6 +9,7 @@ import { enforceRelayOnly, offRelayEdits, type Offense } from './bot-strikes';
 import { anyAgentAccess } from './channels';
 import { EVERY_MESSAGE_SINCE, SHOWN_PUBLICLY_SINCE } from './consent';
 import { authorRef } from './conversation';
+import { attachmentStmts, eventAttachments } from './attachments';
 import { applyGuildEvents, isGuildEvent, type GuildEvent } from './guild';
 import { chunk, commitPlan, compareSnowflakes, MAX_PARAMS, placeholders, planEvent, snowflakeTime, type PlannedEvent } from './events';
 import { contentHash } from './moderation/rows';
@@ -37,6 +38,21 @@ const Located = { channel_id: Snowflake, thread_id: Snowflake.nullish() };
 const ChannelTag = z.object({ id: Snowflake, name: z.string().max(100), moderated: z.boolean() });
 const ChannelKind = z.enum(['text', 'announcement', 'forum', 'media']);
 
+/** A file on a message, as Discord describes it (attachments.ts). Discord allows 10 per message. */
+const Attachments = z
+  .array(
+    z.object({
+      id: Snowflake,
+      filename: z.string().min(1).max(1024),
+      content_type: z.string().max(255).nullish(),
+      size: z.number().int().min(0),
+      url: z.url({ protocol: /^https?$/ }).max(4096),
+      width: z.number().int().min(0).nullish(),
+      height: z.number().int().min(0).nullish(),
+    }),
+  )
+  .max(10);
+
 export const IntakeEvent = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('message_create'),
@@ -55,8 +71,17 @@ export const IntakeEvent = z.discriminatedUnion('kind', [
     timestamp: Timestamp,
     edited_timestamp: Timestamp.nullish(),
     reply_to: Snowflake.nullish(),
+    attachments: Attachments.optional(),
   }),
-  z.object({ kind: z.literal('message_update'), ...Located, message_id: Snowflake, content: z.string().optional(), edited_timestamp: Timestamp }),
+  z.object({
+    kind: z.literal('message_update'),
+    ...Located,
+    message_id: Snowflake,
+    content: z.string().optional(),
+    edited_timestamp: Timestamp,
+    /** Every file the message has now, when Discord said. */
+    attachments: Attachments.optional(),
+  }),
   z.object({ kind: z.literal('message_delete'), ...Located, message_id: Snowflake }),
   z.object({ kind: z.literal('message_delete_bulk'), ...Located, message_ids: z.array(Snowflake).min(1).max(100) }),
   // Who reacted is used only to tell repeats apart; it is never stored or announced.
@@ -550,6 +575,8 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         const tomb = tombs.get(e.message_id);
         const reply_to = e.reply_to ?? who.reply_to;
         stmts.push(createStmt(relay, e, who, { content: e.content, reply_to, edited_at: e.edited_timestamp ?? null }));
+        const files = e.attachments ?? [];
+        stmts.push(...attachmentStmts(relay, { ...e, attachments: files }, false));
         if (who.username !== null) {
           stmts.push(identityStmt(relay, who, e.timestamp));
           const stored = agreedAt.get(e.author.id)!;
@@ -581,6 +608,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
                 content: e.content,
                 created_at: e.timestamp,
                 ...(reply_to ? { reply_to } : {}),
+                ...(files.length ? { attachments: eventAttachments(relay, files) } : {}),
               },
             }),
           );
@@ -622,7 +650,12 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
             channelId: e.channel_id,
             messageId: e.message_id,
             sourceKey: key!,
-            data: { message_id: e.message_id, ...(e.content === undefined || !k ? {} : { content: e.content }), edited_at: e.edited_timestamp },
+            data: {
+              message_id: e.message_id,
+              ...(e.content === undefined || !k ? {} : { content: e.content }),
+              edited_at: e.edited_timestamp,
+              ...(e.attachments === undefined || !k ? {} : { attachments: eventAttachments(relay, e.attachments) }),
+            },
             silent: !k,
             // A person's edit is recorded and sent only under an agreement in force when they made it.
             when: {
@@ -642,6 +675,8 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
               ? relay.db.prepare(`UPDATE conversation SET edited_at = ? WHERE ${live}`).bind(e.edited_timestamp, ...at)
               : relay.db.prepare(`UPDATE conversation SET content = ?, edited_at = ? WHERE ${live}`).bind(e.content, e.edited_timestamp, ...at),
           );
+          // The files the message has now: one the edit dropped is removed, one it added (a bot or webhook can) is recorded.
+          if (e.attachments) stmts.push(...attachmentStmts(relay, { ...e, attachments: e.attachments }, true));
           k.edited_at = e.edited_timestamp;
         }
         break;

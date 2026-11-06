@@ -3,6 +3,7 @@ import type { MiddlewareHandler } from 'hono';
 import type { Relay } from '../context';
 import { RelayError, invalid, unavailable } from '../errors';
 import { fresh } from '../memo';
+import { serveAttachment } from '../services/attachments';
 import { agentChannels, ANY_AGENT, toAgentChannel, usableChannel } from '../services/channels';
 import { readPage } from '../services/conversation';
 import { eventTail } from '../services/events';
@@ -118,6 +119,11 @@ export const registerInternal: RegisterRoutes = (app, relay) => openReads(app, r
 export const register: RegisterRoutes = (app, relay) => {
   openReads(app, relay, '/v1', (scope) => openRead(relay, scope));
   const auth = agentAuth(relay);
+
+  // A file on a message, for whoever may read the message (services/attachments.ts).
+  app.get('/v1/attachments/:id', openRead(relay, 'messages:read'), (c) =>
+    serveAttachment(relay, { viewer: c.get('viewer'), agentId: bearer(c) ? c.get('principal').agent.id : null }, c.req.param('id')),
+  );
 
   // What the agent's subscriptions have waiting, taken off their cursors. A long-poll (wait) costs one read however long it
   // waits (#30 Q5): it holds the request and looks again whenever the log grows.

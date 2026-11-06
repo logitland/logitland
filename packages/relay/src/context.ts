@@ -62,11 +62,12 @@ export interface ChannelSenderClient {
   enqueue(channelId: string, messageId: string): Promise<void>;
 }
 
-/** Where the relay keeps its copies of custom avatars: the part of an R2 bucket it uses. */
-export interface AvatarBucket {
-  get(key: string): Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null>;
+/** Where the relay keeps files (custom avatars, message attachments): the part of an R2 bucket it uses. */
+export interface Bucket {
+  get(key: string): Promise<{ body: ReadableStream; size: number; httpMetadata?: { contentType?: string } } | null>;
   put(key: string, value: Uint8Array<ArrayBuffer>, options: { httpMetadata: { contentType: string } }): Promise<unknown>;
-  delete(key: string): Promise<void>;
+  /** Up to 1,000 keys at once. A key that isn't there is no error. */
+  delete(keys: string | string[]): Promise<void>;
 }
 
 /** Opens an outbound WebSocket: open when the promise resolves, its frames and close go to `events`. */
@@ -109,7 +110,9 @@ export interface Relay {
   resolver: Resolver;
   queue: DeliveryQueue | null;
   /** Null only in development without the binding; custom avatars are then unavailable. */
-  avatars: AvatarBucket | null;
+  avatars: Bucket | null;
+  /** The relay's copies of files on messages (services/attachments.ts). Null only in development without the binding. */
+  attachments: Bucket | null;
   sender: ChannelSenderClient | null;
   gateway: GatewayClient | null;
   streams: StreamHub | null;

@@ -76,6 +76,8 @@ Channel subscriptions skip replies covered by your replies subscription.
 
 Before consuming events, save each subscription's initial cursor, including the replies subscription from \`GET /v1/subscriptions\`. Then wait with \`GET /v1/events?wait=25\`, or MCP’s \`wait_for_events\` with \`{"wait": 25}\`. Save a new checkpoint only after processing, and follow the response’s \`hints\`.
 
+Message events list files in \`attachments\`. Download one from its \`url\` with your token, only when its \`content_type\` and \`size\` make it worth it.
+
 On \`message.deleted\` or \`message.bulk_deleted\`, delete your copies and anything you made from those messages.
 
 For cursors, reconnecting, webhooks or WebSockets, read [subscriptions and delivery](${dashboardUrl}/docs/agents/subscriptions.md).

@@ -1,9 +1,10 @@
 import { iso, type Relay, type Stmt } from '../context';
 import { sha256 } from '../crypto';
+import { removeAttachmentsStmt } from './attachments';
 import { chunk, commitPlan, compareSnowflakes, placeholders, planEvent, type PlannedEvent } from './events';
 
 // Removing text everywhere the relay keeps it (conversation, event payloads, which queued deliveries are read from again when
-// sent, and the relay's own record of a message an agent posted), for Discord deletes and moderator takedowns. What stays:
+// sent, the relay's own record of a message an agent posted, and the message's files), for Discord deletes and moderator takedowns. What stays:
 // the tombstone (who, when, why) and the removal event, so readers and subscribers learn the message is gone.
 
 export type RemovedBy = 'author' | 'moderator' | 'discord';
@@ -43,6 +44,13 @@ export function scrubStatements(relay: Relay, ids: string[], removedBy: RemovedB
           `UPDATE events SET payload = json_set(payload, '$.data.content', '') WHERE message_id IN (${marks}) AND type IN ('message.created', 'message.updated') AND json_type(payload, '$.data.content') = 'text'`,
         )
         .bind(...part),
+      // Its files' names go with the text, and the files themselves are served no more (attachments.ts).
+      relay.db
+        .prepare(
+          `UPDATE events SET payload = json_set(payload, '$.data.attachments', json('[]')) WHERE message_id IN (${marks}) AND type IN ('message.created', 'message.updated') AND json_array_length(payload, '$.data.attachments') > 0`,
+        )
+        .bind(...part),
+      removeAttachmentsStmt(relay, part),
       // The title of a thread an agent started is its starter's words (the thread's ID is the starter's ID).
       relay.db.prepare(`UPDATE threads SET name = NULL WHERE creator_agent_id IS NOT NULL AND name IS NOT NULL AND id IN (${marks})`).bind(...part),
     );

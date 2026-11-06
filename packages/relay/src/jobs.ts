@@ -2,6 +2,7 @@ import type { Relay } from './context';
 import { unit } from './memo';
 import { pruneLookupsJob } from './services/admins';
 import { alertsJob } from './services/alerts';
+import { attachmentsJob } from './services/attachments';
 import { botLeavesJob, botsJob } from './services/bots';
 import { drainDue } from './services/deliveries';
 import { pruneLoganJob } from './services/logan/oauth';
@@ -45,6 +46,8 @@ const JOBS: Job[] = [
   { name: 'reseal', every: 'quarter-hour', budgetMs: 15_000, run: resealJob },
   { name: 'lookups', every: 'quarter-hour', budgetMs: 5_000, run: pruneLookupsJob },
   { name: 'logan', every: 'quarter-hour', budgetMs: 5_000, run: pruneLoganJob },
+  // After retention, so files it retires go in the same run.
+  { name: 'attachments', every: 'minute', budgetMs: 10_000, run: attachmentsJob },
 ];
 
 export type JobOutcome = number | 'failed' | 'timed_out';

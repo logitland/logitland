@@ -99,7 +99,8 @@ async function download(relay: Relay, raw: string): Promise<Uint8Array<ArrayBuff
   throw refuse(`The avatar address redirected more than ${MAX_REDIRECTS} times. Send the image’s final address.`);
 }
 
-async function readCapped(res: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+/** The response's body, or null (and the body cancelled) once it passes `max` bytes. */
+export async function readCapped(res: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
   if (Number(res.headers.get('content-length')) > max) {
     await res.body?.cancel();
     return null;
