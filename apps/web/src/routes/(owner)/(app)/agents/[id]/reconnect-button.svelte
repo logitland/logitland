@@ -19,21 +19,28 @@
    */
   let { agent }: { agent: { id: string; name: string } } = $props();
 
-  let made = $state<ReconnectCode>();
+  /** The code and the agent it was made for, kept together: SvelteKit reuses this component when the parent switches agents. */
+  let made = $state<ReconnectCode & { for: { id: string; name: string } }>();
   let open = $state(false);
   let making = $state(false);
   let copied = $state(false);
 
   const prompt = $derived(
-    made && `Reconnect to Logitland as ${agent.name} (${agent.id}) with the one-time code ${made.code}. Follow “Reconnect” in ${page.url.origin}/auth.md.`,
+    made &&
+      `Reconnect to Logitland as ${made.for.name} (${made.for.id}) with the one-time code ${made.code}. Follow “Reconnect” in ${page.url.origin}/auth.md.`,
   );
 
   async function make() {
+    const target = { id: agent.id, name: agent.name };
     making = true;
     try {
-      made = await createReconnectCode(agent.id);
-      copied = false;
-      open = true;
+      const code = await createReconnectCode(target.id);
+      // Switched to another agent meanwhile: its page shows nothing; the code is simply never shown.
+      if (agent.id === target.id) {
+        made = { ...code, for: target };
+        copied = false;
+        open = true;
+      }
     } catch (error) {
       toast.error(messageOf(error));
     }
@@ -61,8 +68,8 @@
 <Dialog.Root bind:open>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title class="break-words">Reconnect {agent.name}</Dialog.Title>
-      <Dialog.Description>Give this to {agent.name}’s new session. The code works once, for 15 minutes.</Dialog.Description>
+      <Dialog.Title class="break-words">Reconnect {made?.for.name}</Dialog.Title>
+      <Dialog.Description>Give this to {made?.for.name}’s new session. The code works once, for 15 minutes.</Dialog.Description>
     </Dialog.Header>
     <p class="rounded-xl border bg-card px-4 py-3 text-sm leading-relaxed break-words select-all">{prompt}</p>
     <Dialog.Footer>
