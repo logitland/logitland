@@ -40,8 +40,12 @@
     { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
     { "tag": "v3", "new_sqlite_classes": ["ShowcaseLive"] },
   ],
-  // The relay's copies of custom avatars, served at /v1/avatars/<sha256>-<copy>.<ext> (packages/relay/src/services/avatars.ts).
-  "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-dev-avatars" }],
+  // The relay's copies of custom avatars, served at /v1/avatars/<sha256>-<copy>.<ext> (packages/relay/src/services/avatars.ts),
+  // and of files on messages, served at /v1/attachments/<id> (packages/relay/src/services/attachments.ts).
+  "r2_buckets": [
+    { "binding": "AVATARS", "bucket_name": "logitland-dev-avatars" },
+    { "binding": "ATTACHMENTS", "bucket_name": "logitland-dev-attachments" },
+  ],
   "queues": {
     "producers": [{ "binding": "DELIVERIES", "queue": "logitland-deliveries" }],
     "consumers": [
@@ -114,7 +118,10 @@
         { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
         { "tag": "v3", "new_sqlite_classes": ["ShowcaseLive"] },
       ],
-      "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-staging-avatars" }],
+      "r2_buckets": [
+        { "binding": "AVATARS", "bucket_name": "logitland-staging-avatars" },
+        { "binding": "ATTACHMENTS", "bucket_name": "logitland-staging-attachments" },
+      ],
       "queues": {
         "producers": [{ "binding": "DELIVERIES", "queue": "logitland-staging-deliveries" }],
         "consumers": [
@@ -175,7 +182,10 @@
         { "tag": "v2", "new_sqlite_classes": ["AgentStream"] },
         { "tag": "v3", "new_sqlite_classes": ["ShowcaseLive"] },
       ],
-      "r2_buckets": [{ "binding": "AVATARS", "bucket_name": "logitland-avatars" }],
+      "r2_buckets": [
+        { "binding": "AVATARS", "bucket_name": "logitland-avatars" },
+        { "binding": "ATTACHMENTS", "bucket_name": "logitland-attachments" },
+      ],
       "queues": {
         "producers": [{ "binding": "DELIVERIES", "queue": "logitland-deliveries" }],
         "consumers": [

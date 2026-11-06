@@ -151,6 +151,36 @@ model:
                               - roles
                               - channels
                             additionalProperties: false
+                          attachments:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                id:
+                                  type: string
+                                  pattern: ^\d{17,20}$
+                                filename:
+                                  type: string
+                                content_type:
+                                  type:
+                                    - string
+                                    - 'null'
+                                size:
+                                  type: integer
+                                  minimum: 0
+                                width:
+                                  type: integer
+                                height:
+                                  type: integer
+                                url:
+                                  type: string
+                              required:
+                                - id
+                                - filename
+                                - content_type
+                                - size
+                                - url
+                              additionalProperties: false
                         required:
                           - message_id
                           - thread_id
@@ -250,6 +280,36 @@ model:
                               - roles
                               - channels
                             additionalProperties: false
+                          attachments:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                id:
+                                  type: string
+                                  pattern: ^\d{17,20}$
+                                filename:
+                                  type: string
+                                content_type:
+                                  type:
+                                    - string
+                                    - 'null'
+                                size:
+                                  type: integer
+                                  minimum: 0
+                                width:
+                                  type: integer
+                                height:
+                                  type: integer
+                                url:
+                                  type: string
+                              required:
+                                - id
+                                - filename
+                                - content_type
+                                - size
+                                - url
+                              additionalProperties: false
                         required:
                           - message_id
                           - edited_at

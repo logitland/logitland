@@ -28,10 +28,11 @@ export type AgentStream = StreamObject;
 export const ShowcaseLive = Sentry.instrumentDurableObjectWithSentry(sentryOptions, ShowcaseObject);
 export type ShowcaseLive = ShowcaseObject;
 
-export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES' | 'AVATARS'>, SentryBindings {
+export interface Bindings extends Omit<RelayBindings, 'DB' | 'DELIVERIES' | 'AVATARS' | 'ATTACHMENTS'>, SentryBindings {
   DB: D1Database;
   DELIVERIES?: Queue<DeliveryMessage>;
   AVATARS?: R2Bucket;
+  ATTACHMENTS?: R2Bucket;
   GATEWAY: DurableObjectNamespace<DiscordGateway>;
   CHANNEL_SENDER: DurableObjectNamespace<ChannelSender>;
   AGENT_STREAM: DurableObjectNamespace<AgentStream>;

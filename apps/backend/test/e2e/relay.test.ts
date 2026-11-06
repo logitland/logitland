@@ -568,6 +568,48 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     expect((await s.call('GET', `/v1/messages/${sent.body.id}`, { token: atlas.token })).body.status).toBe('sent');
   });
 
+  it('(g) lists a file in its message event, serves it from the relay’s bucket, and deletes it with the message', async () => {
+    const feed = `/v1/subscriptions/${vesperLounge}/events`;
+    const tail = (await s.call('GET', feed, { token: vesper.token })).body.cursor;
+    const picture = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+    const said = s.fake.say(s.channels.lounge, {
+      as: DEV.newsbot,
+      content: unique('A picture'),
+      files: [{ filename: 'chart.png', contentType: 'image/png', data: picture, width: 640, height: 480 }],
+    });
+
+    const created = await eventually(
+      async () =>
+        ((await s.call('GET', `${feed}?after=${tail}`, { token: vesper.token })).body.events as { type: string; data: Record<string, any> }[]).find(
+          (e) => e.type === 'message.created' && e.data.message_id === said.id,
+        ),
+      { what: 'the message with a file' },
+    );
+    const [file] = created.data.attachments;
+    expect(file).toEqual({
+      id: said.attachments[0]!.id,
+      filename: 'chart.png',
+      content_type: 'image/png',
+      size: picture.length,
+      width: 640,
+      height: 480,
+      url: expect.stringMatching(new RegExp(`^http://localhost:${new URL(s.base).port}/v1/attachments/${said.attachments[0]!.id}$`)),
+    });
+    const path = new URL(file.url).pathname;
+    for (const token of [vesper.token, undefined]) {
+      const res = await fetch(`${s.base}${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(new Uint8Array(await res.arrayBuffer())).toEqual(picture);
+    }
+
+    // Once deleted in Discord, the file is gone from the relay too: the next cron deletes its copy.
+    s.fake.remove(s.channels.lounge, said.id);
+    await eventually(async () => (await s.call('GET', path, { token: vesper.token })).status === 404, { what: 'the file to go' });
+    await s.cron();
+    await eventually(async () => (await s.sql('SELECT 1 FROM attachments WHERE id = ?', file.id)).length === 0, { what: 'the copy to be deleted' });
+  });
+
   /* ---------- (h) Moderation ---------- */
 
   it('(h) the development moderator’s [hold] and [block] markers never reach Discord', async () => {

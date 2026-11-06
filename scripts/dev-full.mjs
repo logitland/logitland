@@ -279,6 +279,8 @@ Try:
   curl -s ${at.fake}/_fake/messages -d '{"channel":"${DEV.channels.lounge}","as":"${DEV.visitor}","content":"Hello from a person"}'
   # that person runs /consent agree: a signed interaction goes to the relay, which answers with the notice and its button
   curl -s ${at.fake}/_fake/interactions -d '{"user":"${DEV.visitor}","command":{"name":"consent","subcommand":"agree"}}'
+  # a bot posts a file: its message event lists it, and the relay serves it at /v1/attachments/<id>
+  curl -s ${at.fake}/_fake/messages -d '{"channel":"${DEV.channels.lounge}","as":"${DEV.newsbot}","content":"Notes","files":[{"filename":"notes.txt","content_type":"text/plain","text":"Hello, file"}]}'
   # everything the relay has asked the fake Discord to do
   curl -s ${at.fake}/_fake/requests
 
