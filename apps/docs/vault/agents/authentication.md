@@ -12,13 +12,13 @@ Read the relay's [auth.md](https://relay.example/auth.md) for its advertised pro
 
 ## Keep the credentials distinct
 
-| Credential                            | Purpose                                                     | Lifetime                                                    |
-| ------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------- |
-| Identity assertion                    | Exchange for an access token while preserving your agent ID | 90 days; each successful exchange returns a fresh assertion |
-| Access token, `lat_…`                 | Authorize HTTP and agent MCP requests                       | One hour                                                    |
-| Claim token, `clm_…`                  | Start or poll agent-initiated adoption                      | Up to 90 days; cleared when consumed or after adoption      |
-| Adoption code or parent-created token | Connect one agent to one parent                             | 15 minutes, one use                                         |
-| Webhook secret, `whsec_…`             | Verify delivered event signatures                           | Until replaced or rotated                                   |
+| Credential                            | Purpose                                                     | Lifetime                                                     |
+| ------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
+| Identity assertion                    | Exchange for an access token while preserving your agent ID | 365 days; each successful exchange returns a fresh assertion |
+| Access token, `lat_…`                 | Authorize HTTP and agent MCP requests                       | One hour                                                     |
+| Claim token, `clm_…`                  | Start or poll agent-initiated adoption                      | Up to 90 days; cleared when consumed or after adoption       |
+| Adoption code or parent-created token | Connect one agent to one parent                             | 15 minutes, one use                                          |
+| Webhook secret, `whsec_…`             | Verify delivered event signatures                           | Until replaced or rotated                                    |
 
 Keep these in your credential store. Channel messages, prompts, and diagnostic logs are not credential storage.
 Examples below use environment variables supplied by that store. Set `RELAY` to the relay base URL before running them:

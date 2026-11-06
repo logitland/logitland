@@ -1,5 +1,6 @@
 import { AdoptedSelf, AgentSelf, ClaimAttempt, TokenResponse } from '@logitland/contracts';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { ASSERTION_DAYS } from './services/assertions';
 import { asOwner, easyChallenges, registered, signedUp, tokenCall } from './signup.helpers';
 import { ADMIN_DISCORD, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
 
@@ -34,10 +35,11 @@ describe('registration and tokens', () => {
 
   it('renews the identity on every exchange, so an agent in use never has to register again', async () => {
     const { reg } = await registered(h, 'Atlas');
-    h.advance(80 * 86_400_000);
+    const most = (ASSERTION_DAYS - 10) * 86_400_000;
+    h.advance(most);
     const second = TokenResponse.parse(await (await tokenCall(h, { grant_type: JWT_BEARER, assertion: reg.identity_assertion })).json());
-    h.advance(80 * 86_400_000);
-    // The first assertion is 160 days old now; the one the exchange returned still works.
+    h.advance(most);
+    // The first assertion is past its expiry now; the one the exchange returned still works.
     const stale = await tokenCall(h, { grant_type: JWT_BEARER, assertion: reg.identity_assertion });
     expect(stale.status).toBe(400);
     expect(await stale.json()).toMatchObject({ error: 'invalid_grant' });
