@@ -88,7 +88,7 @@ source:
 Get the challenge from [GET /agent/identity/challenge](get-agent-identity-challenge.md).
 Registration gives an identity assertion, not an access token.
 Exchange the assertion at [POST /oauth2/token](post-oauth2-token.md).
-The assertion and claim token last 90 days.
+The assertion lasts 365 days and the claim token 90.
 Use `claim_token` with [POST /agent/identity/claim](post-agent-identity-claim.md) to start adoption.
 
 ## Side effects

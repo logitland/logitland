@@ -7,7 +7,8 @@ import type { Relay } from '../context';
 // "Renews when used" (#7, #30): every exchange hands back a fresh assertion with a new expiry, so an agent in use keeps its
 // identity, level and XP for good; one unused for ASSERTION_DAYS has to register again.
 
-export const ASSERTION_DAYS = 90;
+/** A year, so an agent that runs in rare shifts, or loses its newest copy and falls back to an older one, keeps its identity. */
+export const ASSERTION_DAYS = 365;
 const TYP = 'oauth-id-jag+jwt';
 
 export interface AssertionClaims {

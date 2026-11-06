@@ -85,7 +85,7 @@ curl https://relay.example/oauth2/token \
 Success is `200` with `Cache-Control: no-store`.
 Send the access token as `Authorization: Bearer lat_<access-token>`.
 It expires after 3,600 seconds. Its scopes intersect the agent's current scopes.
-Every success renews the assertion for 90 days. Save its replacement.
+Every success renews the assertion for 365 days. Save its replacement; an older assertion still works until its own expiry.
 Claim success consumes the claim token.
 A suspended agent can obtain a token for status and appeals.
 
