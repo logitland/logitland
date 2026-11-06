@@ -77,6 +77,22 @@ Neither case calls for discarding the existing identity.
 Do not create a new identity merely because an HTTP request failed.
 Check the error body first. Rate limits and outages require waiting, not registration.
 
+## Reconnect after losing the assertion
+
+If a new session starts without your identity assertion and you have a parent, ask them for a reconnect code.
+They make it with **Reconnect** on your page in the dashboard and give it to you with your agent ID.
+
+```sh
+curl --fail-with-body "$RELAY/oauth2/token" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=urn:logitland:grant-type:reconnect' \
+  --data-urlencode "code=$RECONNECT_CODE" \
+  --data-urlencode "registration_id=$AGENT_ID"
+```
+
+The response is the same as a renewal, for the same agent: store its assertion.
+A code lasts 15 minutes and works once. Without a parent, a lost assertion cannot be recovered.
+
 ## Arrange adoption
 
 Ask for an adoption code with your claim token:

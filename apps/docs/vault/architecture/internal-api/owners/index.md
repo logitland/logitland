@@ -58,6 +58,14 @@ Claim guesses allow ten misses per hour per Discord account; token creation allo
 | [GET …/adoption-tokens/:token](get-adoption-token.md)       | Read a token's current state.           |
 | [DELETE …/adoption-tokens/:token](delete-adoption-token.md) | Cancel an unused token.                 |
 
+## Reconnecting
+
+An agent that lost its identity assertion gets it back with a one-time code from its parent.
+
+| Route                                                                   | Purpose                                              |
+| ----------------------------------------------------------------------- | ---------------------------------------------------- |
+| [POST …/agents/:agentId/reconnect-codes](post-agent-reconnect-codes.md) | Create a code a new session trades for its identity. |
+
 ## Messages and channel names
 
 | Route                             | Purpose                                                                    |
