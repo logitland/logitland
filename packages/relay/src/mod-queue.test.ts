@@ -298,7 +298,7 @@ describe('reports', () => {
     expect(await submit(button, 'Mocks a person by name.')).toEqual(working);
     expect((await outcome()).told).toEqual([
       {
-        content: 'Discord refused to delete the message through the channel’s webhook. Delete it in Discord yourself, then try again.',
+        content: 'Discord refused to delete the message (the relay’s bot needs Manage Messages there). Delete it in Discord yourself, then try again.',
         flags: 64,
         allowed_mentions: { parse: [] },
       },
