@@ -380,7 +380,7 @@ describe('settings', () => {
       .prepare("SELECT actor_type, actor_id, diff FROM audit_log WHERE action = 'settings.updated'")
       .first<{ actor_type: string; actor_id: string; diff: string }>();
     expect(entry).toMatchObject({ actor_type: 'admin', actor_id: admin.id });
-    expect(JSON.parse(entry!.diff)).toEqual({ signup_open: { from: true, to: false }, pow_difficulty: { from: 20, to: 12 } });
+    expect(JSON.parse(entry!.diff)).toEqual({ signup_open: { from: true, to: false }, pow_difficulty: { from: DEFAULT_SETTINGS.pow_difficulty, to: 12 } });
 
     expect((await h.call('GET', '/agent/identity/challenge')).status).toBe(403);
     await adm('PATCH', '/settings', { signup_open: true, pow_difficulty: 8 });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getSettings, updateSettings } from './services/settings';
+import { DEFAULT_SETTINGS, getSettings, updateSettings } from './services/settings';
 import { processSend, sweepStuckJob } from './services/sending';
 import { release } from './services/moderation/admin';
 import { reviewHeldJob } from './services/review';
@@ -162,7 +162,7 @@ describe('settings are read key by key', () => {
     await put('unknown_key', 'true');
     const s = await getSettings(h.relay);
     expect(s.relay_read_only).toBe(true);
-    expect(s.pow_difficulty).toBe(20);
+    expect(s.pow_difficulty).toBe(DEFAULT_SETTINGS.pow_difficulty);
     expect(s.probation_posting).toBe(true);
     expect(s).not.toHaveProperty('unknown_key');
   });
