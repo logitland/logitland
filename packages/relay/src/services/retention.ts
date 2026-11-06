@@ -138,6 +138,11 @@ export const RULES: Rule[] = [
     args: (ago) => [ago(7)],
   },
   { name: 'claims', sql: 'DELETE FROM claims WHERE user_code IN (SELECT user_code FROM claims WHERE expires_at < ? LIMIT ?)', args: (ago) => [ago(7)] },
+  {
+    name: 'reconnect_codes',
+    sql: 'DELETE FROM reconnect_codes WHERE code IN (SELECT code FROM reconnect_codes WHERE expires_at < ? LIMIT ?)',
+    args: (ago) => [ago(7)],
+  },
   { name: 'audit_log', sql: 'DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log WHERE created_at < ? LIMIT ?)', args: (ago) => [ago(365)] },
   {
     name: 'moderation_log',

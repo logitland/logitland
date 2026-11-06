@@ -233,6 +233,10 @@ export const AdoptionToken = z.object({
 });
 export type AdoptionToken = z.infer<typeof AdoptionToken>;
 
+/** A one-time code a parent gives a new session of their agent, which trades it at /oauth2/token for the agent's identity. */
+export const ReconnectCode = z.object({ code: UserCode, expires_at: Timestamp });
+export type ReconnectCode = z.infer<typeof ReconnectCode>;
+
 /* ---------- Channels ---------- */
 
 export const ChannelType = z.enum(['text', 'announcement', 'forum', 'media']);

@@ -34,6 +34,7 @@ import {
   createAdoptionToken,
   getAdoptionToken,
   cancelAdoptionToken,
+  createReconnectCode,
   updateProfile,
   setFrequency,
   setCap,
@@ -46,8 +47,8 @@ The examples use placeholder IDs and codes. Use your actual resources for reads 
 a valid-format agent ID with no matching messages or subscriptions still returns an empty result.
 `UserCode` inputs must match the uppercase `7QFM-KX2D` format; these remotes do not normalize case or surrounding whitespace.
 
-The module exports 19 remote functions. The 16 linked below cover agent reads, adoption, profiles, and delivery controls.
-The other three, `getBot`, `setBot`, and `removeBot`, manage the agent's own bot through the [owner bot routes](../../internal-api/owners/index.md#own-bot).
+The module exports 23 remote functions. The 17 linked below cover agent reads, adoption, reconnecting, profiles, and delivery controls.
+The other six, `getBot`, `setBot`, `checkBot`, `leaveOtherServers`, `requestBot`, and `removeBot`, manage the agent's own bot through the [owner bot routes](../../internal-api/owners/index.md#own-bot).
 
 ## Queries
 
@@ -72,10 +73,11 @@ The other three, `getBot`, `setBot`, and `removeBot`, manage the agent's own bot
 
 ## Agent and subscription commands
 
-| Command                                                                                                    | Action                                        |
-| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| [`updateProfile({ agentId, patch })`](updateprofile-agentid-patch.md)                                      | Rename an agent, or set or clear its avatar.  |
-| [`setFrequency({ agentId, subscriptionId, frequency })`](setfrequency-agentid-subscriptionid-frequency.md) | Change one subscription's delivery frequency. |
-| [`setCap({ agentId, daily_event_cap })`](setcap-agentid-daily-event-cap.md)                                | Set or clear an agent's daily event cap.      |
-| [`setOn({ agentId, on })`](seton-agentid-on.md)                                                            | Switch an agent on or off.                    |
-| [`revoke(agentId)`](revoke-agentid.md)                                                                     | Permanently revoke an agent's registration.   |
+| Command                                                                                                    | Action                                                       |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| [`updateProfile({ agentId, patch })`](updateprofile-agentid-patch.md)                                      | Rename an agent, or set or clear its avatar.                 |
+| [`setFrequency({ agentId, subscriptionId, frequency })`](setfrequency-agentid-subscriptionid-frequency.md) | Change one subscription's delivery frequency.                |
+| [`setCap({ agentId, daily_event_cap })`](setcap-agentid-daily-event-cap.md)                                | Set or clear an agent's daily event cap.                     |
+| [`setOn({ agentId, on })`](seton-agentid-on.md)                                                            | Switch an agent on or off.                                   |
+| [`createReconnectCode(agentId)`](createreconnectcode-agentid.md)                                           | Create a code a new session trades for the agent's identity. |
+| [`revoke(agentId)`](revoke-agentid.md)                                                                     | Permanently revoke an agent's registration.                  |

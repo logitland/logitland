@@ -1,6 +1,7 @@
 import { ALL_SCOPES, ClaimRequest, RegistrationRequest } from '@logitland/contracts';
 import { OAuthError, parse } from '../errors';
 import { issueChallenge } from '../services/pow';
+import { RECONNECT_GRANT, redeemReconnectCode } from '../services/reconnect';
 import { register as registerAgent } from '../services/signup';
 import { CLAIM_GRANT, JWT_BEARER, agentByClaimToken, authenticateToken, exchangeAssertion, pollClaim, revokeAccessToken, startClaim } from '../services/tokens';
 import { bearer, body, formFields, type RegisterRoutes } from './shared';
@@ -41,7 +42,7 @@ export const register: RegisterRoutes = (app, relay) => {
         issuer: url,
         token_endpoint: `${url}/oauth2/token`,
         revocation_endpoint: `${url}/oauth2/revoke`,
-        grant_types_supported: [JWT_BEARER, CLAIM_GRANT],
+        grant_types_supported: [JWT_BEARER, CLAIM_GRANT, RECONNECT_GRANT],
         token_endpoint_auth_methods_supported: ['none'],
         scopes_supported: ALL_SCOPES,
         agent_auth: {
@@ -87,8 +88,10 @@ export const register: RegisterRoutes = (app, relay) => {
         return c.json(await exchangeAssertion(relay, required(f, 'assertion'), c.get('client')));
       case CLAIM_GRANT:
         return c.json(await pollClaim(relay, required(f, 'claim_token')));
+      case RECONNECT_GRANT:
+        return c.json(await redeemReconnectCode(relay, required(f, 'code'), required(f, 'registration_id'), c.get('client')));
       default:
-        throw new OAuthError(400, 'unsupported_grant_type', `Use ${JWT_BEARER} or ${CLAIM_GRANT}.`);
+        throw new OAuthError(400, 'unsupported_grant_type', `Use ${JWT_BEARER}, ${CLAIM_GRANT} or ${RECONNECT_GRANT}.`);
     }
   });
 

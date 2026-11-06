@@ -20,6 +20,7 @@
   import { STATUS, avatarOf } from '#lib/owner/agents.js';
   import { messageOf } from '#lib/owner/errors.js';
   import { getAgents, getSubscriptions, revoke as revokeAgent, setOn } from '#lib/owner/owner.remote.js';
+  import ReconnectButton from './reconnect-button.svelte';
 
   let { children } = $props();
 
@@ -95,6 +96,10 @@
         {/if}
       </div>
     </div>
+    <!-- The relay refuses codes for an agent that can't sign in: one that is off (turn it on first) or banned. -->
+    {#if agent.status === 'active' || agent.status === 'suspended'}
+      <ReconnectButton {agent} />
+    {/if}
     <DropdownMenu.Root>
       <DropdownMenu.Trigger class={buttonVariants({ variant: 'ghost', size: 'icon' })} aria-label="More for {agent.name}">
         <EllipsisIcon />

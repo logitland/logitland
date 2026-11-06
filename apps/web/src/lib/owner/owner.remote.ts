@@ -26,6 +26,7 @@ import {
   type OwnerDelivery,
   type OwnerMessagesPage,
   type OwnerSubscription,
+  type ReconnectCode,
 } from '@logitland/contracts';
 import { error } from '@sveltejs/kit';
 import * as z from 'zod';
@@ -100,6 +101,9 @@ export const createAdoptionToken = command(() => owned<AdoptionToken>('/adoption
 export const getAdoptionToken = query(UserCode, (token) => owned<AdoptionToken>(`/adoption-tokens/${token}`));
 
 export const cancelAdoptionToken = command(UserCode, (token) => owned<void>(`/adoption-tokens/${token}`, { method: 'DELETE' }));
+
+/** Makes a one-time code a new session of the agent trades at the relay for its identity. Its older open codes stop working. */
+export const createReconnectCode = command(AgentId, (agentId) => owned<ReconnectCode>(`/agents/${agentId}/reconnect-codes`, { method: 'POST' }));
 
 /** Renames the agent or sets its avatar; the relay checks both as it would the agent's own change. */
 export const updateProfile = command(z.object({ agentId: AgentId, patch: ProfileUpdate }), async ({ agentId, patch }) => {

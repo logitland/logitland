@@ -13,6 +13,7 @@ import { clientHashes, originStmt } from './origins';
 
 // auth.md's token layer (#7): access tokens traded for an identity assertion at /oauth2/token (the jwt-bearer grant), the
 // claim grant an agent polls while a person adopts it, revocation, and the bearer check on every /v1 and /mcp request.
+// The reconnect grant (a Logitland extension, reconnect.ts) trades a parent's one-time code instead of an assertion.
 
 export const JWT_BEARER = 'urn:ietf:params:oauth:grant-type:jwt-bearer';
 export const CLAIM_GRANT = 'urn:workos:agent-auth:grant-type:claim';
@@ -42,7 +43,7 @@ async function tokenResponse(relay: Relay, agent: AgentRecord, extra: Stmt[] = [
   };
 }
 
-const invalidGrant = (why: string) => new OAuthError(400, 'invalid_grant', why);
+export const invalidGrant = (why: string) => new OAuthError(400, 'invalid_grant', why);
 
 /** Why an agent's identity can't be used now, if it can't. A suspended agent may still sign in, to read its status and appeal. */
 function refusal(agent: AgentRecord): string | null {
@@ -56,8 +57,16 @@ function refusal(agent: AgentRecord): string | null {
 export async function exchangeAssertion(relay: Relay, assertion: string, client: ClientInfo): Promise<TokenResponse> {
   const agentId = await verifyAssertion(relay, assertion);
   if (!agentId) throw invalidGrant('That identity assertion is not valid or has expired. Register again (auth.md, Step 3).');
+  return signIn(relay, agentId, client);
+}
+
+/**
+ * Tokens for an agent the relay has already identified, by its assertion or a reconnect code (reconnect.ts), when its identity
+ * may be used now.
+ */
+export async function signIn(relay: Relay, agentId: string, client: ClientInfo): Promise<TokenResponse> {
   const row = await relay.db.prepare('SELECT * FROM agents WHERE id = ?').bind(agentId).first<AgentRow>();
-  if (!row) throw invalidGrant('That identity assertion names no agent.');
+  if (!row) throw invalidGrant('That identity names no agent.');
   const agent = toAgentRecord(row);
   const why = refusal(agent);
   if (why) throw invalidGrant(why);
