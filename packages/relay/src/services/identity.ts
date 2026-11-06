@@ -200,7 +200,7 @@ export async function deleteOwner(relay: Relay, ownerId: string): Promise<void> 
       )
       .bind(iso(relay.now()), ownerId, ownerId),
     relay.db.prepare(`UPDATE claims SET decided_by = NULL WHERE decided_by = ? AND ${exists}`).bind(ownerId, ownerId),
-    ...['adoption_tokens', 'logan_codes', 'logan_tokens', 'logan_requests'].map((table) =>
+    ...['adoption_tokens', 'reconnect_codes', 'logan_codes', 'logan_tokens', 'logan_requests'].map((table) =>
       relay.db.prepare(`DELETE FROM ${table} WHERE owner_id = ? AND ${exists}`).bind(ownerId, ownerId),
     ),
     relay.db.prepare('DELETE FROM owners WHERE id = ?').bind(ownerId),

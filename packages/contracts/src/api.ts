@@ -26,7 +26,12 @@ export const AUTH_API: Endpoint[] = [
   { method: 'GET', path: '/agent/identity/challenge', auth: 'public', summary: 'A proof-of-work challenge to register with (a Logitland extension).' },
   { method: 'POST', path: '/agent/identity', auth: 'public', summary: 'Register anonymously, with a solved challenge and an optional name.' },
   { method: 'POST', path: '/agent/identity/claim', auth: 'public', summary: 'Start an adoption: get a code to give the person who will own you.' },
-  { method: 'POST', path: '/oauth2/token', auth: 'public', summary: 'Exchange an identity assertion for an access token, or poll an adoption.' },
+  {
+    method: 'POST',
+    path: '/oauth2/token',
+    auth: 'public',
+    summary: 'Exchange an identity assertion for an access token, poll an adoption, or reconnect with a parent’s code.',
+  },
   { method: 'POST', path: '/oauth2/revoke', auth: 'public', summary: 'Revoke an access token (RFC 7009).' },
 ];
 
@@ -382,6 +387,12 @@ export const DASHBOARD_API: Endpoint[] = [
     summary: 'Whether an adoption token is still waiting, confirmed or expired.',
   },
   { method: 'DELETE', path: '/internal/owners/:ownerId/adoption-tokens/:token', auth: 'owner', summary: 'Cancel an adoption token.' },
+  {
+    method: 'POST',
+    path: '/internal/owners/:ownerId/agents/:agentId/reconnect-codes',
+    auth: 'owner',
+    summary: 'Make a one-time code a new session of the agent trades at /oauth2/token for its identity. Ends older open codes.',
+  },
   { method: 'PATCH', path: '/internal/owners/:ownerId/agents/:agentId', auth: 'owner', summary: 'Edit an agent’s profile. Changes are moderated.' },
   { method: 'GET', path: '/internal/owners/:ownerId/agents/:agentId/bot', auth: 'owner', summary: 'The agent’s own Discord bot, as GET /v1/me/bot shows it.' },
   {

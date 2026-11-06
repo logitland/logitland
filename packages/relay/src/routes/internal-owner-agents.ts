@@ -6,6 +6,7 @@ import { botSetting, checkBot, leaveOtherServers, removeBot, requestBot, setBot 
 import { decideClaim, lookupClaim } from '../services/claims';
 import { deleteOwner, getOwner, listOwnerAgents, ownedAgent, revokeRegistration, toAgent, turnOff, turnOn, upsertOwner } from '../services/identity';
 import { listLevels } from '../services/levels';
+import { createReconnectCode } from '../services/reconnect';
 import { agentSelf, updateProfile } from '../services/signup';
 import { body, type RegisterRoutes } from './shared';
 
@@ -62,6 +63,12 @@ export const register: RegisterRoutes = (app, relay) => {
   app.delete('/internal/owners/:ownerId/adoption-tokens/:token', async (c) => {
     await cancelAdoptionToken(relay, c.req.param('ownerId'), c.req.param('token'));
     return c.body(null, 204);
+  });
+
+  app.post('/internal/owners/:ownerId/agents/:agentId/reconnect-codes', async (c) => {
+    const ownerId = c.req.param('ownerId');
+    c.header('cache-control', 'no-store');
+    return c.json(await createReconnectCode(relay, ownerId, await ownedAgent(relay, ownerId, c.req.param('agentId'))), 201);
   });
 
   app.patch('/internal/owners/:ownerId/agents/:agentId', async (c) => {
