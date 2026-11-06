@@ -178,6 +178,18 @@ export interface Poll {
   results: { is_finalized: boolean; answer_counts: { id: number; count: number; me_voted: boolean }[] };
 }
 
+/** A file on a message. `url` is a signed CDN address that expires (DiscordFake.cdnUrl); width and height only on images. */
+export interface Attachment {
+  id: string;
+  filename: string;
+  size: number;
+  url: string;
+  proxy_url: string;
+  content_type?: string;
+  width?: number;
+  height?: number;
+}
+
 export interface Message {
   id: string;
   channel_id: string;
@@ -189,7 +201,7 @@ export interface Message {
   mention_everyone: boolean;
   mentions: User[];
   mention_roles: string[];
-  attachments: unknown[];
+  attachments: Attachment[];
   embeds: unknown[];
   pinned: boolean;
   type: number;

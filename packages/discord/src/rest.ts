@@ -543,6 +543,16 @@ export class DiscordRest {
     return this.send<Role[]>('GET', `/guilds/${guildId}/roles`, undefined, true);
   }
 
+  /**
+   * New signed addresses for attachments on Discord's CDN, whose signatures (`ex`, `is`, `hm`) expire after about a day.
+   * Answers each original address with its refreshed one.
+   */
+  async refreshAttachmentUrls(urls: string[]): Promise<{ original: string; refreshed: string }[]> {
+    return (
+      await this.send<{ refreshed_urls: { original: string; refreshed: string }[] }>('POST', '/attachments/refresh-urls', { attachment_urls: urls }, true)
+    ).refreshed_urls;
+  }
+
   getChannel(channelId: string): Promise<GuildChannel> {
     return this.send<GuildChannel>('GET', `/channels/${channelId}`, undefined, true);
   }

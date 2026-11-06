@@ -1,7 +1,7 @@
 // A programmable fake Discord, served on 127.0.0.1: REST under /api/v10, the Gateway at /gateway and a control API
 // under /_fake. Start one with `DiscordFake.start()`, seed it, point the relay at `apiBase`, and drive it from tests.
 
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { handleControl } from './control.ts';
@@ -17,6 +17,7 @@ import {
   isForum,
   isThread,
   Permission,
+  type Attachment,
   type Channel,
   type ChannelKind,
   type Guild,
@@ -138,6 +139,20 @@ const compile = (route: Route): CompiledRoute => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** How long a signed CDN address lasts: a day, as on Discord. */
+export const CDN_URL_TTL_MS = 24 * 3600_000;
+/** /attachments/:channel/:id/:filename on the fake's CDN. */
+const CDN_PATH = /^\/attachments\/(\d+)\/(\d+)\/([^/]+)$/;
+
+/** A file someone attaches (DiscordFake.say). `data` is its bytes, or text. */
+export interface NewFile {
+  filename: string;
+  contentType?: string;
+  data: Uint8Array | string;
+  width?: number;
+  height?: number;
+}
+
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -173,6 +188,8 @@ export class DiscordFake {
   private readonly teamId: string;
   private readonly server: Server;
   private origin = '';
+  /** Signs CDN addresses (cdnUrl). */
+  private readonly cdnKey = randomBytes(32);
 
   private constructor(options: FakeOptions) {
     this.clock = options.now ?? Date.now;
@@ -369,10 +386,13 @@ export class DiscordFake {
       tags?: string[];
       allowedMentions?: { parse?: string[] };
       enforcePermissions?: boolean;
+      /** Files attached to the message, served from the fake's CDN. */
+      files?: NewFile[];
     },
   ): Message {
     const author = this.person(m.as);
     const channel = this.world.channel(channelId);
+    const attachments = m.files?.map((f) => this.attach(channelId, f));
     // Discord's own apps don't let someone without Send Messages type; by default the fake lets the test decide.
     if (
       m.enforcePermissions &&
@@ -380,7 +400,7 @@ export class DiscordFake {
     )
       throw new Error(`${author.username} may not send messages in ${channel.name}`);
     const reference = m.replyTo ? { message_id: m.replyTo, channel_id: channelId, guild_id: channel.guild_id } : undefined;
-    const input = { author, content: m.content, type: m.type, message_reference: reference, allowed_mentions: m.allowedMentions };
+    const input = { author, content: m.content, type: m.type, message_reference: reference, allowed_mentions: m.allowedMentions, attachments };
     if (isForum(channel.type)) {
       if (!m.threadName) throw new Error('Posts in a forum or media channel need a threadName');
       return this.world.createForumPost(channelId, { name: m.threadName, ownerId: author.id, appliedTags: m.tags }, input).message;
@@ -388,8 +408,63 @@ export class DiscordFake {
     return this.world.postMessage(channelId, input);
   }
 
-  edit(channelId: string, messageId: string, content: string): Message {
-    return this.world.editMessage(channelId, messageId, { content });
+  /** `keep`: the IDs of the attachments the edited message keeps; by default, all of them. */
+  edit(channelId: string, messageId: string, content: string, keep?: string[]): Message {
+    return this.world.editMessage(channelId, messageId, { content, ...(keep ? { attachments: keep } : {}) });
+  }
+
+  /* ---------- Files ---------- */
+
+  /** Stores a file for a message about to be posted in `channelId`, and describes it as Discord would. */
+  attach(channelId: string, f: NewFile): Attachment {
+    const id = this.world.newId();
+    const bytes = typeof f.data === 'string' ? new TextEncoder().encode(f.data) : f.data;
+    const contentType = f.contentType ?? 'application/octet-stream';
+    this.world.files.set(id, { bytes, contentType });
+    const url = this.cdnUrl(channelId, id, f.filename);
+    return {
+      id,
+      filename: f.filename,
+      size: bytes.byteLength,
+      url,
+      proxy_url: url,
+      content_type: contentType,
+      ...(f.width !== undefined && f.height !== undefined ? { width: f.width, height: f.height } : {}),
+    };
+  }
+
+  /**
+   * A signed CDN address for a file, as Discord gives them: `ex` (expiry) and `is` (issued) in hexadecimal Unix seconds, `hm`
+   * the signature. It lasts CDN_URL_TTL_MS; after that the CDN answers 404 until it is refreshed (`attachments.refresh`).
+   */
+  cdnUrl(channelId: string, id: string, filename: string): string {
+    const now = Math.floor(this.now() / 1000);
+    const path = `/attachments/${channelId}/${id}/${encodeURIComponent(filename)}`;
+    const query = `ex=${(now + CDN_URL_TTL_MS / 1000).toString(16)}&is=${now.toString(16)}`;
+    return `${this.origin}${path}?${query}&hm=${this.cdnSignature(`${path}?${query}`)}`;
+  }
+
+  /** A fresh address for one of the fake's CDN addresses; anything else comes back as it was. */
+  refreshCdnUrl(url: string): string {
+    const m = URL.canParse(url) ? CDN_PATH.exec(new URL(url).pathname) : null;
+    return m && this.world.files.has(m[2]!) ? this.cdnUrl(m[1]!, m[2]!, decodeURIComponent(m[3]!)) : url;
+  }
+
+  private cdnSignature(signed: string): string {
+    return createHmac('sha256', this.cdnKey).update(signed).digest('hex');
+  }
+
+  /** GET /attachments/:channel/:id/:filename: the file, while its address is unexpired and correctly signed. */
+  private serveFile(res: ServerResponse, url: URL): void {
+    const m = CDN_PATH.exec(url.pathname);
+    const file = m ? this.world.files.get(m[2]!) : undefined;
+    const ex = Number.parseInt(url.searchParams.get('ex') ?? '', 16);
+    const signed = `${url.pathname}?ex=${url.searchParams.get('ex')}&is=${url.searchParams.get('is')}`;
+    if (!file || !(ex * 1000 > this.now()) || url.searchParams.get('hm') !== this.cdnSignature(signed)) {
+      res.writeHead(404, { 'content-type': 'text/plain' }).end('This content is no longer available.');
+      return;
+    }
+    res.writeHead(200, { 'content-type': file.contentType, 'content-length': String(file.bytes.byteLength) }).end(file.bytes);
   }
 
   remove(channelId: string, messageId: string): void {
@@ -537,6 +612,7 @@ export class DiscordFake {
     try {
       const url = new URL(req.url ?? '/', 'http://fake');
       if (url.pathname === '/_fake' || url.pathname.startsWith('/_fake/')) return await handleControl(this, req, res, url);
+      if (req.method === 'GET' && url.pathname.startsWith('/attachments/')) return this.serveFile(res, url);
       if (await this.oauth.handle(req, res, url)) return;
       await this.rest(req, res, url);
     } catch (err) {

@@ -25,6 +25,11 @@ operation:
       properties:
         content:
           type: string
+        attachments:
+          type: array
+          description: IDs of the attachments the message keeps; the others are removed. Omit to keep them all.
+          items:
+            type: string
     example:
       content: Edited by Alice
   responses:

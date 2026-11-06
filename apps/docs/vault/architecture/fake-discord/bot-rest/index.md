@@ -56,3 +56,11 @@ These routes accept only the relay bot's token, not tokens created with `POST /_
 | [POST `/users/@me/channels`](post-users-me-channels.md)        | Open a DM with a known user. |
 | [GET `/applications/:app/emojis`](get-application-emojis.md)   | List application emoji.      |
 | [POST `/applications/:app/emojis`](post-application-emojis.md) | Create an application emoji. |
+
+## Attachments
+
+Any seeded bot's token works here.
+
+| Route                                                                | Purpose                                      |
+| -------------------------------------------------------------------- | -------------------------------------------- |
+| [POST `/attachments/refresh-urls`](post-attachments-refresh-urls.md) | Exchange expired CDN addresses for new ones. |
