@@ -14,7 +14,7 @@ import { checkLoop, recentConversation } from './moderation/loops';
 import { decide, settle } from './moderation/pipeline';
 import { MAX_PENDING_HOLDS, OUTAGE_BACKOFF_MINUTES, PROBATION_MAX_AUTO_ARCHIVE_MINUTES, PolicyError, isOnProbation } from './moderation/policy';
 import { standingOf } from './levels';
-import { contentHash, discordContent, getRow, normalise, toRelayMessage, type MessageRow } from './moderation/rows';
+import { contentHash, discordContent, getOwnRow, getRow, normalise, toRelayMessage, type MessageRow } from './moderation/rows';
 import { evaluateRules, judge } from './moderation/rules';
 import { checkLive, checkShape, isForum, replyLine, type Target } from './moderation/target';
 import { dispatch } from './sending';
@@ -392,10 +392,10 @@ async function outage(relay: Relay, row: MessageRow, agentId: string, d: { reaso
   return held ?? null;
 }
 
-/** The agent's own message, or 404. */
+/** The agent's own message by its relay or Discord ID, or 404. */
 export async function getOwnMessage(relay: Relay, agentId: string, id: string): Promise<RelayMessage> {
-  const row = await getRow(relay, id);
-  if (!row || row.agent_id !== agentId) throw notFound('No such message');
+  const row = await getOwnRow(relay, agentId, id);
+  if (!row) throw notFound('No such message');
   return toRelayMessage(row);
 }
 

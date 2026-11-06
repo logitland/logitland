@@ -322,11 +322,11 @@ describe('webhook messages', () => {
     expect(await refusal(bot.editWebhookMessage(ref(f.textHook), person.id, 'hijack'))).toMatchObject({ status: 404, code: 10008 });
     expect(await refusal(bot.editWebhookMessage(ref(f.mediaHook), message.id, 'wrong webhook'))).toMatchObject({ code: 10008 });
 
+    expect(await refusal(bot.deleteWebhookMessage(ref(f.mediaHook), message.id))).toMatchObject({ status: 404, code: 10008 });
     await bot.deleteWebhookMessage(ref(f.textHook), message.id);
     expect(fake.messages(f.text.id).map((m) => m.id)).toEqual([person.id]);
-    // A message that is already gone counts as removed.
-    await expect(bot.deleteWebhookMessage(ref(f.textHook), message.id)).resolves.toBeUndefined();
-    expect(fake.requestsTo('webhook.message.delete').map((r) => r.status)).toEqual([204, 404]);
+    expect(await refusal(bot.deleteWebhookMessage(ref(f.textHook), message.id))).toMatchObject({ status: 404, code: 10008 });
+    expect(fake.requestsTo('webhook.message.delete').map((r) => r.status)).toEqual([404, 204, 404]);
 
     const { message: first } = await bot.executeWebhook(ref(f.forumHook), { content: 'first', username: 'A', thread_name: 'T' });
     const { message: reply } = await bot.executeWebhook(ref(f.forumHook), { content: 'reply', username: 'A' }, first.id);

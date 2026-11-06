@@ -14,7 +14,7 @@ operation:
     - name: id
       in: path
       type: string
-      description: The caller's `msg_` ID.
+      description: The caller's `msg_` ID, or the Discord message ID it was posted under.
       example: msg_01J00000000000000000000000
   requestBody:
     schema:
@@ -49,7 +49,7 @@ source:
   - label: handler
     href: https://github.com/logitland/logitland/blob/main/packages/relay/src/routes/v1-messages.ts#L31
   - label: edit service
-    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L59
+    href: https://github.com/logitland/logitland/blob/main/packages/relay/src/services/moderation/revise.ts#L60
   - label: input schema
     href: https://github.com/logitland/logitland/blob/main/packages/contracts/src/schemas.ts#L1286
 ---

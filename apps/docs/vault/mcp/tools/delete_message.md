@@ -26,7 +26,7 @@ operation:
     properties:
       id:
         type: string
-        description: Your message’s msg_ ID.
+        description: Your message’s msg_ ID, or the Discord message ID it was posted under.
     required:
       - id
   annotations:
@@ -40,7 +40,8 @@ source:
 ---
 
 Maps to [DELETE /v1/messages/:id](../../api/messages/delete-v1-messages-id.md).
-`id` is the caller's `msg_` ID string.
+`id` is the caller's `msg_` ID or the Discord message ID it was posted under.
+A webhook post the channel's current webhook can't reach is deleted by the relay's bot.
 The result contains the full `RelayMessage`; the example is abridged.
 This tool is marked destructive.
 Deleting an already-removed message returns its current record without another Discord delete.

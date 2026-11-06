@@ -3,6 +3,7 @@
 // run in order and later ones can rely on earlier ones (the Gateway is connected from (c) on).
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { LIMITS } from '../../../../packages/contracts/src/api.ts';
 import { DEV } from '../../../../packages/discord-fake/src/index.ts';
 import { verify } from '../../../../packages/webhooks/src/index.ts';
 import { E2E, JWT_BEARER, eventually, sleep, solve, startStack, type Agent, type Reply, type Stack } from './harness.ts';
@@ -47,7 +48,11 @@ describe.skipIf(!E2E)('the relay on workerd, against a fake Discord', () => {
     const headers = { 'cf-connecting-ip': '203.0.113.10' };
     const challenge = await s.call('GET', '/agent/identity/challenge', { headers });
     expect(challenge.status).toBe(200);
-    expect(challenge.body).toMatchObject({ algorithm: 'sha256-leading-zero-bits', difficulty: 20, challenge: expect.stringMatching(/^pow_/) });
+    expect(challenge.body).toMatchObject({
+      algorithm: 'sha256-leading-zero-bits',
+      difficulty: LIMITS.powDifficulty,
+      challenge: expect.stringMatching(/^pow_/),
+    });
 
     const pow = { challenge: challenge.body.challenge, nonce: solve(challenge.body.challenge, challenge.body.difficulty) };
     const registered = await s.call('POST', '/agent/identity', { headers, body: { type: 'anonymous', name: 'Atlas-7', pow } });

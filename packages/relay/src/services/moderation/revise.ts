@@ -4,7 +4,7 @@ import { iso, readAll, type Relay } from '../../context';
 import { RelayError, conflict, forbidden, invalid, notFound, rateLimited, unavailable } from '../../errors';
 import type { AgentPrincipal } from '../../types';
 import { auditStmtIf } from '../audit';
-import { deleteBotPost, postingBot } from '../bots';
+import { deletePost, postingBot } from '../bots';
 import { getChannel, openWebhook, usableChannel } from '../channels';
 import { hit } from '../limits';
 import { scrubMessage } from '../scrub';
@@ -16,7 +16,7 @@ import { Trail, logStmtWhere, writeLog } from './log';
 import { recentConversation } from './loops';
 import { decide } from './pipeline';
 import { EDITS_PER_MINUTE, EDIT_WINDOW_HOURS, PolicyError, SEVERE_POLICIES, explain, isOnProbation } from './policy';
-import { contentHash, discordContent, getRow, normalise, toRelayMessage, webhookThread, type MessageRow } from './rows';
+import { contentHash, discordContent, getOwnRow, normalise, toRelayMessage, webhookThread, type MessageRow } from './rows';
 import { evaluateRules, judge } from './rules';
 import { DISCORD_MESSAGE_CHARS } from './target';
 
@@ -26,9 +26,10 @@ export const EDIT_WINDOW_MS = EDIT_WINDOW_HOURS * 3_600_000;
 
 const NO_WEBHOOK = 'This channel has no working webhook right now, so the relay can’t reach the message. An admin needs to set the webhook again.';
 
+/** The agent's own message by its relay or Discord ID (getOwnRow), or 404. */
 async function ownMessage(relay: Relay, agentId: string, id: string): Promise<MessageRow> {
-  const row = await getRow(relay, id);
-  if (!row || row.agent_id !== agentId) throw notFound('No such message');
+  const row = await getOwnRow(relay, agentId, id);
+  if (!row) throw notFound('No such message');
   return row;
 }
 
@@ -242,19 +243,9 @@ export async function deleteMessage(relay: Relay, principal: AgentPrincipal, id:
     case 'sent': {
       if (!row.discord_message_id)
         throw conflict('Discord never confirmed this message, so there is nothing to delete. Ask the agent’s owner or an admin to resolve it.');
-      try {
-        if (row.bot_user_id) {
-          const channel = await getChannel(relay, row.channel_id);
-          if (!channel) throw conflict('This channel no longer exists, so the message can’t be deleted.');
-          await deleteBotPost(relay, { ...row, discord_message_id: row.discord_message_id }, channel.type);
-        } else {
-          const { channel, hook } = await reach(relay, row);
-          await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, webhookThread(row, channel.type));
-        }
-      } catch (err) {
-        if (err instanceof RelayError) throw err;
-        discordFailure(err, 'delete');
-      }
+      const channel = await getChannel(relay, row.channel_id);
+      if (!channel) throw conflict('This channel no longer exists, so the message can’t be deleted.');
+      await deletePost(relay, { ...row, discord_message_id: row.discord_message_id }, channel).catch((err) => discordFailure(err, 'delete'));
       const removed = await gone('sent', 'Deleted by its author.');
       // The scrub blanks nothing in the relay's record that gone() left.
       await scrubMessage(relay, row.discord_message_id, 'author', { channelId: row.channel_id });

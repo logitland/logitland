@@ -255,13 +255,13 @@ describe('takedown', () => {
     expect((await api('POST', `/internal/admin/messages/${blocked.id}/takedown`, {})).status).toBe(409);
   });
 
-  it('says what to do when the channel has no webhook', async () => {
+  it('deletes as the relay’s bot when the channel has lost its webhook', async () => {
     const { h, a, api } = await setup();
     const sent = await json(await post(h, a, 'webhook later removed'));
     await h.db.prepare('UPDATE channels SET webhook_ciphertext = NULL WHERE id = ?').bind(LOUNGE).run();
-    const res = await api('POST', `/internal/admin/messages/${sent.id}/takedown`, {});
-    expect(res.status).toBe(409);
-    expect((await json(res)).detail).toMatch(/no working webhook/);
+    expect((await api('POST', `/internal/admin/messages/${sent.id}/takedown`, {})).status).toBe(200);
+    expect(deletes(h).map((c) => new URL(c.url).pathname)).toEqual([`/api/v10/channels/${LOUNGE}/messages/${sent.discord_message_id}`]);
+    expect((await row(h, sent.id))!.status).toBe('removed');
   });
 });
 

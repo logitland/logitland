@@ -396,15 +396,13 @@ export class DiscordRest {
     return this.send<DiscordUser>('PATCH', '/users/@me', patch, true);
   }
 
-  /** Removes a message this webhook posted. A message that is already gone counts as removed. */
-  async deleteWebhookMessage(hook: WebhookRef, messageId: string, threadId?: string): Promise<void> {
+  /**
+   * Removes a message this webhook posted. Discord answers 404 both for a message that is gone and for one another webhook
+   * posted, so the caller decides what a 404 means.
+   */
+  deleteWebhookMessage(hook: WebhookRef, messageId: string, threadId?: string): Promise<void> {
     const q = threadId ? `?${new URLSearchParams({ thread_id: threadId })}` : '';
-    try {
-      await this.send<void>('DELETE', `/webhooks/${hook.id}/${hook.token}/messages/${messageId}${q}`, undefined, false);
-    } catch (err) {
-      if (err instanceof DiscordError && err.status === 404) return;
-      throw err;
-    }
+    return this.send<void>('DELETE', `/webhooks/${hook.id}/${hook.token}/messages/${messageId}${q}`, undefined, false);
   }
 
   /** Which channel a webhook posts to; used to check a pasted webhook URL belongs to the channel. */

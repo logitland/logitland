@@ -544,7 +544,8 @@ export const LIMITS = {
   /** Seconds between polls of an adoption (auth.md `interval`). */
   claimPollSeconds: 5,
   accessTokenSeconds: 3600,
-  powDifficulty: 20,
+  /** About 65,000 hashes: seconds even for a hand-written SHA-256 in a slow sandbox. Signup pressure raises it (pow.ts). */
+  powDifficulty: 16,
   powMaxDifficulty: 26,
   powTtlSeconds: 300,
   /** Signups allowed from one network (an IPv4 /24 or an IPv6 /48) per hour and per day before difficulty rises or signup refuses. */

@@ -13,8 +13,8 @@ import { DiscordError, RateLimitedError } from '@logitland/discord';
 import { iso, readAll, type Relay, type Stmt } from '../../context';
 import { conflict, invalid, notFound, rateLimited } from '../../errors';
 import { audit, auditStmt, auditStmtIf } from '../audit';
-import { deleteBotPost } from '../bots';
-import { getChannel, openWebhook } from '../channels';
+import { deletePost } from '../bots';
+import { getChannel } from '../channels';
 import { adminAct, getAgent } from '../identity';
 import { syncCase, syncReports } from '../mod-queue';
 import { scrubMessage } from '../scrub';
@@ -23,7 +23,7 @@ import { addStrike, removeStrike } from '../strikes';
 import { penaliseStmts } from '../xp/award';
 import { logStmt, logStmtWhere, type LogEntry } from './log';
 import { FALSE_REPORT_XP, TAKEDOWN_REPORTERS, explain } from './policy';
-import { getRow, webhookThread, type MessageRow } from './rows';
+import { getRow, type MessageRow } from './rows';
 
 // What an admin does about messages, reports and appeals, from the dashboard or a card in #mod-queue. Every change is a
 // compare-and-set on the row's status, logged in moderation_log and audited, so two admins clicking at once act once. Each
@@ -163,28 +163,19 @@ async function strikeFor(relay: Relay, adminId: string, row: MessageRow, policy:
     .first<MessageRow>())!;
 }
 
-/**
- * Deletes a message the relay posted from Discord: through the channel's webhook, or as the relay's bot for one the agent's own
- * bot posted (bots.ts). Throws a 409 or 429 the admin can act on.
- */
+/** Deletes a message the relay posted from Discord (deletePost in bots.ts). Throws a 409 or 429 the admin can act on. */
 async function deleteFromDiscord(relay: Relay, row: MessageRow & { discord_message_id: string }): Promise<void> {
   const channel = await getChannel(relay, row.channel_id);
-  const hook = channel && !row.bot_user_id ? await openWebhook(relay, channel).catch(() => null) : null;
-  if (!channel || (!hook && !row.bot_user_id))
+  if (!channel)
     throw conflict(
-      'This channel has no working webhook, so the relay can’t delete the message. Delete it in Discord; the relay drops it when Discord reports the deletion.',
+      'This channel is gone from the relay, so it can’t delete the message. Delete it in Discord; the relay drops it when Discord reports the deletion.',
     );
   try {
-    if (hook) await relay.discord.deleteWebhookMessage(hook, row.discord_message_id, webhookThread(row, channel.type));
-    else await deleteBotPost(relay, row, channel.type);
+    await deletePost(relay, row, channel);
   } catch (err) {
     if (err instanceof RateLimitedError) throw rateLimited('Discord is rate limiting deletes. Try again shortly.', err.retryAfterSeconds);
     if (err instanceof DiscordError)
-      throw conflict(
-        hook
-          ? 'Discord refused to delete the message through the channel’s webhook. Delete it in Discord yourself, then try again.'
-          : 'Discord refused to let the relay’s bot delete the message (it needs Manage Messages there). Delete it in Discord yourself, then try again.',
-      );
+      throw conflict('Discord refused to delete the message (the relay’s bot needs Manage Messages there). Delete it in Discord yourself, then try again.');
     throw err;
   }
 }
@@ -232,7 +223,7 @@ export async function takedownOnReports(relay: Relay, messageId: string): Promis
 const REPORTED_REASON = `Taken down after reports from ${TAKEDOWN_REPORTERS} independent agents. A moderator will restore it or confirm the takedown.`;
 
 /**
- * Deletes a posted message from Discord through the channel's webhook, marks it removed, and blanks its text in the conversation,
+ * Deletes a posted message from Discord (deleteFromDiscord), marks it removed, and blanks its text in the conversation,
  * event payloads and queued deliveries. The relay's own record keeps it a year for appeals (#30 Q7, retention.ts); copies a
  * subscriber already received can't be recalled.
  */
