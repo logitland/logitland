@@ -647,6 +647,41 @@ describe('posting outside the relay', () => {
     );
   });
 
+  it('keeps the strike card within Discord’s limit however many long filenames the bot added', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
+    const text = Array.from({ length: 75 }, (_, i) => `word${i}`)
+      .join(' ')
+      .padEnd(750, '.');
+    const sent = await json(await post(h, a, say(text)));
+    h.advance(60_000);
+    const files = Array.from({ length: 10 }, (_, i) => ({
+      id: `56000000000000001${i}`,
+      filename: `${'n'.repeat(246)}.txt`,
+      content_type: 'text/plain',
+      size: 1,
+      url: `https://cdn.discordapp.com/attachments/${LOUNGE}/56000000000000001${i}/f.txt`,
+    }));
+    await ingest(h.relay, {
+      source: 'test',
+      events: [
+        {
+          kind: 'message_update',
+          channel_id: LOUNGE,
+          message_id: sent.discord_message_id,
+          content: text,
+          edited_timestamp: h.now().toISOString(),
+          attachments: files,
+        },
+      ],
+    });
+    const [card] = await staffAlerts(h);
+    expect(card).toContain('It added files: nnn');
+    expect(card!.length).toBeLessThanOrEqual(4000);
+  });
+
   it('keeps a send that live intake and a backfill both show before Discord answers', async () => {
     const { h, a, bot } = await adopted();
     await give(h, a);

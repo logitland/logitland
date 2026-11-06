@@ -26,6 +26,8 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 /** Text quoted in a staff alert, of Discord's 2,000 characters a message; an edit quotes its text before and after in half each. */
 const QUOTE_CHARS = 1500;
+/** The added files' names on a strike card, cut so the card stays under Discord's limit with a full quote. */
+const FILES_CHARS = 300;
 const ACTOR = { actor_type: 'system', actor_id: 'bot-strikes' } as const;
 const EDITED_REASON = 'Your bot edited this message outside the relay, so the relay deleted it.';
 
@@ -293,7 +295,11 @@ function strikeCardOf(relay: Relay, r: StrikeRow, s: StrikeAlert): Card {
     `<@${r.bot_user_id}> ${what} in <#${s.channel_id}>${s.deleted ? ', and the relay deleted it' : ''}. ${r.effect ? step[r.effect] : 'No new strike: it did this before its last strike was given.'}`,
   ];
   if (s.failed.length) text.push(`Discord refused to ${s.failed.join(' and ')}: do it in Discord.`);
-  if (s.files) text.push(`It added files: ${s.files.join(', ')}`);
+  if (s.files) {
+    // Cut like the quotes, so ten long filenames can't push the card past Discord's 4,000 characters.
+    const names = s.files.join(', ');
+    text.push(`It added files: ${names.length > FILES_CHARS ? `${names.slice(0, FILES_CHARS)}…` : names}`);
+  }
   return {
     title: `${r.name ?? r.agent_id}’s bot ${what} outside the relay`,
     text,
