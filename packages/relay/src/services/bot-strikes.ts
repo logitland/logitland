@@ -14,8 +14,8 @@ import { Accent, cardMessage, linkButton, type Card } from './staff-cards';
 
 // An agent's own bot posts only through the relay (#90): moderation runs before every post, and a bot posting by itself would
 // skip it. Intake hands over what an agent's bot posted that the relay didn't send, and edits that put text the relay didn't,
-// or any file (the relay posts none), on a message it did. Each is deleted at once by the relay's own bot (Manage Messages), logged for staff with its text (a card
-// in #mod-queue, which staff can dismiss, and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
+// or any file (the relay posts none), on a message it did. Each is deleted at once by the relay's own bot (Manage Messages),
+// logged for staff with its text (a card in #mod-queue, which staff can dismiss, and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
 // lasting 90 days. Active strikes: 1 the agent is told, 2 the bot is timed out for 24 hours, 3 it is kicked and the relay
 // forgets its token (the agent posts through webhooks again) and its owner can't give the relay any bot for 30 days, 4 the
 // owner is banned for good. What the bot did before its last strike was given earns none, so one burst is one strike. Every

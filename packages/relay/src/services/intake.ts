@@ -627,7 +627,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
           break;
         }
         seen.add(key!);
-        // New text an agent's bot put on a message the relay posted: deleted and struck, and the text never kept.
+        // New text or a file an agent's bot put on a message the relay posted: deleted and struck, and neither ever kept.
         const offRelay =
           botEdits.get(key!) ?? (settled.has(e.message_id) ? (await offRelayEdits(relay, [{ ...e, content: rawText.get(key!) }])).get(key!) : undefined);
         if (offRelay) {
