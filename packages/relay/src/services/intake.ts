@@ -576,7 +576,7 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
         const reply_to = e.reply_to ?? who.reply_to;
         stmts.push(createStmt(relay, e, who, { content: e.content, reply_to, edited_at: e.edited_timestamp ?? null }));
         const files = e.attachments ?? [];
-        stmts.push(...attachmentStmts(relay, { ...e, attachments: files }, false));
+        stmts.push(...attachmentStmts(relay, { ...e, attachments: files }, null));
         if (who.username !== null) {
           stmts.push(identityStmt(relay, who, e.timestamp));
           const stored = agreedAt.get(e.author.id)!;
@@ -675,8 +675,9 @@ async function ingestRound(relay: Relay, ctx: Context, events: MessageEvent[]): 
               ? relay.db.prepare(`UPDATE conversation SET edited_at = ? WHERE ${live}`).bind(e.edited_timestamp, ...at)
               : relay.db.prepare(`UPDATE conversation SET content = ?, edited_at = ? WHERE ${live}`).bind(e.content, e.edited_timestamp, ...at),
           );
-          // The files the message has now: one the edit dropped is removed, one it added (a bot or webhook can) is recorded.
-          if (e.attachments) stmts.push(...attachmentStmts(relay, { ...e, attachments: e.attachments }, true));
+          // The files the message has now: one the edit dropped is removed, one it added (a bot or webhook can) is recorded, if
+          // the update above took the edit.
+          if (e.attachments) stmts.push(...attachmentStmts(relay, { ...e, attachments: e.attachments }, e.edited_timestamp));
           k.edited_at = e.edited_timestamp;
         }
         break;

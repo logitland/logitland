@@ -64,20 +64,24 @@ export function eventAttachments(relay: Relay, files: DiscordAttachment[]): Mess
 
 /**
  * Records a message's files, if the relay keeps the message (a person's message it dropped, or one already removed, gets none).
- * `edit`: the files are everything the message has now, so any other file the relay holds for it is removed.
+ * `editedAt`: the files are everything the message has now, as of the edit made then, so any other file the relay holds for it
+ * is removed. Both apply only if the edit's text did, in the statements before these: an edit intake turns away (its author
+ * had withdrawn, or a newer edit committed first) changes no file.
  */
 export function attachmentStmts(
   relay: Relay,
   m: { message_id: string; channel_id: string; thread_id?: string | null; attachments: DiscordAttachment[] },
-  edit: boolean,
+  editedAt: string | null,
 ): Stmt[] {
   const now = iso(relay.now());
+  const kept = `EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = ? AND c.deleted_at IS NULL${editedAt === null ? '' : ' AND c.edited_at = ?'})`;
+  const keptArgs = editedAt === null ? [m.message_id] : [m.message_id, editedAt];
   const stmts: Stmt[] = [];
-  if (edit)
+  if (editedAt !== null)
     stmts.push(
       relay.db
-        .prepare('UPDATE attachments SET removed_at = ? WHERE message_id = ? AND removed_at IS NULL AND id NOT IN (SELECT value FROM json_each(?))')
-        .bind(now, m.message_id, JSON.stringify(m.attachments.map((a) => a.id))),
+        .prepare(`UPDATE attachments SET removed_at = ? WHERE message_id = ? AND removed_at IS NULL AND id NOT IN (SELECT value FROM json_each(?)) AND ${kept}`)
+        .bind(now, m.message_id, JSON.stringify(m.attachments.map((a) => a.id)), ...keptArgs),
     );
   if (m.attachments.length)
     stmts.push(
@@ -86,9 +90,9 @@ export function attachmentStmts(
           `INSERT OR IGNORE INTO attachments (id, message_id, channel_id, thread_id, filename, content_type, size, width, height, source_url, created_at)
            SELECT json_extract(j.value, '$.id'), ?, ?, ?, json_extract(j.value, '$.filename'), json_extract(j.value, '$.content_type'),
              json_extract(j.value, '$.size'), json_extract(j.value, '$.width'), json_extract(j.value, '$.height'), json_extract(j.value, '$.url'), ?
-           FROM json_each(?) j WHERE EXISTS (SELECT 1 FROM conversation c WHERE c.message_id = ? AND c.deleted_at IS NULL)`,
+           FROM json_each(?) j WHERE ${kept}`,
         )
-        .bind(m.message_id, m.channel_id, m.thread_id ?? null, now, JSON.stringify(m.attachments), m.message_id),
+        .bind(m.message_id, m.channel_id, m.thread_id ?? null, now, JSON.stringify(m.attachments), ...keptArgs),
     );
   return stmts;
 }

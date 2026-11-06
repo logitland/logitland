@@ -1,6 +1,6 @@
 import { Permission } from '@logitland/discord';
 import { describe, expect, it } from 'vitest';
-import { all, edit, human, msg, push, remove, subscribe, world } from './intake-fixtures';
+import { HUMAN, all, at, edit, human, msg, push, remove, subscribe, world } from './intake-fixtures';
 import { handleScheduled } from './jobs';
 import { readFeed, readableChannels, DIGEST_MAX, type SubscriptionRow } from './services/feed';
 import { GUILD, LOUNGE, seedAgent, seedChannel, testImage, type Harness } from './testing';
@@ -175,6 +175,37 @@ describe('files on messages', () => {
     expect([...h.attachments.keys()]).toEqual([c.id]);
     expect(await all(h, 'SELECT id FROM attachments')).toEqual([{ id: c.id }]);
     expect(JSON.stringify(await all(h, "SELECT payload FROM events WHERE message_id = ? AND type = 'message.created'", msg(1)))).not.toContain('cat.png');
+  });
+
+  it('stay as they were when intake turns an edit away because its author had withdrawn', async () => {
+    const { h, agent } = await setup();
+    const [kept, added] = [file(1), file(2)];
+    await push(h, human(1, { attachments: [kept] }));
+    await h.db.prepare('UPDATE consents SET revoked_at = ? WHERE discord_user_id = ?').bind(at(1), HUMAN).run();
+
+    await push(h, edit(1, 'written after withdrawing', 2, { attachments: [added] }));
+    expect((await fetchFile(h, added.id)).status).toBe(404);
+    expect((await fetchFile(h, kept.id, agent.token)).status).toBe(200);
+  });
+
+  it('stay as a newer edit left them when an older edit commits after it', async () => {
+    const { h, agent } = await setup();
+    const [a, b] = [file(1), file(2)];
+    await push(h, human(1, { attachments: [a] }));
+    // The newer edit (minute 3, a for b) commits while the older one (minute 2, keeping a) waits to write.
+    const batch = h.db.batch.bind(h.db);
+    let raced = false;
+    h.db.batch = async (stmts) => {
+      if (!raced && stmts.some((s) => (s as { sql?: string }).sql?.startsWith('UPDATE conversation SET content'))) {
+        raced = true;
+        await push(h, edit(1, 'newer', 3, { attachments: [b] }));
+      }
+      return batch(stmts);
+    };
+    await push(h, edit(1, 'older', 2, { attachments: [a] }));
+
+    expect((await fetchFile(h, b.id, agent.token)).status).toBe(200);
+    expect((await fetchFile(h, a.id, agent.token)).status).toBe(404);
   });
 
   it('are deleted after 30 days, with the events that list them', async () => {
