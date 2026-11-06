@@ -65,6 +65,7 @@ rules use.
 | `users.me.guilds`                                     | `GET /users/@me/guilds`                                  | Any bot: the servers it is a member of.                                                                                                                                                                                                                                                                                                                                                                           |
 | `commands.list` / `commands.put`                      | `GET`/`PUT /applications/:app/guilds/:guild/commands`    | Names and descriptions validated; IDs kept across a repeated PUT.                                                                                                                                                                                                                                                                                                                                                 |
 | `gateway.bot`                                         | `GET /gateway/bot`                                       | `ws://127.0.0.1:<port>/gateway`, with a session start limit.                                                                                                                                                                                                                                                                                                                                                      |
+| `attachments.refresh`                                 | `POST /attachments/refresh-urls`                         | Any bot. A fresh signed address for each of the fake's CDN addresses. The CDN itself is `GET /attachments/:channel/:id/:filename` (no `/api`): files attached with `say({ files })`, served while the signature holds, for 24 hours of the fake's clock, and gone with their message or when an edit drops them.                                                                                                  |
 
 The [endpoint reference](../../apps/docs/vault/architecture/fake-discord/index.md) gives request and response details.
 The following inventory uses route names from [the implementation](src/rest.ts).
@@ -90,6 +91,7 @@ The following inventory uses route names from [the implementation](src/rest.ts).
 | `applications.me`                                     | `GET /applications/@me`                                                               |
 | `commands.list` / `.put`                              | `GET` / `PUT /applications/:app/guilds/:guild/commands`                               |
 | `gateway.get` / `gateway.bot`                         | `GET /gateway`, `GET /gateway/bot`                                                    |
+| `attachments.refresh`                                 | `POST /attachments/refresh-urls`                                                      |
 
 **REST behavior and permissions.**
 

@@ -499,6 +499,16 @@ export function routes(): Route[] {
     return ok(stored);
   });
 
+  /* ----- Attachments ----- */
+
+  // Fresh signed CDN addresses for expired ones (DiscordFake.cdnUrl). Addresses that aren't the fake's come back unchanged.
+  add('attachments.refresh', 'POST', '/attachments/refresh-urls', 'any-bot', 'attachments', ({ fake, body }) => {
+    const urls = objectBody(body).attachment_urls;
+    if (!Array.isArray(urls) || !urls.every((u) => typeof u === 'string')) throw formBody(['attachment_urls'], 'BASE_TYPE_REQUIRED', 'This field is required');
+    if (urls.length < 1 || urls.length > 50) throw formBody(['attachment_urls'], 'BASE_TYPE_BAD_LENGTH', 'Must be between 1 and 50 in length.');
+    return ok({ refreshed_urls: urls.map((original) => ({ original, refreshed: fake.refreshCdnUrl(original) })) });
+  });
+
   /* ----- Channels ----- */
 
   add('channel.get', 'GET', '/channels/:channel', 'bot', 'channel', ({ fake, params }) => ok(fake.world.channel(params.channel!)));

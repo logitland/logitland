@@ -20,6 +20,7 @@ const prod = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   TYPESAFE_API_KEY: 'j',
   DELIVERIES: { send: async () => {} } as never,
   AVATARS: {} as never,
+  ATTACHMENTS: {} as never,
   ...over,
 });
 

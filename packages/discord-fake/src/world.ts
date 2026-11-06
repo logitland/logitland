@@ -13,6 +13,7 @@ import {
   isThread,
   type ApplicationCommand,
   type ApplicationEmoji,
+  type Attachment,
   type Channel,
   type ChannelKind,
   type DmChannel,
@@ -53,6 +54,8 @@ export interface NewMessage {
   embeds?: unknown[];
   poll?: Poll;
   message_reference?: Message['message_reference'];
+  /** Files already in `World.files` (DiscordFake.attach). */
+  attachments?: Attachment[];
   allowed_mentions?: AllowedMentions;
   flags?: number;
   tts?: boolean;
@@ -99,6 +102,8 @@ export class World {
   readonly closedDms = new Set<string>();
   /** The application's emoji. */
   readonly emojis: ApplicationEmoji[] = [];
+  /** What the CDN serves for each attachment, by attachment ID. A file goes when its message does, or an edit drops it. */
+  readonly files = new Map<string, { bytes: Uint8Array; contentType: string }>();
   readonly botUser: User;
   private readonly now: () => number;
   private readonly ids: () => string;
@@ -502,7 +507,7 @@ export class World {
       mention_everyone: mentions.everyone,
       mentions: mentions.users,
       mention_roles: mentions.roles,
-      attachments: [],
+      attachments: input.attachments ?? [],
       embeds: input.embeds ?? [],
       pinned: false,
       type: input.type ?? (input.message_reference ? MessageType.reply : MessageType.default),
@@ -523,9 +528,19 @@ export class World {
     return message;
   }
 
-  editMessage(channelId: string, id: string, patch: { content?: string; components?: unknown[]; embeds?: unknown[]; flags?: number }): Message {
+  /** `attachments`: the IDs of the files to keep; the rest go, as when someone removes a file from their message. */
+  editMessage(
+    channelId: string,
+    id: string,
+    patch: { content?: string; components?: unknown[]; embeds?: unknown[]; flags?: number; attachments?: string[] },
+  ): Message {
     const channel = this.channel(channelId);
     const message = this.findMessage(channelId, id);
+    if (patch.attachments !== undefined) {
+      const keep = new Set(patch.attachments);
+      for (const a of message.attachments) if (!keep.has(a.id)) this.files.delete(a.id);
+      message.attachments = message.attachments.filter((a) => keep.has(a.id));
+    }
     if (patch.content !== undefined) {
       message.content = patch.content;
       // Mentions are rebuilt from the new text; an edit never pings anyone.
@@ -547,6 +562,7 @@ export class World {
     const list = this.messagesIn(channelId);
     const at = list.findIndex((m) => m.id === id);
     if (at < 0) throw errors.unknownMessage();
+    for (const a of list[at]!.attachments) this.files.delete(a.id);
     list.splice(at, 1);
     this.emit(channel.guild_id, 'MESSAGE_DELETE', { id, channel_id: channelId, guild_id: channel.guild_id });
   }
@@ -557,6 +573,7 @@ export class World {
     const gone = new Set(ids);
     const known = list.filter((m) => gone.has(m.id)).map((m) => m.id);
     if (known.length !== gone.size) throw errors.unknownMessage();
+    for (const m of list) if (gone.has(m.id)) for (const a of m.attachments) this.files.delete(a.id);
     this.messages.set(
       channelId,
       list.filter((m) => !gone.has(m.id)),
@@ -735,6 +752,7 @@ export class World {
     for (const c of [...this.channels.values()]) if (isThread(c.type)) this.channels.delete(c.id);
     for (const g of this.guilds.values()) for (const id of [...g.channelIds]) if (!this.channels.has(id)) g.channelIds.delete(id);
     this.messages.clear();
+    this.files.clear();
     this.threadMembers.clear();
     for (const c of this.channels.values()) c.last_message_id = null;
     for (const dm of this.dms.values()) dm.last_message_id = null;

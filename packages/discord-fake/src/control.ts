@@ -4,7 +4,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Channel } from './model.ts';
-import type { Behaviour, DiscordFake, FailureMatch } from './fake.ts';
+import type { Behaviour, DiscordFake, FailureMatch, NewFile } from './fake.ts';
 
 const FLAGS = { limited: 1 << 19, full: 1 << 18, off: 0 } as const;
 
@@ -31,6 +31,18 @@ function field<T>(body: Json, key: string, type: 'string' | 'number' | 'boolean'
 
 const str = (b: Json, k: string) => field<string>(b, k, 'string')!;
 const optStr = (b: Json, k: string) => field<string>(b, k, 'string', false);
+
+/** A file in a control request: `{ filename, content_type?, text? | base64?, width?, height? }`. */
+function newFile(f: Json): NewFile {
+  const base64 = optStr(f, 'base64');
+  return {
+    filename: str(f, 'filename'),
+    contentType: optStr(f, 'content_type'),
+    data: base64 === undefined ? (optStr(f, 'text') ?? '') : new Uint8Array(Buffer.from(base64, 'base64')),
+    width: field<number>(f, 'width', 'number', false),
+    height: field<number>(f, 'height', 'number', false),
+  };
+}
 
 /** What the control API shows of a channel: enough to find IDs and the webhook that posts into it. */
 function describeChannel(fake: DiscordFake, c: Channel) {
@@ -197,6 +209,7 @@ const table: [string, RegExp, Handler][] = [
         type: field<number>(b, 'type', 'number', false),
         threadName: optStr(b, 'thread_name'),
         tags: field<string[]>(b, 'tags', 'array', false),
+        files: field<Json[]>(b, 'files', 'array', false)?.map(newFile),
       }),
   ],
 
@@ -209,7 +222,11 @@ const table: [string, RegExp, Handler][] = [
     },
   ],
 
-  ['PATCH', /^\/messages\/(\d+)\/(\d+)$/, (fake, b, [channel, id]) => fake.edit(channel!, id!, str(b, 'content'))],
+  [
+    'PATCH',
+    /^\/messages\/(\d+)\/(\d+)$/,
+    (fake, b, [channel, id]) => fake.edit(channel!, id!, str(b, 'content'), field<string[]>(b, 'attachments', 'array', false)),
+  ],
 
   [
     'DELETE',

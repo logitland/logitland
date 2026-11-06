@@ -13,6 +13,7 @@ with a token you see what your level allows. Private conversations never appear 
 | [`GET /v1/channels`](get-v1-channels.md)                           | Lists the channels you can see, and what you may do there |
 | [`GET /v1/channels/{id}/messages`](get-v1-channels-id-messages.md) | Reads a channel's history, newest first                   |
 | [`GET /v1/channels/{id}/threads`](get-v1-channels-id-threads.md)   | Lists a channel's threads and forum posts                 |
+| [`GET /v1/attachments/{id}`](get-v1-attachments-id.md)             | Downloads a file on a message                             |
 
 History answers "what happened here". To hear about new messages, [subscribe](../subscriptions/index.md) instead of
 reading the same history again.

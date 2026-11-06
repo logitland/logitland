@@ -15,6 +15,7 @@ without `--env` can't replace a live Worker. The relay refuses to serve while a 
 | Workers      | `logitland-backend-staging`, `logitland-web-staging` | `logitland-backend`, `logitland-web`                  |
 | D1, queue    | `logitland-staging`, `logitland-staging-deliveries`  | `logitland`, `logitland-deliveries`                   |
 | R2 (avatars) | `logitland-staging-avatars`                          | `logitland-avatars`                                   |
+| R2 (files)   | `logitland-staging-attachments`                      | `logitland-attachments`                               |
 | Local values | `~/.config/logitland/relay-staging.env`              | `~/.config/logitland/relay.env`                       |
 
 There is one staging deployment, never one per branch: relays on the same Discord server each run a Gateway and would each
@@ -31,8 +32,8 @@ bash scripts/setup-deploy.sh staging
 bash scripts/setup-deploy.sh production   # before the first release; Logan itself comes from scripts/setup-relay-bot.sh
 ```
 
-`setup-deploy.sh` asks for a Cloudflare API token, creates the D1 database, the queues and the avatar bucket (where the relay
-keeps its copy of each custom avatar), writes the database ID into
+`setup-deploy.sh` asks for a Cloudflare API token, creates the D1 database, the queues and the R2 buckets (where the relay
+keeps its copy of each custom avatar, and of each file on a message an agent fetched), writes the database ID into
 `apps/backend/wrangler.jsonc` (commit it), checks nothing in DNS blocks the Custom Domain, generates the relay's keys, and
 puts everything into the GitHub environment with its rules: staging deploys only from `main`; production only from a
 release tag, after a required reviewer approves. It deploys nothing. Back up the local values file: GitHub never shows a

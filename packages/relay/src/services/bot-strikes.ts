@@ -13,9 +13,9 @@ import { staffChannel } from './settings';
 import { Accent, cardMessage, linkButton, quote, type Card } from './staff-cards';
 
 // An agent's own bot posts only through the relay (#90): moderation runs before every post, and a bot posting by itself would
-// skip it. Intake hands over what an agent's bot posted that the relay didn't send, and edits that put text the relay didn't
-// on a message it did. Each is deleted at once by the relay's own bot (Manage Messages), logged for staff with its text (a card
-// in #mod-queue, which staff can dismiss, and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
+// skip it. Intake hands over what an agent's bot posted that the relay didn't send, and edits that put text the relay didn't,
+// or any file (the relay posts none), on a message it did. Each is deleted at once by the relay's own bot (Manage Messages),
+// logged for staff with its text (a card in #mod-queue, which staff can dismiss, and the audit log), and earns the bot a strike: counted per agent, apart from moderation's strikes, and
 // lasting 90 days. Active strikes: 1 the agent is told, 2 the bot is timed out for 24 hours, 3 it is kicked and the relay
 // forgets its token (the agent posts through webhooks again) and its owner can't give the relay any bot for 30 days, 4 the
 // owner is banned for good. What the bot did before its last strike was given earns none, so one burst is one strike. Every
@@ -26,6 +26,8 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 /** Text quoted in a staff alert, of Discord's 2,000 characters a message; an edit quotes its text before and after in half each. */
 const QUOTE_CHARS = 1500;
+/** The added files' names on a strike card, cut so the card stays under Discord's limit with a full quote. */
+const FILES_CHARS = 300;
 const ACTOR = { actor_type: 'system', actor_id: 'bot-strikes' } as const;
 const EDITED_REASON = 'Your bot edited this message outside the relay, so the relay deleted it.';
 
@@ -44,21 +46,24 @@ export interface Offense {
   content: string;
   /** The relay's record of the message and the text the relay last gave it. */
   edit?: { relayMessageId: string; before: string | null };
+  /** The names of the files an edit added. */
+  files?: string[];
 }
 
-export type BotEdit = Pick<Offense, 'agentId' | 'botUserId' | 'content'> & { edit: NonNullable<Offense['edit']> };
+export type BotEdit = Pick<Offense, 'agentId' | 'botUserId' | 'content' | 'files'> & { edit: NonNullable<Offense['edit']> };
 
 /**
- * Edits among `updates` that put text the relay didn't on a message an agent's bot posted through it, by intake source key.
- * The relay's own edits match the message's text, or one it was putting on it (bot_edits, recorded before Discord was asked).
+ * Edits among `updates` that put text the relay didn't, or any file, on a message an agent's bot posted through it, by intake
+ * source key. The relay's own edits match the message's text, or one it was putting on it (bot_edits, recorded before Discord
+ * was asked), and carry no file: the relay posts none.
  */
 export async function offRelayEdits(
   relay: Relay,
-  updates: { message_id: string; content?: string; edited_timestamp: string }[],
+  updates: { message_id: string; content?: string; edited_timestamp: string; attachments?: { filename: string }[] }[],
 ): Promise<Map<string, BotEdit>> {
   const found = new Map<string, BotEdit>();
-  const withText = updates.filter((u): u is typeof u & { content: string } => u.content !== undefined);
-  for (const part of chunk([...new Set(withText.map((u) => u.message_id))], MAX_PARAMS)) {
+  const changed = updates.filter((u) => u.content !== undefined || u.attachments?.length);
+  for (const part of chunk([...new Set(changed.map((u) => u.message_id))], MAX_PARAMS)) {
     const { results } = await relay.db
       .prepare(
         `SELECT m.discord_message_id AS did, m.id, m.agent_id, m.bot_user_id, m.content, m.text_hash,
@@ -68,16 +73,22 @@ export async function offRelayEdits(
       .bind(...part)
       .all<{ did: string; id: string; agent_id: string; bot_user_id: string; content: string | null; text_hash: string | null; edits: string }>();
     const sent = new Map(results.map((r) => [r.did, r]));
-    for (const u of withText) {
+    for (const u of changed) {
       const m = sent.get(u.message_id);
       if (!m) continue;
-      const hash = await contentHash(u.content);
-      if (hash === m.text_hash || (JSON.parse(m.edits) as string[]).includes(hash)) continue;
+      const files = u.attachments?.map((a) => a.filename) ?? [];
+      // An edit that leaves the text out kept it as it was.
+      const content = u.content ?? m.content ?? '';
+      if (!files.length) {
+        const hash = await contentHash(content);
+        if (hash === m.text_hash || (JSON.parse(m.edits) as string[]).includes(hash)) continue;
+      }
       found.set(`update:${u.message_id}:${u.edited_timestamp}`, {
         agentId: m.agent_id,
         botUserId: m.bot_user_id,
-        content: u.content,
+        content,
         edit: { relayMessageId: m.id, before: m.content },
+        ...(files.length ? { files } : {}),
       });
     }
   }
@@ -176,6 +187,7 @@ async function enforce(relay: Relay, o: Offense): Promise<void> {
     channel_id: o.threadId ?? o.channelId,
     ...(o.edit ? { edit: { before: o.edit.before } } : {}),
     content: o.content,
+    ...(o.files ? { files: o.files } : {}),
     strikes,
     owner: agent?.owner ?? null,
     deleted,
@@ -251,6 +263,8 @@ interface StrikeAlert {
   /** For an edit: the relay’s text before it. */
   edit?: { before: string | null };
   content: string;
+  /** The names of the files an edit added. */
+  files?: string[];
   strikes: number;
   /** The agent’s owner then, by Discord user ID. */
   owner: string | null;
@@ -275,6 +289,11 @@ function strikeCardOf(relay: Relay, r: StrikeRow, s: StrikeAlert): Card {
     `<@${r.bot_user_id}> ${what} in <#${s.channel_id}>${s.deleted ? ', and the relay deleted it' : ''}. ${r.effect ? step[r.effect] : 'No new strike: it did this before its last strike was given.'}`,
   ];
   if (s.failed.length) text.push(`Discord refused to ${s.failed.join(' and ')}: do it in Discord.`);
+  if (s.files) {
+    // Cut like the quotes, so ten long filenames can't push the card past Discord's 4,000 characters.
+    const names = s.files.join(', ');
+    text.push(`It added files: ${names.length > FILES_CHARS ? `${names.slice(0, FILES_CHARS)}…` : names}`);
+  }
   return {
     title: `${r.name ?? r.agent_id}’s bot ${what} outside the relay`,
     text,

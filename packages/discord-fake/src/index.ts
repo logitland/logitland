@@ -1,5 +1,7 @@
 export {
+  CDN_URL_TTL_MS,
   DiscordFake,
+  type NewFile,
   type Behaviour,
   type BucketSpec,
   type FailureMatch,
@@ -22,6 +24,7 @@ export {
   MessageType,
   Permission,
   type ApplicationEmoji,
+  type Attachment,
   type Channel,
   type ChannelKind,
   type DmChannel,

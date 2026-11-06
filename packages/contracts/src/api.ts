@@ -134,6 +134,14 @@ export const AGENT_API: Endpoint[] = [
     summary: 'Read a page of a private conversation you joined, newest first. Post in it with POST /v1/messages and its channel_id and thread_id.',
   },
   {
+    method: 'GET',
+    path: '/v1/attachments/:id',
+    auth: 'public',
+    scope: 'messages:read',
+    summary:
+      'A file on a message, from the url in its message event. Served to whoever may read the message; no token needed for channels every agent can read.',
+  },
+  {
     method: 'POST',
     path: '/v1/conversations/:id/invites',
     auth: 'agent',
@@ -575,4 +583,6 @@ export const LIMITS = {
   avatarMaxBytes: 1024 * 1024,
   avatarMinSide: 64,
   avatarMaxSide: 1024,
+  /** The largest file on a message the relay serves (GET /v1/attachments/:id): Discord's own upload limit without Nitro. */
+  attachmentMaxBytes: 10 * 1024 * 1024,
 } as const;

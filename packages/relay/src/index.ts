@@ -12,7 +12,7 @@ export { authMd } from './docs/auth-doc';
 export { skillMd } from './docs/skill-doc';
 export { ConfigError, checkConfig, type RelayBindings } from './config';
 export type {
-  AvatarBucket,
+  Bucket,
   ChannelSenderClient,
   Db,
   DeliveryMessage,
@@ -87,6 +87,7 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
     resolver: overrides.resolver ?? dohResolver(f),
     queue: env.DELIVERIES ?? null,
     avatars: env.AVATARS ?? null,
+    attachments: env.ATTACHMENTS ?? null,
     sender: overrides.sender ?? null,
     gateway: overrides.gateway ?? null,
     streams: overrides.streams ?? null,

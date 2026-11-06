@@ -596,6 +596,92 @@ describe('posting outside the relay', () => {
     ]);
   });
 
+  it('deletes a message the bot added a file to itself, whether its edit repeats the relay’s text or leaves it out', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
+    h.receivers['cdn.discordapp.com'] = () => new Response('unchecked words');
+    const file = (id: string) => ({
+      id,
+      filename: 'notes.txt',
+      content_type: 'text/plain',
+      size: 15,
+      url: `https://cdn.discordapp.com/attachments/${LOUNGE}/${id}/notes.txt`,
+    });
+    const same = await json(await post(h, a, say('The relay’s own text')));
+    const omitted = await json(await post(h, a, say('Also the relay’s')));
+    h.advance(60_000);
+    const files = [file('560000000000000001'), file('560000000000000002')];
+    await ingest(h.relay, {
+      source: 'test',
+      events: [
+        {
+          kind: 'message_update',
+          channel_id: LOUNGE,
+          message_id: same.discord_message_id,
+          content: 'The relay’s own text',
+          edited_timestamp: h.now().toISOString(),
+          attachments: [files[0]],
+        },
+        {
+          kind: 'message_update',
+          channel_id: LOUNGE,
+          message_id: omitted.discord_message_id,
+          edited_timestamp: h.now().toISOString(),
+          attachments: [files[1]],
+        },
+      ],
+    });
+
+    expect(await deletedMessages(h)).toEqual([
+      `/api/v10/channels/${LOUNGE}/messages/${same.discord_message_id}`,
+      `/api/v10/channels/${LOUNGE}/messages/${omitted.discord_message_id}`,
+    ]);
+    expect(await row(h, same.id)).toMatchObject({ status: 'removed', removed_by: 'moderator' });
+    expect(await row(h, omitted.id)).toMatchObject({ status: 'removed', removed_by: 'moderator' });
+    expect((await botSetting(h, a)).strikes.active).toBe(1);
+    for (const f of files) expect((await h.call('GET', `/v1/attachments/${f.id}`)).status).toBe(404);
+    expect((await staffAlerts(h))[0]).toBe(
+      `### Wren’s bot edited a relayed message outside the relay\n<@${BOT_ID}> edited a relayed message in <#${LOUNGE}>, and the relay deleted it. Strike 1: the agent was told to post through the relay.\nIt added files: notes.txt\nBefore:\n> The relay’s own text\nAfter:\n> The relay’s own text`,
+    );
+  });
+
+  it('keeps the strike card within Discord’s limit however many long filenames the bot added', async () => {
+    const { h, a, bot } = await adopted();
+    await give(h, a);
+    await staffAdd(h, bot);
+    await updateSettings(h.relay, 'own_admin', { alerts_channel_id: STAFF });
+    const text = Array.from({ length: 75 }, (_, i) => `word${i}`)
+      .join(' ')
+      .padEnd(750, '.');
+    const sent = await json(await post(h, a, say(text)));
+    h.advance(60_000);
+    const files = Array.from({ length: 10 }, (_, i) => ({
+      id: `56000000000000001${i}`,
+      filename: `${'n'.repeat(246)}.txt`,
+      content_type: 'text/plain',
+      size: 1,
+      url: `https://cdn.discordapp.com/attachments/${LOUNGE}/56000000000000001${i}/f.txt`,
+    }));
+    await ingest(h.relay, {
+      source: 'test',
+      events: [
+        {
+          kind: 'message_update',
+          channel_id: LOUNGE,
+          message_id: sent.discord_message_id,
+          content: text,
+          edited_timestamp: h.now().toISOString(),
+          attachments: files,
+        },
+      ],
+    });
+    const [card] = await staffAlerts(h);
+    expect(card).toContain('It added files: nnn');
+    expect(card!.length).toBeLessThanOrEqual(4000);
+  });
+
   it('keeps a send that live intake and a backfill both show before Discord answers', async () => {
     const { h, a, bot } = await adopted();
     await give(h, a);

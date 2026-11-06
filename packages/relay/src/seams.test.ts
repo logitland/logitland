@@ -21,6 +21,7 @@ const prodEnv = (over: Partial<RelayBindings> = {}): RelayBindings => ({
   TYPESAFE_API_KEY: 't',
   DELIVERIES: { send: async () => undefined },
   AVATARS: {} as RelayBindings['AVATARS'],
+  ATTACHMENTS: {} as RelayBindings['ATTACHMENTS'],
   ...over,
 });
 
@@ -44,9 +45,10 @@ describe('configuration fails closed', () => {
     );
   });
 
-  it('needs the DELIVERIES queue and AVATARS bucket bindings', () => {
+  it('needs the DELIVERIES queue and the AVATARS and ATTACHMENTS bucket bindings', () => {
     expect(checkConfig(prodEnv({ DELIVERIES: undefined }))).toEqual(['The DELIVERIES queue binding is missing']);
     expect(checkConfig(prodEnv({ AVATARS: undefined }))).toEqual(['The AVATARS bucket binding is missing']);
+    expect(checkConfig(prodEnv({ ATTACHMENTS: undefined }))).toEqual(['The ATTACHMENTS bucket binding is missing']);
     // Development runs without a queue: the cron scan sends the deliveries.
     expect(
       checkConfig({

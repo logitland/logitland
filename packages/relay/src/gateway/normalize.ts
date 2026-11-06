@@ -1,3 +1,4 @@
+import type { DiscordAttachment } from '../services/attachments';
 import { snowflakeTime } from '../services/events';
 import type { IntakeEventInput } from '../services/intake';
 
@@ -32,7 +33,19 @@ export interface DiscordMessageLike {
   edited_timestamp?: string | null;
   type?: number;
   message_reference?: { message_id?: string; type?: number } | null;
+  attachments?: DiscordAttachment[];
 }
+
+/** The parts of Discord's attachment object the relay keeps (services/attachments.ts). */
+const attachment = (a: DiscordAttachment): DiscordAttachment => ({
+  id: a.id,
+  filename: a.filename,
+  content_type: a.content_type ?? null,
+  size: a.size,
+  url: a.url,
+  width: a.width ?? null,
+  height: a.height ?? null,
+});
 
 export interface DiscordChannelLike {
   id: string;
@@ -96,6 +109,7 @@ export function messageCreated(m: DiscordMessageLike, threads: ReadonlyMap<strin
     edited_timestamp: m.edited_timestamp ?? null,
     // Only a reply (type 19) answers a message; forwards and pins also carry a reference.
     reply_to: m.type === REPLY ? (m.message_reference?.message_id ?? null) : null,
+    ...(m.attachments?.length ? { attachments: m.attachments.map(attachment) } : {}),
   };
 }
 
@@ -177,6 +191,7 @@ export function normalizeDispatch(t: string, d: unknown, ctx: NormalizeContext):
           message_id: m.id,
           ...(typeof m.content === 'string' ? { content: m.content } : {}),
           edited_timestamp: m.edited_timestamp,
+          ...(Array.isArray(m.attachments) ? { attachments: m.attachments.map(attachment) } : {}),
         },
       ];
     }

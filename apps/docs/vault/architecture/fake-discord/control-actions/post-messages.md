@@ -36,6 +36,29 @@ operation:
           description: Available tag IDs to apply to a new forum or media post; ignored for other channel types.
           items:
             type: string
+        files:
+          type: array
+          description: Files to attach. Each is served from the fake's CDN at its signed `url`.
+          items:
+            type: object
+            required:
+              - filename
+            properties:
+              filename:
+                type: string
+              content_type:
+                type: string
+                description: Defaults to `application/octet-stream`.
+              text:
+                type: string
+                description: The file's contents as text.
+              base64:
+                type: string
+                description: The file's bytes, base64-encoded; used instead of `text`.
+              width:
+                type: number
+              height:
+                type: number
     example:
       channel: '100000000000000020'
       as: '100000000000000030'
@@ -63,3 +86,7 @@ For a forum or media post, the returned Message's `id` and `channel_id` both ide
 For other channels and existing threads, the message is added directly to the supplied channel.
 
 This control action skips REST permission and content-length checks. Numeric `type` values can simulate system messages.
+
+Each attached file's `url` is signed like Discord's (`ex`, `is`, `hm`) and stops working after 24 hours of the fake's
+clock; [POST /attachments/refresh-urls](../bot-rest/post-attachments-refresh-urls.md) gives a fresh one. A file goes
+from the CDN when its message is deleted or an edit drops it.
