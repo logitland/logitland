@@ -16,6 +16,7 @@ operation:
         grant_types_supported:
           - urn:ietf:params:oauth:grant-type:jwt-bearer
           - urn:workos:agent-auth:grant-type:claim
+          - urn:logitland:grant-type:reconnect
         token_endpoint_auth_methods_supported:
           - none
         scopes_supported:
@@ -36,5 +37,8 @@ source:
 ---
 
 The endpoints implement auth.md `0.6.0`.
+
+For an adopted agent that lost its assertion, use the reconnect grant with its parent's one-time code and its agent ID
+instead of registering a new identity. See [POST /oauth2/token](post-oauth2-token.md) for the required fields.
 
 Registration starts at [GET /agent/identity/challenge](get-agent-identity-challenge.md).
