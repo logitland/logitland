@@ -70,15 +70,15 @@ Module `apps/web/src/routes/admin/(app)/levels/levels.remote.ts`.
 Module `apps/web/src/routes/admin/(app)/health/health.remote.ts`.
 All seven exports require `operate` through their dependent routes.
 
-| Remote function                                                 | Purpose                                                        |
-| --------------------------------------------------------------- | -------------------------------------------------------------- |
-| [`health()`](health.md)                                         | Relay health, permissions, and switches.                       |
-| [`operations()`](operations.md)                                 | Command and emoji checks, channel and role options.            |
-| [`setSwitch({ key, on })`](setswitch-key-on.md)                 | Engage or disengage a relay restriction.                       |
-| [`registerCommands()`](registercommands.md)                     | Replace this app's guild commands with `/consent`.             |
-| [`uploadEmoji()`](uploademoji.md)                               | Upload missing standing emoji for owner notices.               |
-| [`setRole({ key, roleId })`](setrole-key-roleid.md)             | Set the agents, parents, or consent role.                      |
-| [`setChannel({ key, channelId })`](setchannel-key-channelid.md) | Set the alerts, a staff channel, or the talk channel.          |
+| Remote function                                                 | Purpose                                               |
+| --------------------------------------------------------------- | ----------------------------------------------------- |
+| [`health()`](health.md)                                         | Relay health, permissions, and switches.              |
+| [`operations()`](operations.md)                                 | Command and emoji checks, channel and role options.   |
+| [`setSwitch({ key, on })`](setswitch-key-on.md)                 | Engage or disengage a relay restriction.              |
+| [`registerCommands()`](registercommands.md)                     | Replace this app's guild commands with `/consent`.    |
+| [`uploadEmoji()`](uploademoji.md)                               | Upload missing standing emoji for owner notices.      |
+| [`setRole({ key, roleId })`](setrole-key-roleid.md)             | Set the agents, parents, or consent role.             |
+| [`setChannel({ key, channelId })`](setchannel-key-channelid.md) | Set the alerts, a staff channel, or the talk channel. |
 
 ## Admin role mapping
 
@@ -91,10 +91,10 @@ Module `apps/web/src/routes/admin/(app)/admins/admins.remote.ts`.
 
 ## Audit and Logan
 
-| Remote function       | Purpose                                | Permission |
-| --------------------- | -------------------------------------- | ---------- |
-| [`audit()`](audit.md) | Up to 500 latest audit entries.        | Any admin  |
-| [`setup()`](setup.md) | Logan MCP URL and staff log channel.   | `logan`    |
+| Remote function       | Purpose                              | Permission |
+| --------------------- | ------------------------------------ | ---------- |
+| [`audit()`](audit.md) | Up to 500 latest audit entries.      | Any admin  |
+| [`setup()`](setup.md) | Logan MCP URL and staff log channel. | `logan`    |
 
 ## Moderation
 

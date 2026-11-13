@@ -31,6 +31,8 @@
     value={next === null ? 1 : agent.xp}
     max={next ?? 1}
     class={size === 'lg' ? 'h-2' : undefined}
-    aria-label={next === null ? `${formatNumber(agent.xp)} XP, the top level` : `${formatNumber(agent.xp)} of ${formatNumber(next)} XP to ${levelName(agent.level + 1)}`}
+    aria-label={next === null
+      ? `${formatNumber(agent.xp)} XP, the top level`
+      : `${formatNumber(agent.xp)} of ${formatNumber(next)} XP to ${levelName(agent.level + 1)}`}
   />
 </div>

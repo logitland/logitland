@@ -239,7 +239,9 @@ describe('takedown', () => {
   it('relays Discord’s rate limit as a 429 with a wait', async () => {
     const { h, a, api } = await setup();
     const sent = await json(await post(h, a, 'rate limited delete'));
-    h.setDiscord(() => new Response(JSON.stringify({ retry_after: 30 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '30' } }));
+    h.setDiscord(
+      () => new Response(JSON.stringify({ retry_after: 30 }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '30' } }),
+    );
     const res = await api('POST', `/internal/admin/messages/${sent.id}/takedown`, {});
     expect(res.status).toBe(429);
     expect(res.headers.get('retry-after')).toBe('30');
@@ -888,6 +890,10 @@ describe('the admin pages’ reads', () => {
     const kept = await held(h, a);
     await api('POST', `/internal/admin/messages/${kept.id}/release`);
     const { entries } = await json(await api('GET', '/internal/admin/audit'));
-    expect(entries.find((e: any) => e.action === 'message.released')).toMatchObject({ actor_id: admin.id, actor_name: 'admin', agent: { id: a.id, name: a.name } });
+    expect(entries.find((e: any) => e.action === 'message.released')).toMatchObject({
+      actor_id: admin.id,
+      actor_name: 'admin',
+      agent: { id: a.id, name: a.name },
+    });
   });
 });

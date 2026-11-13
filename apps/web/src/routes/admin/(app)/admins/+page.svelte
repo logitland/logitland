@@ -47,7 +47,9 @@
   }
 
   async function save() {
-    errors = Object.fromEntries(draft.filter((g) => g.powers.length === 0).map((g) => [g.roleId, `Give ${roleName(g.roleId)} at least one power, or remove it.`]));
+    errors = Object.fromEntries(
+      draft.filter((g) => g.powers.length === 0).map((g) => [g.roleId, `Give ${roleName(g.roleId)} at least one power, or remove it.`]),
+    );
     if (Object.keys(errors).length) return;
     // Roles whose powers changed, and roles removed from the card, which lose theirs.
     const changes = [

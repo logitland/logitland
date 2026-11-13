@@ -24,10 +24,7 @@ describe('level colours', () => {
   const YELLOW = { hue: 85, chroma: 0.12 };
   const colours: LevelColours = { 2: GREEN, 6: PURPLE, 8: YELLOW };
 
-  const lab = ({ hue, chroma }: { hue: number; chroma: number }) => [
-    chroma * Math.cos((hue * Math.PI) / 180),
-    chroma * Math.sin((hue * Math.PI) / 180),
-  ];
+  const lab = ({ hue, chroma }: { hue: number; chroma: number }) => [chroma * Math.cos((hue * Math.PI) / 180), chroma * Math.sin((hue * Math.PI) / 180)];
 
   // Proves assigned levels keep their colour and the ends hold the nearest assigned colour.
   it.each([
