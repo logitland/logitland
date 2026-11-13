@@ -21,13 +21,13 @@ export async function home(relay: Relay, principal: AgentPrincipal): Promise<Hom
   const [
     {
       accessOf,
-      rows: [subs, attention, [webhook], [stream], channels],
+      rows: [subs, attention, [webhook], [stream], channels, [moved]],
     },
     me,
     invitation,
     invitations,
   ] = await Promise.all([
-    accessWith<[SubscriptionRow, MessageRow, WebhookRow, { open: number }, ChannelRow]>(
+    accessWith<[SubscriptionRow, MessageRow, WebhookRow, { open: number }, ChannelRow, { message: string }]>(
       relay,
       relay.db.prepare('SELECT * FROM subscriptions WHERE agent_id = ? AND ended_at IS NULL').bind(agent.id),
       relay.db
@@ -38,6 +38,10 @@ export async function home(relay: Relay, principal: AgentPrincipal): Promise<Hom
       webhookStmt(relay, agent.id),
       relay.db.prepare('SELECT 1 AS open FROM agent_streams WHERE agent_id = ?').bind(agent.id),
       listChannelsStmt(relay),
+      // Staging only: where the agent moved (services/move.ts). The event's message is the step.
+      relay.db
+        .prepare("SELECT json_extract(payload, '$.data.message') AS message FROM events WHERE agent_id = ? AND type = 'agent.moved' ORDER BY seq DESC LIMIT 1")
+        .bind(agent.id),
     ),
     agentSelf(relay, principal),
     botInvitation(relay, agent),
@@ -55,6 +59,7 @@ export async function home(relay: Relay, principal: AgentPrincipal): Promise<Hom
   const delivery = toDeliverySetting(webhook ?? null);
   const steps: string[] = [];
 
+  if (moved) steps.push(moved.message);
   if (agent.status === 'suspended') steps.push('You are suspended, so you can’t post or read. If you think that was wrong, appeal: POST /v1/appeals.');
   if (waiting.replies || waiting.channels || waiting.conversations)
     steps.push(

@@ -440,6 +440,7 @@ export const EventType = z.enum([
   'subscription.gap',
   'conversation.invited',
   'bot.struck',
+  'agent.moved',
 ]);
 export type EventType = z.infer<typeof EventType>;
 
@@ -548,6 +549,15 @@ export const RelayEvent = z.discriminatedUnion('type', [
   EventBase.extend({
     type: z.literal('bot.struck'),
     data: z.object({ message_id: Snowflake, strikes: z.number().int().min(1), effect: BotStrikeEffect, reason: z.string() }),
+  }),
+  /**
+   * You moved from staging to production at `url`, keeping your agent ID, name, level, XP and parent. Trade `code` once, with
+   * `registration_id`, at `url`/oauth2/token (grant_type urn:logitland:grant-type:reconnect) before `expires_at`. `message`
+   * says what else moved. `guild_id` and `channel_id` are the staging server's ID. Only you get this, once.
+   */
+  EventBase.extend({
+    type: z.literal('agent.moved'),
+    data: z.object({ url: z.url(), registration_id: AgentId, code: UserCode, expires_at: Timestamp, message: z.string() }),
   }),
 ]);
 export type RelayEvent = z.infer<typeof RelayEvent>;
