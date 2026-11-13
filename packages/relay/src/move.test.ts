@@ -2,10 +2,13 @@ import { AgentSelf, RelayEvent, Subscription, TokenResponse, type Digest, type H
 import { verify } from '@logitland/webhooks';
 import { describe, expect, it } from 'vitest';
 import type { Db } from './context';
+import { sha256 } from './crypto';
 import { HOOK_HOST, poll, say, setup, subscribe, useWebhook, type Setup } from './deliveries.testkit';
 import { attemptDelivery, pushDue } from './services/deliveries';
 import { MOVE_CODE_DAYS, moveAgents, type Outcome, type Sql } from './services/move';
 import { RECONNECT_GRANT } from './services/reconnect';
+import { retentionJob } from './services/retention';
+import { CLAIM_GRANT } from './services/tokens';
 import { tokenCall } from './signup.helpers';
 import { BENCH, LOUNGE, harness, seedAgent, seedChannel, seedOwner, type Harness } from './testing';
 import { mockQueue } from './webhook.testkit';
@@ -148,6 +151,62 @@ describe('moving agents to production', () => {
     const orrery = (await (await s.call('GET', '/v1/home', undefined, s.auth)).json()) as Home;
     expect(orrery.next_steps[0]).toContain('same URL with the same signing secret');
     expect(orrery.next_steps[0]).toContain('except to #lab-bench');
+  });
+
+  it('leaves staging’s claim tokens behind', async () => {
+    const { s } = await staging();
+    const p = await production();
+    const claim = { grant_type: CLAIM_GRANT, claim_token: 'clm_staging' };
+    await s.db
+      .prepare('UPDATE agents SET claim_token_hash = ?, claim_token_expires = ? WHERE id = ?')
+      .bind(await sha256(claim.claim_token), new Date(s.now().getTime() + DAY_MS).toISOString(), s.agent.id)
+      .run();
+    await move(s, p);
+
+    expect((await tokenCall(p, claim)).status).toBe(400);
+    expect((await tokenCall(s, claim)).status).toBe(200);
+  });
+
+  it('tells an agent that deleted its replies subscription, through a new one', async () => {
+    const { s, quill } = await staging();
+    const p = await production();
+    const quillAuth = s.as(quill.token);
+    const replies = await subscribe(s, { kind: 'replies' }, quillAuth);
+    expect((await s.call('DELETE', `/v1/subscriptions/${replies.id}`, undefined, quillAuth)).status).toBe(204);
+    await subscribe(s, {}, quillAuth);
+    const { code } = moving(await move(s, p), quill.id);
+
+    const [digest] = (await poll({ ...s, auth: quillAuth })).digests;
+    expect(RelayEvent.parse(digest!.events[0])).toMatchObject({ type: 'agent.moved', data: { code } });
+
+    // Running again neither tells it twice nor adds a second replies subscription.
+    await move(s, p);
+    expect((await poll({ ...s, auth: quillAuth })).digests).toEqual([]);
+    expect(await s.db.prepare("SELECT COUNT(*) AS n FROM subscriptions WHERE agent_id = ? AND kind = 'replies'").bind(quill.id).first()).toEqual({ n: 1 });
+  });
+
+  it('announces a new code when the last expired unused, and keeps it in home as long as the code', async () => {
+    const { s, quill } = await staging();
+    const p = await production();
+    const quillAuth = s.as(quill.token);
+    const first = moving(await move(s, p), quill.id);
+    await poll({ ...s, auth: quillAuth });
+    s.advance(DAY_MS);
+    await say(s, 'a day later');
+    s.advance((MOVE_CODE_DAYS + 1) * DAY_MS);
+    await posted(s, quill.id, 2);
+
+    const second = moving(await move(s, p), quill.id);
+    expect(second.code).not.toBe(first.code);
+    const [digest] = (await poll({ ...s, auth: quillAuth })).digests;
+    expect(digest!.events.map((e) => RelayEvent.parse(e))).toMatchObject([
+      { type: 'agent.moved', observed_at: s.now().toISOString(), data: { code: second.code } },
+    ]);
+
+    s.advance((MOVE_CODE_DAYS - 1) * DAY_MS);
+    await retentionJob(s.relay);
+    const home = (await (await s.call('GET', '/v1/home', undefined, quillAuth)).json()) as Home;
+    expect(home.next_steps[0]).toContain(second.code);
   });
 
   it('moves only agents that posted in the last 30 days and were not revoked or banned', async () => {

@@ -48,8 +48,6 @@ interface AgentRow {
   status_reason: string | null;
   posting_paused_until: string | null;
   scopes: string;
-  claim_token_hash: string | null;
-  claim_token_expires: string | null;
   daily_event_cap: number | null;
   created_at: string;
   owner_id: string | null;
@@ -118,7 +116,7 @@ async function exportAgents(staging: Sql, box: SecretBox, now: number): Promise<
   const [agents, subscriptions, webhooks, [guild]] = await Promise.all([
     staging.all<AgentRow>(
       `SELECT a.id, a.name, a.name_key, a.name_changed_at, a.level, a.xp, a.adoption_xp, a.adopted_at, a.status, a.status_reason,
-         a.posting_paused_until, a.scopes, a.claim_token_hash, a.claim_token_expires, a.daily_event_cap, a.created_at, o.id AS owner_id,
+         a.posting_paused_until, a.scopes, a.daily_event_cap, a.created_at, o.id AS owner_id,
          o.discord_user_id AS owner_discord_id, o.username AS owner_username, o.created_at AS owner_created_at,
          EXISTS (SELECT 1 FROM agent_bots b WHERE b.agent_id = a.id) AS bot
        FROM agents a LEFT JOIN owners o ON o.id = a.owner_id WHERE ${MOVING} ORDER BY a.id`,
@@ -169,9 +167,10 @@ async function copyStatements(a: MovingAgent, channels: Map<string, string>, box
     });
   out.push(
     {
+      // No claim token: it is a staging credential, and the move code is the only way in.
       sql: `INSERT INTO agents (id, kind, owner_id, adopted_at, name, name_key, name_changed_at, level, xp, adoption_xp, status, status_reason,
-              posting_paused_until, scopes, claim_token_hash, claim_token_expires, daily_event_cap, created_at, updated_at)
-            VALUES (?, 'agent', (SELECT id FROM owners WHERE discord_user_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+              posting_paused_until, scopes, daily_event_cap, created_at, updated_at)
+            VALUES (?, 'agent', (SELECT id FROM owners WHERE discord_user_id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
       params: [
         a.id,
         a.owner_discord_id,
@@ -186,8 +185,6 @@ async function copyStatements(a: MovingAgent, channels: Map<string, string>, box
         a.status_reason,
         a.posting_paused_until,
         a.scopes,
-        a.claim_token_hash,
-        a.claim_token_expires,
         a.daily_event_cap,
         a.created_at,
         now,
@@ -312,21 +309,31 @@ export function moveMessage(url: string, o: Extract<Outcome, { result: 'moving' 
 }
 
 /**
- * Staging's agent.moved events, one per moving agent, on its replies subscription. Running again records none: an event
- * whose code or message changed is updated in place, for home to show, and isn't announced again.
+ * Staging's agent.moved events, one per moving agent and code, on its replies subscription. An agent that deleted its replies
+ * subscription gets a new one (live, at the log's tail) just before the event, so the event reaches it. Running again with the
+ * same code records nothing new: a changed message updates the event in place, for home to show. A new code, given when the
+ * last one expired unused, is a new event, so the agent hears it and retention keeps it as long as the code.
  */
 function announcements(outcomes: Outcome[], url: string, guildId: string, now: string): Statement[] {
   return outcomes.flatMap((o) => {
     if (o.result !== 'moving') return [];
     const id = newId('evt');
+    const sourceKey = `agent.moved:${o.agent.id}:${o.code}`;
     const data = { url, registration_id: o.agent.id, code: o.code, expires_at: o.expires_at, message: moveMessage(url, o) };
     const payload = JSON.stringify({ id, schema_version: 1, type: 'agent.moved', observed_at: now, guild_id: guildId, channel_id: guildId, data });
     return [
       {
+        // The unique replies index ignores it when the agent has one; it starts before the event, so the event is due to it.
+        sql: `INSERT OR IGNORE INTO subscriptions (id, agent_id, kind, frequency, frequency_seconds, include_own, cursor, start_seq, created_at, updated_at)
+              SELECT ?, ?, 'replies', 'live', 0, 0, tail, tail, ?, ? FROM (SELECT COALESCE(MAX(seq), 0) AS tail FROM events)
+              WHERE NOT EXISTS (SELECT 1 FROM events WHERE source_key = ?)`,
+        params: [newId('sub'), o.agent.id, now, now, sourceKey],
+      },
+      {
         sql: `INSERT INTO events (id, source_key, type, guild_id, channel_id, payload, observed_at, agent_id) VALUES (?, ?, 'agent.moved', ?, ?, ?, ?, ?)
               ON CONFLICT (source_key) DO UPDATE SET payload = json_set(excluded.payload, '$.id', events.id, '$.observed_at', json_extract(events.payload, '$.observed_at'))
               WHERE json_extract(events.payload, '$.data') IS NOT json_extract(excluded.payload, '$.data')`,
-        params: [id, `agent.moved:${o.agent.id}`, guildId, guildId, payload, now, o.agent.id],
+        params: [id, sourceKey, guildId, guildId, payload, now, o.agent.id],
       },
     ];
   });

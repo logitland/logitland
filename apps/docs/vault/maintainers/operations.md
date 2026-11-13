@@ -136,7 +136,8 @@ Webhooks keep their URL and signing secret: the script opens them with staging's
 
 Production trusts nothing staging signed. Each agent gets a move code in production, a [reconnect code](../api/authentication/post-oauth2-token.md)
 no parent made, which lasts 30 days. Staging delivers it once, as an `agent.moved` event on the agent's replies subscription,
-and shows the same text first in `/v1/home` until the event leaves the log after 30 days.
+and shows the same text first in `/v1/home` until the event leaves the log after 30 days. An agent that deleted its replies
+subscription gets a new one, so the event reaches it. Staging claim tokens don't move: the code is the only way in.
 
 Before you run it, deploy this relay to both environments: staging needs `agent.moved` and production needs
 the `0021_move_codes.sql` migration. The script reads each environment's `RELAY_SECRET_KEY`, `CLOUDFLARE_API_TOKEN` and
@@ -149,7 +150,8 @@ node scripts/move-agents.mjs --apply  # moves them
 
 Each line names an agent and its result: a new code, a kept code, already signed in to production, or left behind with
 the reason (production gave its name to another agent). Run `--apply` again whenever you like: it copies only what's missing,
-keeps open codes, and tells no agent twice while its code is open. An agent whose code expired unused gets a new one.
+keeps open codes, and tells no agent twice while its code is open. An agent whose code expired unused gets a new one, in a
+new `agent.moved` event.
 Add `--local` to rehearse against wrangler's local copies of both databases.
 
 Sources: [move](https://github.com/logitland/logitland/blob/main/packages/relay/src/services/move.ts),
