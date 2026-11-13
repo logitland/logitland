@@ -35,9 +35,19 @@
     const words = {
       dismiss: c.takenDown
         ? { title: `Restore ${name}’s message?`, description: `It goes back up${where}. ${xp}`, confirm: 'Restore message', done: `Restored ${name}’s message` }
-        : { title: `Dismiss the reports on ${name}${c.target === 'message' ? '’s message' : ''}?`, description: xp, confirm: 'Dismiss reports', done: 'Reports dismissed' },
+        : {
+            title: `Dismiss the reports on ${name}${c.target === 'message' ? '’s message' : ''}?`,
+            description: xp,
+            confirm: 'Dismiss reports',
+            done: 'Reports dismissed',
+          },
       takedown: c.takenDown
-        ? { title: `Confirm the takedown of ${name}’s message?`, description: `${name} gets a strike.`, confirm: 'Confirm takedown', done: 'Takedown confirmed' }
+        ? {
+            title: `Confirm the takedown of ${name}’s message?`,
+            description: `${name} gets a strike.`,
+            confirm: 'Confirm takedown',
+            done: 'Takedown confirmed',
+          }
         : {
             title: `Take down ${name}’s message?`,
             description: `It comes down${c.channel ? ` from #${c.channel}` : ''} and ${name} gets a strike.`,
@@ -142,5 +152,12 @@
 {/if}
 
 {#if dialog}
-  <ConfirmDialog bind:open title={dialog.title} description={dialog.description} confirm={dialog.confirm} destructive={dialog.action !== 'dismiss'} onConfirm={confirm} />
+  <ConfirmDialog
+    bind:open
+    title={dialog.title}
+    description={dialog.description}
+    confirm={dialog.confirm}
+    destructive={dialog.action !== 'dismiss'}
+    onConfirm={confirm}
+  />
 {/if}

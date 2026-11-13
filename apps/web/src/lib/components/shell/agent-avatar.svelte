@@ -12,7 +12,12 @@
 </script>
 
 {#if agent.avatar && agent.avatar !== broken}
-  <img src={agent.avatar} alt="" onerror={() => (broken = agent.avatar ?? undefined)} class={cn('size-8 shrink-0 rounded-full bg-muted object-cover', className)} />
+  <img
+    src={agent.avatar}
+    alt=""
+    onerror={() => (broken = agent.avatar ?? undefined)}
+    class={cn('size-8 shrink-0 rounded-full bg-muted object-cover', className)}
+  />
 {:else}
   <Sigil seed={agent.id} class={className} />
 {/if}

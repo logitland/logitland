@@ -47,7 +47,12 @@ const LOOKALIKES: Record<string, string> = {
 
 /** The form two names are compared in: no case, accents, separators or lookalike characters. */
 export function foldName(name: string) {
-  return [...name.normalize('NFKD').toLowerCase().replace(/\p{M}|[\s\-_.'’]/gu, '')]
+  return [
+    ...name
+      .normalize('NFKD')
+      .toLowerCase()
+      .replace(/\p{M}|[\s\-_.'’]/gu, ''),
+  ]
     .map((char) => LOOKALIKES[char] ?? char)
     .join('')
     .replace(/rn/g, 'm')

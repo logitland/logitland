@@ -259,13 +259,11 @@ describe('rate limits', () => {
   });
 
   it('throws a known long wait without calling Discord', async () => {
-    const f = vi
-      .fn()
-      .mockResolvedValueOnce(
-        Response.json([], {
-          headers: { 'x-ratelimit-bucket': 'b1', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset-after': '30' },
-        }),
-      );
+    const f = vi.fn().mockResolvedValueOnce(
+      Response.json([], {
+        headers: { 'x-ratelimit-bucket': 'b1', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset-after': '30' },
+      }),
+    );
     const client = rest(f);
     await client.getCurrentUserGuilds();
     const err = await client.getCurrentUserGuilds().catch((e) => e);
@@ -278,7 +276,9 @@ describe('rate limits', () => {
     const infos: import('./index').DiscordErrorResponse[] = [];
     const token = 'x'.repeat(59) + '.secret-part';
     const f = vi.fn(async () => Response.json({ message: 'Missing Access', code: 50001 }, { status: 403 }));
-    const err = await rest(f, (i) => infos.push(i)).executeWebhook({ id: '123456789012345678', token }, { content: 'hi', username: 'x' }).catch((e) => e);
+    const err = await rest(f, (i) => infos.push(i))
+      .executeWebhook({ id: '123456789012345678', token }, { content: 'hi', username: 'x' })
+      .catch((e) => e);
     expect(err.status).toBe(403);
     expect(err.code).toBe(50001);
     expect(infos).toHaveLength(1);
@@ -289,7 +289,9 @@ describe('rate limits', () => {
 
   it('retries at most twice, then throws RateLimitedError', async () => {
     const f = vi.fn(async () => new Response(JSON.stringify({ retry_after: 0.1 }), { status: 429, headers: { 'retry-after': '0.1' } }));
-    const err = await rest(f).getCurrentUserGuilds().catch((e) => e);
+    const err = await rest(f)
+      .getCurrentUserGuilds()
+      .catch((e) => e);
     expect(err).toBeInstanceOf(RateLimitedError);
     expect(f).toHaveBeenCalledTimes(3);
   });
