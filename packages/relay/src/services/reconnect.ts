@@ -53,14 +53,16 @@ export async function createReconnectCode(relay: Relay, ownerId: string, agent: 
 const NOT_VALID = 'That reconnect code doesn’t work for this agent. It may be mistyped, expired or used. Ask your parent for a new one.';
 
 /**
- * The reconnect grant. The code must be open and made for `agentId`, whose parent made it and still has it: a revoked
- * registration has no parent. One compare-and-set spends the code and audits it, so two sessions racing get one identity.
+ * The reconnect grant. The code must be open and made for `agentId`, whose registration still stands, and a parent's code
+ * only while that parent still has it. A move code (services/move.ts) names no parent. One compare-and-set spends the code
+ * and audits it, so two sessions racing get one identity.
  */
 export async function redeemReconnectCode(relay: Relay, raw: string, agentId: string, client: ClientInfo): Promise<TokenResponse> {
   const misses = await missesFrom(relay, client);
   const code = raw.trim().toUpperCase();
   const now = iso(relay.now());
-  const open = `code = ? AND agent_id = ? AND used_at IS NULL AND expires_at > ? AND EXISTS (SELECT 1 FROM agents a WHERE a.id = reconnect_codes.agent_id AND a.owner_id = reconnect_codes.owner_id AND a.deleted_at IS NULL)`;
+  const open = `code = ? AND agent_id = ? AND used_at IS NULL AND expires_at > ? AND EXISTS (SELECT 1 FROM agents a WHERE a.id = reconnect_codes.agent_id
+    AND a.deleted_at IS NULL AND (reconnect_codes.owner_id IS NULL OR a.owner_id = reconnect_codes.owner_id))`;
   const [tried, found] = await Promise.all([
     peek(relay, misses),
     UserCode.safeParse(code).success ? relay.db.prepare(`SELECT 1 FROM reconnect_codes WHERE ${open}`).bind(code, agentId, now).first() : null,

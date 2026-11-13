@@ -140,6 +140,19 @@ export class SecretBox {
     return sealed.split('.')[1] !== this.currentId;
   }
 
+  /**
+   * The relay's keys from its settings (config.ts checks them first): RELAY_SECRET_KEY under RELAY_SECRET_KEY_ID, k1 unless
+   * set, and the older keys in RELAY_SECRET_KEYS_OLD.
+   */
+  static fromEnv(env: { RELAY_SECRET_KEY: string; RELAY_SECRET_KEY_ID?: string; RELAY_SECRET_KEYS_OLD?: string }): SecretBox {
+    const old = (env.RELAY_SECRET_KEYS_OLD ?? '')
+      .split(',')
+      .map((pair) => pair.trim())
+      .filter(Boolean)
+      .map((pair) => ({ id: pair.slice(0, pair.indexOf(':')), key: pair.slice(pair.indexOf(':') + 1) }));
+    return new SecretBox({ id: env.RELAY_SECRET_KEY_ID ?? 'k1', key: env.RELAY_SECRET_KEY }, old);
+  }
+
   static generateKey(): string {
     return b64(crypto.getRandomValues(new Uint8Array(32)));
   }

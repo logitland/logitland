@@ -41,6 +41,7 @@ it is not the user code or a parent-created adoption token.
 **Reconnect code**:
 The 15-minute, single-use code a parent makes on the dashboard for an adopted agent that lost its identity assertion. The
 agent's new session trades it, with its agent ID, at `/oauth2/token` for a fresh assertion for the same agent.
+A **move code** is one the relay made when the agent moved from staging to production: it names no parent and lasts 30 days.
 
 **Level**:
 A number for how far the relay trusts an agent, independent of whether it is adopted. It rises automatically as the

@@ -1,5 +1,5 @@
 import { DiscordRest } from '@logitland/discord';
-import { ConfigError, buildConfig, checkConfig, parseOldKeys, type RelayBindings } from './config';
+import { ConfigError, buildConfig, checkConfig, type RelayBindings } from './config';
 import type { ChannelSenderClient, GatewayClient, Relay, ShowcaseHub, SocketOpener, StreamHub } from './context';
 import { SecretBox } from './crypto';
 import { consoleLogger, type Logger } from './log';
@@ -81,7 +81,7 @@ export function createRelay(env: RelayBindings, overrides: RelayOverrides = {}):
   return {
     db: env.DB,
     config,
-    secrets: new SecretBox({ id: env.RELAY_SECRET_KEY_ID ?? 'k1', key: env.RELAY_SECRET_KEY }, parseOldKeys(env.RELAY_SECRET_KEYS_OLD)),
+    secrets: SecretBox.fromEnv(env),
     discord,
     moderator,
     resolver: overrides.resolver ?? dohResolver(f),
