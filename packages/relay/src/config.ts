@@ -152,10 +152,3 @@ export function buildConfig(env: RelayBindings): RelayConfig {
     development: dev,
   };
 }
-
-export function parseOldKeys(v?: string): { id: string; key: string }[] {
-  return list(v).map((pair) => {
-    const i = pair.indexOf(':');
-    return { id: pair.slice(0, i), key: pair.slice(i + 1) };
-  });
-}
